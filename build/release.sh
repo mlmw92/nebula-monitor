@@ -105,15 +105,18 @@ usage() {
   sudo ./install.sh server  [参数]        # 部署/升级 Server
   sudo ./install.sh agent   [参数]        # 安装 Agent（在被监控节点）
   sudo ./install.sh vm      [参数]        # 独立安装时序库 (VictoriaMetrics / Mimir / Cortex / Thanos)
+  sudo ./install.sh uninstall [参数]      # 卸载（默认保留数据，加 --purge 才删数据）
 
 完整参数请用：
   sudo ./install.sh <子命令> --help
 
 子命令说明：
-  server  - 监控 Server（含 Web UI / API / 时序库对接）
-  agent   - 监控 Agent（向 Server 上报指标）
-  vm      - 时序库（可与 Server 同机或分机；VM 默认二进制+systemd，
-            Mimir/Cortex/Thanos 自动走 Docker）
+  server    - 监控 Server（含 Web UI / API / 时序库对接）
+  agent     - 监控 Agent（向 Server 上报指标）
+  vm        - 时序库（可与 Server 同机或分机；VM 默认二进制+systemd，
+              Mimir/Cortex/Thanos 自动走 Docker）
+  uninstall - 卸载组件；默认保留数据目录（仅停服务+删二进制+删配置），
+              加 --purge 才会删数据（不可逆）
 USAGE
 }
 
@@ -124,25 +127,33 @@ interactive_menu() {
 ============================================================
   nebula-monitor v${ver}  安装入口
 ============================================================
-请选择要安装的组件：
+请选择要执行的操作：
 
-  1) server   监控 Server（含 Web UI / API / 时序库对接）
-  2) agent    监控 Agent（装在被监控节点上，向 Server 上报）
-  3) vm       时序库（VictoriaMetrics / Mimir / Cortex / Thanos）
+  【1】安装 server
+  【2】安装 agent
+  【3】安装 VictoriaMetrics
+  【4】卸载 server
+  【5】卸载 agent
+  【6】卸载 VictoriaMetrics
+  【7】卸载全部
 
-  h) help     查看详细帮助
-  q) quit     退出
+  h) help       查看详细帮助
+  q) quit       退出
 
 MENU
   while true; do
-    read -r -p "请输入选项 [1/2/3/h/q]: " choice || { echo; exit 1; }
+    read -r -p "请输入选项 [1-7/h/q]: " choice || { echo; exit 1; }
     case "$choice" in
-      1|server)   run_privileged "$HERE/install.sh" server ;;
-      2|agent)    run_privileged "$HERE/install.sh" agent ;;
-      3|vm|tsdb)  run_privileged "$HERE/install.sh" vm ;;
-      h|H|help)   usage; echo; continue ;;
+      1)            run_privileged "$HERE/install.sh" server ;;
+      2)            run_privileged "$HERE/install.sh" agent ;;
+      3)            run_privileged "$HERE/install.sh" vm ;;
+      4)            run_privileged "$HERE/install.sh" uninstall --server ;;
+      5)            run_privileged "$HERE/install.sh" uninstall --agent ;;
+      6)            run_privileged "$HERE/install.sh" uninstall --tsdb ;;
+      7)            run_privileged "$HERE/install.sh" uninstall --all ;;
+      h|H|help)     usage; echo; continue ;;
       q|Q|quit|exit) echo "已退出"; exit 0 ;;
-      *) echo "无效选项 '$choice'，请输入 1/2/3/h/q" ;;
+      *)            echo "无效选项 '$choice'，请输入 1-7 或 h/q" ;;
     esac
   done
 }
@@ -169,13 +180,20 @@ case "$cmd" in
     exec run_privileged "$HERE/deploy/install-tsdb.sh" \
       --packages "$HERE/packages" "$@"
     ;;
+  uninstall|remove)
+    exec run_privileged "$HERE/deploy/uninstall.sh" "$@"
+    ;;
   *)
-    echo "未知子命令: $cmd（支持 server / agent / vm）" >&2
+    echo "未知子命令: $cmd（支持 server / agent / vm / uninstall）" >&2
     usage; exit 2
     ;;
 esac
 EOF
 chmod +x "$STAGE_FULL/install.sh"
+
+# 5b) 独立 uninstall.sh 入口（与 install.sh 并列，方便用户单独使用/查看）
+cp "$ROOT/deploy/uninstall.sh" "$STAGE_FULL/uninstall.sh"
+chmod +x "$STAGE_FULL/uninstall.sh"
 
 # 6) VERSION + README
 printf '%s\n' "$VERSION" > "$STAGE_FULL/VERSION"
