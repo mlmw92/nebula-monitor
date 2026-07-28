@@ -55,6 +55,14 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 **前端**
 
 - 登录、总览、主机列表（含分组）、主机详情（硬件信息 + 分区表 + 指标图表）、告警列表、规则新增/编辑、分组管理
+- **系统升级**：上传 upgrade 包 → 解析版本 → 立即升级（备份+替换 server/web+同步 agent 到自带 CDN+重启）/ 回滚 / 历史；**Agent 不主动推送**，由管理员在主机列表手动点击
+
+**系统升级**
+
+- **Web 端一键升级**：在仪表盘「系统升级」页上传 `nebula-monitor-v*-upgrade.tar.gz`，自动解析 `manifest.json` 显示新版本信息（版本号、Server 架构/大小、Web 大小、Agent 架构、SHA256），点击「立即升级」完成备份→替换→重启并写历史。
+- **Agent CDN 同步**：apply 时把新 agent（amd64/arm64/arm）复制到 server 自带 CDN（`agentBinDir/agent/linux/<arch>/agent`），**不主动推送到主机**；管理员到「主机列表」点升级按钮触发。
+- **回滚**：一键回到最近一次备份（替换 server + web + 重启）。
+- **包格式约定**：`manifest.json` 声明每个组件的 source/target/action/sha256，由 `build/release.sh` 自动生成并自校验一致性。
 
 ### 路线图（未实现，暂未排期）
 
@@ -77,23 +85,52 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 
 ## 快速部署
 
-部署脚本从 `dist/artifacts/` 读取本地资源（VictoriaMetrics/Node 压缩包 + 预编译二进制），按当前 CPU
-架构自动匹配。三个脚本各司其职，时序库与 Server 可同机或分机：
+下载 **full 包**（首次部署用，已含全部资源），解压后 `sudo ./install.sh` 进入 7 选项交互菜单：
 
 ```bash
-# 1. 时序库机器（安装 VictoriaMetrics）
-sudo bash deploy/install-tsdb.sh --yes
+# 1. 下载 full 包（GitHub Release）
+curl -fsSL -O https://github.com/<org>/<repo>/releases/download/v${VERSION}/nebula-monitor-v${VERSION}-full.tar.gz
 
-# 2. Server 机器（对接时序库地址）
-sudo bash deploy/install-server.sh --yes --tsdb-addr http://<时序库IP>:8428
+# 2. 解压
+tar -xzf nebula-monitor-v${VERSION}-full.tar.gz
+cd nebula-monitor-v${VERSION}-full
 
-# 3. 被监控节点（从 Server 自带 CDN 一行安装 Agent，无需公网）
-curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- --server http://<server>:8080
+# 3. 一键入口（默认交互菜单；非 root 会自动 sudo 提权）
+sudo ./install.sh
+
+# 安装菜单：
+#   【1】安装 server
+#   【2】安装 agent
+#   【3】安装 VictoriaMetrics
+#   【4】卸载 server
+#   【5】卸载 agent
+#   【6】卸载 VictoriaMetrics
+#   【7】卸载全部
 ```
 
-### 准备 dist/artifacts/ 资源
+`install.sh` 内部按选项调用 `deploy/install-server.sh` / `deploy/install-tsdb.sh` / `deploy/agent-install.sh` / `deploy/uninstall.sh`。
 
-部署前在任意机器准备好以下文件：
+### 非交互 / 自动化
+
+```bash
+# 安装 server（对接已有时序库）
+sudo ./install.sh server --yes --tsdb-addr http://<tsdb>:8428
+
+# 安装 agent（在被监控节点）
+sudo ./install.sh agent --yes --server http://<server>:8080 [--secret <KEY>]
+
+# 独立安装 VictoriaMetrics
+sudo ./install.sh vm --yes
+
+# 卸载（默认保留数据；加 --purge 才删数据）
+sudo ./install.sh uninstall --all --yes
+sudo ./install.sh uninstall --server --purge --yes
+```
+
+### 准备 dist/artifacts/ 资源（自建发布包时）
+
+`install.sh` 默认从包内 `bin/`、`web/`、`packages/` 读取资源，**用户无需关心**。
+仅当你在仓库根目录自建发布包（开发/CI 维护者）才需要准备：
 
 1. `dist/artifacts/bin/server/linux/<arch>/server` — Server 离线二进制
 2. `dist/artifacts/bin/agent/linux/<arch>/agent` — Agent 离线二进制
@@ -113,49 +150,30 @@ bash build/fetch-packages.sh       # 下载 node + victoria-metrics 到 dist/art
 > 脚本按 `uname -m` 自动匹配；同一 arch 有多个会列出供确认，也可用 `--node-package` /
 > `--vm-package` 显式指定。
 
-### 1. 部署时序库
+### 高级：直接调用底层脚本
+
+`install.sh` 内部就是按选项调用 `deploy/` 下的脚本。如果你想跳过交互、嵌入 CI 或对单步做自定义，也可以直接调：
 
 ```bash
-# 交互式（默认装 VictoriaMetrics 二进制 + systemd）
-sudo bash deploy/install-tsdb.sh
+# 部署时序库（VictoriaMetrics / Mimir / Cortex / Thanos）
+sudo bash deploy/install-tsdb.sh [--yes] [--backend victoriametrics|mimir|cortex|thanos] [--docker]
+sudo bash deploy/install-tsdb.sh --upgrade --vm-package victoria-metrics-linux-amd64-v<NEW>.tar.gz
 
-# 非交互
-sudo bash deploy/install-tsdb.sh --yes
+# 部署 Server（对接时序库）
+sudo bash deploy/install-server.sh --yes --tsdb-addr http://<tsdb>:8428
+sudo bash deploy/install-server.sh --upgrade   # 升级已有部署（保留 server.yaml）
 
-# 用 Docker 拉起其它后端
-sudo bash deploy/install-tsdb.sh --backend mimir --docker
-```
+# 安装 Agent（被监控节点，从 Server 自带 CDN 拉）
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- --server http://<server>:8080 [--secret <KEY>]
+sudo bash deploy/agent-install.sh --yes --server http://<server>:8080
 
-脚本完成后输出写入地址（如 `http://<时序库IP>:8428`），下一步用 `--tsdb-addr` 指定。
+# 卸载（默认保留数据；--purge 连数据一起清）
+sudo bash deploy/uninstall.sh --all --yes
+sudo bash deploy/uninstall.sh --server --purge --yes
 
-### 2. 部署 Server
-
-```bash
-# 对接时序库地址
-sudo bash deploy/install-server.sh --yes --tsdb-addr http://<时序库IP>:8428
-
-# 交互式分步引导
-sudo bash deploy/install-server.sh
-
-# 或 Docker
+# Docker 方式
 docker build -f deploy/docker/Dockerfile.server -t monitor-server:latest .
 docker compose -f deploy/docker/docker-compose.yml up -d
-```
-
-访问 `http://<server>:8080/` 打开仪表盘。安装完成摘要会给出 Agent 一行安装命令。
-
-### 3. 安装 Agent（被监控节点）
-
-```bash
-# 未启用授权密钥
-curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- --server http://<server>:8080
-
-# 已启用 agentAuth（必带 --secret）
-curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- \
-    --server http://<server>:8080 --secret <AUTH_SECRET>
-
-# 或直接在节点上运行脚本
-sudo bash deploy/agent-install.sh --yes --server http://<server>:8080
 ```
 
 ---
@@ -219,7 +237,7 @@ bash build/release.sh
 | 包 | 用途 | 包含 |
 |---|---|---|
 | `-full` | 首次部署 / 全量升级 | bin + web + deploy + packages + install.sh + README + VERSION + SHA256SUMS |
-| `-upgrade` | 增量升级 | bin + web + VERSION + SHA256SUMS + UPGRADE.md |
+| `-upgrade` | 增量升级（含 agent + manifest） | bin/server + bin/agent + web + VERSION + manifest.json + SHA256SUMS + UPGRADE.md |
 
 ### GitHub Actions 自动发布
 
@@ -326,6 +344,11 @@ Server 写入走 `remote_write`、读取走 PromQL，兼容 PromQL 生态时序�
 | GET/POST/PUT/DELETE | `/api/v1/rules` | 告警规则 CRUD |
 | GET | `/ws?topic=metrics&node=` | 实时指标（WebSocket） |
 | GET | `/ws?topic=alerts` | 告警广播（WebSocket） |
+| POST | `/api/v1/system/upgrade/upload` | 上传升级包（multipart, field `file`） |
+| GET  | `/api/v1/system/upgrade/current` | 当前待应用升级包 |
+| POST | `/api/v1/system/upgrade/apply` | 立即应用（备份+替换+重启） |
+| POST | `/api/v1/system/upgrade/rollback` | 回滚到最近备份 |
+| GET  | `/api/v1/system/upgrade/history` | 升级历史 |
 
 ---
 
@@ -345,6 +368,7 @@ deploy/                  安装/部署脚本（不产出二进制）
   install-tsdb.sh          时序库安装（独立，可分机）
   install-server.sh        Server 安装（对接时序库）
   agent-install.sh         Agent 安装
+  uninstall.sh             卸载（默认保留数据，--purge 清数据）
   docker/                  可选容器化部署
 dist/                    编译产物（不入库）
   artifacts/               本地与发布用产物
