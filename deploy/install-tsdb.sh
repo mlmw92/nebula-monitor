@@ -143,7 +143,7 @@ detect_env() {
 preflight() {
   c_info "预检环境"
   if [[ "$(id -u)" -ne 0 ]]; then
-    c_warn "当前非 root，systemd 服务安装/启动需要 root；可加 sudo 运行"
+    die "请用 root 或 sudo 执行本脚本（systemd 服务安装/启动需要 root）"
   fi
   if ! have_cmd systemctl; then
     c_warn "未检测到 systemctl，将跳过 systemd 单元安装"
