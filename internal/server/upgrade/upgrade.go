@@ -182,9 +182,15 @@ func (m *Manager) Upload(r *http.Request, maxBytes int64) (*Task, error) {
 	for i := range mf.Components {
 		c := &mf.Components[i]
 		src := filepath.Join(unpackDir, c.Source)
-		if _, err := os.Stat(src); err != nil {
+		fi, err := os.Stat(src)
+		if err != nil {
 			os.RemoveAll(unpackDir)
 			return nil, fmt.Errorf("manifest 声明的 %s 不存在: %w", c.Source, err)
+		}
+		if fi.IsDir() {
+			// 目录型组件（如 web，action=sync_dir）无法用单文件 sha256 校验，
+			// 跳过；其完整性由 apply 时逐文件同步（sync_dir）保证，无需在此填充 checksum。
+			continue
 		}
 		sum, err := fileSHA256(src)
 		if err != nil {
