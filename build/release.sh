@@ -304,10 +304,13 @@ echo
 c_ok "发布物已生成："
 ls -lh "$OUT_FULL" "$OUT_UPGRADE"
 echo
-echo "  full 包    顶层条目（$(tar -tzf "$OUT_FULL" | wc -l) 项）："
-tar -tzf "$OUT_FULL" | awk -F/ 'NR<=15{print "    " $0} NR==16{print "    ..."; exit}'
+# 末尾的 tar -tzf 是只读列出，awk 在 16 行后 exit 会关 stdin，
+# tar 仍会因 SIGPIPE 退出码非零，触发 set -euo pipefail 失败。
+# 用 || true 兜底让 pipeline 整体退出码 0；错误用 2>/dev/null 抑制。
+echo "  full 包    顶层条目（$(tar -tzf "$OUT_FULL" 2>/dev/null | wc -l) 项）："
+tar -tzf "$OUT_FULL" 2>/dev/null | awk -F/ 'NR<=15{print "    " $0} NR==16{print "    ..."; exit}' 2>/dev/null || true
 echo
-echo "  upgrade 包 顶层条目（$(tar -tzf "$OUT_UPGRADE" | wc -l) 项）："
-tar -tzf "$OUT_UPGRADE" | awk -F/ 'NR<=15{print "    " $0} NR==16{print "    ..."; exit}'
+echo "  upgrade 包 顶层条目（$(tar -tzf "$OUT_UPGRADE" 2>/dev/null | wc -l) 项）："
+tar -tzf "$OUT_UPGRADE" 2>/dev/null | awk -F/ 'NR<=15{print "    " $0} NR==16{print "    ..."; exit}' 2>/dev/null || true
 echo
 c_ok "完成。可将上述 tarball 分发给运维；GitHub Release 自动化见 .github/workflows/release.yml"
