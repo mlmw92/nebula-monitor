@@ -40,4 +40,17 @@ export default {
       body: JSON.stringify(body),
     }),
   del: (p) => request(p, { method: 'DELETE' }),
+  // multipart 上传（不预设 Content-Type，由浏览器自动加 boundary）
+  upload: async (p, formData) => {
+    const token = getToken()
+    const headers = token ? { Authorization: 'Bearer ' + token } : {}
+    const r = await fetch(p, { method: 'POST', body: formData, headers })
+    if (r.status === 401) {
+      setToken('')
+      window.dispatchEvent(new CustomEvent('auth-expired'))
+      throw new Error('未登录或登录已过期')
+    }
+    if (!r.ok) throw new Error('HTTP ' + r.status)
+    return r.json()
+  },
 }

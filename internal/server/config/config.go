@@ -28,6 +28,7 @@ type Config struct {
 	AgentScriptPath string          `yaml:"agentScriptPath"` // Agent 安装脚本路径（由 /install/agent-install.sh 提供）
 	WebDir          string          `yaml:"webDir"`          // 前端静态资源目录（磁盘读取，改前端只需替换文件+重启）
 	Auth            AuthConfig      `yaml:"auth"`            // 登录认证配置
+	Upgrade         UpgradeConfig   `yaml:"upgrade"`         // Web 系统升级模块配置
 }
 
 // AuthConfig 登录认证配置（启用后访问需登录，token 有效期 24h）
@@ -96,6 +97,19 @@ type AgentAuthConfig struct {
 	Secret  string `yaml:"secret"` // 共享授权密钥
 }
 
+// UpgradeConfig 系统升级模块配置。
+// Web 端上传 upgrade 包后，server 会：备份当前 server 二进制与 web、按 manifest
+// 替换 server、把新 agent 同步到自带 CDN（AgentBinDir/agent/linux/<arch>/agent），
+// 并重启 monitor-server。Agent 不主动推送到节点，由管理员在主机列表手动点击升级。
+type UpgradeConfig struct {
+	Enabled    bool   `yaml:"enabled"`    // 是否启用 Web 升级功能
+	Dir        string `yaml:"dir"`        // 升级工作目录（上传包、解压、备份）；默认 <DataDir>/upgrades
+	BinDir     string `yaml:"binDir"`     // server 二进制安装目录；默认 /usr/local/bin
+	BackupKeep int    `yaml:"backupKeep"` // 保留最近几次备份；默认 3
+	UseSystemd bool   `yaml:"useSystemd"` // 是否用 systemd 重启 server；默认 true
+	Service    string `yaml:"service"`    // systemd 服务名；默认 monitor-server.service
+}
+
 // Default 返回默认配置。
 func Default() *Config {
 	return &Config{
@@ -115,6 +129,14 @@ func Default() *Config {
 		AgentScriptPath: "./deploy/agent-install.sh",
 		WebDir:          "/etc/monitor-server/web",
 		Auth:            AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: ""},
+		Upgrade: UpgradeConfig{
+			Enabled:    true,
+			Dir:        "/var/lib/monitor-server/upgrades",
+			BinDir:     "/usr/local/bin",
+			BackupKeep: 3,
+			UseSystemd: true,
+			Service:    "monitor-server.service",
+		},
 	}
 }
 

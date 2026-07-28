@@ -19,6 +19,7 @@ import (
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/receiver"
 	"github.com/nebula/monitor/internal/server/storage"
+	"github.com/nebula/monitor/internal/server/upgrade"
 	"github.com/nebula/monitor/internal/version"
 )
 
@@ -70,8 +71,26 @@ func main() {
 	// 上报接收
 	recv := receiver.New(store, nodeMgr, cfg.AgentAuth)
 
+	// 系统升级管理器
+	var upgrader *upgrade.Manager
+	if cfg.Upgrade.Enabled {
+		upgrader, err = upgrade.New(upgrade.Config{
+			Dir:         cfg.Upgrade.Dir,
+			BinDir:      cfg.Upgrade.BinDir,
+			WebDir:      cfg.WebDir,
+			AgentBinDir: cfg.AgentBinDir,
+			BackupKeep:  cfg.Upgrade.BackupKeep,
+			UseSystemd:  cfg.Upgrade.UseSystemd,
+			Service:     cfg.Upgrade.Service,
+		}, nodeMgr)
+		if err != nil {
+			slog.Error("初始化升级管理器失败", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	// API
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)

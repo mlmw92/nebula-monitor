@@ -11,6 +11,7 @@ import (
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/storage"
+	"github.com/nebula/monitor/internal/server/upgrade"
 	"github.com/nebula/monitor/internal/version"
 )
 
@@ -39,11 +40,12 @@ type API struct {
 	agentAuth config.AgentAuthConfig
 	webDir    string
 	auth      config.AuthConfig
+	upgrader  *upgrade.Manager
 }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth, upgrader: upgrader}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -71,6 +73,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/install-info", a.handleInstallInfo)
 	mux.HandleFunc("GET /api/v1/version", a.handleVersion)
+
+	mux.HandleFunc("POST /api/v1/system/upgrade/upload", a.handleSystemUpgradeUpload)
+	mux.HandleFunc("GET /api/v1/system/upgrade/current", a.handleSystemUpgradeCurrent)
+	mux.HandleFunc("POST /api/v1/system/upgrade/apply", a.handleSystemUpgradeApply)
+	mux.HandleFunc("POST /api/v1/system/upgrade/rollback", a.handleSystemUpgradeRollback)
+	mux.HandleFunc("GET /api/v1/system/upgrade/history", a.handleSystemUpgradeHistory)
 
 	mux.HandleFunc("POST /api/v1/login", a.handleLogin)
 	mux.HandleFunc("POST /api/v1/logout", a.handleLogout)

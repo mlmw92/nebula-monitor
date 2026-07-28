@@ -308,8 +308,30 @@ chmod +x "$STAGE_UPGRADE/bin/server/linux/"*"/server" "$STAGE_UPGRADE/bin/agent/
 # 2) 前端
 cp -a "$WEB_DIR"/. "$STAGE_UPGRADE/web/"
 
-# 3) VERSION + UPGRADE.md
+# 3) VERSION + manifest.json + UPGRADE.md
 printf '%s\n' "$VERSION" > "$STAGE_UPGRADE/VERSION"
+
+# 生成 manifest.json：声明包内每个组件的 source/target/action，
+# 供 server apply 时按声明处理（备份→替换 server→替换 web→复制 agent 到自带 CDN→重启）。
+# - server: install_file，替换为 /usr/local/bin/monitor-server
+# - web:    sync_dir，  替换为 /etc/monitor-server/web
+# - agent:  install_file，apply 时复制到 <AgentBinDir>/agent/linux/<arch>/agent（不推送到主机）
+cat > "$STAGE_UPGRADE/manifest.json" <<EOF
+{
+  "version": "${VERSION}",
+  "previous_version_min": "1.0.0",
+  "notes": "由 build/release.sh 自动生成；server 端 internal/server/upgrade 按此 manifest 处理",
+  "components": [
+    { "name": "server", "arch": "amd64", "source": "bin/server/linux/amd64/server", "target": "/usr/local/bin/monitor-server", "action": "install_file", "mode": "0755" },
+    { "name": "server", "arch": "arm64", "source": "bin/server/linux/arm64/server", "target": "/usr/local/bin/monitor-server", "action": "install_file", "mode": "0755" },
+    { "name": "server", "arch": "arm",   "source": "bin/server/linux/arm/server",   "target": "/usr/local/bin/monitor-server", "action": "install_file", "mode": "0755" },
+    { "name": "web",    "source": "web",                                            "target": "/etc/monitor-server/web",       "action": "sync_dir" },
+    { "name": "agent",  "arch": "amd64", "source": "bin/agent/linux/amd64/agent", "action": "install_file", "mode": "0755" },
+    { "name": "agent",  "arch": "arm64", "source": "bin/agent/linux/arm64/agent", "action": "install_file", "mode": "0755" },
+    { "name": "agent",  "arch": "arm",   "source": "bin/agent/linux/arm/agent",   "action": "install_file", "mode": "0755" }
+  ]
+}
+EOF
 
 cat > "$STAGE_UPGRADE/UPGRADE.md" <<EOF
 # nebula-monitor v${VERSION} 升级包（增量）
@@ -373,6 +395,26 @@ c_info "生成 SHA256SUMS (upgrade)"
 ( cd "$STAGE_UPGRADE" && \
   find bin web -type f -print0 2>/dev/null \
     | xargs -0 sha256sum > SHA256SUMS )
+
+# 4.5) manifest 自校验：保证 manifest.json 声明的每个 source 在包内真实存在
+c_info "校验 manifest.json 与包内容一致"
+if command -v jq >/dev/null 2>&1; then
+  ok=1
+  while IFS= read -r src; do
+    if [[ -z "$src" ]]; then continue; fi
+    if [[ ! -e "$STAGE_UPGRADE/$src" ]]; then
+      echo "::error::manifest 声明的文件不存在: $src" >&2
+      ok=0
+    fi
+  done < <(jq -r '.components[].source' "$STAGE_UPGRADE/manifest.json")
+  if (( ok == 0 )); then
+    echo "::error::manifest 自校验失败，请检查 bin/server、bin/agent、web 是否齐全" >&2
+    exit 1
+  fi
+  c_ok "manifest 自校验通过"
+else
+  c_warn "未安装 jq，跳过 manifest 自校验（建议安装 jq 以保证 manifest 与包内容一致）"
+fi
 
 # 5) 打包
 c_info "打包 $(basename "$OUT_UPGRADE")"

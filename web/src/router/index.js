@@ -16,6 +16,7 @@ const routes = [
       { path: 'hosts', name: 'hosts', component: () => import('../components/HostsView.vue') },
       { path: 'node/:name', name: 'node', component: () => import('../components/NodeView.vue'), props: true },
       { path: 'alerts', name: 'alerts', component: () => import('../components/AlertsView.vue') },
+      { path: 'system/upgrade', name: 'system-upgrade', component: () => import('../components/UpgradeView.vue') },
     ],
   },
 ]
