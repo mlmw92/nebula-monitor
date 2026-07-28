@@ -134,6 +134,20 @@ func (m *Manager) SetNodeGroup(name, group string) error {
 	return nil
 }
 
+// SetNodeDisplayName 设置节点的自定义显示名（别名）。空字符串表示清除别名，恢复使用真实主机名。
+// 该值仅由用户在 UI 设置，Agent 上报时不会被覆盖（Register 不会更新此字段）。
+func (m *Manager) SetNodeDisplayName(name, displayName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n, ok := m.nodes[name]
+	if !ok {
+		return os.ErrNotExist
+	}
+	n.DisplayName = displayName
+	m.persistLocked()
+	return nil
+}
+
 // RemoveNode 移除节点。
 func (m *Manager) RemoveNode(name string) {
 	m.mu.Lock()

@@ -56,6 +56,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/nodes/{name}", a.handleNode)
 	mux.HandleFunc("DELETE /api/v1/nodes/{name}", a.handleNodeDelete)
 	mux.HandleFunc("PUT /api/v1/nodes/{name}/group", a.handleNodeGroup)
+	mux.HandleFunc("PUT /api/v1/nodes/{name}/display-name", a.handleNodeDisplayName)
 	mux.HandleFunc("POST /api/v1/nodes/{name}/upgrade", a.handleNodeUpgrade)
 
 	mux.HandleFunc("GET /api/v1/groups", a.handleGroups)
@@ -268,6 +269,26 @@ func (a *API) handleNodeGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.nodeMgr.SetNodeGroup(r.PathValue("name"), body.Group); err != nil {
+		http.Error(w, "node not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+// handleNodeDisplayName 设置节点的自定义显示名（别名），不修改 Agent 上报的真实主机名。
+func (a *API) handleNodeDisplayName(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DisplayName string `json:"displayName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if runes := []rune(body.DisplayName); len(runes) > 64 {
+		http.Error(w, "displayName too long (max 64)", http.StatusBadRequest)
+		return
+	}
+	if err := a.nodeMgr.SetNodeDisplayName(r.PathValue("name"), body.DisplayName); err != nil {
 		http.Error(w, "node not found", http.StatusNotFound)
 		return
 	}

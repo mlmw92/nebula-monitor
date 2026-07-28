@@ -66,9 +66,18 @@
             <div class="host-name">
               <div class="hn-top">
                 <OsIcon :os="row.os" />
-                <span class="hn-name">{{ row.hostname }}</span>
+                <span class="hn-name">{{ row.displayName || row.hostname }}</span>
+                <el-button
+                  link
+                  size="small"
+                  :icon="Edit"
+                  class="hn-edit"
+                  title="编辑显示名"
+                  @click.stop="editName(row)"
+                />
               </div>
               <span class="hn-ip">{{ row.ip || '-' }}</span>
+              <span class="hn-host" v-if="row.displayName">原始：{{ row.hostname }}</span>
             </div>
           </template>
         </el-table-column>
@@ -218,13 +227,31 @@
       @close="showGroupManage = false"
       @changed="load"
     />
+
+    <!-- 编辑显示名弹窗 -->
+    <el-dialog v-model="showNameModal" title="编辑显示名" width="420px" @closed="nameInput = ''">
+      <p style="color: var(--text-dim); margin-bottom: 12px; font-size: 13px">
+        为「{{ nameTarget }}」设置一个便于识别的显示名（别名）。留空则恢复使用原始主机名，不影响 Agent 上报的真实主机名。
+      </p>
+      <el-input
+        v-model="nameInput"
+        placeholder="如：Web 生产机-01"
+        maxlength="64"
+        show-word-limit
+        @keyup.enter="saveName"
+      />
+      <template #footer>
+        <el-button @click="showNameModal = false">取消</el-button>
+        <el-button type="primary" @click="saveName">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, CopyDocument, Setting, ArrowDown, Refresh } from '@element-plus/icons-vue'
+import { Plus, Search, CopyDocument, Setting, ArrowDown, Refresh, Edit } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
 import OsIcon from './OsIcon.vue'
@@ -249,6 +276,9 @@ const loadError = ref('')
 const showAddModal = ref(false)
 const showGroupManage = ref(false)
 const installCommand = ref('')
+const showNameModal = ref(false)
+const nameInput = ref('')
+const nameTarget = ref('')
 
 let loadTimer = null
 let countdownTimer = null
@@ -267,7 +297,12 @@ const filteredNodes = computed(() => {
   if (groupFilter.value) arr = arr.filter((n) => (n.group || 'default') === groupFilter.value)
   if (keyword.value) {
     const k = keyword.value.toLowerCase()
-    arr = arr.filter((n) => n.hostname.toLowerCase().includes(k) || (n.ip || '').toLowerCase().includes(k))
+    arr = arr.filter(
+      (n) =>
+        n.hostname.toLowerCase().includes(k) ||
+        (n.displayName || '').toLowerCase().includes(k) ||
+        (n.ip || '').toLowerCase().includes(k)
+    )
   }
   return arr.sort((a, b) => nodeSeverity(b) - nodeSeverity(a))
 })
@@ -404,6 +439,24 @@ async function changeGroup(row, group) {
     load()
   } catch (e) {
     ElMessage.error('修改分组失败：' + (e.message || ''))
+  }
+}
+
+function editName(row) {
+  nameTarget.value = row.hostname
+  nameInput.value = row.displayName || ''
+  showNameModal.value = true
+}
+
+async function saveName() {
+  const target = nameTarget.value
+  try {
+    await http.put('/api/v1/nodes/' + target + '/display-name', { displayName: nameInput.value.trim() })
+    ElMessage.success('显示名已保存')
+    showNameModal.value = false
+    load()
+  } catch (e) {
+    ElMessage.error('保存失败：' + (e.message || ''))
   }
 }
 
@@ -555,6 +608,18 @@ defineExpose({ reload: load })
   color: var(--text-dim);
   font-size: 11px;
   font-family: var(--mono);
+}
+.hn-host {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.hn-edit {
+  margin-left: 2px;
+  color: var(--text-muted);
+}
+.hn-edit:hover {
+  color: var(--accent);
 }
 .ver-cell {
   display: inline-block;

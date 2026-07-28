@@ -83,6 +83,7 @@ type HostInfo struct {
 // Node 表示一个被监控节点。
 type Node struct {
 	Hostname  string            `json:"hostname"`           // 主机名
+	DisplayName string          `json:"displayName,omitempty"` // 自定义显示名/别名（不修改 Agent 上报的真实主机名）
 	IP        string            `json:"ip"`                 // 主机 IP
 	OS        string            `json:"os"`                 // 操作系统
 	Arch      string            `json:"arch"`               // CPU 架构
