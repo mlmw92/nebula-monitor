@@ -111,6 +111,10 @@ func isPublicPath(path string) bool {
 	if strings.HasPrefix(path, "/api/v1/login") || strings.HasPrefix(path, "/api/v1/report") {
 		return true
 	}
+	// Agent 安装脚本的接入鉴权预检（同样走 X-Agent-Secret，不受登录 token 影响）
+	if strings.HasPrefix(path, "/api/v1/agent/check") {
+		return true
+	}
 	if strings.HasPrefix(path, "/install/") || strings.HasPrefix(path, "/bin/") {
 		return true
 	}

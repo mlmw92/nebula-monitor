@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -73,6 +74,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/install-info", a.handleInstallInfo)
 	mux.HandleFunc("GET /api/v1/version", a.handleVersion)
+	mux.HandleFunc("GET /api/v1/agent/check", a.handleAgentCheck)
 
 	mux.HandleFunc("POST /api/v1/system/upgrade/upload", a.handleSystemUpgradeUpload)
 	mux.HandleFunc("GET /api/v1/system/upgrade/current", a.handleSystemUpgradeCurrent)
@@ -99,6 +101,25 @@ func (a *API) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
 		"command":     cmd,
 		"authEnabled": a.agentAuth.Enabled,
 	})
+}
+
+// handleAgentCheck 给 Agent 安装脚本做接入鉴权预检（agent 视角的连通性检查）。
+// 与 HandleReport 同样走 X-Agent-Secret 校验，因此 200/401 能真实反映 Agent 上报能否被接受；
+// 该路径在 AuthMiddleware 的 isPublicPath 中，不受登录 Bearer token 影响。
+func (a *API) handleAgentCheck(w http.ResponseWriter, r *http.Request) {
+	if !a.agentAuth.Enabled {
+		writeJSON(w, 200, map[string]interface{}{"ok": true, "authEnabled": false})
+		return
+	}
+	got := r.Header.Get("X-Agent-Secret")
+	want := a.agentAuth.Secret
+	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "secret mismatch"})
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"ok": true, "authEnabled": true})
 }
 
 // handleVersion 返回 Server 版本信息（Agent/Web 版本由前端自行获取）。

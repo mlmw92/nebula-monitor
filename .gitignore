@@ -14,3 +14,6 @@ agent.test.yaml
 # OS
 Thumbs.db
 .DS_Store
+
+# 本地 go build 直接产物（未指定 -o 时落在仓库根的 *.exe）
+*.exe

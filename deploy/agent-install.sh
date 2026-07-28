@@ -329,8 +329,10 @@ acquire_binary() {
     verify_checksum "$tmp/agent" "$url.sha256" "$SECRET"
     src="$tmp/agent"
   else
-    if (( ASSUME_YES )); then
-      # 默认从 Server 的 /bin 端点拉取
+    if (( ASSUME_YES )) || [[ ! -t 0 ]]; then
+      # 非交互（--yes 或管道 curl|bash，stdin 非 TTY）：直接默认从 Server 在线下载，
+      # 不再弹出菜单（避免管道场景下菜单一闪而过又自动选默认项的噪音）。
+      # 若需本地产物或从其它 URL 下载，请用 --dist / --base-url 显式指定。
       BASE_URL="${SERVER_URL%/}/bin"
       local tmp; tmp="$(mktemp -d)"
       local url="$BASE_URL/linux/$ARCH/agent"
@@ -432,19 +434,22 @@ start_service() {
 
 connectivity_check() {
   c_info "连通性检查"
-  local code
-  # 启用 agentAuth 时需携带密钥，否则 /api/v1/nodes 会返回 401（v1.0.0+）
+  # 用 agent 视角的鉴权预检端点：与 Agent 真实上报走同一条 X-Agent-Secret 校验，
+  # 因此 200/401 能真实反映密钥是否被 Server 接受（不受登录 Bearer token 影响）。
+  local url="${SERVER_URL%/}/api/v1/agent/check"
   local auth_args=()
   if [[ -n "${SECRET:-}" ]]; then
     auth_args=(-H "X-Agent-Secret: $SECRET")
   fi
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "${auth_args[@]}" "${SERVER_URL%/}/api/v1/nodes" 2>/dev/null || echo 000)"
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "${auth_args[@]}" "$url" 2>/dev/null || echo 000)"
   if [[ "$code" == "200" ]]; then
-    c_ok "Server 可达 ($SERVER_URL -> 200)"
-  elif [[ "$code" == "401" && -n "${SECRET:-}" ]]; then
-    c_warn "Server 返回 HTTP 401，密钥未被接受，请检查 --secret 是否与 server.yaml 中 agentAuth.secret 一致"
+    c_ok "接入鉴权校验通过（Server 接受本密钥，Agent 可正常上报）"
+  elif [[ "$code" == "401" ]]; then
+    c_err "接入密钥校验失败（HTTP 401）：请检查 --secret 是否与 server.yaml 中 agentAuth.secret 一致"
+    c_err "修正方法：重新运行安装并传入正确密钥，或到 Server 端确认 agentAuth.secret 配置后重启"
   else
-    c_warn "Server 返回 HTTP $code，请确认 Server 地址与监听端口正确"
+    c_warn "无法确认接入鉴权（HTTP $code），请确认 Server 地址与端口可达、且未启用额外网络隔离"
   fi
   if have_cmd systemctl; then
     local st
