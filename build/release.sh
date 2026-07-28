@@ -169,19 +169,21 @@ fi
 shift
 case "$cmd" in
   server)
-    exec run_privileged "$HERE/deploy/install-server.sh" \
+    # 注意：不能用 exec run_privileged（exec 不能执行 shell 函数）。
+    # 让 run_privileged 内部 exec bash/sudo bash 即可，结束后自然退出当前脚本。
+    run_privileged "$HERE/deploy/install-server.sh" \
       --packages "$HERE/packages" --dist "$HERE/bin" "$@"
     ;;
   agent)
-    exec run_privileged "$HERE/deploy/agent-install.sh" "$@"
+    run_privileged "$HERE/deploy/agent-install.sh" "$@"
     ;;
   vm)
     # vm 安装时把 --packages 指向包内 packages/，让 install-tsdb.sh 自动探测 VM tarball
-    exec run_privileged "$HERE/deploy/install-tsdb.sh" \
+    run_privileged "$HERE/deploy/install-tsdb.sh" \
       --packages "$HERE/packages" "$@"
     ;;
   uninstall|remove)
-    exec run_privileged "$HERE/deploy/uninstall.sh" "$@"
+    run_privileged "$HERE/deploy/uninstall.sh" "$@"
     ;;
   *)
     echo "未知子命令: $cmd（支持 server / agent / vm / uninstall）" >&2
