@@ -1,0 +1,25 @@
+{
+  "name": "nebulaeye-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "NebulaEye 服务器监控仪表盘前端（Vue 3 + Vite）",
+  "scripts": {
+    "dev": "vite",
+    "version:sync": "node scripts/gen-version.mjs",
+    "build": "npm run version:sync && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "echarts": "^5.5.0",
+    "element-plus": "^2.14.3",
+    "vue": "^3.4.21",
+    "vue-echarts": "^6.7.3",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "vite": "^5.2.0"
+  }
+}

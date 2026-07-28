@@ -1,0 +1,135 @@
+// Package config 定义 Server 的配置结构与加载逻辑。
+package config
+
+import (
+	"fmt"
+	"os"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Mode 部署模式（当前仅支持单机模式 standalone）。
+const (
+	ModeStandalone = "standalone" // 单机模式
+)
+
+// Config 是 Server 运行配置。
+type Config struct {
+	Mode            string          `yaml:"mode"`            // standalone
+	Listen          string          `yaml:"listen"`          // HTTP 监听地址，如 :8080
+	TSDB            TSDBConfig      `yaml:"tsdb"`            // 时序库（默认 VictoriaMetrics，可对接主流 PromQL 时序库）
+	NodeMeta        string          `yaml:"nodeMeta"`        // 节点分组 meta JSON 路径
+	DataDir         string          `yaml:"dataDir"`         // 运行时数据目录
+	OfflineTimeout  int             `yaml:"offlineTimeout"`  // 节点离线判定阈值（秒）
+	Alert           AlertConfig     `yaml:"alert"`           // 告警配置
+	Notify          NotifyConfig    `yaml:"notify"`          // 通知渠道配置
+	AgentAuth       AgentAuthConfig `yaml:"agentAuth"`       // Agent 接入授权（参考哪吒探针：密钥注册）
+	AgentBinDir     string          `yaml:"agentBinDir"`     // Agent 二进制分发目录（自带 CDN，含 agent/linux/<arch>/agent）
+	AgentScriptPath string          `yaml:"agentScriptPath"` // Agent 安装脚本路径（由 /install/agent-install.sh 提供）
+	WebDir          string          `yaml:"webDir"`          // 前端静态资源目录（磁盘读取，改前端只需替换文件+重启）
+	Auth            AuthConfig      `yaml:"auth"`            // 登录认证配置
+}
+
+// AuthConfig 登录认证配置（启用后访问需登录，token 有效期 24h）
+type AuthConfig struct {
+	Enabled  bool   `yaml:"enabled"`  // 是否启用登录认证
+	Username string `yaml:"username"` // 登录用户名
+	Password string `yaml:"password"` // 登录密码（明文，建议配置后修改）
+	Secret   string `yaml:"secret"`   // token 签名密钥（留空时启动自动生成）
+}
+
+// TSDBConfig 时序库连接配置。
+// 后端兼容 Prometheus remote_write + PromQL 的主流时序库：
+//   victoriametrics（默认，写 /api/v1/write）
+//   mimir（写 /api/v1/push）、cortex（写 /api/v1/push）
+//   thanos（写 /api/v1/receive）、prometheus（经 remote_write receiver）
+//   custom（手动指定 writePath/queryPath，兼容任意 PromQL 时序库）
+// 读取统一走 PromQL：queryPath / queryRangePath（默认 /api/v1/query、/api/v1/query_range）。
+type TSDBConfig struct {
+	Backend        string `yaml:"backend"`        // 后端类型，默认 victoriametrics
+	Addr           string `yaml:"addr"`           // 写入与查询默认基址，如 http://127.0.0.1:8428
+	QueryAddr      string `yaml:"queryAddr"`      // 可选：查询基址（与写入不同端口时，如 Thanos/Cortex Query）
+	WritePath      string `yaml:"writePath"`      // 自定义写入路径（backend=custom 时必填）
+	QueryPath      string `yaml:"queryPath"`      // 自定义查询路径，默认 /api/v1/query
+	QueryRangePath string `yaml:"queryRangePath"` // 自定义区间查询路径，默认 /api/v1/query_range
+	WriteTimeout   int    `yaml:"writeTimeout"`   // 写超时（秒）
+	QueryTimeout   int    `yaml:"queryTimeout"`   // 查询超时（秒）
+}
+
+// AlertConfig 告警引擎配置。
+type AlertConfig struct {
+	Enabled         bool   `yaml:"enabled"`         // 是否启用告警
+	RulesFile       string `yaml:"rulesFile"`       // 规则文件路径
+	EvalInterval    int    `yaml:"evalInterval"`    // 评估间隔（秒）
+	RecoverInterval int    `yaml:"recoverInterval"` // 恢复检查间隔（秒）
+}
+
+// NotifyConfig 通知渠道配置。
+type NotifyConfig struct {
+	Email   EmailConfig   `yaml:"email"`
+	Webhook WebhookConfig `yaml:"webhook"`
+}
+
+// EmailConfig 邮件通知配置。
+type EmailConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	SMTPHost string `yaml:"smtpHost"`
+	SMTPPort int    `yaml:"smtpPort"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"` // 敏感，不写日志
+	From     string `yaml:"from"`
+	To       []string `yaml:"to"`
+	UseTLS   bool   `yaml:"useTLS"`
+}
+
+// WebhookConfig Webhook 通知配置。
+type WebhookConfig struct {
+	Enabled bool     `yaml:"enabled"`
+	URLs    []string `yaml:"urls"` // 敏感，不写日志
+}
+
+// AgentAuthConfig Agent 接入授权配置（参考哪吒探针的 client_secret 机制）。
+// 启用后，Agent 上报需携带与 Secret 一致的 X-Agent-Secret 头，否则 401。
+// Secret 留空且 Enabled=true 时，Server 启动时自动生成随机密钥（重启会变，建议写入配置固定）。
+type AgentAuthConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Secret  string `yaml:"secret"` // 共享授权密钥
+}
+
+// Default 返回默认配置。
+func Default() *Config {
+	return &Config{
+		Mode:           ModeStandalone,
+		Listen:         ":8080",
+		TSDB:           TSDBConfig{Backend: "victoriametrics", Addr: "http://127.0.0.1:8428", WriteTimeout: 5, QueryTimeout: 10},
+		NodeMeta:       "/etc/monitor-server/nodes.json",
+		DataDir:        "/var/lib/monitor-server",
+		OfflineTimeout: 60,
+		Alert:          AlertConfig{Enabled: true, RulesFile: "/etc/monitor-server/rules.yaml", EvalInterval: 15, RecoverInterval: 30},
+		Notify: NotifyConfig{
+			Email:   EmailConfig{Enabled: false, SMTPPort: 587, UseTLS: true},
+			Webhook: WebhookConfig{Enabled: false},
+		},
+		AgentAuth:       AgentAuthConfig{Enabled: false, Secret: ""},
+		AgentBinDir:     "./dist",
+		AgentScriptPath: "./deploy/agent-install.sh",
+		WebDir:          "/etc/monitor-server/web",
+		Auth:            AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: ""},
+	}
+}
+
+// Load 从指定路径读取 YAML 配置并与默认值合并。
+func Load(path string) (*Config, error) {
+	cfg := Default()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("读取配置文件失败: %w", err)
+	}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("解析配置文件失败: %w", err)
+	}
+	if cfg.Mode != ModeStandalone {
+		cfg.Mode = ModeStandalone
+	}
+	return cfg, nil
+}

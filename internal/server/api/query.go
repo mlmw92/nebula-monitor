@@ -1,0 +1,507 @@
+package api
+
+import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/config"
+	"github.com/nebula/monitor/internal/server/node"
+	"github.com/nebula/monitor/internal/server/storage"
+	"github.com/nebula/monitor/internal/version"
+)
+
+// RulesProvider 提供告警规则读写（由 alert 包实现）。
+type RulesProvider interface {
+	List() []model.AlertRule
+	Get(id string) (model.AlertRule, bool)
+	Create(r model.AlertRule) model.AlertRule
+	Update(r model.AlertRule) error
+	Delete(id string) error
+}
+
+// AlertStore 提供告警事件查询（由 alert 包实现）。
+type AlertStore interface {
+	Recent(limit int) []model.AlertEvent
+	Active() []model.AlertEvent
+}
+
+// API 聚合所有 REST 接口依赖。
+type API struct {
+	store     storage.Storage
+	nodeMgr   *node.Manager
+	rules     RulesProvider
+	alerts    AlertStore
+	hub       *Hub
+	agentAuth config.AgentAuthConfig
+	webDir    string
+	auth      config.AuthConfig
+}
+
+// New 创建 API。
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth}
+}
+
+// RegisterRoutes 注册所有路由到 mux。
+func (a *API) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/nodes", a.handleNodes)
+	mux.HandleFunc("GET /api/v1/nodes/latest", a.handleNodesLatest)
+	mux.HandleFunc("GET /api/v1/nodes/{name}", a.handleNode)
+	mux.HandleFunc("DELETE /api/v1/nodes/{name}", a.handleNodeDelete)
+	mux.HandleFunc("PUT /api/v1/nodes/{name}/group", a.handleNodeGroup)
+	mux.HandleFunc("POST /api/v1/nodes/{name}/upgrade", a.handleNodeUpgrade)
+
+	mux.HandleFunc("GET /api/v1/groups", a.handleGroups)
+	mux.HandleFunc("POST /api/v1/groups", a.handleGroupCreate)
+	mux.HandleFunc("DELETE /api/v1/groups/{name}", a.handleGroupDelete)
+
+	mux.HandleFunc("GET /api/v1/query/range", a.handleQueryRange)
+	mux.HandleFunc("GET /api/v1/query/latest", a.handleQueryLatest)
+	mux.HandleFunc("GET /api/v1/processes", a.handleProcesses)
+
+	mux.HandleFunc("GET /api/v1/alerts", a.handleAlerts)
+	mux.HandleFunc("GET /api/v1/rules", a.handleRulesList)
+	mux.HandleFunc("POST /api/v1/rules", a.handleRuleCreate)
+	mux.HandleFunc("PUT /api/v1/rules/{id}", a.handleRuleUpdate)
+	mux.HandleFunc("DELETE /api/v1/rules/{id}", a.handleRuleDelete)
+
+	mux.HandleFunc("GET /api/v1/install-info", a.handleInstallInfo)
+	mux.HandleFunc("GET /api/v1/version", a.handleVersion)
+
+	mux.HandleFunc("POST /api/v1/login", a.handleLogin)
+	mux.HandleFunc("POST /api/v1/logout", a.handleLogout)
+	mux.HandleFunc("GET /api/v1/auth-info", a.handleAuthInfo)
+}
+
+// handleInstallInfo 返回 Agent 一行安装命令（server 地址取自请求 Host，secret 取自配置）。
+func (a *API) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
+	srv := "http://" + r.Host
+	cmd := "curl -fsSL " + srv + "/install/agent-install.sh | bash -s -- --server " + srv
+	if a.agentAuth.Enabled {
+		cmd += " --secret " + a.agentAuth.Secret
+	}
+	// 注意：不回显明文 agentAuth.secret 字段，避免该接口成为密钥泄露点
+	// （认证关闭时 /api/v1/install-info 虽需登录后方可访问，但最小暴露原则下仅下发安装命令）。
+	writeJSON(w, 200, map[string]interface{}{
+		"serverURL":   srv,
+		"command":     cmd,
+		"authEnabled": a.agentAuth.Enabled,
+	})
+}
+
+// handleVersion 返回 Server 版本信息（Agent/Web 版本由前端自行获取）。
+func (a *API) handleVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{
+		"server":    version.Version,
+		"buildTime": version.BuildTime,
+		"goVersion": version.GoVersion,
+	})
+}
+
+// ---- 节点与分组 ----
+
+func (a *API) handleNodes(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{"nodes": a.nodeMgr.ListNodes()})
+}
+
+// handleNodesLatest 一次性聚合所有节点的关键指标，供主机列表展示。
+// 返回结构：metrics[node] = { cpu, mem, disk, load1, netIn, netOut, diskRead, diskWrite }。
+func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
+	type nodeMetric struct {
+		CPU      float64 `json:"cpu"`
+		Mem      float64 `json:"mem"`
+		Disk     float64 `json:"disk"`
+		Load1    float64 `json:"load1"`
+		NetIn    float64 `json:"netIn"`
+		NetOut   float64 `json:"netOut"`
+		DiskRead float64 `json:"diskRead"`
+		DiskWr   float64 `json:"diskWr"`
+	}
+	out := map[string]*nodeMetric{}
+
+	// 通用取值（每节点一个样本）：cpu_usage / mem_used_percent / load1
+	for _, name := range []string{"cpu_usage", "mem_used_percent", "load1"} {
+		series, err := a.store.QueryAllLatest(name, nil)
+		if err != nil {
+			slog.Warn("聚合指标查询失败", "metric", name, "err", err, "query", name)
+			continue
+		}
+		slog.Debug("聚合指标查询结果", "metric", name, "series_count", len(series))
+		for _, s := range series {
+			node := s.Labels["node"]
+			if node == "" || len(s.Points) == 0 {
+				continue
+			}
+			v := s.Points[len(s.Points)-1].Value
+			m, ok := out[node]
+			if !ok {
+				m = &nodeMetric{}
+				out[node] = m
+			}
+			switch name {
+			case "cpu_usage":
+				m.CPU = round2(v)
+			case "mem_used_percent":
+				m.Mem = round2(v)
+			case "load1":
+				m.Load1 = round2(v)
+			}
+		}
+	}
+
+	diskUsage, err := aggregateDiskUsageByNode(a.store)
+	if err != nil {
+		slog.Warn("聚合磁盘使用率失败", "err", err)
+	}
+	for node, usage := range diskUsage {
+		m, ok := out[node]
+		if !ok {
+			m = &nodeMetric{}
+			out[node] = m
+		}
+		m.Disk = usage
+	}
+
+	// 跨标签聚合：network_*_rate 与 disk_*_rate 取 sum
+	for _, name := range []string{"network_recv_rate", "network_sent_rate", "disk_read_rate", "disk_write_rate"} {
+		series, err := a.store.QueryAllLatest(name, nil)
+		if err != nil {
+			slog.Warn("聚合指标查询失败", "metric", name, "err", err)
+			continue
+		}
+		for _, s := range series {
+			node := s.Labels["node"]
+			if node == "" || len(s.Points) == 0 {
+				continue
+			}
+			v := s.Points[len(s.Points)-1].Value
+			m, ok := out[node]
+			if !ok {
+				m = &nodeMetric{}
+				out[node] = m
+			}
+			switch name {
+			case "network_recv_rate":
+				m.NetIn += v
+			case "network_sent_rate":
+				m.NetOut += v
+			case "disk_read_rate":
+				m.DiskRead += v
+			case "disk_write_rate":
+				m.DiskWr += v
+			}
+		}
+	}
+
+	writeJSON(w, 200, map[string]interface{}{"metrics": out})
+}
+
+func (a *API) handleNode(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	n, ok := a.nodeMgr.GetNode(name)
+	if !ok {
+		http.Error(w, "node not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, 200, n)
+}
+
+func (a *API) handleNodeDelete(w http.ResponseWriter, r *http.Request) {
+	a.nodeMgr.RemoveNode(r.PathValue("name"))
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+// handleNodeUpgrade 标记节点待升级，Agent 下次上报时收到 upgrade 指令并自升级。
+func (a *API) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if _, ok := a.nodeMgr.GetNode(name); !ok {
+		http.Error(w, "node not found", http.StatusNotFound)
+		return
+	}
+	a.nodeMgr.RequestUpgrade(name)
+	slog.Info("收到 Agent 升级请求", "node", name)
+	writeJSON(w, 200, map[string]string{
+		"status":  "ok",
+		"message": "升级任务已下发，等待 Agent 下次心跳时执行",
+	})
+}
+
+func (a *API) handleNodeGroup(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Group string `json:"group"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Group == "" {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if err := a.nodeMgr.SetNodeGroup(r.PathValue("name"), body.Group); err != nil {
+		http.Error(w, "node not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+func (a *API) handleGroups(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{"groups": a.nodeMgr.ListGroups()})
+}
+
+func (a *API) handleGroupCreate(w http.ResponseWriter, r *http.Request) {
+	var g model.Group
+	if err := json.NewDecoder(r.Body).Decode(&g); err != nil || g.Name == "" {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	a.nodeMgr.AddGroup(g.Name, g.Description)
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+func (a *API) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
+	a.nodeMgr.RemoveGroup(r.PathValue("name"))
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+// ---- 指标查询 ----
+
+func aggregateDiskUsageByNode(store storage.Storage) (map[string]float64, error) {
+	totals, err := store.QueryAllLatest("disk_total", nil)
+	if err != nil {
+		return nil, err
+	}
+	used, err := store.QueryAllLatest("disk_used", nil)
+	if err != nil {
+		return nil, err
+	}
+	totalByNode := sumLatestByNode(totals)
+	usedByNode := sumLatestByNode(used)
+	out := make(map[string]float64, len(totalByNode))
+	for node, total := range totalByNode {
+		if total <= 0 {
+			continue
+		}
+		out[node] = round2(usedByNode[node] / total * 100)
+	}
+	return out, nil
+}
+
+func aggregateDiskUsageForNode(store storage.Storage, node string) (*model.Point, error) {
+	totals, err := store.QueryInstant(node, "disk_total", nil)
+	if err != nil {
+		return nil, err
+	}
+	used, err := store.QueryInstant(node, "disk_used", nil)
+	if err != nil {
+		return nil, err
+	}
+	var totalValue, usedValue float64
+	var ts int64
+	for _, s := range totals {
+		if len(s.Points) == 0 {
+			continue
+		}
+		p := s.Points[len(s.Points)-1]
+		totalValue += p.Value
+		if p.Timestamp > ts {
+			ts = p.Timestamp
+		}
+	}
+	for _, s := range used {
+		if len(s.Points) == 0 {
+			continue
+		}
+		p := s.Points[len(s.Points)-1]
+		usedValue += p.Value
+		if p.Timestamp > ts {
+			ts = p.Timestamp
+		}
+	}
+	if totalValue <= 0 {
+		return nil, nil
+	}
+	return &model.Point{Timestamp: ts, Value: round2(usedValue / totalValue * 100)}, nil
+}
+
+func sumLatestByNode(series []model.Series) map[string]float64 {
+	out := make(map[string]float64)
+	for _, s := range series {
+		node := s.Labels["node"]
+		if node == "" || len(s.Points) == 0 {
+			continue
+		}
+		out[node] += s.Points[len(s.Points)-1].Value
+	}
+	return out
+}
+
+func (a *API) handleQueryRange(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	node := q.Get("node")
+	name := q.Get("metric")
+	if node == "" || name == "" {
+		http.Error(w, "node and metric required", http.StatusBadRequest)
+		return
+	}
+	start, _ := strconv.ParseInt(q.Get("start"), 10, 0)
+	end, _ := strconv.ParseInt(q.Get("end"), 10, 0)
+	step, _ := strconv.ParseInt(q.Get("step"), 10, 0)
+	if step == 0 {
+		// 默认按跨度自动降采样到约 300 点
+		span := end - start
+		step = span / 300
+		if step < 60000 {
+			step = 60000 // 最少 60s（毫秒单位）
+		}
+	}
+	labels := parseLabelQuery(q)
+	series, err := a.store.QueryRange(node, name, labels, start, end, step)
+	if err != nil {
+		slog.Error("查询失败", "err", err)
+		http.Error(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"series": series})
+}
+
+func (a *API) handleQueryLatest(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	node := q.Get("node")
+	name := q.Get("metric")
+	if node == "" || name == "" {
+		http.Error(w, "node and metric required", http.StatusBadRequest)
+		return
+	}
+	p, err := a.store.QueryLatest(node, name, parseLabelQuery(q))
+	if err != nil {
+		http.Error(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"point": p})
+}
+
+func (a *API) handleProcesses(w http.ResponseWriter, r *http.Request) {
+	node := r.URL.Query().Get("hostname")
+	if node == "" {
+		http.Error(w, "node required", http.StatusBadRequest)
+		return
+	}
+	cpuSeries, err := a.store.QueryInstant(node, "proc_cpu", nil)
+	if err != nil {
+		http.Error(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+	memSeries, _ := a.store.QueryInstant(node, "proc_mem", nil)
+
+	memByKey := map[string]float64{}
+	for _, s := range memSeries {
+		key := s.Labels["pid"] + "|" + s.Labels["comm"]
+		if len(s.Points) > 0 {
+			memByKey[key] = s.Points[len(s.Points)-1].Value
+		}
+	}
+	type proc struct {
+		PID  string  `json:"pid"`
+		Name string  `json:"name"`
+		CPU  float64 `json:"cpu"`
+		Mem  float64 `json:"mem"`
+	}
+	var out []proc
+	for _, s := range cpuSeries {
+		pid := s.Labels["pid"]
+		comm := s.Labels["comm"]
+		cpu := 0.0
+		if len(s.Points) > 0 {
+			cpu = s.Points[len(s.Points)-1].Value
+		}
+		out = append(out, proc{PID: pid, Name: comm, CPU: cpu, Mem: memByKey[pid+"|"+comm]})
+	}
+	writeJSON(w, 200, map[string]interface{}{"processes": out})
+}
+
+// parseLabelQuery 从 URL 查询中提取 labels.<name>=<value> 形式的标签过滤。
+func parseLabelQuery(q map[string][]string) map[string]string {
+	labels := map[string]string{}
+	for k, v := range q {
+		if strings.HasPrefix(k, "labels.") && len(v) > 0 {
+			labels[strings.TrimPrefix(k, "labels.")] = v[0]
+		}
+	}
+	return labels
+}
+
+// ---- 告警 ----
+
+func (a *API) handleAlerts(w http.ResponseWriter, r *http.Request) {
+	node := r.URL.Query().Get("hostname")
+	var events []model.AlertEvent
+	if r.URL.Query().Get("state") == "active" {
+		events = a.alerts.Active()
+	} else {
+		limit := 100
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if v, err := strconv.Atoi(l); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		events = a.alerts.Recent(limit)
+	}
+	if node != "" {
+		filtered := make([]model.AlertEvent, 0, len(events))
+		for _, e := range events {
+			if e.Node == node {
+				filtered = append(filtered, e)
+			}
+		}
+		events = filtered
+	}
+	writeJSON(w, 200, map[string]interface{}{"alerts": events})
+}
+
+// ---- 告警规则 CRUD ----
+
+func (a *API) handleRulesList(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{"rules": a.rules.List()})
+}
+
+func (a *API) handleRuleCreate(w http.ResponseWriter, r *http.Request) {
+	var rule model.AlertRule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	created := a.rules.Create(rule)
+	writeJSON(w, 200, created)
+}
+
+func (a *API) handleRuleUpdate(w http.ResponseWriter, r *http.Request) {
+	var rule model.AlertRule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	rule.ID = r.PathValue("id")
+	if err := a.rules.Update(rule); err != nil {
+		http.Error(w, "rule not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+func (a *API) handleRuleDelete(w http.ResponseWriter, r *http.Request) {
+	a.rules.Delete(r.PathValue("id"))
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+// writeJSON 统一 JSON 响应。
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// round2 保留两位小数。
+func round2(v float64) float64 {
+	return float64(int64(v*100+0.5)) / 100
+}

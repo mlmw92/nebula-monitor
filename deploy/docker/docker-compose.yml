@@ -1,0 +1,40 @@
+# Monitor 系统 docker-compose 部署（单机模式）
+# VictoriaMetrics + 1 个 Server
+#
+# 用法：
+#   docker compose -f deploy/docker/docker-compose.yml up -d
+version: "3.8"
+
+services:
+  vm:
+    image: victoriametrics/victoria-metrics:v1.101.0
+    container_name: monitor-vm
+    command:
+      - "--storageDataPath=/victoria-metrics-data"
+      - "--retentionPeriod=30"
+    volumes:
+      - vm-data:/victoria-metrics-data
+    restart: always
+    ports:
+      - "8428:8428"
+
+  server:
+    image: monitor-server:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.server
+    container_name: monitor-server
+    depends_on:
+      - vm
+    volumes:
+      - ./server.yaml:/etc/monitor-server/server.yaml:ro
+      - server-data:/var/lib/monitor-server
+    # 容器内访问 compose 网络需用服务名
+    # 请将 server.yaml 中 vm.addr 设为 http://vm:8428
+    ports:
+      - "8080:8080"
+    restart: always
+
+volumes:
+  vm-data:
+  server-data:

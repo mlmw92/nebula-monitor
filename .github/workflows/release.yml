@@ -1,0 +1,94 @@
+name: Release
+
+# 两种触发方式：
+#   1. push tag（vX.Y.Z）：自动发布，必须保证 tag 与 VERSION 文件一致
+#   2. workflow_dispatch（手动）：在 GitHub UI 手动触发，可指定 tag_name，
+#      用于发布前 dry-run / 验证 CI 端 fetch-packages.sh 下载可用
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '发布 tag 名（如 v1.4.4，会写入 VERSION 临时覆盖并用于 Release 名）'
+        required: true
+        type: string
+      draft:
+        description: '是否创建 draft Release（默认 false；测试场景建议 true 避免污染正式 release 列表）'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write  # 允许创建/更新 Release
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 决定本次构建的发布版本号：
+      #   - push tag：用 GITHUB_REF_NAME（v1.0.0），并校验与 VERSION 文件一致
+      #   - workflow_dispatch：用 inputs.tag_name 临时覆盖 VERSION 文件（仅本次 run 可见）
+      - name: Resolve release version
+        id: resolve
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            RELEASE_TAG="$GITHUB_REF_NAME"           # v1.0.0
+            FILE_VER="$(tr -d '[:space:]' < VERSION)"
+            TAG_VER="${RELEASE_TAG#v}"
+            if [[ "$FILE_VER" != "$TAG_VER" ]]; then
+              echo "::error::tag ($RELEASE_TAG) 与 VERSION 文件 ($FILE_VER) 不一致"
+              exit 1
+            fi
+            echo "VERSION=$FILE_VER 与 tag $RELEASE_TAG 一致"
+          else
+            RELEASE_TAG="${{ inputs.tag_name }}"
+            VER="${RELEASE_TAG#v}"
+            echo "手动触发，tag_name=$RELEASE_TAG -> VERSION=$VER（仅本次 run 覆盖 VERSION）"
+            echo "$VER" > VERSION
+            FILE_VER="$VER"
+          fi
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$FILE_VER"        >> "$GITHUB_OUTPUT"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build binaries (server + agent, 3 archs)
+        run: bash build/cross-compile.sh
+
+      - name: Build web (前端 Vue 构建 + 拷贝到 dist/artifacts/web)
+        run: bash build/build-web.sh
+
+      - name: Fetch 3rd-party packages (node + victoria-metrics)
+        run: bash build/fetch-packages.sh
+
+      - name: Package release (full + upgrade)
+        run: bash build/release.sh
+
+      - name: Create / Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.resolve.outputs.release_tag }}
+          name: ${{ steps.resolve.outputs.release_tag }}
+          draft: ${{ inputs.draft == true }}
+          files: |
+            dist/release/nebula-monitor-v*-full.tar.gz
+            dist/release/nebula-monitor-v*-upgrade.tar.gz
+          generate_release_notes: true
+          fail_on_unmatched_files: true

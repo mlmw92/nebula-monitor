@@ -1,0 +1,16 @@
+# 构建产物（dist/ 整目录不入库；web/dist 也不入库）
+/bin/
+/dist/
+web/dist/
+web/node_modules/
+
+# 运行时 / 测试产生的临时文件
+*.out
+*.err
+server.log
+agent.log
+agent.test.yaml
+
+# OS
+Thumbs.db
+.DS_Store
