@@ -77,44 +77,100 @@ if (( !any_pkg )); then
   c_warn "未在 ${PKG_DIR}/ 找到 node / victoria-metrics tarball（full 包将不含相关可选依赖）"
 fi
 
-# 5) 统一入口 install.sh（透传 --dist/--packages 指向包内目录）
+# 5) 统一入口 install.sh（无参数时进入交互菜单；带子命令时透传）
 cat > "$STAGE_FULL/install.sh" <<'EOF'
 #!/usr/bin/env bash
 # nebula-monitor 统一安装入口
-#   ./install.sh server  [...]   部署/升级 Server（透传给 deploy/install-server.sh）
-#   ./install.sh agent   [...]   安装 Agent（透传给 deploy/agent-install.sh）
-# 全部参数透传给 deploy/ 下的原始脚本；可用 --help 查看子命令帮助。
+#   无参数       进入交互菜单选择 server / agent / vm
+#   server [..]  部署/升级 Server（透传给 deploy/install-server.sh）
+#   agent  [..]  安装 Agent   （透传给 deploy/agent-install.sh）
+#   vm     [..]  独立安装时序库（透传给 deploy/install-tsdb.sh）
+# 透传时自动设置 --packages/--dist 指向包内目录。
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 当前已是 root 就不加 sudo（避免嵌套 sudo 反复问密码）
+run_privileged() {
+  if [[ $EUID -eq 0 ]]; then
+    bash "$@"
+  else
+    sudo bash "$@"
+  fi
+}
+
 usage() {
-  cat <<USAGE
+  cat <<'USAGE'
 用法:
-  ./install.sh server  [参数]   部署/升级 Server（透传给 deploy/install-server.sh）
-  ./install.sh agent   [参数]   安装 Agent（透传给 deploy/agent-install.sh）
+  sudo ./install.sh                      # 交互菜单（推荐首次使用）
+  sudo ./install.sh server  [参数]        # 部署/升级 Server
+  sudo ./install.sh agent   [参数]        # 安装 Agent（在被监控节点）
+  sudo ./install.sh vm      [参数]        # 独立安装时序库 (VictoriaMetrics / Mimir / Cortex / Thanos)
 
 完整参数请用：
-  ./install.sh server --help
-  ./install.sh agent  --help
+  sudo ./install.sh <子命令> --help
 
-本入口会自动设置 --packages/--dist 指向解压目录，所以子命令只需要指定
-tsdb 地址、监听端口、密钥等业务参数即可。
+子命令说明：
+  server  - 监控 Server（含 Web UI / API / 时序库对接）
+  agent   - 监控 Agent（向 Server 上报指标）
+  vm      - 时序库（可与 Server 同机或分机；VM 默认二进制+systemd，
+            Mimir/Cortex/Thanos 自动走 Docker）
 USAGE
 }
+
+interactive_menu() {
+  local ver
+  ver="$(cat "$HERE/VERSION" 2>/dev/null || echo '?')"
+  cat <<MENU
+============================================================
+  nebula-monitor v${ver}  安装入口
+============================================================
+请选择要安装的组件：
+
+  1) server   监控 Server（含 Web UI / API / 时序库对接）
+  2) agent    监控 Agent（装在被监控节点上，向 Server 上报）
+  3) vm       时序库（VictoriaMetrics / Mimir / Cortex / Thanos）
+
+  h) help     查看详细帮助
+  q) quit     退出
+
+MENU
+  while true; do
+    read -r -p "请输入选项 [1/2/3/h/q]: " choice || { echo; exit 1; }
+    case "$choice" in
+      1|server)   run_privileged "$HERE/install.sh" server ;;
+      2|agent)    run_privileged "$HERE/install.sh" agent ;;
+      3|vm|tsdb)  run_privileged "$HERE/install.sh" vm ;;
+      h|H|help)   usage; echo; continue ;;
+      q|Q|quit|exit) echo "已退出"; exit 0 ;;
+      *) echo "无效选项 '$choice'，请输入 1/2/3/h/q" ;;
+    esac
+  done
+}
+
 cmd="${1:-}"
-if [[ -z "$cmd" || "$cmd" == "-h" || "$cmd" == "--help" ]]; then
-  usage; exit 0
+if [[ -z "$cmd" || "$cmd" == "-h" || "$cmd" == "--help" || "$cmd" == "help" ]]; then
+  if [[ -z "$cmd" ]]; then
+    interactive_menu
+  else
+    usage; exit 0
+  fi
 fi
 shift
 case "$cmd" in
   server)
-    exec sudo bash "$HERE/deploy/install-server.sh" \
+    exec run_privileged "$HERE/deploy/install-server.sh" \
       --packages "$HERE/packages" --dist "$HERE/bin" "$@"
     ;;
   agent)
-    exec sudo bash "$HERE/deploy/agent-install.sh" "$@"
+    exec run_privileged "$HERE/deploy/agent-install.sh" "$@"
+    ;;
+  vm)
+    # vm 安装时把 --packages 指向包内 packages/，让 install-tsdb.sh 自动探测 VM tarball
+    exec run_privileged "$HERE/deploy/install-tsdb.sh" \
+      --packages "$HERE/packages" "$@"
     ;;
   *)
-    echo "未知子命令: $cmd（支持 server / agent）" >&2
+    echo "未知子命令: $cmd（支持 server / agent / vm）" >&2
     usage; exit 2
     ;;
 esac
