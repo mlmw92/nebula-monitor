@@ -89,6 +89,17 @@ cat > "$STAGE_FULL/install.sh" <<'EOF'
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# 必须以 root 权限运行：非 root 时自动尝试 sudo 提权；无 sudo 则提示退出
+if [[ $EUID -ne 0 ]]; then
+  if command -v sudo >/dev/null 2>&1; then
+    echo "当前不是 root 用户，正在使用 sudo 提权重新运行：$0 $*"
+    exec sudo "$0" "$@"
+  else
+    echo "错误：请以 root 用户运行本脚本，或安装 sudo 后执行：sudo $0 $*" >&2
+    exit 1
+  fi
+fi
+
 # 当前已是 root 就不加 sudo（避免嵌套 sudo 反复问密码）
 run_privileged() {
   if [[ $EUID -eq 0 ]]; then
