@@ -191,7 +191,18 @@ c_info "生成 SHA256SUMS (full)"
 c_info "打包 $(basename "$OUT_FULL")"
 mkdir -p "$STAGE_ROOT"
 rm -f "$OUT_FULL"
-tar -czf "$OUT_FULL" -C "$STAGE_ROOT" "${NAME}-full"
+# 诊断：磁盘满是 CI 上 tar 报"stdout: write error"的常见根因
+echo "  阶段目录: $(du -sh "$STAGE_FULL" | cut -f1)  入口: $(find "$STAGE_FULL" | wc -l) 个"
+echo "  可用空间: $(df -h "$OUT_FULL" | tail -1 | awk '{print $4}')  目标: $OUT_FULL"
+if ! tar -czf "$OUT_FULL" -C "$STAGE_ROOT" "${NAME}-full"; then
+  echo "::error::tar 打包 full 失败，详细诊断："
+  ls -la "$STAGE_FULL" 2>&1 | head -30
+  echo "--- df ---"
+  df -h
+  echo "--- du stage ---"
+  du -sh "$STAGE_FULL"/*
+  exit 1
+fi
 
 # ============================ 准备 upgrade 包 stage ============================
 c_info "组装 ${NAME}-upgrade"
@@ -276,7 +287,17 @@ c_info "生成 SHA256SUMS (upgrade)"
 # 5) 打包
 c_info "打包 $(basename "$OUT_UPGRADE")"
 rm -f "$OUT_UPGRADE"
-tar -czf "$OUT_UPGRADE" -C "$STAGE_ROOT" "${NAME}-upgrade"
+echo "  阶段目录: $(du -sh "$STAGE_UPGRADE" | cut -f1)  入口: $(find "$STAGE_UPGRADE" | wc -l) 个"
+echo "  可用空间: $(df -h "$OUT_UPGRADE" | tail -1 | awk '{print $4}')  目标: $OUT_UPGRADE"
+if ! tar -czf "$OUT_UPGRADE" -C "$STAGE_ROOT" "${NAME}-upgrade"; then
+  echo "::error::tar 打包 upgrade 失败，详细诊断："
+  ls -la "$STAGE_UPGRADE" 2>&1 | head -30
+  echo "--- df ---"
+  df -h
+  exit 1
+fi
+# 立即清理 stage-full（~240MB），避免后续步骤占空间
+rm -rf "$STAGE_FULL"
 
 # ============================ 报告 ============================
 echo

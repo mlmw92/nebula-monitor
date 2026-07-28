@@ -78,6 +78,12 @@ jobs:
       - name: Fetch 3rd-party packages (node + victoria-metrics)
         run: bash build/fetch-packages.sh
 
+      - name: Disk space pre-flight check
+        run: |
+          echo "=== 磁盘空间（tar 写满会报 'stdout: write error'，这里提前看）==="
+          df -h
+          du -sh dist/artifacts/* 2>/dev/null
+
       - name: Package release (full + upgrade)
         run: bash build/release.sh
 
