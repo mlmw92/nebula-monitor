@@ -25,6 +25,7 @@ INTERVAL=""
 BASE_URL=""
 DIST_DIR=""
 ASSUME_YES=0
+ASK_BINARY=0
 
 # 采集项开关（默认全开）
 C_CPU=""; C_MEM=""; C_DISK=""; C_NET=""; C_PROC=""; C_LOAD=""
@@ -104,6 +105,7 @@ usage() {
   --dist <dir>        本地已构建产物目录（含 agent 二进制）
   --base-url <url>    二进制下载基址（默认从 \$SERVER_URL/bin 拉取）
   --yes               非交互式，未提供的项使用默认值
+  --ask-binary        弹出"获取 Agent 二进制"菜单（交互选择下载源）
   -h, --help          显示本帮助
 
 示例：
@@ -123,6 +125,7 @@ while [[ $# -gt 0 ]]; do
     --dist)     DIST_DIR="$2"; shift 2 ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
     --yes)      ASSUME_YES=1; shift ;;
+    --ask-binary) ASK_BINARY=1; shift ;;
     -h|--help)  usage ;;
     *) die "未知参数: $1（用 -h 查看帮助）" ;;
   esac
@@ -329,18 +332,8 @@ acquire_binary() {
     verify_checksum "$tmp/agent" "$url.sha256" "$SECRET"
     src="$tmp/agent"
   else
-    if (( ASSUME_YES )) || [[ ! -t 0 ]]; then
-      # 非交互（--yes 或管道 curl|bash，stdin 非 TTY）：直接默认从 Server 在线下载，
-      # 不再弹出菜单（避免管道场景下菜单一闪而过又自动选默认项的噪音）。
-      # 若需本地产物或从其它 URL 下载，请用 --dist / --base-url 显式指定。
-      BASE_URL="${SERVER_URL%/}/bin"
-      local tmp; tmp="$(mktemp -d)"
-      local url="$BASE_URL/linux/$ARCH/agent"
-      c_info "下载 $url"
-      download "$url" "$tmp/agent" "$SECRET" || die "下载 Agent 失败: $url（确认 Server 已提供 /bin 端点，或改用 --base-url/--dist）"
-      verify_checksum "$tmp/agent" "$url.sha256" "$SECRET"
-      src="$tmp/agent"
-    else
+    if (( ASK_BINARY )); then
+      # 仅显式加 --ask-binary 才交互选源；否则默认从 Server 在线下载，不再弹菜单。
       echo "如何获取 Agent 二进制？"
       choose "获取方式" 1 "从 Server 在线下载" "本地已构建产物目录" "从 URL 下载"
       case "$CHOICE_VAL" in
@@ -369,6 +362,16 @@ acquire_binary() {
           src="$tmp2/agent"
           ;;
       esac
+    else
+      # 默认从 Server 在线下载（--yes / 管道 / 交互直跑 均走此分支，不再弹菜单）。
+      # 若需本地产物或从其它 URL 下载，请用 --dist / --base-url 显式指定，或加 --ask-binary 交互选源。
+      BASE_URL="${SERVER_URL%/}/bin"
+      local tmp; tmp="$(mktemp -d)"
+      local url="$BASE_URL/linux/$ARCH/agent"
+      c_info "下载 $url"
+      download "$url" "$tmp/agent" "$SECRET" || die "下载 Agent 失败: $url（确认 Server 已提供 /bin 端点，或改用 --base-url/--dist）"
+      verify_checksum "$tmp/agent" "$url.sha256" "$SECRET"
+      src="$tmp/agent"
     fi
   fi
   install -m 0755 "$src" "$BIN_DIR/monitor-agent" || die "安装 monitor-agent 失败"
