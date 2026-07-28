@@ -27,6 +27,7 @@
         :show-file-list="false"
         :http-request="onUpload"
         :before-upload="beforeUpload"
+        :disabled="uploading"
         accept=".tar.gz,.tgz"
         class="upload-area"
       >
@@ -40,6 +41,16 @@
           </div>
         </template>
       </el-upload>
+      <div v-if="uploading" class="upload-progress">
+        <el-progress
+          :percentage="uploadProgress"
+          :stroke-width="14"
+          :status="uploadProgress >= 100 ? 'success' : undefined"
+        />
+        <div class="upload-progress-text">
+          {{ uploadProgress >= 100 ? '服务端解析中…' : '上传中 ' + uploadProgress + '%' }}
+        </div>
+      </div>
     </div>
 
     <!-- 待应用 -->
@@ -147,6 +158,8 @@ const applying = ref(false)
 const applyError = ref('')
 const history = ref([])
 const loadingHistory = ref(false)
+const uploading = ref(false)
+const uploadProgress = ref(0)
 
 async function loadCurrentVersion() {
   try { currentVersion.value = await http.get('/api/v1/version') } catch (e) { /* ignore */ }
@@ -177,14 +190,21 @@ function beforeUpload(file) {
 async function onUpload(option) {
   const fd = new FormData()
   fd.append('file', option.file)
+  uploading.value = true
+  uploadProgress.value = 0
   try {
-    const task = await http.upload('/api/v1/system/upgrade/upload', fd)
+    const task = await http.upload('/api/v1/system/upgrade/upload', fd, (pct) => {
+      uploadProgress.value = pct
+    })
+    uploadProgress.value = 100
     pending.value = task
     ElMessage.success('升级包解析成功：v' + task.version)
     option.onSuccess && option.onSuccess(task)
   } catch (e) {
     ElMessage.error('上传失败：' + e.message)
     option.onError && option.onError(e)
+  } finally {
+    uploading.value = false
   }
 }
 
@@ -296,6 +316,15 @@ onMounted(async () => {
 .upload-area :deep(.el-upload-dragger) {
   background: rgba(255, 255, 255, 0.02);
   border: 1px dashed rgba(0, 200, 150, 0.3);
+}
+.upload-progress {
+  margin-top: 12px;
+}
+.upload-progress-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  text-align: center;
 }
 .pending-grid {
   display: flex;

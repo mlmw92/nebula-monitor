@@ -40,17 +40,40 @@ export default {
       body: JSON.stringify(body),
     }),
   del: (p) => request(p, { method: 'DELETE' }),
-  // multipart 上传（不预设 Content-Type，由浏览器自动加 boundary）
-  upload: async (p, formData) => {
+  // multipart 上传（XHR 实现以支持上传进度回调 onProgress(percent)）
+  upload: (p, formData, onProgress) => {
     const token = getToken()
-    const headers = token ? { Authorization: 'Bearer ' + token } : {}
-    const r = await fetch(p, { method: 'POST', body: formData, headers })
-    if (r.status === 401) {
-      setToken('')
-      window.dispatchEvent(new CustomEvent('auth-expired'))
-      throw new Error('未登录或登录已过期')
-    }
-    if (!r.ok) throw new Error('HTTP ' + r.status)
-    return r.json()
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', p)
+      if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token)
+      xhr.responseType = 'json'
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && typeof onProgress === 'function') {
+          onProgress(Math.round((e.loaded / e.total) * 100))
+        }
+      }
+      xhr.onload = () => {
+        if (xhr.status === 401) {
+          setToken('')
+          window.dispatchEvent(new CustomEvent('auth-expired'))
+          reject(new Error('未登录或登录已过期'))
+          return
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(xhr.response)
+          return
+        }
+        // 尝试解析后端错误体
+        let msg = 'HTTP ' + xhr.status
+        try {
+          const body = xhr.response || JSON.parse(xhr.responseText)
+          if (body && body.error) msg = body.error
+        } catch (_) { /* ignore */ }
+        reject(new Error(msg))
+      }
+      xhr.onerror = () => reject(new Error('网络错误'))
+      xhr.send(formData)
+    })
   },
 }

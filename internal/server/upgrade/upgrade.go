@@ -485,6 +485,10 @@ func (m *Manager) restart() error {
 // ---- 工具函数 ----
 
 func untarGz(src, dst string) error {
+	// 兼容两种打包方式：带唯一顶层目录（如 nebula-monitor-v1.1.0-upgrade/）
+	// 或扁平包（manifest.json 在根）。若全部条目共享同一顶层目录，则剥离该前缀。
+	prefix := tarLeadingPrefix(src)
+
 	f, err := os.Open(src)
 	if err != nil {
 		return err
@@ -505,7 +509,15 @@ func untarGz(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		target := filepath.Clean(filepath.Join(dst, hdr.Name))
+		name := hdr.Name
+		if prefix != "" {
+			name = strings.TrimPrefix(name, prefix)
+			// 顶层目录本身（剥离后为空）直接跳过
+			if name == "" {
+				continue
+			}
+		}
+		target := filepath.Clean(filepath.Join(dst, name))
 		// 防止 zip slip
 		if !strings.HasPrefix(target, cleanDst+string(os.PathSeparator)) && target != cleanDst {
 			return fmt.Errorf("非法路径: %s", hdr.Name)
@@ -531,6 +543,45 @@ func untarGz(src, dst string) error {
 		}
 	}
 	return nil
+}
+
+// tarLeadingPrefix 读取 tar.gz 内全部文件名，若它们都共享同一个顶层目录，
+// 返回该目录前缀（含结尾 /），否则返回空串（表示扁平包，无需剥离）。
+func tarLeadingPrefix(src string) string {
+	f, err := os.Open(src)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return ""
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	var cand string
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return ""
+		}
+		if hdr.Typeflag == tar.TypeDir {
+			continue // 顶层目录条目不影响前缀判断
+		}
+		first := strings.SplitN(hdr.Name, "/", 2)[0]
+		if cand == "" {
+			cand = first
+		} else if cand != first {
+			return "" // 存在多个顶层，不剥离
+		}
+	}
+	if cand == "" {
+		return ""
+	}
+	return cand + "/"
 }
 
 func copyFile(src, dst string) error {
