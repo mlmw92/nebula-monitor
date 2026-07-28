@@ -98,3 +98,4 @@ jobs:
             dist/release/nebula-monitor-v*-upgrade.tar.gz
           generate_release_notes: true
           fail_on_unmatched_files: true
+          overwrite_files: true   # 重跑时覆盖同名资产（修复 bug 后可重新发布到同 tag）
