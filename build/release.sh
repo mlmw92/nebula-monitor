@@ -193,9 +193,12 @@ esac
 EOF
 chmod +x "$STAGE_FULL/install.sh"
 
-# 5b) 独立 uninstall.sh 入口（与 install.sh 并列，方便用户单独使用/查看）
+# 5b) uninstall.sh 入口（deploy/ + 顶层都放）
+#   - deploy/uninstall.sh：与 install-server.sh/install-tsdb.sh/agent-install.sh 并列，满足 install.sh 路径
+#   - uninstall.sh (顶层)：方便用户单独使用或阅读
+cp "$ROOT/deploy/uninstall.sh" "$STAGE_FULL/deploy/uninstall.sh"
 cp "$ROOT/deploy/uninstall.sh" "$STAGE_FULL/uninstall.sh"
-chmod +x "$STAGE_FULL/uninstall.sh"
+chmod +x "$STAGE_FULL/deploy/uninstall.sh" "$STAGE_FULL/uninstall.sh"
 
 # 6) VERSION + README
 printf '%s\n' "$VERSION" > "$STAGE_FULL/VERSION"
