@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # nebula-monitor 卸载脚本
-#   - 默认保留数据目录（仅停服务+删二进制+删配置），方便备份/恢复
-#   - --purge 同时清理数据目录（不可逆！）
+#   - 默认完全卸载：停服务 + 删二进制 + 删配置 + 删数据目录（彻底清理）
+#   - --keep-data 保留数据目录（不删 /var/lib/*，便于备份/恢复）
 #   - --yes 跳过所有交互确认
 #   - --all 卸载 server + agent + tsdb（默认根据探测到的服务决定）
 #   - --server / --agent / --tsdb 限制范围
@@ -31,16 +31,17 @@ usage() {
   --server           仅卸载 server
   --agent            仅卸载 agent
   --tsdb             仅卸载时序库 (victoriametrics / mimir / cortex / thanos)
-  --purge            同时清理数据目录（默认保留供备份）
+  --purge            完全清理数据目录（默认即如此，保留以兼容旧用法）
+  --keep-data        保留数据目录（不删 /var/lib/*，便于备份/恢复）
   --yes              跳过所有交互确认
   -h | --help        显示本帮助
 
 典型场景:
-  # 保留数据，干净卸载所有组件
+  # 完全清理（默认即停服务+删二进制+删配置+删数据目录）
   sudo ./uninstall.sh
 
-  # 完全清理（删数据，不可逆）
-  sudo ./uninstall.sh --purge --yes
+  # 仅保留数据目录卸载（备份用）
+  sudo ./uninstall.sh --keep-data
 
   # 只卸 server（agent 和 tsdb 保留）
   sudo ./uninstall.sh --server
@@ -49,7 +50,7 @@ USAGE
 }
 
 # ---------------------------- 参数解析 ----------------------------
-PURGE=0
+PURGE=1                 # 默认完全删除数据目录
 ASSUME_YES=0
 DO_SERVER=0
 DO_AGENT=0
@@ -58,6 +59,7 @@ DO_ALL=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --purge)      PURGE=1; shift ;;
+    --keep-data)  PURGE=0; shift ;;
     --yes|-y)     ASSUME_YES=1; shift ;;
     --all)        DO_ALL=1; shift ;;
     --server)     DO_SERVER=1; shift ;;
@@ -182,7 +184,7 @@ if (( DOCKER_TSDB_PRESENT )); then
 fi
 echo "================================================"
 if (( ! PURGE )); then
-  c_dim "数据目录默认保留（加 --purge 才会删除，不可逆）"
+  c_dim "数据目录将保留（默认会删除，使用 --keep-data 时才保留）"
 fi
 echo
 
@@ -252,7 +254,7 @@ if (( VM_PRESENT )); then
   c_info "卸载 VictoriaMetrics..."
   stop_disable victoriametrics
   safe_rm /usr/local/bin/victoria-metrics
-  safe_rm /etc/systemd/system/victoria-metrics.service
+  safe_rm /etc/systemd/system/victoriametrics.service
   safe_rm /etc/victoria-metrics
   if (( PURGE )); then
     safe_rm /var/lib/victoria-metrics-data
