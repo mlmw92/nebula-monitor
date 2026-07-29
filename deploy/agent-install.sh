@@ -416,6 +416,8 @@ ExecStart=$BIN_DIR/monitor-agent -config $CONFIG_DIR/agent.yaml
 Restart=always
 RestartSec=5
 User=root
+# 升级时只杀主进程，不杀整个 cgroup（升级脚本需独立存活）
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target

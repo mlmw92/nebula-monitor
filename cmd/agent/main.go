@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/nebula/monitor/internal/agent/collector"
@@ -15,6 +16,8 @@ import (
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/version"
 )
+
+const pidFile = "/var/run/monitor-agent.pid"
 
 func main() {
 	cfgPath := flag.String("config", "agent.yaml", "配置文件路径")
@@ -35,6 +38,10 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
+
+	// 写 pid 文件，升级脚本通过它等待 agent 退出
+	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644)
+	defer os.Remove(pidFile)
 
 	coll := collector.New(cfg.Node, cfg.Group, cfg.Labels, cfg.Collectors)
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
@@ -79,8 +86,9 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 	if resp.Command == "upgrade" {
 		slog.Info("收到升级指令，开始自升级流程", "server", cfg.ServerURL)
 		upgrader.Run(cfg)
-		// 等待脚本接管后退出当前进程，systemd 会拉起新版本
-		time.Sleep(3 * time.Second)
-		os.Exit(0)
+		// 不主动退出：升级脚本会用 systemctl stop 停止本进程。
+		// 阻塞等待，避免 ticker 再次触发上报导致 ConsumeUpgrade 已消费但升级未完成。
+		slog.Info("等待升级脚本执行，agent 进入阻塞状态")
+		select {}
 	}
 }
