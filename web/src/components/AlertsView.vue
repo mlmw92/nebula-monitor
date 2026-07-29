@@ -74,7 +74,7 @@
       <div class="panel-title-row">
         <span class="panel-title" style="margin-bottom: 0">告警事件</span>
         <el-radio-group v-model="eventFilter" size="small">
-          <el-radio-button value="active">活跃</el-radio-button>
+          <el-radio-button value="firing">活跃</el-radio-button>
           <el-radio-button value="resolved">已恢复</el-radio-button>
           <el-radio-button value="">全部</el-radio-button>
         </el-radio-group>
