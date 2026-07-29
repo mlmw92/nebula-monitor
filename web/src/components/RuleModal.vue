@@ -87,21 +87,16 @@
         </el-col>
       </el-row>
       <el-form-item label="通知渠道">
-        <el-select
-          v-model="form.notify"
-          multiple
-          clearable
-          placeholder="不选则发送给全部已启用渠道"
-          style="width: 100%"
-        >
-          <el-option
+        <el-checkbox-group v-model="form.notify">
+          <el-checkbox
             v-for="c in channels"
             :key="c.value"
             :value="c.value"
-            :label="c.enabled ? c.label : c.label + '（未启用）'"
             :disabled="!c.enabled"
-          />
-        </el-select>
+          >
+            {{ c.enabled ? c.label : c.label + '（未启用）' }}
+          </el-checkbox>
+        </el-checkbox-group>
         <div class="form-hint">
           仅推送告警到所选渠道；留空表示使用全部已启用渠道。未启用的渠道请先在「通知配置」中开启。
         </div>
