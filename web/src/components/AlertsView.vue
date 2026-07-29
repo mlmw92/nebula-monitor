@@ -43,7 +43,7 @@
             <template v-if="row.notify && row.notify.length">
               <el-tag v-for="c in row.notify" :key="c" size="small" style="margin: 0 4px 4px 0">{{ channelLabel(c) }}</el-tag>
             </template>
-            <span v-else class="muted">全部</span>
+            <span v-else class="muted">不发送</span>
           </template>
         </el-table-column>
         <el-table-column label="持续" width="80">

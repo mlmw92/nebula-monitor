@@ -168,9 +168,13 @@ func (e *Engine) resolve(r model.AlertRule, node string, value float64, now int6
 
 // notify 按规则配置的渠道发送通知。
 func (e *Engine) notify(ev model.AlertEvent) {
+	chs := e.ruleNotifyChannels(ev.RuleID)
+	// 规则未指定渠道时不发送任何通知
+	if len(chs) == 0 {
+		return
+	}
 	for _, n := range e.notifiers {
-		// 规则未指定渠道时默认全部发送；指定时仅发送给对应渠道
-		if chs := e.ruleNotifyChannels(ev.RuleID); len(chs) > 0 && !contains(chs, n.Channel()) {
+		if !contains(chs, n.Channel()) {
 			continue
 		}
 		if err := n.Notify(ev); err != nil {
@@ -187,7 +191,7 @@ func (e *Engine) SetNotifiers(ns []Notifier) {
 	e.notifiers = ns
 }
 
-// ruleNotifyChannels 返回规则指定的通知渠道；空表示使用全部已启用渠道。
+// ruleNotifyChannels 返回规则指定的通知渠道；空表示不发送任何通知。
 func (e *Engine) ruleNotifyChannels(ruleID string) []string {
 	if r, ok := e.rules.Get(ruleID); ok {
 		return r.Notify

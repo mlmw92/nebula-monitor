@@ -98,7 +98,7 @@
           </el-checkbox>
         </el-checkbox-group>
         <div class="form-hint">
-          仅推送告警到所选渠道；留空表示使用全部已启用渠道。未启用的渠道请先在「通知配置」中开启。
+          勾选要接收告警的渠道；留空表示不发送通知。未启用的渠道请先在「通知配置」中开启。
         </div>
       </el-form-item>
     </el-form>
