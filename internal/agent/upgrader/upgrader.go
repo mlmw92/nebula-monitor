@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -31,19 +32,22 @@ func Run(cfg *config.Config) {
 
 	script := buildUpgradeScript(url, binPath, secret)
 
-	tmp, err := os.CreateTemp("", "agent-upgrade-*.sh")
+	tmp, err := os.CreateTemp(filepath.Dir(binPath), ".agent-upgrade-*.sh")
 	if err != nil {
 		return
 	}
-	defer os.Remove(tmp.Name())
 	if _, err := tmp.WriteString(script); err != nil {
+		_ = os.Remove(tmp.Name())
 		return
 	}
-	tmp.Close()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return
+	}
 	_ = os.Chmod(tmp.Name(), 0o700)
 
 	// Run the script detached so it survives this process exiting.
-	cmd := exec.Command("nohup", "bash", tmp.Name(), ">/dev/null", "2>&1", "&")
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("nohup bash %q >/var/log/monitor-agent-upgrade.log 2>&1 &", tmp.Name()))
 	_ = cmd.Start()
 }
 
@@ -57,10 +61,13 @@ func buildUpgradeScript(url, binPath, secret string) string {
 
 	return fmt.Sprintf(`#!/usr/bin/env bash
 set -e
-sleep 2
+SCRIPT="$0"
+trap 'rm -f "$SCRIPT"' EXIT
+sleep 6
 
 BIN='%s'
-TMP="$(mktemp /tmp/agent-upgrade.XXXXXX)"
+DIR="$(dirname "$BIN")"
+TMP="$(mktemp "$DIR/.agent-upgrade-bin.XXXXXX")"
 URL='%s'
 SECRET='%s'
 MAX=3
@@ -102,11 +109,17 @@ if [ -n "$SECRET" ] && [ -n "$sig" ]; then
 fi
 
 chmod +x "$TMP"
+if command -v systemctl >/dev/null 2>&1; then
+  # Agent 退出后 systemd 可能已按 Restart=always 拉起旧二进制；先显式停止，
+  # 避免替换时与旧进程竞争，再启动新版本。
+  systemctl stop monitor-agent
+  sleep 1
+fi
 mv -f "$TMP" "$BIN"
 rm -f "$TMP.sha256"
 
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl restart monitor-agent || true
+  systemctl start monitor-agent
 fi
 `, binEsc, urlEsc, secEsc)
 }
