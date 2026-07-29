@@ -62,16 +62,31 @@ func (d *Distributor) serveBin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 目标二进制（或 .sha256 对应的二进制）路径。
-	// apply 把 agent 写到 BinDir/agent/linux/<arch>/agent；
+	// apply / install-server 均把 agent 写到规范路径 BinDir/agent/linux/<arch>/agent；
 	// 历史 agent 升级 URL 为 /bin/<arch>/agent（无 linux 段），新 agent 为 /bin/linux/<arch>/agent。
-	// 这里按候选顺序兼容多种结构，确保新旧 agent 都能下到正确二进制。
-	binName := strings.TrimSuffix(clean, ".sha256")
-	candidates := []string{
-		filepath.Join(d.BinDir, binName),
-		filepath.Join(d.BinDir, "agent", binName),
-		filepath.Join(d.BinDir, "agent", "linux", binName),
-		filepath.Join(d.BinDir, "linux", binName),
+	// 这里先按架构定位规范路径，再回退到历史布局，确保先命中最新二进制，
+	// 避免旧布局残留（如 BinDir/linux/<arch>/agent 的旧二进制）被先命中而下到旧版本。
+	isSha := strings.HasSuffix(clean, ".sha256")
+	binName := strings.TrimSuffix(clean, ".sha256") // 形如 linux/<arch>/agent、<arch>/agent、agent
+
+	arch := ""
+	for _, seg := range strings.Split(clean, "/") {
+		switch seg {
+		case "amd64", "arm64", "arm":
+			arch = seg
+		}
 	}
+	var candidates []string
+	if arch != "" {
+		candidates = append(candidates, filepath.Join(d.BinDir, "agent", "linux", arch, "agent"))
+	}
+	candidates = append(candidates,
+		filepath.Join(d.BinDir, "agent", "linux", binName),
+		filepath.Join(d.BinDir, "agent", binName),
+		filepath.Join(d.BinDir, binName),
+		filepath.Join(d.BinDir, "linux", binName),
+	)
+
 	target := ""
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
@@ -84,15 +99,15 @@ func (d *Distributor) serveBin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The agent binary itself requires authorization when agent auth is on.
-	if strings.HasSuffix(clean, "/agent") || filepath.Base(clean) == "agent" {
+	// 二进制本体在启用 agentAuth 时需鉴权（.sha256 始终放行，无密钥也无法验证）。
+	if !isSha {
 		if d.AgentAuth.Enabled && !d.validSecret(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 	}
 
-	if strings.HasSuffix(clean, ".sha256") {
+	if isSha {
 		d.serveChecksum(w, r, target)
 		return
 	}

@@ -36,7 +36,7 @@ LABELS_YAML=""
 ARCH=""
 OS=""
 
-CONFIG_DIR="/etc/monagent"
+CONFIG_DIR="/etc/monitor-agent"
 BIN_DIR="/usr/local/bin"
 SERVICE_DIR="/etc/systemd/system"
 
@@ -405,7 +405,7 @@ EOF
 }
 
 write_service() {
-  cat > "$SERVICE_DIR/monagent.service" <<EOF
+  cat > "$SERVICE_DIR/monitor-agent.service" <<EOF
 [Unit]
 Description=nebula-monitor Agent (主机指标采集上报)
 After=network.target
@@ -420,7 +420,7 @@ User=root
 [Install]
 WantedBy=multi-user.target
 EOF
-  c_ok "已写入 systemd 单元: $SERVICE_DIR/monagent.service"
+  c_ok "已写入 systemd 单元: $SERVICE_DIR/monitor-agent.service"
 }
 
 # ============================ 启动 & 校验 ============================
@@ -430,8 +430,8 @@ start_service() {
     return
   fi
   systemctl daemon-reload
-  systemctl enable monagent.service
-  systemctl restart monagent.service
+  systemctl enable monitor-agent.service
+  systemctl restart monitor-agent.service
   sleep 2
 }
 
@@ -456,11 +456,11 @@ connectivity_check() {
   fi
   if have_cmd systemctl; then
     local st
-    st="$(systemctl is-active monagent.service 2>/dev/null || echo unknown)"
+    st="$(systemctl is-active monitor-agent.service 2>/dev/null || echo unknown)"
     if [[ "$st" == "active" ]]; then
-      c_ok "Agent 服务运行中 (systemctl is-active monagent = active)"
+      c_ok "Agent 服务运行中 (systemctl is-active monitor-agent = active)"
     else
-      c_warn "Agent 服务未运行 (状态: $st)，请查看: journalctl -u monagent -n 50"
+      c_warn "Agent 服务未运行 (状态: $st)，请查看: journalctl -u monitor-agent -n 50"
     fi
   fi
 }
@@ -479,8 +479,8 @@ summary() {
   echo " 配置文件    : $CONFIG_DIR/agent.yaml"
   echo " 二进制      : $BIN_DIR/monitor-agent"
   echo "------------------------------------------------------------"
-  echo " 查看状态 : systemctl status monagent"
-  echo " 查看日志 : journalctl -u monagent -f"
+  echo " 查看状态 : systemctl status monitor-agent"
+  echo " 查看日志 : journalctl -u monitor-agent -f"
   echo " 控制台   : 打开 $SERVER_URL 查看本节点 $NODE"
   echo "============================================================"
 }

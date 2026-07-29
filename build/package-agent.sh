@@ -41,7 +41,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/monitor-agent -config /etc/monagent/agent.yaml
+ExecStart=/usr/local/bin/monitor-agent -config /etc/monitor-agent/agent.yaml
 Restart=always
 RestartSec=5
 User=root
@@ -56,10 +56,10 @@ cat > "${PKG_DIR}/install.sh" <<'INSTALL'
 set -euo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 install -Dm755 "${SRC}/bin/agent" /usr/local/bin/monitor-agent
-install -Dm644 "${SRC}/config/agent.yaml" /etc/monagent/agent.yaml
-install -Dm644 "${SRC}/agent.service" /etc/systemd/system/monagent.service
+install -Dm644 "${SRC}/config/agent.yaml" /etc/monitor-agent/agent.yaml
+install -Dm644 "${SRC}/agent.service" /etc/systemd/system/monitor-agent.service
 systemctl daemon-reload
-systemctl enable --now monagent
+systemctl enable --now monitor-agent
 echo ">> monitor-agent 已安装并启动"
 INSTALL
 chmod +x "${PKG_DIR}/install.sh"

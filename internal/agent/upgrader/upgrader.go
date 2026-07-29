@@ -106,7 +106,7 @@ mv -f "$TMP" "$BIN"
 rm -f "$TMP.sha256"
 
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl restart nebula-agent || true
+  systemctl restart monitor-agent || true
 fi
 `, binEsc, urlEsc, secEsc)
 }
