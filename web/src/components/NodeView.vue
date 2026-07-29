@@ -51,13 +51,7 @@
           <div class="dev-item"><span>IP 地址</span><strong class="with-copy mono">{{ current?.ip || '-' }}<el-icon class="copy-btn" title="复制" @click="copyText(current?.ip)"><DocumentCopy /></el-icon></strong></div>
           <div class="dev-item"><span>操作系统</span><strong>{{ current?.os || '-' }}</strong></div>
           <div class="dev-item"><span>运行天数</span><strong class="mono">{{ uptimeDays }} 天（{{ bootTimeText }}）</strong></div>
-          <div class="dev-item">
-            <span>Agent 版本</span>
-            <strong class="mono">v{{ current?.version || '-' }}
-              <el-tag v-if="agentOutdated" type="warning" size="small" effect="dark" class="ver-tag">最新 v{{ latestAgentVersion }}</el-tag>
-              <el-tag v-else-if="current?.version" type="success" size="small" effect="dark" class="ver-tag">已是最新</el-tag>
-            </strong>
-          </div>
+          <div class="dev-item"><span>Agent 版本</span><strong class="mono">v{{ current?.version || '-' }}</strong></div>
           <div class="dev-item"><span>CPU 型号</span><strong :title="hostInfo?.cpuModel">{{ hostInfo?.cpuModel || '-' }}</strong></div>
           <div class="dev-item"><span>CPU 核数</span><strong class="mono">{{ hostInfo?.cpuCores || '-' }} 核</strong></div>
           <div class="dev-item">
@@ -238,7 +232,6 @@ let nodeTimer = null
 let alertTimer = null
 
 const nodes = ref([])
-const latestAgentVersion = ref('')
 const selected = ref('')
 const activeTab = ref('overview')
 const procs = ref([])
@@ -345,7 +338,6 @@ const setMonitorRef = (el, key) => {
 
 const current = computed(() => nodes.value.find((n) => n.hostname === selected.value) || null)
 const currentStatus = computed(() => (current.value?.status === 'online' ? 'online' : 'offline'))
-const agentOutdated = computed(() => !!current.value?.version && !!latestAgentVersion.value && current.value.version !== latestAgentVersion.value)
 const hostInfo = computed(() => current.value?.hostInfo || null)
 const uptimeDays = computed(() => {
   const bt = hostInfo.value?.bootTime
@@ -469,14 +461,6 @@ async function loadNodes() {
     const list = data.nodes || []
     if (!selected.value && list.length) selected.value = list[0].hostname
     nodes.value = list
-  } catch (e) { /* ignore */ }
-}
-
-// 最新可用 Agent 版本（server 版本即 CDN 中 agent 二进制版本）
-async function loadVersion() {
-  try {
-    const v = await http.get('/api/v1/version')
-    latestAgentVersion.value = v.server || ''
   } catch (e) { /* ignore */ }
 }
 
@@ -735,7 +719,6 @@ function initRealtimeCharts() {
 
 onMounted(async () => {
   await loadNodes()
-  loadVersion()
   if (selected.value) {
     connectWS(selected.value)
     loadProcesses(selected.value)

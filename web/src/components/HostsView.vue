@@ -116,7 +116,9 @@
 
         <el-table-column label="Agent 版本" min-width="110">
           <template #default="{ row }">
-            <span class="ver-cell" :class="verClass(row.version)">{{ row.version || '-' }}</span>
+            <span class="ver-cell" :class="verClass(row.version)">
+              <span v-if="needUpgrade(row)" class="ver-dot"></span>{{ row.version || '-' }}
+            </span>
           </template>
         </el-table-column>
 
@@ -181,9 +183,7 @@
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
             <el-button link size="small" @click.stop="goDetail(row)">详情</el-button>
-            <el-badge :is-dot="true" :hidden="!needUpgrade(row)" type="danger">
-              <el-button link size="small" type="warning" @click.stop="upgrade(row)">升级</el-button>
-            </el-badge>
+            <el-button link size="small" type="warning" @click.stop="upgrade(row)">升级</el-button>
             <el-button link size="small" type="danger" @click.stop="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -522,7 +522,7 @@ async function loadVersion() {
   } catch (e) { /* ignore */ }
 }
 
-// 该节点 Agent 版本是否为最新（用于升级按钮红点提示）
+// 该节点 Agent 版本是否为最新（用于 Agent 版本列红点提示）
 function needUpgrade(row) {
   return !!latestAgentVersion.value && !!row.version && row.version !== latestAgentVersion.value
 }
@@ -653,6 +653,16 @@ defineExpose({ reload: load })
 .ver-cell.release {
   color: var(--accent);
   background: var(--accent-dim);
+}
+.ver-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f56c6c;
+  margin-right: 5px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 2px rgba(245, 108, 108, 0.25);
 }
 
 /* 状态指示灯 */
