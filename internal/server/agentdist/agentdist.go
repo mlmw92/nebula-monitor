@@ -61,14 +61,27 @@ func (d *Distributor) serveBin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 目标二进制（或 .sha256 对应的二进制）路径，兼容 BinDir/agent/ 子目录结构。
+	// 目标二进制（或 .sha256 对应的二进制）路径。
+	// apply 把 agent 写到 BinDir/agent/linux/<arch>/agent；
+	// 历史 agent 升级 URL 为 /bin/<arch>/agent（无 linux 段），新 agent 为 /bin/linux/<arch>/agent。
+	// 这里按候选顺序兼容多种结构，确保新旧 agent 都能下到正确二进制。
 	binName := strings.TrimSuffix(clean, ".sha256")
-	target := filepath.Join(d.BinDir, binName)
-	if _, err := os.Stat(target); err != nil {
-		alt := filepath.Join(d.BinDir, "agent", binName)
-		if _, err2 := os.Stat(alt); err2 == nil {
-			target = alt
+	candidates := []string{
+		filepath.Join(d.BinDir, binName),
+		filepath.Join(d.BinDir, "agent", binName),
+		filepath.Join(d.BinDir, "agent", "linux", binName),
+		filepath.Join(d.BinDir, "linux", binName),
+	}
+	target := ""
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			target = c
+			break
 		}
+	}
+	if target == "" {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
 	}
 
 	// The agent binary itself requires authorization when agent auth is on.

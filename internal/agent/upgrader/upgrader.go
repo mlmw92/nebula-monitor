@@ -26,7 +26,8 @@ func Run(cfg *config.Config) {
 		return
 	}
 
-	url := fmt.Sprintf("%s/bin/%s/agent", serverURL, runtime.GOARCH)
+	// 与 install 脚本、apply 存放结构保持一致：/bin/linux/<arch>/agent
+	url := fmt.Sprintf("%s/bin/linux/%s/agent", serverURL, runtime.GOARCH)
 
 	script := buildUpgradeScript(url, binPath, secret)
 
