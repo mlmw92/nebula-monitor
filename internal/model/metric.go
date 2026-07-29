@@ -35,18 +35,42 @@ type ProcessStat struct {
 
 // ReportPayload 是 Agent 上报的请求体。
 type ReportPayload struct {
-	Node      string            `json:"node"`                // 主机名
-	IP        string            `json:"ip"`                  // 主机 IP
-	OS        string            `json:"os"`                  // 操作系统
-	Arch      string            `json:"arch"`                // CPU 架构
-	Group     string            `json:"group"`               // 节点分组
-	Secret    string            `json:"secret,omitempty"`    // 接入授权密钥（启用 agentAuth 时校验）
-	Labels    map[string]string `json:"labels,omitempty"`    // 自定义标签
-	Version   string            `json:"version,omitempty"`   // Agent 版本号
-	HostInfo  HostInfo          `json:"hostInfo,omitempty"`  // 主机系统与硬件信息
-	Metrics   []Metric          `json:"metrics"`             // 指标列表
-	Processes []ProcessStat     `json:"processes,omitempty"` // 资源占用 Top 进程
-	ReportAt  int64             `json:"reportAt"`            // 上报时间（毫秒）
+	Node           string            `json:"node"`                      // 主机名
+	IP             string            `json:"ip"`                        // 主机 IP
+	OS             string            `json:"os"`                        // 操作系统
+	Arch           string            `json:"arch"`                      // CPU 架构
+	Group          string            `json:"group"`                     // 节点分组
+	Secret         string            `json:"secret,omitempty"`          // 接入授权密钥（启用 agentAuth 时校验）
+	Labels         map[string]string `json:"labels,omitempty"`          // 自定义标签
+	Version        string            `json:"version,omitempty"`         // Agent 版本号
+	HostInfo       HostInfo          `json:"hostInfo,omitempty"`        // 主机系统与硬件信息
+	Metrics        []Metric          `json:"metrics"`                   // 指标列表
+	Processes      []ProcessStat     `json:"processes,omitempty"`       // 资源占用 Top 进程
+	RedisInstances []RedisInstance   `json:"redisInstances,omitempty"`  // Redis 实例元信息（不含密码）
+	ReportAt       int64             `json:"reportAt"`                  // 上报时间（毫秒）
+}
+
+// RedisInstanceConfig 是 Agent 本地配置的 Redis 实例连接信息。
+// 密码字段 Password 的 JSON tag 为 "-"，确保不上报 Server（密码不离开主机）。
+type RedisInstanceConfig struct {
+	Name         string `yaml:"name"`         // 实例别名（用于展示）
+	Addr         string `yaml:"addr"`         // Redis 地址 host:port
+	Password     string `yaml:"password"`     // 认证密码（不上报，json:"-")
+	DB           int    `yaml:"db"`           // 采集的 DB 号（直连模式可选）
+	Topology     string `yaml:"topology"`     // standalone|replication|sentinel|cluster
+	SentinelName string `yaml:"sentinelName"` // 哨兵模式下监控的 master 名称
+	ExporterURL  string `yaml:"exporterURL"`  // exporter 模式的 /metrics URL（留空走直连）
+}
+
+// RedisInstance 是上报给 Server 的 Redis 实例元信息（不含密码），供 Web 只读展示。
+type RedisInstance struct {
+	Instance  string `json:"instance"`  // 实例地址 host:port
+	Name      string `json:"name"`      // 实例别名
+	Node      string `json:"node"`      // 采集 Agent 节点名
+	Role      string `json:"role"`      // master|slave|sentinel
+	Topology  string `json:"topology"`  // standalone|replication|sentinel|cluster
+	Version   string `json:"version"`   // Redis 版本（来自 INFO Server）
+	Up        bool   `json:"up"`        // 是否可达
 }
 
 // DiskStat 表示单个真实文件系统的容量与使用率。

@@ -43,7 +43,7 @@ func main() {
 	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644)
 	defer os.Remove(pidFile)
 
-	coll := collector.New(cfg.Node, cfg.Group, cfg.Labels, cfg.Collectors)
+	coll := collector.New(cfg.Node, cfg.Group, cfg.Labels, cfg.Collectors, cfg.RedisInstances)
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
 	slog.Info("Agent 启动", "node", cfg.Node, "server", cfg.ServerURL, "interval", cfg.Interval, "version", version.Version)
@@ -61,19 +61,24 @@ func main() {
 
 func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *config.Config) {
 	metrics, procs := coll.Collect()
+	redisMetrics, redisInstances := coll.CollectRedis()
+	if len(redisMetrics) > 0 {
+		metrics = append(metrics, redisMetrics...)
+	}
 	osName, arch, ip := coll.HostInfo()
 	payload := model.ReportPayload{
-		Node:      cfg.Node,
-		IP:        ip,
-		OS:        osName,
-		Arch:      arch,
-		Group:     cfg.Group,
-		Labels:    cfg.Labels,
-		Version:   version.Version,
-		HostInfo:  collector.CollectHostInfo(),
-		Metrics:   metrics,
-		Processes: procs,
-		ReportAt:  model.NowMillis(),
+		Node:           cfg.Node,
+		IP:             ip,
+		OS:             osName,
+		Arch:           arch,
+		Group:          cfg.Group,
+		Labels:         cfg.Labels,
+		Version:        version.Version,
+		HostInfo:       collector.CollectHostInfo(),
+		Metrics:        metrics,
+		Processes:      procs,
+		RedisInstances: redisInstances,
+		ReportAt:       model.NowMillis(),
 	}
 	resp, err := rep.ReportFull(payload)
 	if err != nil {

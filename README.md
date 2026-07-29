@@ -52,12 +52,19 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 **前端**
 
 - 登录、总览、主机列表（Agent 版本低于服务端时显示红点）、主机详情、告警列表、规则新增/编辑、分组管理
+- **中间件监控**：独立一级菜单，Tab 布局（一种中间件一个 Tab）。已实现 Redis Tab：统计概览卡片 + 拓扑/角色/状态分布环形图 + 内存/OPS 排行柱状图 + 命中率可视化 + 实例列表表格 + 实例详情抽屉（多趋势图）。
 - **系统升级**：Web 上传 upgrade 包 → 解析版本 → 立即升级（备份+替换+重启）/ 回滚 + 升级历史；Agent 不主动推送，由管理员在主机列表手动触发
 - 升级按钮提交后 15 秒冷却（显示"请等待 Ns"并禁用），防止 server 重启期间重复点击
 
+**中间件监控（Agent 采集）**
+
+| 指标 | 说明 |
+|------|------|
+| Redis | 支持单机/主从/哨兵/集群四种部署模式；Agent 内置直连（RESP 协议）+ Prometheus exporter 双采集模式；实例密码仅存 Agent 本地不上报；上报 redis_instance_up 存活状态 + 20+ 核心指标（连接数/内存/OPS/命中率/键空间/复制延迟/哨兵/集群等） |
+
 ### 路线图（未实现）
 
-- **中间件监控**：Redis / MySQL / PostgreSQL / MongoDB / Kafka / Nginx / Docker / Kubernetes
+- **更多中间件**：MySQL / PostgreSQL / MongoDB / Kafka / Nginx / Docker / Kubernetes
 - **更多通知渠道**：钉钉 / 飞书 / 企业微信 / Slack / Telegram
 - **告警增强**：静默 / 维护期、抑制与分组
 - **可观测性增强**：自定义仪表盘、指标自动发现、历史数据导出
@@ -239,7 +246,32 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `group` | 分组 |
 | `secret` | 接入授权密钥（与 Server 一致） |
 | `interval` | 采集间隔（秒） |
-| `collectors` | 采集项开关（cpu/memory/disk/network/process/load） |
+| `collectors` | 采集项开关（cpu/memory/disk/network/process/load/redis） |
+| `redisInstances` | Redis 实例连接配置列表（数组，密码仅存本地不上报） |
+
+#### Redis 实例配置示例
+
+```yaml
+collectors:
+  redis: true
+redisInstances:
+  - name: "cache-primary"
+    addr: "10.0.0.10:6379"
+    password: "yourpassword"   # 仅存本地，不上报
+    topology: "standalone"     # standalone|replication|sentinel|cluster
+  - name: "sentinel-cluster"
+    addr: "10.0.0.20:26379"
+    password: ""
+    topology: "sentinel"
+    sentinelName: "mymaster"
+  - name: "redis-cluster"
+    addr: "10.0.0.30:7000"
+    password: ""
+    topology: "cluster"
+  - name: "with-exporter"
+    addr: "10.0.0.40:6379"
+    exporterURL: "http://10.0.0.40:9121/metrics"  # 配置后走 exporter 拉取模式
+```
 
 ---
 
@@ -255,6 +287,7 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | GET | `/api/v1/query/range?node=&metric=&start=&end=&step=` | 历史范围查询 |
 | GET | `/api/v1/query/latest?node=&metric=` | 最新点 |
 | GET | `/api/v1/processes?node=` | 进程 TOP |
+| GET | `/api/v1/middleware/redis/instances` | Redis 实例列表（聚合最新状态与指标） |
 | GET | `/api/v1/alerts?state=active` | 告警事件 |
 | GET/POST/PUT/DELETE | `/api/v1/rules` | 告警规则 CRUD |
 | GET | `/ws?topic=metrics&node=` | 实时指标（WebSocket） |

@@ -18,11 +18,12 @@ type Collector struct {
 	cpu  *CPUCollector
 	disk *DiskCollector
 	net  *NetworkCollector
+	redis *RedisCollector
 }
 
 // New 创建 Collector。
-func New(node, group string, labels map[string]string, cfg config.CollectorToggle) *Collector {
-	return &Collector{
+func New(node, group string, labels map[string]string, cfg config.CollectorToggle, redisInstances []model.RedisInstanceConfig) *Collector {
+	c := &Collector{
 		node:   node,
 		group:  group,
 		labels: labels,
@@ -31,6 +32,10 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 		disk:   NewDiskCollector(),
 		net:    NewNetworkCollector(),
 	}
+	if cfg.Redis {
+		c.redis = NewRedisCollector(node, redisInstances)
+	}
+	return c
 }
 
 // Collect 采集所有启用指标，并填充节点基础信息。
@@ -77,6 +82,15 @@ func (c *Collector) Collect() ([]model.Metric, []model.ProcessStat) {
 		procs = collectProcessTop()
 	}
 	return metrics, procs
+}
+
+// CollectRedis 采集 Redis 指标，返回 redis_* 指标与实例元信息。
+// 调用方负责将 metrics 合并到 ReportPayload.Metrics，instances 填入 ReportPayload.RedisInstances。
+func (c *Collector) CollectRedis() ([]model.Metric, []model.RedisInstance) {
+	if c.redis == nil {
+		return nil, nil
+	}
+	return c.redis.Collect()
 }
 
 // HostInfo 返回主机静态信息（OS/Arch/IP），用于上报体。

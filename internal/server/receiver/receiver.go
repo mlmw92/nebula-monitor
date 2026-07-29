@@ -58,7 +58,7 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 	r.nodeMgr.Register(&payload)
 
 	// 补充分组标签后写入 VM
-	metrics := make([]model.Metric, 0, len(payload.Metrics)+len(payload.Processes)*2)
+	metrics := make([]model.Metric, 0, len(payload.Metrics)+len(payload.Processes)*2+len(payload.RedisInstances))
 	for _, m := range payload.Metrics {
 		if m.Node == "" {
 			m.Node = payload.Node
@@ -76,6 +76,24 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 			model.Metric{Node: payload.Node, Name: "proc_cpu", Labels: labels, Value: p.CPU, Timestamp: payload.ReportAt},
 			model.Metric{Node: payload.Node, Name: "proc_mem", Labels: labels, Value: p.Mem, Timestamp: payload.ReportAt},
 		)
+	}
+	// Redis 实例元信息转为 redis_instance_up 指标写入 VM，供前端聚合查询
+	for _, ri := range payload.RedisInstances {
+		upVal := 0.0
+		if ri.Up {
+			upVal = 1
+		}
+		labels := map[string]string{
+			"group":     payload.Group,
+			"instance":  ri.Instance,
+			"name":      ri.Name,
+			"role":      ri.Role,
+			"topology":  ri.Topology,
+			"version":   ri.Version,
+		}
+		metrics = append(metrics, model.Metric{
+			Node: payload.Node, Name: "redis_instance_up", Labels: labels, Value: upVal, Timestamp: payload.ReportAt,
+		})
 	}
 
 	if err := r.storage.Write(metrics); err != nil {

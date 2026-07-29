@@ -71,6 +71,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/query/latest", a.handleQueryLatest)
 	mux.HandleFunc("GET /api/v1/processes", a.handleProcesses)
 
+	mux.HandleFunc("GET /api/v1/middleware/redis/instances", a.handleRedisInstances)
+
 	mux.HandleFunc("GET /api/v1/alerts", a.handleAlerts)
 	mux.HandleFunc("GET /api/v1/rules", a.handleRulesList)
 	mux.HandleFunc("POST /api/v1/rules", a.handleRuleCreate)
@@ -584,4 +586,102 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 // round2 保留两位小数。
 func round2(v float64) float64 {
 	return float64(int64(v*100+0.5)) / 100
+}
+
+// ---- 中间件监控：Redis ----
+
+// handleRedisInstances 聚合所有 Redis 实例的最新状态与关键指标，供前端列表展示。
+// 通过 QueryAllLatest 查询 redis_instance_up 获取实例清单（含 instance/role/topology/version 标签），
+// 再批量查询 redis_connected_clients/redis_used_memory/redis_used_memory_percent/redis_ops_per_sec/
+// redis_uptime_in_seconds/redis_hit_rate/redis_keys 等指标，按 instance 标签聚合到实例对象。
+func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
+	// 1. 查询 redis_instance_up 获取实例清单
+	upSeries, err := a.store.QueryAllLatest("redis_instance_up", nil)
+	if err != nil {
+		slog.Error("查询 Redis 实例失败", "err", err)
+		http.Error(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+
+	type redisInstanceInfo struct {
+		Node        string  `json:"node"`
+		Instance    string  `json:"instance"`
+		Name        string  `json:"name"`
+		Role        string  `json:"role"`
+		Topology    string  `json:"topology"`
+		Version     string  `json:"version"`
+		Up          bool    `json:"up"`
+		Clients     float64 `json:"clients"`
+		UsedMemory  float64 `json:"usedMemory"`
+		MemPercent  float64 `json:"memPercent"`
+		Ops         float64 `json:"ops"`
+		Uptime      float64 `json:"uptime"`
+		HitRate     float64 `json:"hitRate"`
+		Keys        float64 `json:"keys"`
+		Group       string  `json:"group"`
+	}
+
+	// 以 "node|instance" 为 key 建立实例索引
+	instances := map[string]*redisInstanceInfo{}
+	var keys []string
+	for _, s := range upSeries {
+		node := s.Labels["node"]
+		instance := s.Labels["instance"]
+		if node == "" || instance == "" || len(s.Points) == 0 {
+			continue
+		}
+		key := node + "|" + instance
+		if _, exists := instances[key]; !exists {
+			ri := &redisInstanceInfo{
+				Node:     node,
+				Instance: instance,
+				Name:     s.Labels["name"],
+				Role:     s.Labels["role"],
+				Topology: s.Labels["topology"],
+				Version:  s.Labels["version"],
+				Group:    s.Labels["group"],
+				Up:       s.Points[len(s.Points)-1].Value > 0,
+			}
+			instances[key] = ri
+			keys = append(keys, key)
+		}
+	}
+
+	// 2. 批量查询关键指标，按 instance 标签填充到实例
+	metricMap := map[string]func(ri *redisInstanceInfo, v float64){
+		"redis_connected_clients":     func(ri *redisInstanceInfo, v float64) { ri.Clients = round2(v) },
+		"redis_used_memory":           func(ri *redisInstanceInfo, v float64) { ri.UsedMemory = round2(v) },
+		"redis_used_memory_percent":   func(ri *redisInstanceInfo, v float64) { ri.MemPercent = round2(v) },
+		"redis_ops_per_sec":           func(ri *redisInstanceInfo, v float64) { ri.Ops = round2(v) },
+		"redis_uptime_in_seconds":     func(ri *redisInstanceInfo, v float64) { ri.Uptime = round2(v) },
+		"redis_hit_rate":              func(ri *redisInstanceInfo, v float64) { ri.HitRate = round2(v) },
+		"redis_keys":                  func(ri *redisInstanceInfo, v float64) { ri.Keys = round2(v) },
+	}
+	for metricName, setter := range metricMap {
+		series, err := a.store.QueryAllLatest(metricName, nil)
+		if err != nil {
+			slog.Warn("聚合 Redis 指标查询失败", "metric", metricName, "err", err)
+			continue
+		}
+		for _, s := range series {
+			node := s.Labels["node"]
+			instance := s.Labels["instance"]
+			if node == "" || instance == "" || len(s.Points) == 0 {
+				continue
+			}
+			key := node + "|" + instance
+			ri, ok := instances[key]
+			if !ok {
+				continue
+			}
+			setter(ri, s.Points[len(s.Points)-1].Value)
+		}
+	}
+
+	// 3. 转为列表返回
+	out := make([]redisInstanceInfo, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, *instances[k])
+	}
+	writeJSON(w, 200, map[string]interface{}{"instances": out})
 }

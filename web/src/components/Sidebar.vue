@@ -51,7 +51,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Odometer, Monitor, Bell, Upload, Message } from '@element-plus/icons-vue'
+import { Odometer, Monitor, Bell, Upload, Message, Connection } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { WEB_VERSION } from '../version'
 
@@ -69,6 +69,7 @@ const serverVersion = ref('...')
 const items = [
   { key: 'overview', to: '/', label: '首页概览', icon: Odometer },
   { key: 'hosts', to: '/hosts', label: '主机列表', icon: Monitor },
+  { key: 'middleware', to: '/middleware', label: '中间件监控', icon: Connection },
   { key: 'alerts', to: '/alerts', label: '告警中心', icon: Bell },
   { key: 'upgrade', to: '/system/upgrade', label: '系统升级', icon: Upload },
   { key: 'notify', to: '/notify', label: '通知配置', icon: Message },

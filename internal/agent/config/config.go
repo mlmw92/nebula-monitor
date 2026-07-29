@@ -6,18 +6,21 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/nebula/monitor/internal/model"
 )
 
 // Config 是 Agent 运行配置。
 type Config struct {
-	ServerURL  string             `yaml:"serverURL"`  // Server 接收地址，如 http://10.0.0.1:8080
-	Node       string             `yaml:"node"`       // 节点名（默认自动取 hostname）
-	Group      string             `yaml:"group"`      // 默认分组
-	Secret     string             `yaml:"secret"`     // 接入授权密钥（与 Server agentAuth.secret 一致）
-	Labels     map[string]string  `yaml:"labels"`     // 自定义标签
-	Interval   int                `yaml:"interval"`   // 采集间隔（秒）
-	BatchSize  int                `yaml:"batchSize"`  // 单批最大指标数
-	Collectors CollectorToggle    `yaml:"collectors"` // 采集项开关
+	ServerURL      string               `yaml:"serverURL"`      // Server 接收地址，如 http://10.0.0.1:8080
+	Node           string               `yaml:"node"`           // 节点名（默认自动取 hostname）
+	Group          string               `yaml:"group"`          // 默认分组
+	Secret         string               `yaml:"secret"`         // 接入授权密钥（与 Server agentAuth.secret 一致）
+	Labels         map[string]string    `yaml:"labels"`         // 自定义标签
+	Interval       int                  `yaml:"interval"`       // 采集间隔（秒）
+	BatchSize      int                  `yaml:"batchSize"`      // 单批最大指标数
+	Collectors     CollectorToggle      `yaml:"collectors"`     // 采集项开关
+	RedisInstances []model.RedisInstanceConfig `yaml:"redisInstances"` // Redis 实例连接配置（密码仅存本地）
 }
 
 // CollectorToggle 控制各采集器是否启用。
@@ -28,6 +31,7 @@ type CollectorToggle struct {
 	Network bool `yaml:"network"`
 	Process bool `yaml:"process"`
 	Load    bool `yaml:"load"`
+	Redis   bool `yaml:"redis"` // Redis 中间件监控开关，默认关闭
 }
 
 // Default 返回默认配置。

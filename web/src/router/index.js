@@ -15,6 +15,7 @@ const routes = [
       { path: '', name: 'overview', component: () => import('../components/OverviewView.vue') },
       { path: 'hosts', name: 'hosts', component: () => import('../components/HostsView.vue') },
       { path: 'node/:name', name: 'node', component: () => import('../components/NodeView.vue'), props: true },
+      { path: 'middleware', name: 'middleware', component: () => import('../components/MiddlewareView.vue') },
       { path: 'alerts', name: 'alerts', component: () => import('../components/AlertsView.vue') },
       { path: 'system/upgrade', name: 'system-upgrade', component: () => import('../components/UpgradeView.vue') },
       { path: 'notify', name: 'notify', component: () => import('../components/NotifyView.vue') },
