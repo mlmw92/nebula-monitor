@@ -345,7 +345,7 @@ cat > "$STAGE_UPGRADE/UPGRADE.md" <<EOF
 本包包含**编译后的产物**（Server / Agent 二进制 + 前端 web），以及 **deploy/agent-install.sh**（Server 自带 CDN 向 Agent 分发的安装脚本）。  
 **不包含** install.sh / uninstall.sh / 时序库等部署脚本与可选依赖（node / victoria-metrics），避免与现有部署版本错配。
 
-> 上传升级后，server 端 apply 会自动把新 `agent-install.sh` 同步到配置里的 `agentScriptPath`（默认 `/var/lib/monitor-server/agent-dist/agent-install.sh`），对外提供的安装脚本随之升级，无需再手动 scp。
+> 上传升级后，server 端 apply 会自动把新 \`agent-install.sh\` 同步到配置里的 \`agentScriptPath\`（默认 \`/var/lib/monitor-server/agent-dist/agent-install.sh\`），对外提供的安装脚本随之升级，无需再手动 scp。
 
 > 升级会替换 Server 二进制并重启 \`monitor-server\` 服务，期间 web 端短暂不可用（约 5-15 秒）。
 
