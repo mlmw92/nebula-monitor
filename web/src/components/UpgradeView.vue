@@ -92,7 +92,12 @@
       </div>
       <div class="action-row">
         <el-button @click="cancelPending" :disabled="applying">取消</el-button>
-        <el-button type="primary" :loading="applying" @click="doApply">立即升级</el-button>
+        <el-button
+          type="primary"
+          :loading="applying"
+          :disabled="applying || cooldown > 0"
+          @click="doApply"
+        >{{ cooldown > 0 ? `请等待 ${cooldown}s` : '立即升级' }}</el-button>
       </div>
       <el-alert
         v-if="applyError"
@@ -141,7 +146,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import http from '../api/http'
@@ -156,6 +161,8 @@ const history = ref([])
 const loadingHistory = ref(false)
 const uploading = ref(false)
 const uploadProgress = ref(0)
+const cooldown = ref(0)
+let cooldownTimer = null
 
 async function loadCurrentVersion() {
   try { currentVersion.value = await http.get('/api/v1/version') } catch (e) { /* ignore */ }
@@ -224,6 +231,7 @@ async function doApply() {
   try {
     await http.post('/api/v1/system/upgrade/apply?operator=web', {})
     ElMessage.success('升级已提交，server 即将重启（约 5-15 秒）。请稍候刷新页面。')
+    startCooldown(15)
     setTimeout(() => window.location.reload(), 8000)
   } catch (e) {
     applyError.value = e.message
@@ -267,10 +275,26 @@ function fmtSize(b) {
   return b.toFixed(1) + ' ' + u[i]
 }
 
+function startCooldown(sec) {
+  clearInterval(cooldownTimer)
+  cooldown.value = sec
+  cooldownTimer = setInterval(() => {
+    cooldown.value -= 1
+    if (cooldown.value <= 0) {
+      clearInterval(cooldownTimer)
+      cooldownTimer = null
+    }
+  }, 1000)
+}
+
 onMounted(async () => {
   await loadCurrentVersion()
   await loadPending()
   await loadHistory()
+})
+
+onUnmounted(() => {
+  if (cooldownTimer) clearInterval(cooldownTimer)
 })
 </script>
 
