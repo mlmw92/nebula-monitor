@@ -119,19 +119,15 @@
         <el-table-column label="时间" width="180">
           <template #default="{ row }">{{ fmtTime(row.at) }}</template>
         </el-table-column>
-        <el-table-column prop="action" label="操作" width="100" />
-        <el-table-column prop="version" label="版本" width="120" />
-        <el-table-column prop="result" label="结果" width="100">
+        <el-table-column label="操作" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small">
-              {{ row.result }}
-            </el-tag>
+            <el-tag :type="row.action === 'rollback' ? 'warning' : 'primary'" size="small" effect="plain">{{ actionLabel(row.action) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="agentCDNUpdated" label="Agent CDN" width="120">
+        <el-table-column prop="version" label="版本" width="120" />
+        <el-table-column label="结果" width="100">
           <template #default="{ row }">
-            <el-tag v-if="row.agentCDNUpdated" type="success" size="small">已更新</el-tag>
-            <span v-else>-</span>
+            <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small" effect="dark">{{ resultLabel(row.result) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="detail" label="详情" />
@@ -266,6 +262,16 @@ async function doRollback() {
 function fmtTime(s) {
   if (!s) return '-'
   return new Date(s).toLocaleString()
+}
+function actionLabel(a) {
+  if (a === 'apply') return '升级'
+  if (a === 'rollback') return '回滚'
+  return a || '-'
+}
+function resultLabel(r) {
+  if (r === 'success') return '成功'
+  if (r === 'failed') return '失败'
+  return r || '-'
 }
 function fmtSize(b) {
   if (!b) return '-'

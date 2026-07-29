@@ -181,7 +181,9 @@
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
             <el-button link size="small" @click.stop="goDetail(row)">详情</el-button>
-            <el-button link size="small" type="warning" @click.stop="upgrade(row)">升级</el-button>
+            <el-badge :is-dot="true" :hidden="!needUpgrade(row)" type="danger">
+              <el-button link size="small" type="warning" @click.stop="upgrade(row)">升级</el-button>
+            </el-badge>
             <el-button link size="small" type="danger" @click.stop="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -259,6 +261,7 @@ import GroupManage from './GroupManage.vue'
 
 const router = useRouter()
 const nodes = ref([])
+const latestAgentVersion = ref('')
 const metrics = ref({})
 const groups = ref([])
 const statusFilter = ref('')
@@ -511,6 +514,19 @@ function goDetail(row) {
   router.push('/node/' + row.hostname)
 }
 
+// 最新可用 Agent 版本（server 版本即 CDN 中 agent 二进制版本）
+async function loadVersion() {
+  try {
+    const v = await http.get('/api/v1/version')
+    latestAgentVersion.value = v.server || ''
+  } catch (e) { /* ignore */ }
+}
+
+// 该节点 Agent 版本是否为最新（用于升级按钮红点提示）
+function needUpgrade(row) {
+  return !!latestAgentVersion.value && !!row.version && row.version !== latestAgentVersion.value
+}
+
 function onVis() {
   visible = document.visibilityState === 'visible'
   if (visible) {
@@ -524,6 +540,7 @@ function onVis() {
 
 onMounted(() => {
   load()
+  loadVersion()
   restartTimers()
   document.addEventListener('visibilitychange', onVis)
 })
