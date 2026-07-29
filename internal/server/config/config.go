@@ -84,7 +84,8 @@ type EmailConfig struct {
 	Password string   `yaml:"password" json:"password"` // 敏感，不写日志；GET 接口脱敏
 	From     string   `yaml:"from" json:"from"`
 	To       []string `yaml:"to" json:"to"`
-	UseTLS   bool     `yaml:"useTLS" json:"useTLS"`
+	UseTLS   bool     `yaml:"useTLS" json:"useTLS"` // 隐式 TLS（端口通常 465）
+	UseStartTLS bool  `yaml:"useStartTLS" json:"useStartTLS"` // STARTTLS 升级（端口通常 587）
 }
 
 // WebhookConfig Webhook 通知配置。

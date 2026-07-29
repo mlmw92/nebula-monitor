@@ -23,7 +23,15 @@
           <el-col :span="12"><el-form-item label="用户名"><el-input v-model="notify.email.username" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="发件人"><el-input v-model="notify.email.from" placeholder="monitor@example.com" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="密码"><el-input v-model="notify.email.password" type="password" show-password placeholder="不修改请留空" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item label="TLS 加密"><el-switch v-model="notify.email.useTLS" /></el-form-item></el-col>
+          <el-col :span="12">
+            <el-form-item label="加密方式">
+              <el-radio-group v-model="emailEncryption">
+                <el-radio value="none">无</el-radio>
+                <el-radio value="starttls">STARTTLS</el-radio>
+                <el-radio value="tls">SSL/TLS</el-radio>
+              </el-radio-group>
+            </el-form-item>
+          </el-col>
         </el-row>
         <el-form-item label="收件人（多人每行一个）">
           <StringListInput v-model="notify.email.to" placeholder="ops@example.com" />
@@ -94,7 +102,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import http from '../api/http'
 import StringListInput from './StringListInput.vue'
@@ -103,9 +111,22 @@ const loading = ref(false)
 const saving = ref(false)
 const notify = ref(defaultConfig())
 
+// emailEncryption 将加密方式映射到 useTLS / useStartTLS 两个布尔字段。
+const emailEncryption = computed({
+  get() {
+    if (notify.value.email.useStartTLS) return 'starttls'
+    if (notify.value.email.useTLS) return 'tls'
+    return 'none'
+  },
+  set(v) {
+    notify.value.email.useTLS = v === 'tls'
+    notify.value.email.useStartTLS = v === 'starttls'
+  },
+})
+
 function defaultConfig() {
   return {
-    email: { enabled: false, smtpHost: '', smtpPort: 587, username: '', password: '', from: '', to: [], useTLS: true },
+    email: { enabled: false, smtpHost: '', smtpPort: 587, username: '', password: '', from: '', to: [], useTLS: true, useStartTLS: false },
     webhook: { enabled: false, urls: [] },
     dingtalk: { enabled: false, urls: [], secret: '', atMobiles: [] },
     feishu: { enabled: false, urls: [], secret: '' },

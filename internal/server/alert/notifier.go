@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/smtp"
 	"net/http"
 	"net/url"
@@ -68,9 +69,12 @@ func (n *EmailNotifier) Notify(e model.AlertEvent) error {
 		auth = smtp.PlainAuth("", n.cfg.Username, n.cfg.Password, n.cfg.SMTPHost)
 	}
 	var err error
-	if n.cfg.UseTLS {
+	switch {
+	case n.cfg.UseTLS:
 		err = sendTLS(addr, n.cfg.SMTPHost, auth, n.cfg.From, n.cfg.To, msg.Bytes())
-	} else {
+	case n.cfg.UseStartTLS:
+		err = sendStartTLS(addr, n.cfg.SMTPHost, auth, n.cfg.From, n.cfg.To, msg.Bytes())
+	default:
 		err = smtp.SendMail(addr, auth, n.cfg.From, n.cfg.To, msg.Bytes())
 	}
 	if err != nil {
@@ -80,7 +84,7 @@ func (n *EmailNotifier) Notify(e model.AlertEvent) error {
 	return nil
 }
 
-// sendTLS 通过显式 TLS 发送邮件。
+// sendTLS 通过显式 TLS 发送邮件（隐式 TLS，端口通常 465）。
 func sendTLS(addr, host string, auth smtp.Auth, from string, to []string, msg []byte) error {
 	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: host})
 	if err != nil {
@@ -92,6 +96,47 @@ func sendTLS(addr, host string, auth smtp.Auth, from string, to []string, msg []
 		return err
 	}
 	defer c.Quit()
+	if auth != nil {
+		if err := c.Auth(auth); err != nil {
+			return err
+		}
+	}
+	if err := c.Mail(from); err != nil {
+		return err
+	}
+	for _, t := range to {
+		if err := c.Rcpt(t); err != nil {
+			return err
+		}
+	}
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(msg)
+	if err != nil {
+		return err
+	}
+	return w.Close()
+}
+
+// sendStartTLS 先建立明文连接，再通过 STARTTLS 升级加密发送（端口通常 587）。
+func sendStartTLS(addr, host string, auth smtp.Auth, from string, to []string, msg []byte) error {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+	defer c.Quit()
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
+			return err
+		}
+	}
 	if auth != nil {
 		if err := c.Auth(auth); err != nil {
 			return err
