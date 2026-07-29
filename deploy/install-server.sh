@@ -552,14 +552,19 @@ stage_web_dist() {
 stage_agent_dist() {
   c_info "暂存 Agent 分发文件（Server 自带 CDN）"
   local stage="$DATA_DIR/agent-dist"
-  # 已暂存且非升级模式则跳过
-  if [[ -d "$stage/agent/linux" ]] && ls "$stage"/agent/linux/*/agent >/dev/null 2>&1 && (( ! UPGRADE )); then
-    c_ok "Agent 分发文件已暂存，跳过（升级请用 --upgrade）"
+  mkdir -p "$stage/agent/linux"
+
+  # 升级模式：保留已分发的 Agent 二进制与脚本，避免影响已接入节点
+  if (( UPGRADE )); then
+    c_ok "升级模式：保留 Agent 分发文件（agent-dist 不覆盖）"
     AGENT_BIN_DIR="$stage/agent"
     [[ -f "$stage/agent-install.sh" ]] && AGENT_SCRIPT_PATH="$stage/agent-install.sh"
     return
   fi
-  mkdir -p "$stage/agent/linux"
+
+  # 全新安装/重装：始终用本次包内最新版覆盖脚本与二进制。
+  # 修复：旧版卸载未 --purge 时 dataDir/agent-dist 残留旧文件，原逻辑会整体跳过，
+  # 导致重装后 /install/agent-install.sh 及 CDN 分发的 agent 仍是旧版本。
 
   # 安装脚本
   local script_src=""
