@@ -116,7 +116,7 @@ const rules = ref([])
 const alerts = ref([])
 const groups = ref([])
 const editing = ref(null)
-const eventFilter = ref('active')
+const eventFilter = ref('firing')
 // 全部渠道及其展示名；enabled 由通知配置决定，未启用的渠道在新建规则时置灰。
 const CHANNEL_META = [
   { value: 'email', label: '邮件' },
@@ -206,7 +206,10 @@ function onSaved() {
 async function toggleRule(rule) {
   try {
     await http.post('/api/v1/rules/' + rule.id + '/toggle')
-    ElMessage.success(rule.enabled ? '已停用' : '已启用')
+    // 乐观更新：立即把新状态写回本地行，避免 load() 异步返回前用户点「编辑」时
+    // 弹窗拿到重载前的旧对象（enabled=false），出现「列表已开启、编辑里未开启」的错位。
+    rule.enabled = !rule.enabled
+    ElMessage.success(rule.enabled ? '已启用' : '已停用')
     load()
   } catch (e) {
     ElMessage.error('操作失败')
