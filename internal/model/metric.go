@@ -70,30 +70,30 @@ type OnlineUser struct {
 
 // HostInfo 表示主机系统与硬件信息。
 type HostInfo struct {
-	CPUModel    string     `json:"cpuModel,omitempty"`
-	CPUCores    int        `json:"cpuCores,omitempty"`
-	MemoryTotal uint64     `json:"memoryTotal,omitempty"`
-	DiskTotal   uint64     `json:"diskTotal,omitempty"`
-	DiskUsed    uint64     `json:"diskUsed,omitempty"`
-	Disks       []DiskStat `json:"disks,omitempty"`
-	BootTime    int64      `json:"bootTime,omitempty"`   // 系统启动时间（Unix 秒），用于计算运行天数
+	CPUModel    string       `json:"cpuModel,omitempty"`
+	CPUCores    int          `json:"cpuCores,omitempty"`
+	MemoryTotal uint64       `json:"memoryTotal,omitempty"`
+	DiskTotal   uint64       `json:"diskTotal,omitempty"`
+	DiskUsed    uint64       `json:"diskUsed,omitempty"`
+	Disks       []DiskStat   `json:"disks,omitempty"`
+	BootTime    int64        `json:"bootTime,omitempty"`    // 系统启动时间（Unix 秒），用于计算运行天数
 	OnlineUsers []OnlineUser `json:"onlineUsers,omitempty"` // 当前在线用户会话
 }
 
 // Node 表示一个被监控节点。
 type Node struct {
-	Hostname  string            `json:"hostname"`           // 主机名
-	DisplayName string          `json:"displayName,omitempty"` // 自定义显示名/别名（不修改 Agent 上报的真实主机名）
-	IP        string            `json:"ip"`                 // 主机 IP
-	OS        string            `json:"os"`                 // 操作系统
-	Arch      string            `json:"arch"`               // CPU 架构
-	Group     string            `json:"group"`              // 分组
-	Labels    map[string]string `json:"labels,omitempty"`   // 自定义标签
-	Version   string            `json:"version,omitempty"`  // Agent 版本号
-	HostInfo  HostInfo          `json:"hostInfo,omitempty"` // 主机系统与硬件信息
-	Status    string            `json:"status"`             // online/offline
-	LastSeen  int64             `json:"lastSeen"`           // 最近心跳（毫秒）
-	CreatedAt int64             `json:"createdAt"`          // 注册时间（毫秒）
+	Hostname    string            `json:"hostname"`              // 主机名
+	DisplayName string            `json:"displayName,omitempty"` // 自定义显示名/别名（不修改 Agent 上报的真实主机名）
+	IP          string            `json:"ip"`                    // 主机 IP
+	OS          string            `json:"os"`                    // 操作系统
+	Arch        string            `json:"arch"`                  // CPU 架构
+	Group       string            `json:"group"`                 // 分组
+	Labels      map[string]string `json:"labels,omitempty"`      // 自定义标签
+	Version     string            `json:"version,omitempty"`     // Agent 版本号
+	HostInfo    HostInfo          `json:"hostInfo,omitempty"`    // 主机系统与硬件信息
+	Status      string            `json:"status"`                // online/offline
+	LastSeen    int64             `json:"lastSeen"`              // 最近心跳（毫秒）
+	CreatedAt   int64             `json:"createdAt"`             // 注册时间（毫秒）
 }
 
 // Group 表示节点分组。
@@ -139,19 +139,20 @@ type AlertRule struct {
 
 // AlertEvent 告警事件（触发或恢复时产生）。
 type AlertEvent struct {
-	ID        string     `json:"id"`        // 事件 ID
-	RuleID    string     `json:"ruleId"`    // 规则 ID
-	RuleName  string     `json:"ruleName"`  // 规则名称
-	Node      string     `json:"node"`      // 节点名
-	Metric    string     `json:"metric"`    // 指标名
-	Value     float64    `json:"value"`     // 触发值
-	Operator  string     `json:"operator"`  // 运算符
-	Threshold float64    `json:"threshold"` // 阈值
-	Severity  Severity   `json:"severity"`  // 严重级别
-	State     AlertState `json:"state"`     // 状态 firing/resolved
-	Message   string     `json:"message"`   // 描述
-	StartsAt  int64      `json:"startsAt"`  // 触发时间（毫秒）
-	EndsAt    int64      `json:"endsAt"`    // 恢复时间（毫秒）
+	ID        string     `json:"id"`               // 事件 ID
+	RuleID    string     `json:"ruleId"`           // 规则 ID
+	RuleName  string     `json:"ruleName"`         // 规则名称
+	Node      string     `json:"node"`             // 节点名
+	NodeIP    string     `json:"nodeIp,omitempty"` // 节点 IP（便于在通知渠道中展示）
+	Metric    string     `json:"metric"`           // 指标名
+	Value     float64    `json:"value"`            // 触发值
+	Operator  string     `json:"operator"`         // 运算符
+	Threshold float64    `json:"threshold"`        // 阈值
+	Severity  Severity   `json:"severity"`         // 严重级别
+	State     AlertState `json:"state"`            // 状态 firing/resolved
+	Message   string     `json:"message"`          // 描述
+	StartsAt  int64      `json:"startsAt"`         // 触发时间（毫秒）
+	EndsAt    int64      `json:"endsAt"`           // 恢复时间（毫秒）
 }
 
 // NowMillis 返回当前毫秒时间戳。

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/smtp"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
@@ -44,9 +45,10 @@ func (n *EmailNotifier) Notify(e model.AlertEvent) error {
 	if !n.cfg.Enabled || len(n.cfg.To) == 0 {
 		return nil
 	}
-	subject := fmt.Sprintf("[监控告警][%s] %s", e.Severity, e.RuleName)
-	body := fmt.Sprintf("告警事件\n节点: %s\n规则: %s\n指标: %s\n触发值: %.2f %s 阈值 %.2f\n状态: %s\n时间: %s\n描述: %s\n",
-		e.Node, e.RuleName, e.Metric, e.Value, e.Operator, e.Threshold, e.State, timeStr(e.StartsAt), e.Message)
+	subject := fmt.Sprintf("[监控告警][%s] %s", sevLabel(e.Severity), e.RuleName)
+	plain := fmt.Sprintf("告警事件\n节点: %s\n节点 IP: %s\n规则: %s\n指标: %s\n触发值: %.2f %s 阈值 %.2f\n状态: %s\n时间: %s\n描述: %s\n",
+		e.Node, ipOrDash(e.NodeIP), e.RuleName, e.Metric, e.Value, e.Operator, e.Threshold, stateLabel(e.State), timeStr(e.StartsAt), e.Message)
+	html := emailHTML(e)
 
 	msg := bytes.Buffer{}
 	msg.WriteString("From: " + n.cfg.From + "\r\n")
@@ -60,8 +62,15 @@ func (n *EmailNotifier) Notify(e model.AlertEvent) error {
 	msg.WriteString("\r\n")
 	msg.WriteString("Subject: " + subject + "\r\n")
 	msg.WriteString("MIME-Version: 1.0\r\n")
+	// multipart/alternative：HTML 与纯文本共存，客户端优先显示 HTML
+	msg.WriteString("Content-Type: multipart/alternative; boundary=\"__nebula_alert__\"\r\n\r\n")
+	msg.WriteString("--__nebula_alert__\r\n")
 	msg.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
-	msg.WriteString(body)
+	msg.WriteString(plain)
+	msg.WriteString("\r\n--__nebula_alert__\r\n")
+	msg.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
+	msg.WriteString(html)
+	msg.WriteString("\r\n--__nebula_alert__--\r\n")
 
 	addr := fmt.Sprintf("%s:%d", n.cfg.SMTPHost, n.cfg.SMTPPort)
 	var auth smtp.Auth
@@ -86,6 +95,117 @@ func (n *EmailNotifier) Notify(e model.AlertEvent) error {
 	}
 	return nil
 }
+
+// sevLabel 把 severity 翻译为中文。
+func sevLabel(s model.Severity) string {
+	switch s {
+	case model.SeverityCritical:
+		return "紧急"
+	case model.SeverityWarning:
+		return "警告"
+	case model.SeverityInfo:
+		return "信息"
+	}
+	return string(s)
+}
+
+// stateLabel 把 state 翻译为中文。
+func stateLabel(s model.AlertState) string {
+	switch s {
+	case model.AlertStateFiring:
+		return "告警中"
+	case model.AlertStateResolved:
+		return "已恢复"
+	}
+	return string(s)
+}
+
+// ipOrDash 空 IP 显示为 -。
+func ipOrDash(ip string) string {
+	if ip == "" {
+		return "-"
+	}
+	return ip
+}
+
+// emailHTML 生成告警邮件的 HTML 主体（中文、含 IP、表格布局、深色风格）。
+func emailHTML(e model.AlertEvent) string {
+	state := stateLabel(e.State)
+	stateColor := "#f56c6c"
+	stateBg := "#fef0f0"
+	if e.State == model.AlertStateResolved {
+		stateColor = "#67c23a"
+		stateBg = "#f0f9eb"
+	}
+	sev := sevLabel(e.Severity)
+	sevColor := "#f56c6c"
+	sevBg := "#fef0f0"
+	if e.Severity == model.SeverityWarning {
+		sevColor = "#e6a23c"
+		sevBg = "#fdf6ec"
+	} else if e.Severity == model.SeverityInfo {
+		sevColor = "#909399"
+		sevBg = "#f4f4f5"
+	}
+	triggerValue := fmt.Sprintf("%.2f", e.Value)
+	threshold := fmt.Sprintf("%.2f", e.Threshold)
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f5f7fa;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">
+<div style="max-width:640px;margin:24px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+  <div style="background:%s;color:#fff;padding:20px 24px;">
+    <div style="font-size:13px;opacity:.9;">Nebula Monitor 监控告警</div>
+    <div style="font-size:22px;font-weight:600;margin-top:6px;">%s</div>
+    <div style="margin-top:10px;">
+      <span style="display:inline-block;background:%s;color:%s;font-size:12px;padding:2px 10px;border-radius:12px;margin-right:6px;">级别 %s</span>
+      <span style="display:inline-block;background:%s;color:%s;font-size:12px;padding:2px 10px;border-radius:12px;">状态 %s</span>
+    </div>
+  </div>
+  <div style="padding:20px 24px;">
+    <table style="width:100%%;border-collapse:collapse;font-size:14px;color:#303133;">
+      <tr><td style="padding:10px 0;color:#909399;width:96px;">节点</td><td style="padding:10px 0;">%s</td></tr>
+      <tr><td style="padding:10px 0;color:#909399;">节点 IP</td><td style="padding:10px 0;">%s</td></tr>
+      <tr><td style="padding:10px 0;color:#909399;">规则</td><td style="padding:10px 0;">%s</td></tr>
+      <tr><td style="padding:10px 0;color:#909399;">指标</td><td style="padding:10px 0;font-family:'Menlo','Consolas',monospace;">%s</td></tr>
+      <tr><td style="padding:10px 0;color:#909399;">触发条件</td><td style="padding:10px 0;font-family:'Menlo','Consolas',monospace;">%s %s %s</td></tr>
+      <tr><td style="padding:10px 0;color:#909399;">时间</td><td style="padding:10px 0;">%s</td></tr>
+    </table>
+  </div>
+  <div style="padding:0 24px 20px;">
+    <div style="color:#909399;font-size:13px;margin-bottom:6px;">告警描述</div>
+    <div style="background:#f5f7fa;border-radius:6px;padding:12px 14px;font-size:13px;color:#606266;line-height:1.6;">%s</div>
+  </div>
+  <div style="padding:14px 24px;background:#fafafa;color:#c0c4cc;font-size:12px;border-top:1px solid #ebeef5;">
+    本邮件由 Nebula Monitor 自动发送，请勿直接回复。
+  </div>
+</div>
+</body></html>`,
+		stateColor,
+		e.RuleName,
+		sevBg, sevColor, sev,
+		stateBg, stateColor, state,
+		htmlEscape(e.Node),
+		htmlEscape(ipOrDash(e.NodeIP)),
+		htmlEscape(e.RuleName),
+		htmlEscape(e.Metric),
+		triggerValue, htmlEscape(e.Operator), threshold,
+		htmlEscape(timeStr(e.StartsAt)),
+		htmlEscape(e.Message),
+	)
+}
+
+// htmlEscape 对 HTML 文本中的特殊字符进行转义。
+func htmlEscape(s string) string {
+	return htmlReplacer.Replace(s)
+}
+
+var htmlReplacer = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+	"\"", "&quot;",
+	"'", "&#39;",
+)
 
 // sendTLS 通过显式 TLS 发送邮件（隐式 TLS，端口通常 465）。
 func sendTLS(addr, host string, auth smtp.Auth, from string, to []string, msg []byte) error {

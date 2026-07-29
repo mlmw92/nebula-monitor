@@ -178,7 +178,7 @@
               </el-table-column>
               <el-table-column label="级别" width="80">
                 <template #default="{ row }">
-                  <el-tag :type="row.severity === 'critical' ? 'danger' : 'warning'" size="small">{{ row.severity }}</el-tag>
+                  <el-tag :type="sevType(row.severity)" size="small" effect="dark">{{ sevLabel(row.severity) }}</el-tag>
                 </template>
               </el-table-column>
             </el-table>
@@ -403,9 +403,20 @@ function fmtBytes(bytes) {
 }
 function fmtTime(ts) {
   if (!ts) return '-'
-  const d = new Date(num(ts) * 1000)
+  // 同时兼容 Unix 秒（如 bootTime）与 Unix 毫秒（如告警事件 startsAt/endsAt）：
+  // 数值 < 1e12 视为秒（10 位 ~2025 年）；否则视为毫秒（13 位）。
+  let n = num(ts)
+  if (n < 1e12) n *= 1000
+  const d = new Date(n)
+  if (isNaN(d.getTime())) return '-'
   const p = (x) => String(x).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+function sevType(s) {
+  return { critical: 'danger', warning: 'warning', info: 'info' }[s] || 'info'
+}
+function sevLabel(s) {
+  return { critical: '紧急', warning: '警告', info: '信息' }[s] || s
 }
 function rateClass(v) { const n = num(v); return n >= 90 ? 'red' : n >= 70 ? 'amber' : 'green' }
 function memClass(v) { return num(v) >= 50 ? 'amber' : 'green' }

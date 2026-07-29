@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"time"
 
 	"github.com/nebula/monitor/internal/model"
 )
@@ -203,7 +202,8 @@ func parseSample(tsRaw, vRaw interface{}) (int64, float64, bool) {
 	default:
 		return 0, 0, false
 	}
-	return int64(tsSec * float64(time.Second)), value, true
+	// VM 返回的时间戳是秒级浮点数，model.Point 期望毫秒。
+	return int64(tsSec * 1000), value, true
 }
 
 // Close 释放资源（时序库为远端服务，无需特殊处理）。

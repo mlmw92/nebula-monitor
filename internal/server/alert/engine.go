@@ -129,6 +129,7 @@ func (e *Engine) fire(r model.AlertRule, node string, value float64, now int64) 
 		RuleID:    r.ID,
 		RuleName:  r.Name,
 		Node:      node,
+		NodeIP:    e.nodeIP(node),
 		Metric:    r.Metric,
 		Value:     value,
 		Operator:  r.Operator,
@@ -154,6 +155,7 @@ func (e *Engine) resolve(r model.AlertRule, node string, value float64, now int6
 		RuleID:    r.ID,
 		RuleName:  r.Name,
 		Node:      node,
+		NodeIP:    e.nodeIP(node),
 		Metric:    r.Metric,
 		Value:     value,
 		Operator:  r.Operator,
@@ -169,6 +171,14 @@ func (e *Engine) resolve(r model.AlertRule, node string, value float64, now int6
 		e.broadcaster.BroadcastAlert(ev)
 	}
 	slog.Info("告警恢复", "rule", r.Name, "node", node, "metric", r.Metric, "value", value)
+}
+
+// nodeIP 查询节点 IP（通知渠道在邮件等中展示）；找不到返回空串。
+func (e *Engine) nodeIP(node string) string {
+	if n, ok := e.nodeMgr.GetNode(node); ok {
+		return n.IP
+	}
+	return ""
 }
 
 // TestAlert 构造一条测试告警事件，绕过评估链路直接写入并通知，便于用户验证事件/通知链路。
