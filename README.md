@@ -47,7 +47,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 **告警**
 
 - 阈值规则：`>` `>=` `<` `<=` `==` `!=` + 持续时长（For）+ firing/resolved 状态机 + 事件去重
-- 通知渠道：邮件（SMTP）、Webhook
+- 通知渠道：邮件（SMTP）、Webhook、钉钉、飞书、企业微信（自定义机器人 Webhook，钉钉/飞书支持加签）
 
 **前端**
 
@@ -58,7 +58,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 ### 路线图（未实现）
 
 - **中间件监控**：Redis / MySQL / PostgreSQL / MongoDB / Kafka / Nginx / Docker / Kubernetes
-- **更多通知渠道**：钉钉 / 飞书 / 企业微信 / Slack / Telegram
+- **更多通知渠道**：Slack / Telegram
 - **告警增强**：静默 / 维护期、抑制与分组
 - **可观测性增强**：自定义仪表盘、指标自动发现、历史数据导出
 - **多用户与权限**：SSO 登录、角色权限管理

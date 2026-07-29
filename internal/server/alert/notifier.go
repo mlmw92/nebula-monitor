@@ -2,12 +2,17 @@ package alert
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/smtp"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
@@ -154,6 +159,15 @@ func BuildNotifiers(cfg config.NotifyConfig) []Notifier {
 	if cfg.Webhook.Enabled {
 		ns = append(ns, NewWebhookNotifier(cfg.Webhook))
 	}
+	if cfg.DingTalk.Enabled {
+		ns = append(ns, NewDingTalkNotifier(cfg.DingTalk))
+	}
+	if cfg.Feishu.Enabled {
+		ns = append(ns, NewFeishuNotifier(cfg.Feishu))
+	}
+	if cfg.WeCom.Enabled {
+		ns = append(ns, NewWeComNotifier(cfg.WeCom))
+	}
 	return ns
 }
 
@@ -162,4 +176,144 @@ func timeStr(ms int64) string {
 		return ""
 	}
 	return time.UnixMilli(ms).Format("2006-01-02 15:04:05")
+}
+
+// ---- 钉钉 / 飞书 / 企业微信 通知 ----
+
+// alertText 生成纯文本告警内容（飞书 / 企业微信 text 类型使用）。
+func alertText(e model.AlertEvent) string {
+	return fmt.Sprintf("[监控告警] 级别:%s 状态:%s\n节点: %s\n规则: %s\n指标: %s\n触发值: %.2f %s 阈值 %.2f\n时间: %s\n描述: %s",
+		e.Severity, e.State, e.Node, e.RuleName, e.Metric, e.Value, e.Operator, e.Threshold, timeStr(e.StartsAt), e.Message)
+}
+
+// alertMarkdown 生成钉钉 markdown 告警内容。
+func alertMarkdown(e model.AlertEvent) string {
+	return fmt.Sprintf("### 监控告警\n> **级别**: %s  **状态**: %s\n> **节点**: %s\n> **规则**: %s\n> **指标**: %s\n> **触发值**: %.2f %s 阈值 %.2f\n> **时间**: %s\n> **描述**: %s",
+		e.Severity, e.State, e.Node, e.RuleName, e.Metric, e.Value, e.Operator, e.Threshold, timeStr(e.StartsAt), e.Message)
+}
+
+// postJSON 向指定 URL POST JSON，并校验响应状态。
+func postJSON(rawURL string, body interface{}) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(rawURL, "application/json", bytes.NewReader(data))
+	if err != nil {
+		slog.Error("通知渠道请求失败", "err", err)
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		slog.Error("通知渠道返回非成功状态", "status", resp.StatusCode, "body", string(b))
+		return fmt.Errorf("通知渠道返回 %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// DingTalkNotifier 钉钉机器人（支持加签与 @）。
+type DingTalkNotifier struct {
+	cfg config.DingTalkConfig
+}
+
+func NewDingTalkNotifier(cfg config.DingTalkConfig) *DingTalkNotifier {
+	return &DingTalkNotifier{cfg: cfg}
+}
+
+func (n *DingTalkNotifier) Channel() string { return "dingtalk" }
+
+func (n *DingTalkNotifier) Notify(e model.AlertEvent) error {
+	if !n.cfg.Enabled || n.cfg.URL == "" {
+		return nil
+	}
+	u := n.cfg.URL
+	if n.cfg.Secret != "" {
+		ts, sign, err := dingSign(n.cfg.Secret)
+		if err != nil {
+			return err
+		}
+		u = fmt.Sprintf("%s&timestamp=%d&sign=%s", u, ts, url.QueryEscape(sign))
+	}
+	payload := map[string]interface{}{
+		"msgtype": "markdown",
+		"markdown": map[string]string{
+			"title": "监控告警",
+			"text":  alertMarkdown(e),
+		},
+	}
+	if len(n.cfg.AtMobiles) > 0 {
+		payload["at"] = map[string]interface{}{"atMobiles": n.cfg.AtMobiles}
+	}
+	return postJSON(u, payload)
+}
+
+// dingSign 钉钉加签：HMAC-SHA256 → base64，timestamp 为毫秒。
+func dingSign(secret string) (int64, string, error) {
+	ts := time.Now().UnixMilli()
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(fmt.Sprintf("%d\n%s", ts, secret)))
+	return ts, base64.StdEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
+// FeishuNotifier 飞书机器人（支持签名）。
+type FeishuNotifier struct {
+	cfg config.FeishuConfig
+}
+
+func NewFeishuNotifier(cfg config.FeishuConfig) *FeishuNotifier {
+	return &FeishuNotifier{cfg: cfg}
+}
+
+func (n *FeishuNotifier) Channel() string { return "feishu" }
+
+func (n *FeishuNotifier) Notify(e model.AlertEvent) error {
+	if !n.cfg.Enabled || n.cfg.URL == "" {
+		return nil
+	}
+	body := map[string]interface{}{
+		"msg_type": "text",
+		"content": map[string]string{"text": alertText(e)},
+	}
+	if n.cfg.Secret != "" {
+		ts, sign := feishuSign(n.cfg.Secret)
+		body["timestamp"] = ts
+		body["sign"] = sign
+	}
+	return postJSON(n.cfg.URL, body)
+}
+
+// feishuSign 飞书签名：HMAC-SHA256 → base64，timestamp 为秒。
+func feishuSign(secret string) (int64, string) {
+	ts := time.Now().Unix()
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(fmt.Sprintf("%d\n%s", ts, secret)))
+	return ts, base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// WeComNotifier 企业微信机器人（支持 @）。
+type WeComNotifier struct {
+	cfg config.WeComConfig
+}
+
+func NewWeComNotifier(cfg config.WeComConfig) *WeComNotifier {
+	return &WeComNotifier{cfg: cfg}
+}
+
+func (n *WeComNotifier) Channel() string { return "wecom" }
+
+func (n *WeComNotifier) Notify(e model.AlertEvent) error {
+	if !n.cfg.Enabled || n.cfg.URL == "" {
+		return nil
+	}
+	content := map[string]interface{}{"content": alertText(e)}
+	if len(n.cfg.MentionedList) > 0 {
+		content["mentioned_list"] = n.cfg.MentionedList
+	}
+	body := map[string]interface{}{
+		"msgtype": "text",
+		"content": content,
+	}
+	return postJSON(n.cfg.URL, body)
 }

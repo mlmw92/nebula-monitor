@@ -69,6 +69,9 @@ type AlertConfig struct {
 type NotifyConfig struct {
 	Email   EmailConfig   `yaml:"email"`
 	Webhook WebhookConfig `yaml:"webhook"`
+	DingTalk DingTalkConfig `yaml:"dingtalk"`
+	Feishu   FeishuConfig   `yaml:"feishu"`
+	WeCom    WeComConfig    `yaml:"wecom"`
 }
 
 // EmailConfig 邮件通知配置。
@@ -87,6 +90,28 @@ type EmailConfig struct {
 type WebhookConfig struct {
 	Enabled bool     `yaml:"enabled"`
 	URLs    []string `yaml:"urls"` // 敏感，不写日志
+}
+
+// DingTalkConfig 钉钉机器人通知配置。
+type DingTalkConfig struct {
+	Enabled   bool     `yaml:"enabled"`
+	URL       string   `yaml:"url"`       // 机器人 Webhook 地址
+	Secret    string   `yaml:"secret"`    // 可选，加签密钥（安全设置→加签）
+	AtMobiles []string `yaml:"atMobiles"` // 可选，@ 的手机号列表
+}
+
+// FeishuConfig 飞书机器人通知配置。
+type FeishuConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	URL     string `yaml:"url"`    // 机器人 Webhook 地址
+	Secret  string `yaml:"secret"` // 可选，签名密钥（安全设置→签名校验）
+}
+
+// WeComConfig 企业微信机器人通知配置。
+type WeComConfig struct {
+	Enabled       bool     `yaml:"enabled"`
+	URL           string   `yaml:"url"`           // 机器人 Webhook 地址（key 已含在 URL）
+	MentionedList []string `yaml:"mentionedList"` // 可选，@ 成员（userid 或 "@all"）
 }
 
 // AgentAuthConfig Agent 接入授权配置（参考哪吒探针的 client_secret 机制）。
@@ -121,8 +146,11 @@ func Default() *Config {
 		OfflineTimeout: 60,
 		Alert:          AlertConfig{Enabled: true, RulesFile: "/etc/monitor-server/rules.yaml", EvalInterval: 15, RecoverInterval: 30},
 		Notify: NotifyConfig{
-			Email:   EmailConfig{Enabled: false, SMTPPort: 587, UseTLS: true},
-			Webhook: WebhookConfig{Enabled: false},
+			Email:    EmailConfig{Enabled: false, SMTPPort: 587, UseTLS: true},
+			Webhook:  WebhookConfig{Enabled: false},
+			DingTalk: DingTalkConfig{Enabled: false},
+			Feishu:   FeishuConfig{Enabled: false},
+			WeCom:    WeComConfig{Enabled: false},
 		},
 		AgentAuth:       AgentAuthConfig{Enabled: false, Secret: ""},
 		AgentBinDir:     "./dist",
