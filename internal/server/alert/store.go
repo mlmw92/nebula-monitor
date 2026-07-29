@@ -45,30 +45,29 @@ func (s *VMAlertStore) Add(e model.AlertEvent) {
 }
 
 // Recent 返回最近 limit 条告警事件（按事件时间倒序）。
+// 告警事件是 fire/resolve 切换时一次性写入的稀疏样本，
+// 用 range query 在大窗口+固定步长下会被时序库降采样吞掉，改用 instant query
+// 直接取每个序列的最新点，对每个 (rule, host, state) 都能拿到。
 func (s *VMAlertStore) Recent(limit int) []model.AlertEvent {
-	now := time.Now().UnixMilli()
-	start := now - int64(7*24*time.Hour)
-	end := now
-	step := (end - start) / 500
-	if step < int64(time.Minute) {
-		step = int64(time.Minute)
-	}
-	series, err := s.store.QueryRange("system", alertMetric, nil, start, end, step)
+	series, err := s.store.QueryInstant("system", alertMetric, nil)
 	if err != nil {
+		slog.Warn("告警事件查询失败", "err", err)
 		return nil
 	}
 	latest := map[string]model.AlertEvent{}
 	order := []string{}
 	for _, ser := range series {
+		if len(ser.Points) == 0 {
+			continue
+		}
 		key := ser.Labels["rule"] + "|" + ser.Labels["host"] + "|" + ser.Labels["state"]
-		for _, p := range ser.Points {
-			ev := buildEvent(ser.Labels, p.Timestamp, p.Value)
-			if cur, ok := latest[key]; !ok || ev.StartsAt > cur.StartsAt {
-				if !ok {
-					order = append(order, key)
-				}
-				latest[key] = ev
+		p := ser.Points[len(ser.Points)-1]
+		ev := buildEvent(ser.Labels, p.Timestamp, p.Value)
+		if cur, ok := latest[key]; !ok || ev.StartsAt > cur.StartsAt {
+			if !ok {
+				order = append(order, key)
 			}
+			latest[key] = ev
 		}
 	}
 	out := make([]model.AlertEvent, 0, len(latest))
@@ -86,6 +85,7 @@ func (s *VMAlertStore) Recent(limit int) []model.AlertEvent {
 func (s *VMAlertStore) Active() []model.AlertEvent {
 	series, err := s.store.QueryInstant("system", alertMetric, map[string]string{"state": string(model.AlertStateFiring)})
 	if err != nil {
+		slog.Warn("活跃告警查询失败", "err", err)
 		return nil
 	}
 	var out []model.AlertEvent
