@@ -29,7 +29,7 @@ WEB_DIR="/etc/monitor-server/web"
 BIN_DIR="/usr/local/bin"
 SERVICE_DIR="/etc/systemd/system"
 ALERT_WEBHOOK=""
-ENABLE_AGENT_AUTH=""    # yes/no：是否启用 Agent 接入授权密钥
+ENABLE_AGENT_AUTH=""    # yes/no：是否启用 Agent 接入授权密钥（未显式指定时默认 yes）
 AGENT_SECRET=""         # 授权密钥（启用时生成或显式传入）
 AGENT_AUTH_EXPLICIT=0   # 是否由命令行显式指定（--agent-auth/--agent-secret），升级时据此决定是否更新配置
 AGENT_BIN_DIR="./dist"  # Agent 二进制分发根目录（自带 CDN），由 stage_agent_dist 覆盖
@@ -434,8 +434,8 @@ step_agent_auth() {
     AGENT_SECRET="$(awk '/^[[:space:]]*agentAuth:/{f=1;next} f&&/^[^[:space:]]/{f=0} f' "$CONFIG_DIR/server.yaml" | grep -E '^[[:space:]]*secret:' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
   fi
   if [[ -z "$ENABLE_AGENT_AUTH" ]]; then
-    if (( ASSUME_YES )); then ENABLE_AGENT_AUTH="no"; else
-      if confirm "是否启用 Agent 接入授权密钥（启用后 Agent 必须携带密钥，防止非法节点上报）？" "no"; then
+    if (( ASSUME_YES )); then ENABLE_AGENT_AUTH="yes"; else
+      if confirm "是否启用 Agent 接入授权密钥（启用后 Agent 必须携带密钥，防止非法节点上报）？" "yes"; then
         ENABLE_AGENT_AUTH="yes"
       else
         ENABLE_AGENT_AUTH="no"
