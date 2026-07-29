@@ -491,8 +491,12 @@ func parseLabelQuery(q map[string][]string) map[string]string {
 
 func (a *API) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	node := r.URL.Query().Get("hostname")
+	if node == "" {
+		node = r.URL.Query().Get("node")
+	}
+	state := r.URL.Query().Get("state")
 	var events []model.AlertEvent
-	if r.URL.Query().Get("state") == "active" {
+	if state == "active" || state == string(model.AlertStateFiring) {
 		events = a.alerts.Active()
 	} else {
 		limit := 100

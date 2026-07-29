@@ -168,7 +168,7 @@
             <div class="section-title" style="margin-top: 16px">告警事件</div>
             <el-table :data="alertEvents" stripe size="small" max-height="220">
               <el-table-column label="时间" width="160">
-                <template #default="{ row }">{{ fmtTime(row.startsAt) }}</template>
+                <template #default="{ row }">{{ fmtTime(row.startsAt || row.endsAt) }}</template>
               </el-table-column>
               <el-table-column prop="ruleName" label="规则" min-width="120" show-overflow-tooltip />
               <el-table-column label="状态" width="80">

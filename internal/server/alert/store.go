@@ -60,7 +60,7 @@ func (s *VMAlertStore) Recent(limit int) []model.AlertEvent {
 	latest := map[string]model.AlertEvent{}
 	order := []string{}
 	for _, ser := range series {
-		key := ser.Labels["rule"] + "|" + ser.Labels["node"] + "|" + ser.Labels["state"]
+		key := ser.Labels["rule"] + "|" + ser.Labels["host"] + "|" + ser.Labels["state"]
 		for _, p := range ser.Points {
 			ev := buildEvent(ser.Labels, p.Timestamp, p.Value)
 			if cur, ok := latest[key]; !ok || ev.StartsAt > cur.StartsAt {

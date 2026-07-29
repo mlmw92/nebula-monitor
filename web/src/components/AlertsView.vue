@@ -93,7 +93,7 @@
         </el-table-column>
         <el-table-column prop="message" label="详情" min-width="200" show-overflow-tooltip />
         <el-table-column label="时间" width="160">
-          <template #default="{ row }">{{ fmt(row.startsAt) }}</template>
+          <template #default="{ row }">{{ fmt(row.startsAt || row.endsAt) }}</template>
         </el-table-column>
       </el-table>
     </div>

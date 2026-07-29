@@ -42,10 +42,12 @@ type AuthConfig struct {
 
 // TSDBConfig 时序库连接配置。
 // 后端兼容 Prometheus remote_write + PromQL 的主流时序库：
-//   victoriametrics（默认，写 /api/v1/write）
-//   mimir（写 /api/v1/push）、cortex（写 /api/v1/push）
-//   thanos（写 /api/v1/receive）、prometheus（经 remote_write receiver）
-//   custom（手动指定 writePath/queryPath，兼容任意 PromQL 时序库）
+//
+//	victoriametrics（默认，写 /api/v1/write）
+//	mimir（写 /api/v1/push）、cortex（写 /api/v1/push）
+//	thanos（写 /api/v1/receive）、prometheus（经 remote_write receiver）
+//	custom（手动指定 writePath/queryPath，兼容任意 PromQL 时序库）
+//
 // 读取统一走 PromQL：queryPath / queryRangePath（默认 /api/v1/query、/api/v1/query_range）。
 type TSDBConfig struct {
 	Backend        string `yaml:"backend"`        // 后端类型，默认 victoriametrics
@@ -68,8 +70,8 @@ type AlertConfig struct {
 
 // NotifyConfig 通知渠道配置。
 type NotifyConfig struct {
-	Email   EmailConfig   `yaml:"email" json:"email"`
-	Webhook WebhookConfig `yaml:"webhook" json:"webhook"`
+	Email    EmailConfig    `yaml:"email" json:"email"`
+	Webhook  WebhookConfig  `yaml:"webhook" json:"webhook"`
 	DingTalk DingTalkConfig `yaml:"dingtalk" json:"dingtalk"`
 	Feishu   FeishuConfig   `yaml:"feishu" json:"feishu"`
 	WeCom    WeComConfig    `yaml:"wecom" json:"wecom"`
@@ -77,15 +79,15 @@ type NotifyConfig struct {
 
 // EmailConfig 邮件通知配置。
 type EmailConfig struct {
-	Enabled  bool     `yaml:"enabled" json:"enabled"`
-	SMTPHost string   `yaml:"smtpHost" json:"smtpHost"`
-	SMTPPort int      `yaml:"smtpPort" json:"smtpPort"`
-	Username string   `yaml:"username" json:"username"`
-	Password string   `yaml:"password" json:"password"` // 敏感，不写日志；GET 接口脱敏
-	From     string   `yaml:"from" json:"from"`
-	To       []string `yaml:"to" json:"to"`
-	UseTLS   bool     `yaml:"useTLS" json:"useTLS"` // 隐式 TLS（端口通常 465）
-	UseStartTLS bool  `yaml:"useStartTLS" json:"useStartTLS"` // STARTTLS 升级（端口通常 587）
+	Enabled     bool     `yaml:"enabled" json:"enabled"`
+	SMTPHost    string   `yaml:"smtpHost" json:"smtpHost"`
+	SMTPPort    int      `yaml:"smtpPort" json:"smtpPort"`
+	Username    string   `yaml:"username" json:"username"`
+	Password    string   `yaml:"password" json:"password"` // 敏感，不写日志；GET 接口脱敏
+	From        string   `yaml:"from" json:"from"`
+	To          []string `yaml:"to" json:"to"`
+	UseTLS      bool     `yaml:"useTLS" json:"useTLS"`           // 隐式 TLS（端口通常 465）
+	UseStartTLS bool     `yaml:"useStartTLS" json:"useStartTLS"` // STARTTLS 升级（端口通常 587）
 }
 
 // WebhookConfig Webhook 通知配置。
@@ -97,22 +99,22 @@ type WebhookConfig struct {
 // DingTalkConfig 钉钉机器人通知配置。
 type DingTalkConfig struct {
 	Enabled   bool     `yaml:"enabled" json:"enabled"`
-	URLs      []string `yaml:"urls" json:"urls"`          // 机器人 Webhook 地址列表（支持多个群）
-	Secret    string   `yaml:"secret" json:"secret"`      // 可选，加签密钥（安全设置→加签）
+	URLs      []string `yaml:"urls" json:"urls"`           // 机器人 Webhook 地址列表（支持多个群）
+	Secret    string   `yaml:"secret" json:"secret"`       // 可选，加签密钥（安全设置→加签）
 	AtMobiles []string `yaml:"atMobiles" json:"atMobiles"` // 可选，@ 的手机号列表
 }
 
 // FeishuConfig 飞书机器人通知配置。
 type FeishuConfig struct {
 	Enabled bool     `yaml:"enabled" json:"enabled"`
-	URLs    []string `yaml:"urls" json:"urls"`      // 机器人 Webhook 地址列表（支持多个群）
+	URLs    []string `yaml:"urls" json:"urls"`     // 机器人 Webhook 地址列表（支持多个群）
 	Secret  string   `yaml:"secret" json:"secret"` // 可选，签名密钥（安全设置→签名校验）
 }
 
 // WeComConfig 企业微信机器人通知配置。
 type WeComConfig struct {
 	Enabled       bool     `yaml:"enabled" json:"enabled"`
-	URLs          []string `yaml:"urls" json:"urls"`                    // 机器人 Webhook 地址列表（支持多个群，key 已含在 URL）
+	URLs          []string `yaml:"urls" json:"urls"`                   // 机器人 Webhook 地址列表（支持多个群，key 已含在 URL）
 	MentionedList []string `yaml:"mentionedList" json:"mentionedList"` // 可选，@ 成员（userid 或 "@all"）
 }
 
@@ -148,7 +150,7 @@ func Default() *Config {
 		OfflineTimeout: 60,
 		Alert:          AlertConfig{Enabled: true, RulesFile: "/etc/monitor-server/rules.yaml", EvalInterval: 15, RecoverInterval: 30},
 		Notify: NotifyConfig{
-			Email:    EmailConfig{Enabled: false, SMTPPort: 587, UseTLS: true},
+			Email:    EmailConfig{Enabled: false, SMTPPort: 587, UseStartTLS: true},
 			Webhook:  WebhookConfig{Enabled: false},
 			DingTalk: DingTalkConfig{Enabled: false},
 			Feishu:   FeishuConfig{Enabled: false},

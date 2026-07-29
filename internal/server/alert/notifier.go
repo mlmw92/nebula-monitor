@@ -11,8 +11,8 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"net/smtp"
 	"net/http"
+	"net/smtp"
 	"net/url"
 	"time"
 
@@ -68,11 +68,14 @@ func (n *EmailNotifier) Notify(e model.AlertEvent) error {
 	if n.cfg.Username != "" {
 		auth = smtp.PlainAuth("", n.cfg.Username, n.cfg.Password, n.cfg.SMTPHost)
 	}
+	useStartTLS := n.cfg.UseStartTLS || (n.cfg.UseTLS && n.cfg.SMTPPort == 587)
+	useImplicitTLS := n.cfg.UseTLS && !useStartTLS
+
 	var err error
 	switch {
-	case n.cfg.UseTLS:
+	case useImplicitTLS:
 		err = sendTLS(addr, n.cfg.SMTPHost, auth, n.cfg.From, n.cfg.To, msg.Bytes())
-	case n.cfg.UseStartTLS:
+	case useStartTLS:
 		err = sendStartTLS(addr, n.cfg.SMTPHost, auth, n.cfg.From, n.cfg.To, msg.Bytes())
 	default:
 		err = smtp.SendMail(addr, auth, n.cfg.From, n.cfg.To, msg.Bytes())
