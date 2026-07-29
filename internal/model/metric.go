@@ -131,7 +131,7 @@ type AlertRule struct {
 	For       string   `json:"for"`       // 持续时间，如 "5m"
 	Severity  Severity `json:"severity"`  // 严重级别
 	Group     string   `json:"group"`     // 作用的节点分组（空表示全部）
-	Notify    []string `json:"notify"`    // 通知渠道：email/webhook
+	Notify    []string `json:"notify"`    // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示全部已启用渠道
 	Enabled   bool     `json:"enabled"`   // 是否启用
 	CreatedAt int64    `json:"createdAt"` // 创建时间（毫秒）
 	UpdatedAt int64    `json:"updatedAt"` // 更新时间（毫秒）

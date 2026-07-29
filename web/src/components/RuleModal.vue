@@ -86,6 +86,26 @@
           </el-form-item>
         </el-col>
       </el-row>
+      <el-form-item label="通知渠道">
+        <el-select
+          v-model="form.notify"
+          multiple
+          clearable
+          placeholder="不选则发送给全部已启用渠道"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="c in channels"
+            :key="c.value"
+            :value="c.value"
+            :label="c.enabled ? c.label : c.label + '（未启用）'"
+            :disabled="!c.enabled"
+          />
+        </el-select>
+        <div class="form-hint">
+          仅推送告警到所选渠道；留空表示使用全部已启用渠道。未启用的渠道请先在「通知配置」中开启。
+        </div>
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="$emit('close')">取消</el-button>
@@ -100,7 +120,7 @@ import { ElMessage } from 'element-plus'
 import http from '../api/http'
 import { metricGroups, metricMap } from '../metrics/dictionary'
 
-const props = defineProps({ rule: Object, groups: Array })
+const props = defineProps({ rule: Object, groups: Array, channels: { type: Array, default: () => [] } })
 const emit = defineEmits(['close', 'saved'])
 
 const form = reactive({
@@ -113,6 +133,7 @@ const form = reactive({
   severity: '',
   group: '',
   enabled: true,
+  notify: [],
 })
 
 watch(
@@ -127,6 +148,7 @@ watch(
     form.severity = r ? r.severity : ''
     form.group = r ? r.group : ''
     form.enabled = r ? r.enabled : true
+    form.notify = r && r.notify ? [...r.notify] : []
   },
   { immediate: true }
 )
@@ -170,6 +192,7 @@ async function submit() {
     severity: form.severity,
     group: form.group,
     enabled: form.enabled,
+    notify: form.notify || [],
   }
   try {
     if (form.id) await http.put('/api/v1/rules/' + form.id, body)

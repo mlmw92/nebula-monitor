@@ -38,6 +38,14 @@
             <el-tag :type="sevType(row.severity)" size="small" effect="dark">{{ sevLabel(row.severity) }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="通知渠道" min-width="150">
+          <template #default="{ row }">
+            <template v-if="row.notify && row.notify.length">
+              <el-tag v-for="c in row.notify" :key="c" size="small" style="margin: 0 4px 4px 0">{{ channelLabel(c) }}</el-tag>
+            </template>
+            <span v-else class="muted">全部</span>
+          </template>
+        </el-table-column>
         <el-table-column label="持续" width="80">
           <template #default="{ row }">{{ row.for === '0' ? '立即' : row.for }}</template>
         </el-table-column>
@@ -87,7 +95,7 @@
       </el-table>
     </div>
 
-    <RuleModal v-if="editing" :rule="editing" :groups="groups" @close="editing = null" @saved="onSaved" />
+    <RuleModal v-if="editing" :rule="editing" :groups="groups" :channels="channelOptions" @close="editing = null" @saved="onSaved" />
   </div>
 </template>
 
@@ -103,6 +111,15 @@ const alerts = ref([])
 const groups = ref([])
 const editing = ref(null)
 const eventFilter = ref('active')
+// 全部渠道及其展示名；enabled 由通知配置决定，未启用的渠道在新建规则时置灰。
+const CHANNEL_META = [
+  { value: 'email', label: '邮件' },
+  { value: 'webhook', label: 'Webhook' },
+  { value: 'dingtalk', label: '钉钉' },
+  { value: 'feishu', label: '飞书' },
+  { value: 'wecom', label: '企业微信' },
+]
+const channelOptions = ref(CHANNEL_META.map((c) => ({ ...c, enabled: true })))
 let timer = null
 
 const activeCount = computed(() => alerts.value.filter((a) => a.state === 'firing').length)
@@ -119,6 +136,9 @@ function sevType(s) {
 }
 function sevLabel(s) {
   return { critical: '紧急', warning: '警告', info: '信息' }[s] || s
+}
+function channelLabel(v) {
+  return (CHANNEL_META.find((c) => c.value === v) || {}).label || v
 }
 function fmt(ts) {
   if (!ts) return '-'
@@ -138,6 +158,19 @@ async function load() {
   }
   try {
     groups.value = (await http.get('/api/v1/groups')).groups || []
+  } catch (e) {
+    /* ignore */
+  }
+  try {
+    const cfg = await http.get('/api/v1/notify')
+    const enabled = {
+      email: cfg.email && cfg.email.enabled,
+      webhook: cfg.webhook && cfg.webhook.enabled,
+      dingtalk: cfg.dingtalk && cfg.dingtalk.enabled,
+      feishu: cfg.feishu && cfg.feishu.enabled,
+      wecom: cfg.wecom && cfg.wecom.enabled,
+    }
+    channelOptions.value = CHANNEL_META.map((c) => ({ ...c, enabled: !!enabled[c.value] }))
   } catch (e) {
     /* ignore */
   }
@@ -182,5 +215,8 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 14px;
+}
+.muted {
+  color: var(--muted, #909399);
 }
 </style>
