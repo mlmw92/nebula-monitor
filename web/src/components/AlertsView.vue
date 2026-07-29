@@ -49,15 +49,12 @@
         <el-table-column label="持续" width="80">
           <template #default="{ row }">{{ row.for === '0' ? '立即' : row.for }}</template>
         </el-table-column>
-        <el-table-column label="启用" width="90">
+        <el-table-column label="启用" width="80" align="center">
           <template #default="{ row }">
-            <el-button
-              size="small"
-              :type="row.enabled ? 'warning' : 'success'"
-              @click="toggleRule(row)"
-            >
-              {{ row.enabled ? '停用' : '启用' }}
-            </el-button>
+            <el-switch
+              v-model="row.enabled"
+              @change="toggleRule(row)"
+            />
           </template>
         </el-table-column>
         <el-table-column label="操作" width="130">
@@ -206,12 +203,12 @@ function onSaved() {
 async function toggleRule(rule) {
   try {
     await http.post('/api/v1/rules/' + rule.id + '/toggle')
-    // 乐观更新：立即把新状态写回本地行，避免 load() 异步返回前用户点「编辑」时
-    // 弹窗拿到重载前的旧对象（enabled=false），出现「列表已开启、编辑里未开启」的错位。
-    rule.enabled = !rule.enabled
+    // el-switch 已即时翻转 row.enabled，这里仅提示；load() 后台刷新保证与后端一致。
     ElMessage.success(rule.enabled ? '已启用' : '已停用')
     load()
   } catch (e) {
+    // 失败回滚开关状态
+    rule.enabled = !rule.enabled
     ElMessage.error('操作失败')
   }
 }
