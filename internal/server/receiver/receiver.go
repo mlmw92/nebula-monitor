@@ -84,11 +84,11 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 响应：若有待执行升级任务，下发 upgrade 指令
+	// 响应：若节点仍需升级（agent 版本未达标），持续下发 upgrade 指令
 	resp := map[string]interface{}{"status": "ok"}
-	if r.nodeMgr.ConsumeUpgrade(payload.Node) {
+	if r.nodeMgr.ConsumeUpgrade(payload.Node, payload.Version) {
 		resp["command"] = "upgrade"
-		slog.Info("已下发升级指令", "node", payload.Node)
+		slog.Info("已下发升级指令", "node", payload.Node, "agentVersion", payload.Version)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

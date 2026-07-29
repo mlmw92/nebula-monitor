@@ -262,8 +262,8 @@ func (a *API) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "node not found", http.StatusNotFound)
 		return
 	}
-	a.nodeMgr.RequestUpgrade(name)
-	slog.Info("收到 Agent 升级请求", "node", name)
+	a.nodeMgr.RequestUpgrade(name, version.Version)
+	slog.Info("收到 Agent 升级请求", "node", name, "targetVersion", version.Version)
 	writeJSON(w, 200, map[string]string{
 		"status":  "ok",
 		"message": "升级任务已下发，等待 Agent 下次心跳时执行",

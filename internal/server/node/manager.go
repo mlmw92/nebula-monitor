@@ -18,6 +18,13 @@ type metaFile struct {
 	Groups []model.Group `json:"groups"`
 }
 
+// upgradeTask 记录一个节点的升级任务（持续追踪直到 agent 版本匹配或超时）。
+type upgradeTask struct {
+	targetVersion string    // 期望 agent 升级到的版本
+	createdAt     time.Time // 任务创建时间（用于超时清理）
+	retries       int       // 已下发次数（用于限流与诊断）
+}
+
 // Manager 管理被监控节点与分组。
 type Manager struct {
 	mu             sync.RWMutex
@@ -25,7 +32,7 @@ type Manager struct {
 	groups         map[string]*model.Group
 	metaPath       string
 	offlineTimeout time.Duration
-	upgradeQueue   map[string]bool // 待升级节点集合（内存态，重启丢失）
+	upgradeQueue   map[string]*upgradeTask // 待升级节点集合（内存态，重启丢失）
 }
 
 // New 创建 Manager 并从 meta 文件加载已有节点/分组。
@@ -35,7 +42,7 @@ func New(metaPath string, offlineTimeout time.Duration) *Manager {
 		groups:         map[string]*model.Group{},
 		metaPath:       metaPath,
 		offlineTimeout: offlineTimeout,
-		upgradeQueue:   map[string]bool{},
+		upgradeQueue:   map[string]*upgradeTask{},
 	}
 	m.load()
 	// 默认分组
@@ -157,21 +164,44 @@ func (m *Manager) RemoveNode(name string) {
 }
 
 // RequestUpgrade 标记某节点待升级（由前端 API 触发）。
-func (m *Manager) RequestUpgrade(name string) {
+// targetVersion 为期望 agent 升级到的版本（server 当前版本）。
+func (m *Manager) RequestUpgrade(name, targetVersion string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.upgradeQueue[name] = true
+	m.upgradeQueue[name] = &upgradeTask{
+		targetVersion: targetVersion,
+		createdAt:     time.Now(),
+	}
 }
 
-// ConsumeUpgrade 消费升级任务：若该节点在队列中则移除并返回 true（由 receiver 在上报响应里调用）。
-func (m *Manager) ConsumeUpgrade(name string) bool {
+// ConsumeUpgrade 检查节点是否需要升级指令。
+// 持续下发逻辑：
+//   - 节点在升级队列中且 agent 上报版本 != 目标版本 -> 下发 upgrade，保留任务
+//   - agent 上报版本 == 目标版本 -> 升级成功，移除任务
+//   - 任务超时（10 分钟）-> 放弃，移除任务
+//   - 节点不在队列中 -> 不下发
+func (m *Manager) ConsumeUpgrade(name, agentVersion string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.upgradeQueue[name] {
-		delete(m.upgradeQueue, name)
-		return true
+	task, ok := m.upgradeQueue[name]
+	if !ok {
+		return false
 	}
-	return false
+	// 超时清理（10 分钟）
+	if time.Since(task.createdAt) > 10*time.Minute {
+		slog.Warn("升级任务超时，移除", "node", name, "target", task.targetVersion, "agent", agentVersion)
+		delete(m.upgradeQueue, name)
+		return false
+	}
+	// 版本匹配 -> 升级成功
+	if agentVersion != "" && agentVersion == task.targetVersion {
+		slog.Info("agent 升级成功", "node", name, "version", agentVersion)
+		delete(m.upgradeQueue, name)
+		return false
+	}
+	// 仍需升级，累加计数后下发指令
+	task.retries++
+	return true
 }
 
 // ListGroups 返回分组列表。
