@@ -73,6 +73,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/rules", a.handleRulesList)
 	mux.HandleFunc("POST /api/v1/rules", a.handleRuleCreate)
 	mux.HandleFunc("PUT /api/v1/rules/{id}", a.handleRuleUpdate)
+	mux.HandleFunc("POST /api/v1/rules/{id}/toggle", a.handleRuleToggle)
 	mux.HandleFunc("DELETE /api/v1/rules/{id}", a.handleRuleDelete)
 
 	mux.HandleFunc("GET /api/v1/install-info", a.handleInstallInfo)
@@ -547,6 +548,22 @@ func (a *API) handleRuleUpdate(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleRuleDelete(w http.ResponseWriter, r *http.Request) {
 	a.rules.Delete(r.PathValue("id"))
 	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+// handleRuleToggle 切换规则启用/停用状态。
+func (a *API) handleRuleToggle(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	rule, ok := a.rules.Get(id)
+	if !ok {
+		http.Error(w, "rule not found", http.StatusNotFound)
+		return
+	}
+	rule.Enabled = !rule.Enabled
+	if err := a.rules.Update(rule); err != nil {
+		http.Error(w, "update failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, 200, rule)
 }
 
 // writeJSON 统一 JSON 响应。

@@ -49,9 +49,15 @@
         <el-table-column label="持续" width="80">
           <template #default="{ row }">{{ row.for === '0' ? '立即' : row.for }}</template>
         </el-table-column>
-        <el-table-column label="启用" width="80">
+        <el-table-column label="启用" width="90">
           <template #default="{ row }">
-            <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag>
+            <el-button
+              size="small"
+              :type="row.enabled ? 'warning' : 'success'"
+              @click="toggleRule(row)"
+            >
+              {{ row.enabled ? '停用' : '启用' }}
+            </el-button>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="130">
@@ -196,6 +202,15 @@ async function del(id) {
 function onSaved() {
   editing.value = null
   load()
+}
+async function toggleRule(rule) {
+  try {
+    await http.post('/api/v1/rules/' + rule.id + '/toggle')
+    ElMessage.success(rule.enabled ? '已停用' : '已启用')
+    load()
+  } catch (e) {
+    ElMessage.error('操作失败')
+  }
 }
 
 // 每 30s 自动刷新告警列表，确保实时性
