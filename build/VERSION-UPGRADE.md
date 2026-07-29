@@ -83,7 +83,8 @@ sudo ./install.sh agent  --server http://10.0.0.10:8080 --secret <key>
 ```bash
 tar -xzf nebula-monitor-v{VERSION}-upgrade.tar.gz
 cd nebula-monitor-v{VERSION}-upgrade
-sudo cp bin/server/linux/<arch>/server /usr/local/bin/monitor-server
+# 用 install -m 0755：规避运行中二进制的 "Text file busy"，且保证执行位
+sudo install -m 0755 bin/server/linux/<arch>/server /usr/local/bin/monitor-server
 sudo rsync -a --delete web/ /etc/monitor-server/web/
 sudo systemctl restart monitor-server
 ```

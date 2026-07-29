@@ -357,8 +357,10 @@ tar -xzf nebula-monitor-v${VERSION}-upgrade.tar.gz
 cd ${NAME}-upgrade
 
 # 2. 替换 server 二进制（按本机架构取对应文件）
-sudo cp bin/server/linux/amd64/server /usr/local/bin/monitor-server
-# 也可: sudo install -m 0755 bin/server/linux/<arch>/server /usr/local/bin/monitor-server
+#    用 install -m 0755 而非 cp：cp 默认打开已运行的可执行文件覆盖写入会报
+#    "Text file busy"，且不会强制设执行位；install 先 unlink 再建新文件，规避 busy 且保证 +x。
+sudo install -m 0755 bin/server/linux/amd64/server /usr/local/bin/monitor-server
+# 等价写法: sudo cp --remove-destination bin/server/linux/<arch>/server /usr/local/bin/monitor-server && sudo chmod 0755 /usr/local/bin/monitor-server
 
 # 3. 替换前端（Server 从 /etc/monitor-server/web 读取）
 sudo rsync -a --delete web/ /etc/monitor-server/web/
@@ -373,7 +375,8 @@ sudo systemctl restart monitor-server
 
 \`\`\`
 # 在被监控节点上
-sudo cp <从升级包获取的>bin/agent/linux/<arch>/agent /usr/local/bin/monitor-agent
+# 用 install -m 0755 保证执行位（cp 可能漏 +x）
+sudo install -m 0755 bin/agent/linux/<arch>/agent /usr/local/bin/monitor-agent
 sudo systemctl restart monitor-agent
 \`\`\`
 
