@@ -208,11 +208,14 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `tsdb.addr` | 时序库基址，如 `http://10.0.0.10:8428` |
 | `tsdb.queryAddr` | 可选：查询基址（与写入端口不同时，如 Thanos/Cortex） |
 | `alert` | 告警引擎（enabled / rulesFile / evalInterval） |
-| `notify` | 邮件 / Webhook 渠道 |
+| `notify` | 邮件 / Webhook / 钉钉 / 飞书 / 企业微信渠道（**仅首次初始化用**；运行时以独立 `notifyFile` 为准，可在 Web 后台「通知配置」页修改） |
+| `notifyFile` | 通知配置独立文件路径（默认 `/etc/monitor-server/notify.yaml`）；Web 端修改写入此处并热加载 |
 | `agentAuth.enabled` | 启用 Agent 接入授权（默认 false） |
 | `agentAuth.secret` | 授权密钥；启用且留空时启动自动生成 |
 | `agentBinDir` | Agent 二进制分发目录（自带 CDN） |
 | `agentScriptPath` | Agent 安装脚本路径（`/install/agent-install.sh`） |
+
+> **Web 通知配置**：登录后在「通知配置」页可视化配置邮件 / Webhook / 钉钉 / 飞书 / 企业微信，支持多收件人、多群（多 Webhook 地址）、@ 成员；保存即写入独立 `notifyFile` 并热加载，无需重启。敏感字段（SMTP 密码、机器人加签密钥）读取时脱敏，留空表示不修改。
 
 #### 时序库后端
 

@@ -179,6 +179,14 @@ func (e *Engine) notify(ev model.AlertEvent) {
 	}
 }
 
+// SetNotifiers 热加载通知器列表。在 e.mu 锁内替换，与 evaluate/notify 共用同一把锁，
+// 避免并发读写 notifiers 切片导致竞态；保存配置后调用，无需重启 Server。
+func (e *Engine) SetNotifiers(ns []Notifier) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.notifiers = ns
+}
+
 // ruleNotifyChannels 缓存规则渠道（避免每次查规则）。简单实现：返回空（全发）。
 func ruleNotifyChannels(ruleID string) []string { return nil }
 

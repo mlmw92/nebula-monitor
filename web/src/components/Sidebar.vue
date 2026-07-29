@@ -51,7 +51,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Odometer, Monitor, Bell, Upload } from '@element-plus/icons-vue'
+import { Odometer, Monitor, Bell, Upload, Message } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { WEB_VERSION } from '../version'
 
@@ -71,6 +71,7 @@ const items = [
   { key: 'hosts', to: '/hosts', label: '主机列表', icon: Monitor },
   { key: 'alerts', to: '/alerts', label: '告警中心', icon: Bell },
   { key: 'upgrade', to: '/system/upgrade', label: '系统升级', icon: Upload },
+  { key: 'notify', to: '/notify', label: '通知配置', icon: Message },
 ]
 
 function isActive(item) {

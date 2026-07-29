@@ -29,6 +29,7 @@ type Config struct {
 	WebDir          string          `yaml:"webDir"`          // 前端静态资源目录（磁盘读取，改前端只需替换文件+重启）
 	Auth            AuthConfig      `yaml:"auth"`            // 登录认证配置
 	Upgrade         UpgradeConfig   `yaml:"upgrade"`         // Web 系统升级模块配置
+	NotifyFile      string          `yaml:"notifyFile"`      // 通知渠道独立配置文件（Web 端配置写入，优先于 server.yaml 的 notify 段）
 }
 
 // AuthConfig 登录认证配置（启用后访问需登录，token 有效期 24h）
@@ -67,51 +68,51 @@ type AlertConfig struct {
 
 // NotifyConfig 通知渠道配置。
 type NotifyConfig struct {
-	Email   EmailConfig   `yaml:"email"`
-	Webhook WebhookConfig `yaml:"webhook"`
-	DingTalk DingTalkConfig `yaml:"dingtalk"`
-	Feishu   FeishuConfig   `yaml:"feishu"`
-	WeCom    WeComConfig    `yaml:"wecom"`
+	Email   EmailConfig   `yaml:"email" json:"email"`
+	Webhook WebhookConfig `yaml:"webhook" json:"webhook"`
+	DingTalk DingTalkConfig `yaml:"dingtalk" json:"dingtalk"`
+	Feishu   FeishuConfig   `yaml:"feishu" json:"feishu"`
+	WeCom    WeComConfig    `yaml:"wecom" json:"wecom"`
 }
 
 // EmailConfig 邮件通知配置。
 type EmailConfig struct {
-	Enabled  bool   `yaml:"enabled"`
-	SMTPHost string `yaml:"smtpHost"`
-	SMTPPort int    `yaml:"smtpPort"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"` // 敏感，不写日志
-	From     string `yaml:"from"`
-	To       []string `yaml:"to"`
-	UseTLS   bool   `yaml:"useTLS"`
+	Enabled  bool     `yaml:"enabled" json:"enabled"`
+	SMTPHost string   `yaml:"smtpHost" json:"smtpHost"`
+	SMTPPort int      `yaml:"smtpPort" json:"smtpPort"`
+	Username string   `yaml:"username" json:"username"`
+	Password string   `yaml:"password" json:"password"` // 敏感，不写日志；GET 接口脱敏
+	From     string   `yaml:"from" json:"from"`
+	To       []string `yaml:"to" json:"to"`
+	UseTLS   bool     `yaml:"useTLS" json:"useTLS"`
 }
 
 // WebhookConfig Webhook 通知配置。
 type WebhookConfig struct {
-	Enabled bool     `yaml:"enabled"`
-	URLs    []string `yaml:"urls"` // 敏感，不写日志
+	Enabled bool     `yaml:"enabled" json:"enabled"`
+	URLs    []string `yaml:"urls" json:"urls"` // 敏感，不写日志
 }
 
 // DingTalkConfig 钉钉机器人通知配置。
 type DingTalkConfig struct {
-	Enabled   bool     `yaml:"enabled"`
-	URLs      []string `yaml:"urls"`      // 机器人 Webhook 地址列表（支持多个群）
-	Secret    string   `yaml:"secret"`    // 可选，加签密钥（安全设置→加签）
-	AtMobiles []string `yaml:"atMobiles"` // 可选，@ 的手机号列表
+	Enabled   bool     `yaml:"enabled" json:"enabled"`
+	URLs      []string `yaml:"urls" json:"urls"`          // 机器人 Webhook 地址列表（支持多个群）
+	Secret    string   `yaml:"secret" json:"secret"`      // 可选，加签密钥（安全设置→加签）
+	AtMobiles []string `yaml:"atMobiles" json:"atMobiles"` // 可选，@ 的手机号列表
 }
 
 // FeishuConfig 飞书机器人通知配置。
 type FeishuConfig struct {
-	Enabled bool     `yaml:"enabled"`
-	URLs    []string `yaml:"urls"`    // 机器人 Webhook 地址列表（支持多个群）
-	Secret  string   `yaml:"secret"` // 可选，签名密钥（安全设置→签名校验）
+	Enabled bool     `yaml:"enabled" json:"enabled"`
+	URLs    []string `yaml:"urls" json:"urls"`      // 机器人 Webhook 地址列表（支持多个群）
+	Secret  string   `yaml:"secret" json:"secret"` // 可选，签名密钥（安全设置→签名校验）
 }
 
 // WeComConfig 企业微信机器人通知配置。
 type WeComConfig struct {
-	Enabled       bool     `yaml:"enabled"`
-	URLs          []string `yaml:"urls"`          // 机器人 Webhook 地址列表（支持多个群，key 已含在 URL）
-	MentionedList []string `yaml:"mentionedList"` // 可选，@ 成员（userid 或 "@all"）
+	Enabled       bool     `yaml:"enabled" json:"enabled"`
+	URLs          []string `yaml:"urls" json:"urls"`                    // 机器人 Webhook 地址列表（支持多个群，key 已含在 URL）
+	MentionedList []string `yaml:"mentionedList" json:"mentionedList"` // 可选，@ 成员（userid 或 "@all"）
 }
 
 // AgentAuthConfig Agent 接入授权配置（参考哪吒探针的 client_secret 机制）。
@@ -156,6 +157,7 @@ func Default() *Config {
 		AgentBinDir:     "./dist",
 		AgentScriptPath: "./deploy/agent-install.sh",
 		WebDir:          "/etc/monitor-server/web",
+		NotifyFile:      "/etc/monitor-server/notify.yaml",
 		Auth:            AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: ""},
 		Upgrade: UpgradeConfig{
 			Enabled:    true,

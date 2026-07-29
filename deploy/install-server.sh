@@ -753,6 +753,9 @@ alert:
   recoverInterval: 30
 
 notify:
+  # 说明：server.yaml 的 notify 段仅作为「首次初始化」来源。Server 启动后会读取独立的
+  # notify 配置文件（默认 /etc/monitor-server/notify.yaml），该文件不存在时用本段初始化并写入；
+  # 之后在 Web 后台「通知配置」页的修改只写入独立文件，运行时以该文件为准，无需改 server.yaml 或重启。
   email:
     enabled: false
     smtpHost: "smtp.example.com"

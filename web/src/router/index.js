@@ -17,6 +17,7 @@ const routes = [
       { path: 'node/:name', name: 'node', component: () => import('../components/NodeView.vue'), props: true },
       { path: 'alerts', name: 'alerts', component: () => import('../components/AlertsView.vue') },
       { path: 'system/upgrade', name: 'system-upgrade', component: () => import('../components/UpgradeView.vue') },
+      { path: 'notify', name: 'notify', component: () => import('../components/NotifyView.vue') },
     ],
   },
 ]

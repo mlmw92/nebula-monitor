@@ -11,6 +11,7 @@ import (
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/node"
+	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/upgrade"
 	"github.com/nebula/monitor/internal/version"
@@ -42,11 +43,12 @@ type API struct {
 	webDir    string
 	auth      config.AuthConfig
 	upgrader  *upgrade.Manager
+	notifyMgr *notify.Manager
 }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth, upgrader: upgrader}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -86,6 +88,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/login", a.handleLogin)
 	mux.HandleFunc("POST /api/v1/logout", a.handleLogout)
 	mux.HandleFunc("GET /api/v1/auth-info", a.handleAuthInfo)
+
+	mux.HandleFunc("GET /api/v1/notify", a.handleNotifyGet)
+	mux.HandleFunc("PUT /api/v1/notify", a.handleNotifyPut)
 }
 
 // handleInstallInfo 返回 Agent 一行安装命令（server 地址取自请求 Host，secret 取自配置）。

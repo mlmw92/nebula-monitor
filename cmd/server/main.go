@@ -17,6 +17,7 @@ import (
 	"github.com/nebula/monitor/internal/server/api"
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/node"
+	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/receiver"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/upgrade"
@@ -68,6 +69,18 @@ func main() {
 	hub := api.NewHub()
 	engine := alert.NewEngine(store, nodeMgr, rules, alertStore, notifiers, hub, cfg.Alert.EvalInterval)
 
+	// 通知配置管理：独立文件（Web 端可配置），启动时优先加载该文件，不存在则
+	// 用 server.yaml 的 notify 段初始化并落盘；保存时通过 SetNotifiers 热加载。
+	notifyMgr, err := notify.New(cfg.NotifyFile, cfg.Notify, func(c config.NotifyConfig) {
+		engine.SetNotifiers(alert.BuildNotifiers(c))
+	})
+	if err != nil {
+		slog.Error("初始化通知配置失败", "err", err)
+		os.Exit(1)
+	}
+	// 用加载后的配置同步内存通知器（若文件存在则覆盖初始 cfg.Notify）。
+	engine.SetNotifiers(alert.BuildNotifiers(notifyMgr.Get()))
+
 	// 上报接收
 	recv := receiver.New(store, nodeMgr, cfg.AgentAuth)
 
@@ -91,7 +104,7 @@ func main() {
 	}
 
 	// API
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader, notifyMgr)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)
