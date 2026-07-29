@@ -65,10 +65,6 @@
           <span class="r-label">上传时间</span>
           <span class="r-val">{{ fmtTime(pending.uploadedAt) }}</span>
         </div>
-        <div class="pending-row" v-if="pending.notes">
-          <span class="r-label">说明</span>
-          <span class="r-val">{{ pending.notes }}</span>
-        </div>
         <div class="pending-row">
           <span class="r-label">Server</span>
           <span class="r-val">

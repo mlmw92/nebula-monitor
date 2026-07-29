@@ -325,7 +325,7 @@ cat > "$STAGE_UPGRADE/manifest.json" <<EOF
 {
   "version": "${VERSION}",
   "previous_version_min": "1.0.0",
-  "notes": "由 build/release.sh 自动生成；server 端 internal/server/upgrade 按此 manifest 处理",
+  "notes": "",
   "components": [
     { "name": "server", "arch": "amd64", "source": "bin/server/linux/amd64/server", "target": "/usr/local/bin/monitor-server", "action": "install_file", "mode": "0755" },
     { "name": "server", "arch": "arm64", "source": "bin/server/linux/arm64/server", "target": "/usr/local/bin/monitor-server", "action": "install_file", "mode": "0755" },

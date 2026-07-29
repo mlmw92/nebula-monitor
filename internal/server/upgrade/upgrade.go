@@ -287,7 +287,7 @@ func (m *Manager) Apply(operator string) (*Task, error) {
 				mode = mm
 			}
 		}
-		if err := copyFileMode(src, serverBin, mode); err != nil {
+		if err := replaceFileAtomic(src, serverBin, mode); err != nil {
 			applyErrors = append(applyErrors, "替换 server 失败: "+err.Error())
 		} else {
 			serverApplied = true
@@ -636,6 +636,38 @@ func copyFileMode(src, dst string, mode os.FileMode) error {
 	defer out.Close()
 	_, err = io.Copy(out, in)
 	return err
+}
+
+// replaceFileAtomic 先写到同目录临时文件，再 rename 原子替换目标。
+// 用于替换正在运行的 server 二进制：直接 O_TRUNC 覆盖会因 ETXTBSY（text file busy）失败，
+// 而 rename 只替换目录项、不影响正在运行的旧 inode，规避该问题。
+func replaceFileAtomic(src, dst string, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".upgrade-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := io.Copy(tmp, in); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, dst)
 }
 
 // syncDir 清空 dst 后将 src 内容复制到 dst。
