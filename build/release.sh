@@ -3,7 +3,7 @@
 # nebula-monitor 离线发布包组装脚本
 #   产出两种 tarball 到 dist/release/：
 #     1) -full       首次部署用（bin + web + deploy + packages + install.sh）
-#     2) -upgrade    增量升级用（仅 bin + web + VERSION + SHA256SUMS + UPGRADE.md）
+#     2) -upgrade    增量升级用（bin + web + deploy/agent-install.sh + VERSION + SHA256SUMS + UPGRADE.md）
 #
 # 用法: ./build/release.sh
 # 前置:
@@ -298,7 +298,7 @@ fi
 c_info "组装 ${NAME}-upgrade"
 STAGE_UPGRADE="${STAGE_ROOT}/${NAME}-upgrade"
 rm -rf "$STAGE_UPGRADE"
-mkdir -p "$STAGE_UPGRADE/bin" "$STAGE_UPGRADE/web"
+mkdir -p "$STAGE_UPGRADE/bin" "$STAGE_UPGRADE/web" "$STAGE_UPGRADE/deploy"
 
 # 1) 二进制
 cp -a "$BIN_DIR/server" "$STAGE_UPGRADE/bin/"
@@ -307,6 +307,11 @@ chmod +x "$STAGE_UPGRADE/bin/server/linux/"*"/server" "$STAGE_UPGRADE/bin/agent/
 
 # 2) 前端
 cp -a "$WEB_DIR"/. "$STAGE_UPGRADE/web/"
+
+# 2b) Agent 安装脚本（Server 自带 CDN 对外提供，应跟随 Server 版本）
+#     升级时由 internal/server/upgrade apply 复制到 server 配置的 agentScriptPath。
+cp -a deploy/agent-install.sh "$STAGE_UPGRADE/deploy/"
+chmod +x "$STAGE_UPGRADE/deploy/agent-install.sh"
 
 # 3) VERSION + manifest.json + UPGRADE.md
 printf '%s\n' "$VERSION" > "$STAGE_UPGRADE/VERSION"
@@ -328,7 +333,8 @@ cat > "$STAGE_UPGRADE/manifest.json" <<EOF
     { "name": "web",    "source": "web",                                            "target": "/etc/monitor-server/web",       "action": "sync_dir" },
     { "name": "agent",  "arch": "amd64", "source": "bin/agent/linux/amd64/agent", "action": "install_file", "mode": "0755" },
     { "name": "agent",  "arch": "arm64", "source": "bin/agent/linux/arm64/agent", "action": "install_file", "mode": "0755" },
-    { "name": "agent",  "arch": "arm",   "source": "bin/agent/linux/arm/agent",   "action": "install_file", "mode": "0755" }
+    { "name": "agent",  "arch": "arm",   "source": "bin/agent/linux/arm/agent",   "action": "install_file", "mode": "0755" },
+    { "name": "agent-script", "source": "deploy/agent-install.sh", "target": "/var/lib/monitor-server/agent-dist/agent-install.sh", "action": "install_file", "mode": "0755" }
   ]
 }
 EOF
@@ -336,8 +342,10 @@ EOF
 cat > "$STAGE_UPGRADE/UPGRADE.md" <<EOF
 # nebula-monitor v${VERSION} 升级包（增量）
 
-本包仅包含**编译后的产物**（Server / Agent 二进制 + 前端 web）。  
-**不包含**部署脚本、install.sh、可选依赖（node / victoria-metrics），避免与现有部署版本错配。
+本包包含**编译后的产物**（Server / Agent 二进制 + 前端 web），以及 **deploy/agent-install.sh**（Server 自带 CDN 向 Agent 分发的安装脚本）。  
+**不包含** install.sh / uninstall.sh / 时序库等部署脚本与可选依赖（node / victoria-metrics），避免与现有部署版本错配。
+
+> 上传升级后，server 端 apply 会自动把新 `agent-install.sh` 同步到配置里的 `agentScriptPath`（默认 `/var/lib/monitor-server/agent-dist/agent-install.sh`），对外提供的安装脚本随之升级，无需再手动 scp。
 
 > 升级会替换 Server 二进制并重启 \`monitor-server\` 服务，期间 web 端短暂不可用（约 5-15 秒）。
 
@@ -393,7 +401,7 @@ EOF
 # 4) SHA256SUMS
 c_info "生成 SHA256SUMS (upgrade)"
 ( cd "$STAGE_UPGRADE" && \
-  find bin web -type f -print0 2>/dev/null \
+  find bin web deploy -type f -print0 2>/dev/null \
     | xargs -0 sha256sum > SHA256SUMS )
 
 # 4.5) manifest 自校验：保证 manifest.json 声明的每个 source 在包内真实存在

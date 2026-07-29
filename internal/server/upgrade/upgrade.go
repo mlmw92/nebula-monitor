@@ -1,9 +1,9 @@
 // Package upgrade 实现 server 自升级：上传升级包、备份/替换/重启、回滚、历史。
 //
 // 设计要点：
-//   - 升级包格式：tar.gz，内含 bin/server/<arch>/server、bin/agent/<arch>/agent、web/、VERSION、manifest.json
+//   - 升级包格式：tar.gz，内含 bin/server/<arch>/server、bin/agent/<arch>/agent、web/、deploy/agent-install.sh、VERSION、manifest.json
 //   - manifest.json 声明每个组件的 source/target/action/sha256，apply 时按声明处理
-//   - apply 流程：备份→替换 server→替换 web→复制新 agent 到 AgentBinDir（自带 CDN）→重启 server
+//   - apply 流程：备份→替换 server→替换 web→复制新 agent 到 AgentBinDir（自带 CDN）→复制新 agent-install.sh 到 AgentScriptPath→重启 server
 //   - 不主动推送 agent 升级到节点，由管理员在主机列表手动点击升级
 //   - history 持久化到 <Dir>/history.json
 package upgrade
@@ -34,8 +34,8 @@ import (
 
 // Component 描述升级包内一个组件。
 type Component struct {
-	Name     string `json:"name"`                // server | agent | web
-	Arch     string `json:"arch,omitempty"`      // amd64 | arm64 | arm（web 为空）
+	Name     string `json:"name"`                // server | agent | web | agent-script
+	Arch     string `json:"arch,omitempty"`      // amd64 | arm64 | arm（web/agent-script 为空）
 	Source   string `json:"source"`              // 包内相对路径
 	Target   string `json:"target,omitempty"`    // 目标绝对路径（仅展示用）
 	Action   string `json:"action"`              // install_file | sync_dir
@@ -83,8 +83,9 @@ type Config struct {
 	Dir         string // 升级工作目录（上传包 / 解压 / 备份）
 	BinDir      string // server 二进制安装目录（默认 /usr/local/bin）
 	WebDir      string // 前端静态资源目录
-	AgentBinDir string // agent 自带 CDN 根目录（含 agent/linux/<arch>/agent）
-	BackupKeep  int    // 保留备份份数
+	AgentBinDir     string // agent 自带 CDN 根目录（含 agent/linux/<arch>/agent）
+	AgentScriptPath string // Agent 安装脚本目标路径（apply 时写入，如 dataDir/agent-dist/agent-install.sh）
+	BackupKeep      int    // 保留备份份数
 	UseSystemd  bool   // 是否用 systemd 重启 server
 	Service     string // systemd 服务名
 }
@@ -335,6 +336,31 @@ func (m *Manager) Apply(operator string) (*Task, error) {
 			applyErrors = append(applyErrors, fmt.Sprintf("复制 agent (%s) 失败: %s", c.Arch, err.Error()))
 		} else {
 			agentUpdated = true
+		}
+	}
+
+	// 3b) 把新 agent-install.sh 复制到 AgentScriptPath（自带 CDN 对外脚本，跟随 server 版本）
+	if m.cfg.AgentScriptPath != "" {
+		for _, c := range t.Components {
+			if c.Name != "agent-script" {
+				continue
+			}
+			if _, err := os.Stat(m.cfg.AgentScriptPath); err == nil {
+				_ = copyFile(m.cfg.AgentScriptPath, filepath.Join(backupDir, "agent-install.sh"))
+			}
+			src := filepath.Join(unpackRoot, c.Source)
+			mode := os.FileMode(0o755)
+			if c.Mode != "" {
+				if mm, err := parseOctal(c.Mode); err == nil {
+					mode = mm
+				}
+			}
+			if err := copyFileMode(src, m.cfg.AgentScriptPath, mode); err != nil {
+				applyErrors = append(applyErrors, "复制 agent-install.sh 失败: "+err.Error())
+			} else {
+				agentUpdated = true // 属于 Agent CDN 更新的一部分
+			}
+			break
 		}
 	}
 

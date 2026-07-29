@@ -75,11 +75,12 @@ func main() {
 	var upgrader *upgrade.Manager
 	if cfg.Upgrade.Enabled {
 		upgrader, err = upgrade.New(upgrade.Config{
-			Dir:         cfg.Upgrade.Dir,
-			BinDir:      cfg.Upgrade.BinDir,
-			WebDir:      cfg.WebDir,
-			AgentBinDir: cfg.AgentBinDir,
-			BackupKeep:  cfg.Upgrade.BackupKeep,
+			Dir:            cfg.Upgrade.Dir,
+			BinDir:         cfg.Upgrade.BinDir,
+			WebDir:         cfg.WebDir,
+			AgentBinDir:    cfg.AgentBinDir,
+			AgentScriptPath: cfg.AgentScriptPath,
+			BackupKeep:     cfg.Upgrade.BackupKeep,
 			UseSystemd:  cfg.Upgrade.UseSystemd,
 			Service:     cfg.Upgrade.Service,
 		}, nodeMgr)
