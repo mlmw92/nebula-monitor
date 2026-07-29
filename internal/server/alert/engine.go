@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math"
 	"math/rand"
@@ -142,6 +143,9 @@ func (e *Engine) fire(r model.AlertRule, node string, value float64, now int64) 
 	if e.broadcaster != nil {
 		e.broadcaster.BroadcastAlert(ev)
 	}
+	slog.Info("告警触发", "rule", r.Name, "node", node, "metric", r.Metric,
+		"value", value, "operator", r.Operator, "threshold", r.Threshold,
+		"severity", r.Severity, "channels", r.Notify)
 }
 
 func (e *Engine) resolve(r model.AlertRule, node string, value float64, now int64) {
@@ -164,6 +168,74 @@ func (e *Engine) resolve(r model.AlertRule, node string, value float64, now int6
 	if e.broadcaster != nil {
 		e.broadcaster.BroadcastAlert(ev)
 	}
+	slog.Info("告警恢复", "rule", r.Name, "node", node, "metric", r.Metric, "value", value)
+}
+
+// TestAlert 构造一条测试告警事件，绕过评估链路直接写入并通知，便于用户验证事件/通知链路。
+// channel 非空时仅触发指定渠道；为空时按当前 notifiers 全渠道发送。
+func (e *Engine) TestAlert(channel string) (model.AlertEvent, error) {
+	now := model.NowMillis()
+	ev := model.AlertEvent{
+		ID:        genEventID(),
+		RuleID:    "test-rule",
+		RuleName:  "测试告警",
+		Node:      "manual",
+		Metric:    "test",
+		Value:     0,
+		Operator:  ">=",
+		Threshold: 0,
+		Severity:  model.SeverityInfo,
+		State:     model.AlertStateFiring,
+		Message:   "这是一条由用户手动触发的测试告警事件，用于验证事件链路与通知渠道",
+		StartsAt:  now,
+	}
+	e.alerts.Add(ev)
+	e.mu.Lock()
+	ns := append([]Notifier(nil), e.notifiers...)
+	e.mu.Unlock()
+	for _, n := range ns {
+		if channel != "" && n.Channel() != channel {
+			continue
+		}
+		if err := n.Notify(ev); err != nil {
+			slog.Warn("测试告警通知失败", "channel", n.Channel(), "err", err)
+			return ev, fmt.Errorf("渠道 %s 通知失败: %w", n.Channel(), err)
+		}
+	}
+	if e.broadcaster != nil {
+		e.broadcaster.BroadcastAlert(ev)
+	}
+	slog.Info("手动触发测试告警", "channel", channel, "eventID", ev.ID)
+	return ev, nil
+}
+
+// TestEmail 主动调用邮件渠道发送一封测试邮件，立即返回 SMTP 错误详情。
+// 不写入告警事件，避免污染事件列表；仅在邮件渠道存在时返回成功。
+func (e *Engine) TestEmail() error {
+	now := model.NowMillis()
+	ev := model.AlertEvent{
+		ID:        genEventID(),
+		RuleID:    "test-rule",
+		RuleName:  "测试邮件",
+		Node:      "manual",
+		Metric:    "test",
+		Value:     0,
+		Operator:  ">=",
+		Threshold: 0,
+		Severity:  model.SeverityInfo,
+		State:     model.AlertStateFiring,
+		Message:   "这是一封由用户手动触发的测试邮件，用于验证 SMTP 配置与链路",
+		StartsAt:  now,
+	}
+	e.mu.Lock()
+	ns := append([]Notifier(nil), e.notifiers...)
+	e.mu.Unlock()
+	for _, n := range ns {
+		if n.Channel() == "email" {
+			return n.Notify(ev)
+		}
+	}
+	return fmt.Errorf("邮件渠道未启用或未配置（请先在「通知配置」中开启并保存）")
 }
 
 // notify 按规则配置的渠道发送通知。
@@ -251,7 +323,7 @@ func aggregatedDiskUsage(store storage.Storage, node string) (float64, bool) {
 	if total <= 0 {
 		return 0, false
 	}
-	return round2(used/total*100), true
+	return round2(used / total * 100), true
 }
 
 func round2(v float64) float64 {

@@ -5,7 +5,10 @@
         <h2>通知配置</h2>
         <p class="sub">配置告警通知渠道，保存后立即生效（热加载，无需重启）。配置独立存储，不修改 server.yaml。</p>
       </div>
-      <el-button type="primary" :loading="saving" :disabled="loading" @click="save">保存并生效</el-button>
+      <div class="head-actions">
+        <el-button :loading="testing" :disabled="loading" @click="testNotify">发送测试邮件</el-button>
+        <el-button type="primary" :loading="saving" :disabled="loading" @click="save">保存并生效</el-button>
+      </div>
     </div>
 
     <el-form v-loading="loading" :model="notify" label-position="top" class="cards">
@@ -109,6 +112,7 @@ import StringListInput from './StringListInput.vue'
 
 const loading = ref(false)
 const saving = ref(false)
+const testing = ref(false)
 const notify = ref(defaultConfig())
 
 // emailEncryption 将加密方式映射到 useTLS / useStartTLS 两个布尔字段。
@@ -170,6 +174,22 @@ async function save() {
   }
 }
 
+async function testNotify() {
+  testing.value = true
+  try {
+    const r = await http.post('/api/v1/notify/test')
+    if (r.ok) {
+      ElMessage.success(r.message || '测试邮件已发送')
+    } else {
+      ElMessageBox.alert(r.error || '测试失败', '邮件发送失败', { type: 'error', confirmButtonText: '关闭' })
+    }
+  } catch (e) {
+    ElMessageBox.alert(e.message || '请求失败', '邮件发送失败', { type: 'error', confirmButtonText: '关闭' })
+  } finally {
+    testing.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -183,6 +203,11 @@ onMounted(load)
   align-items: flex-start;
   gap: 16px;
   margin-bottom: 18px;
+}
+.head-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 .page-head h2 {
   margin: 0 0 4px;

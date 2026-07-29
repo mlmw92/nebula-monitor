@@ -70,11 +70,14 @@
     <div class="glass panel">
       <div class="panel-title-row">
         <span class="panel-title" style="margin-bottom: 0">告警事件</span>
-        <el-radio-group v-model="eventFilter" size="small">
-          <el-radio-button value="firing">活跃</el-radio-button>
-          <el-radio-button value="resolved">已恢复</el-radio-button>
-          <el-radio-button value="">全部</el-radio-button>
-        </el-radio-group>
+        <div class="event-toolbar">
+          <el-radio-group v-model="eventFilter" size="small">
+            <el-radio-button value="firing">活跃</el-radio-button>
+            <el-radio-button value="resolved">已恢复</el-radio-button>
+            <el-radio-button value="">全部</el-radio-button>
+          </el-radio-group>
+          <el-button size="small" :loading="testing" @click="testAlert">测试事件</el-button>
+        </div>
       </div>
       <el-table :data="filteredAlerts" stripe style="width: 100%" empty-text="暂无告警事件">
         <el-table-column prop="ruleName" label="规则" min-width="140" />
@@ -114,6 +117,7 @@ const alerts = ref([])
 const groups = ref([])
 const editing = ref(null)
 const eventFilter = ref('firing')
+const testing = ref(false)
 // 全部渠道及其展示名；enabled 由通知配置决定，未启用的渠道在新建规则时置灰。
 const CHANNEL_META = [
   { value: 'email', label: '邮件' },
@@ -179,6 +183,23 @@ async function load() {
   }
 }
 
+async function testAlert() {
+  testing.value = true
+  try {
+    const r = await http.post('/api/v1/alerts/test')
+    if (r.ok) {
+      ElMessage.success('已发送测试告警事件，请查看事件列表或通知渠道')
+    } else {
+      ElMessageBox.alert(r.error || '测试失败', '触发失败', { type: 'error', confirmButtonText: '关闭' })
+    }
+    load()
+  } catch (e) {
+    ElMessageBox.alert(e.message || '请求失败', '触发失败', { type: 'error', confirmButtonText: '关闭' })
+  } finally {
+    testing.value = false
+  }
+}
+
 function newRule() {
   // 设为空对象（truthy）以触发 RuleModal 渲染（v-if="editing"）
   editing.value = {}
@@ -229,7 +250,11 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 14px;
+}
+.event-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 .muted {
   color: var(--muted, #909399);

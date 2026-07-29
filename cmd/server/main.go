@@ -88,14 +88,14 @@ func main() {
 	var upgrader *upgrade.Manager
 	if cfg.Upgrade.Enabled {
 		upgrader, err = upgrade.New(upgrade.Config{
-			Dir:            cfg.Upgrade.Dir,
-			BinDir:         cfg.Upgrade.BinDir,
-			WebDir:         cfg.WebDir,
-			AgentBinDir:    cfg.AgentBinDir,
+			Dir:             cfg.Upgrade.Dir,
+			BinDir:          cfg.Upgrade.BinDir,
+			WebDir:          cfg.WebDir,
+			AgentBinDir:     cfg.AgentBinDir,
 			AgentScriptPath: cfg.AgentScriptPath,
-			BackupKeep:     cfg.Upgrade.BackupKeep,
-			UseSystemd:  cfg.Upgrade.UseSystemd,
-			Service:     cfg.Upgrade.Service,
+			BackupKeep:      cfg.Upgrade.BackupKeep,
+			UseSystemd:      cfg.Upgrade.UseSystemd,
+			Service:         cfg.Upgrade.Service,
 		}, nodeMgr)
 		if err != nil {
 			slog.Error("初始化升级管理器失败", "err", err)
@@ -104,7 +104,7 @@ func main() {
 	}
 
 	// API
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader, notifyMgr)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)
