@@ -3,6 +3,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -17,7 +18,14 @@ import (
 
 func main() {
 	cfgPath := flag.String("config", "agent.yaml", "配置文件路径")
+	showVersion := flag.Bool("version", false, "显示版本信息")
 	flag.Parse()
+	if *showVersion {
+		fmt.Printf("nebula-monitor agent %s\n", version.Version)
+		fmt.Printf("build_time=%s\n", version.BuildTime)
+		fmt.Printf("go_version=%s\n", version.GoVersion)
+		return
+	}
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
