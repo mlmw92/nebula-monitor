@@ -56,10 +56,12 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 
 - 登录、总览、主机列表（含分组）、主机详情（硬件信息 + 分区表 + 指标图表）、告警列表、规则新增/编辑、分组管理
 - **系统升级**：上传 upgrade 包 → 解析版本 → 立即升级（备份+替换 server/web+同步 agent 到自带 CDN+重启）/ 回滚 / 历史；**Agent 不主动推送**，由管理员在主机列表手动点击
+- **主机列表 Agent 版本提示**：某节点 Agent 版本低于服务端版本时，「Agent 版本」列显示红点，提示需要升级
+- **升级按钮防重复**：「系统升级」页「立即升级」提交后按钮进入 15 秒冷却（显示"请等待 Ns"并禁用），避免 server 重启期间被重复点击
 
 **系统升级**
 
-- **Web 端一键升级**：在仪表盘「系统升级」页上传 `nebula-monitor-v*-upgrade.tar.gz`，自动解析 `manifest.json` 显示新版本信息（版本号、Server 架构/大小、Web 大小、Agent 架构、SHA256），点击「立即升级」完成备份→替换→重启并写历史。
+- **Web 端一键升级**：在仪表盘「系统升级」页上传 `nebula-monitor-v*-upgrade.tar.gz`，自动解析 `manifest.json` 显示新版本信息（版本号、Server 架构/大小、Web 大小、Agent 架构、SHA256），点击「立即升级」完成备份→替换→重启并写历史。提交后按钮进入 15 秒冷却（显示"请等待 Ns"并禁用），防止 server 重启期间重复点击；升级历史「操作」列显示「升级 / 回滚」、「结果」列显示「成功 / 失败」（中文化）。
 - **Agent CDN 同步**：apply 时把新 agent（amd64/arm64/arm）复制到 server 自带 CDN（`agentBinDir/agent/linux/<arch>/agent`），**不主动推送到主机**；管理员到「主机列表」点升级按钮触发。
 - **回滚**：一键回到最近一次备份（替换 server + web + 重启）。
 - **包格式约定**：`manifest.json` 声明每个组件的 source/target/action/sha256，由 `build/release.sh` 自动生成并自校验一致性。
@@ -202,13 +204,15 @@ sudo bash deploy/install-server.sh --upgrade --tsdb-addr http://<时序库IP>:84
 
 ### Agent 升级
 
+> **升级顺序**：Agent 自升级由 Agent 自身向 Server 自带 CDN 拉取二进制，因此**必须先将 Server 升级到目标版本**（Web 上传 upgrade 包），否则 Agent 会下载到旧版本、始终不更新。完整链路：Server 升级 → 在主机列表点「升级」或重跑 `agent-install.sh` → Agent 二进制与 Server 同源、服务名统一为 `monitor-agent`。
+
 Server `--upgrade` 后 CDN 里的 Agent 二进制已刷新，各节点**重跑一行安装命令**即自动覆盖旧 Agent 并重启：
 
 ```bash
 curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- --server http://<server>:8080 [--secret <SECRET>]
 ```
 
-> `agent-install.sh` 本身无"已安装跳过"逻辑，重跑即覆盖二进制 + 重启 `monagent.service`，适合批量升级。
+> `agent-install.sh` 本身无"已安装跳过"逻辑，重跑即覆盖二进制 + 重启 `monitor-agent.service`，适合批量升级。
 
 ---
 
