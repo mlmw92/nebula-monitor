@@ -225,28 +225,42 @@ func NewDingTalkNotifier(cfg config.DingTalkConfig) *DingTalkNotifier {
 func (n *DingTalkNotifier) Channel() string { return "dingtalk" }
 
 func (n *DingTalkNotifier) Notify(e model.AlertEvent) error {
-	if !n.cfg.Enabled || n.cfg.URL == "" {
+	if !n.cfg.Enabled || len(n.cfg.URLs) == 0 {
 		return nil
 	}
-	u := n.cfg.URL
+	var ts int64
+	var sign string
 	if n.cfg.Secret != "" {
-		ts, sign, err := dingSign(n.cfg.Secret)
+		var err error
+		ts, sign, err = dingSign(n.cfg.Secret)
 		if err != nil {
 			return err
 		}
-		u = fmt.Sprintf("%s&timestamp=%d&sign=%s", u, ts, url.QueryEscape(sign))
 	}
-	payload := map[string]interface{}{
-		"msgtype": "markdown",
-		"markdown": map[string]string{
-			"title": "监控告警",
-			"text":  alertMarkdown(e),
-		},
-	}
+	at := map[string]interface{}{}
 	if len(n.cfg.AtMobiles) > 0 {
-		payload["at"] = map[string]interface{}{"atMobiles": n.cfg.AtMobiles}
+		at["atMobiles"] = n.cfg.AtMobiles
 	}
-	return postJSON(u, payload)
+	for _, base := range n.cfg.URLs {
+		u := base
+		if n.cfg.Secret != "" {
+			u = fmt.Sprintf("%s&timestamp=%d&sign=%s", u, ts, url.QueryEscape(sign))
+		}
+		payload := map[string]interface{}{
+			"msgtype": "markdown",
+			"markdown": map[string]string{
+				"title": "监控告警",
+				"text":  alertMarkdown(e),
+			},
+		}
+		if len(at) > 0 {
+			payload["at"] = at
+		}
+		if err := postJSON(u, payload); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // dingSign 钉钉加签：HMAC-SHA256 → base64，timestamp 为毫秒。
@@ -269,19 +283,28 @@ func NewFeishuNotifier(cfg config.FeishuConfig) *FeishuNotifier {
 func (n *FeishuNotifier) Channel() string { return "feishu" }
 
 func (n *FeishuNotifier) Notify(e model.AlertEvent) error {
-	if !n.cfg.Enabled || n.cfg.URL == "" {
+	if !n.cfg.Enabled || len(n.cfg.URLs) == 0 {
 		return nil
 	}
-	body := map[string]interface{}{
-		"msg_type": "text",
-		"content": map[string]string{"text": alertText(e)},
-	}
+	var ts int64
+	var sign string
 	if n.cfg.Secret != "" {
-		ts, sign := feishuSign(n.cfg.Secret)
-		body["timestamp"] = ts
-		body["sign"] = sign
+		ts, sign = feishuSign(n.cfg.Secret)
 	}
-	return postJSON(n.cfg.URL, body)
+	for _, u := range n.cfg.URLs {
+		body := map[string]interface{}{
+			"msg_type": "text",
+			"content":  map[string]string{"text": alertText(e)},
+		}
+		if n.cfg.Secret != "" {
+			body["timestamp"] = ts
+			body["sign"] = sign
+		}
+		if err := postJSON(u, body); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // feishuSign 飞书签名：HMAC-SHA256 → base64，timestamp 为秒。
@@ -304,16 +327,21 @@ func NewWeComNotifier(cfg config.WeComConfig) *WeComNotifier {
 func (n *WeComNotifier) Channel() string { return "wecom" }
 
 func (n *WeComNotifier) Notify(e model.AlertEvent) error {
-	if !n.cfg.Enabled || n.cfg.URL == "" {
+	if !n.cfg.Enabled || len(n.cfg.URLs) == 0 {
 		return nil
 	}
 	content := map[string]interface{}{"content": alertText(e)}
 	if len(n.cfg.MentionedList) > 0 {
 		content["mentioned_list"] = n.cfg.MentionedList
 	}
-	body := map[string]interface{}{
-		"msgtype": "text",
-		"content": content,
+	for _, u := range n.cfg.URLs {
+		body := map[string]interface{}{
+			"msgtype": "text",
+			"content": content,
+		}
+		if err := postJSON(u, body); err != nil {
+			return err
+		}
 	}
-	return postJSON(n.cfg.URL, body)
+	return nil
 }

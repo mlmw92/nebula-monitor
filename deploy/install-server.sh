@@ -763,21 +763,21 @@ notify:
     to: []
     useTLS: true
 $webhook_block
-  # 钉钉机器人（自定义 Webhook，可选加签）
+  # 钉钉机器人（自定义 Webhook，可选加签；urls 支持多个群）
   dingtalk:
     enabled: false
-    url: ""
+    urls: []
     secret: ""
     atMobiles: []
-  # 飞书机器人（自定义 Webhook，可选签名）
+  # 飞书机器人（自定义 Webhook，可选签名；urls 支持多个群）
   feishu:
     enabled: false
-    url: ""
+    urls: []
     secret: ""
-  # 企业微信机器人（自定义 Webhook，key 已含在 url 中）
+  # 企业微信机器人（自定义 Webhook，key 已含在 url 中；urls 支持多个群）
   wecom:
     enabled: false
-    url: ""
+    urls: []
     mentionedList: []
 
 # Agent 接入授权（参考哪吒探针：启用后 Agent 需携带 secret）

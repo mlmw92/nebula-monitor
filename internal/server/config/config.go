@@ -95,22 +95,22 @@ type WebhookConfig struct {
 // DingTalkConfig 钉钉机器人通知配置。
 type DingTalkConfig struct {
 	Enabled   bool     `yaml:"enabled"`
-	URL       string   `yaml:"url"`       // 机器人 Webhook 地址
+	URLs      []string `yaml:"urls"`      // 机器人 Webhook 地址列表（支持多个群）
 	Secret    string   `yaml:"secret"`    // 可选，加签密钥（安全设置→加签）
 	AtMobiles []string `yaml:"atMobiles"` // 可选，@ 的手机号列表
 }
 
 // FeishuConfig 飞书机器人通知配置。
 type FeishuConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	URL     string `yaml:"url"`    // 机器人 Webhook 地址
-	Secret  string `yaml:"secret"` // 可选，签名密钥（安全设置→签名校验）
+	Enabled bool     `yaml:"enabled"`
+	URLs    []string `yaml:"urls"`    // 机器人 Webhook 地址列表（支持多个群）
+	Secret  string   `yaml:"secret"` // 可选，签名密钥（安全设置→签名校验）
 }
 
 // WeComConfig 企业微信机器人通知配置。
 type WeComConfig struct {
 	Enabled       bool     `yaml:"enabled"`
-	URL           string   `yaml:"url"`           // 机器人 Webhook 地址（key 已含在 URL）
+	URLs          []string `yaml:"urls"`          // 机器人 Webhook 地址列表（支持多个群，key 已含在 URL）
 	MentionedList []string `yaml:"mentionedList"` // 可选，@ 成员（userid 或 "@all"）
 }
 
