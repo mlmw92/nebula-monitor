@@ -113,8 +113,8 @@
             <span class="topo-group-title">
               <ClusterIcon />
               <strong>集群 {{ grp.name || '未命名' }}</strong>
-              <el-tooltip content="集群名来自 agent 配置文件 /etc/monitor-agent/config.yaml 中 redisInstances[*].name，用于将多个实例归入同一逻辑集群；留空则按实例地址独立展示。建议为同一集群的多个实例配置相同的 name。" placement="top">
-                <span class="name-source-hint">name ← agent 配置</span>
+              <el-tooltip content="集群名直接读取 agent 配置 /etc/monitor-agent/config.yaml → redisInstances[*].name（同一集群下所有实例需配置相同的 name）。修改后重启 agent 生效。" placement="top">
+                <span class="name-source-hint">name ← agent.yaml → redisInstances[*].name</span>
               </el-tooltip>
             </span>
             <span class="topo-meta">
@@ -124,46 +124,7 @@
               <span class="dim">masters: {{ grp.masters.length }}</span>
               <span class="dim">· replicas: {{ grp.slaves.length }}</span>
               <span class="dim">· 总节点 {{ grp.masters.length + grp.slaves.length }}</span>
-              <span class="dim" v-if="clusterSlotStats(grp).assigned > 0">
-                · slots {{ clusterSlotStats(grp).assigned }}/16384 ({{ clusterSlotStats(grp).pct }}%)
-              </span>
             </span>
-          </div>
-
-          <!-- Slot 数据分片条：16384 槽按 master 着色分段 -->
-          <div class="slot-section" v-if="clusterSlotView(grp).length">
-            <div class="slot-section-label">数据分片（Slot 分配）</div>
-            <div class="slot-bar">
-              <div
-                v-for="seg in clusterSlotView(grp)"
-                :key="'seg-'+seg.master.instance+'-'+seg.range"
-                class="slot-seg"
-                :class="{ 'is-down': !seg.master.up }"
-                :style="{ flexGrow: seg.count, background: seg.color }"
-                :title="seg.master.instance + ' · slots ' + seg.range + '（' + seg.count + ' 槽）'"
-                @click="openDetail(seg.master)"
-              ></div>
-              <div
-                v-if="clusterSlotStats(grp).unassigned > 0"
-                class="slot-seg slot-seg-empty"
-                :style="{ flexGrow: clusterSlotStats(grp).unassigned }"
-                :title="'未分配槽位：' + clusterSlotStats(grp).unassigned"
-              ></div>
-            </div>
-            <div class="slot-legend">
-              <span
-                v-for="(m, mi) in grp.masters.filter(mm => (mm.slotRanges || []).length)"
-                :key="'lg-'+m.instance"
-                class="slot-legend-item"
-                :title="'slots ' + (m.slotRanges || []).join(', ')"
-                @click="openDetail(m)"
-              >
-                <span class="slot-swatch" :style="{ background: slotColor(grp, mi) }"></span>
-                <span class="mono">{{ m.instance }}</span>
-                <span class="dim">slots {{ (m.slotRanges || []).join(', ') }}</span>
-                <span class="dim">（{{ slotRangeTotal(m.slotRanges) }} 槽）</span>
-              </span>
-            </div>
           </div>
 
           <!-- 主从复制与故障转移：复制 ↓ 实线（master→slave），故障转移 ↑ 虚线（slave 升主） -->
@@ -193,10 +154,8 @@
                     <span class="dim">·</span>
                     <span>{{ formatBytes(m.usedMemory) }}</span>
                   </div>
-                  <div class="rel-node-meta" v-if="(m.slotRanges || []).length">
-                    <span class="slot-chip" :style="{ borderColor: slotColor(grp, idx), color: slotColor(grp, idx) }">
-                      slots {{ (m.slotRanges || []).join(', ') }} · {{ slotRangeTotal(m.slotRanges) }} 槽
-                    </span>
+                  <div class="rel-node-meta" v-if="m.up">
+                    <span class="mono">{{ m.instance }}</span>
                   </div>
                 </div>
                 <!-- 复制链路 + failover 路径（按预聚合映射直接取，避免匹配失败） -->
