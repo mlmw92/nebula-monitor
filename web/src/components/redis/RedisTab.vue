@@ -233,8 +233,35 @@
             </div>
           </div>
           <div class="topo-legend">
-            <span class="topo-legend-item"><span class="legend-line legend-solid"></span>数据复制（master → slave）</span>
-            <span class="topo-legend-item"><span class="legend-line legend-dash"></span>故障转移（slave 升主，slave → master）</span>
+            <span class="topo-legend-item" title="master 将写入同步给 replica"><span class="legend-line legend-solid"></span>数据复制（master → slave）</span>
+            <span class="topo-legend-item" title="master 宕机时对应 slave 提升为新 master"><span class="legend-line legend-dash"></span>故障转移（slave 升主，slave → master）</span>
+          </div>
+          <!-- 未关联主节点的从节点（replicaOf 为空，常见于 agent 未升级二进制） -->
+          <div v-if="grp.unlinkedSlaves.length" class="unlinked-block">
+            <div class="unlinked-label">
+              <span class="role-badge role-badge-s">S</span>
+              未关联主节点的从节点（{{ grp.unlinkedSlaves.length }} 个）— agent 升级后将自动关联
+            </div>
+            <div class="unlinked-list">
+              <div v-for="s in grp.unlinkedSlaves" :key="'ul-'+s.instance"
+                   class="rel-node rel-slave ms-slave-card"
+                   :class="{ 'is-down': !s.up }"
+                   @click.stop="openDetail(s)">
+                <div class="ms-slave-head">
+                  <span class="role-badge role-badge-s">S</span>
+                  <span class="mono" :title="s.instance">{{ s.instance }}</span>
+                </div>
+                <div class="ms-slave-meta">
+                  <span :class="['dot', s.up ? 'up' : 'down']"></span>
+                  <span>{{ s.up ? '在线' : '离线' }}</span>
+                  <span class="dim">·</span>
+                  <span>{{ s.up ? formatNum(s.ops) + ' ops/s' : '离线' }}</span>
+                  <span v-if="s.up && s.replicationLag !== undefined && s.replicationLag !== null" class="dim">· lag {{ s.replicationLag }}s</span>
+                  <span class="dim">·</span>
+                  <span>{{ formatBytes(s.usedMemory) }}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         </div>
@@ -778,13 +805,16 @@ const topologyGroups = computed(() => {
   for (const i of instances.value) {
     const g = i.group || i.name || i.instance
     if (i.topology === 'cluster') {
-      clusters[g] = clusters[g] || { name: g, masters: [], slaves: [], slavesByMaster: {}, topology: 'cluster' }
+      clusters[g] = clusters[g] || { name: g, masters: [], slaves: [], slavesByMaster: {}, unlinkedSlaves: [], topology: 'cluster' }
       if (i.role === 'slave' || i.role === 'replica') {
         clusters[g].slaves.push(i)
-        // 按 replicaOf 预聚合到对应 master，避免渲染时再 filter 匹配失败导致从节点不显示
+        // 按 replicaOf 预聚合到对应 master
         if (i.replicaOf) {
           clusters[g].slavesByMaster[i.replicaOf] = clusters[g].slavesByMaster[i.replicaOf] || []
           clusters[g].slavesByMaster[i.replicaOf].push(i)
+        } else {
+          // replicaOf 为空（旧 agent 未上报或无法确定主节点关系）→ 归入未关联区域，避免从节点丢失
+          clusters[g].unlinkedSlaves.push(i)
         }
       } else clusters[g].masters.push(i)
     } else if (i.topology === 'sentinel') {
@@ -1862,21 +1892,9 @@ function handleResize() {
   font-size: 11px; font-family: var(--mono);
   padding: 1px 8px; border-radius: 4px; border: 1px dashed;
 }
-/* 分支：左轨为复制实线（向下），右侧虚线为 failover（向上） */
+/* 分支：左轨为复制实线（向下），右侧虚线为 failover（向上）
+   注：ms-branch-rail / ms-rail-repl / ms-rail-fo 等强化样式见下方"强化 rail 方向箭头"段 */
 .ms-branch { display: flex; gap: 0; margin-left: 10px; }
-.ms-branch-rail {
-  position: relative; width: 56px; flex-shrink: 0;
-  border-left: 2px solid rgba(99,179,237,0.55);
-  border-right: none;
-  display: flex; flex-direction: column; justify-content: space-between;
-  padding: 2px 0 2px 6px; margin: 4px 0;
-}
-.ms-branch-rail::after {
-  content: ''; position: absolute; right: 6px; top: 4px; bottom: 4px;
-  border-right: 2px dashed rgba(245,158,11,0.55);
-}
-.ms-rail-label { font-size: 10px; color: rgba(147,197,253,0.85); writing-mode: vertical-lr; letter-spacing: 1px; }
-.ms-rail-failover { font-size: 10px; color: rgba(251,191,36,0.85); writing-mode: vertical-lr; letter-spacing: 1px; }
 .ms-slaves { display: flex; flex-direction: column; gap: 6px; flex: 1; padding: 4px 0; }
 .ms-slave { position: relative; }
 .ms-slave::before {
@@ -1936,4 +1954,38 @@ function handleResize() {
 .ms-slave-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; }
 .ms-slave-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: rgba(255,255,255,0.75); flex-wrap: wrap; }
 .ms-slave-meta .dim { color: rgba(255,255,255,0.4); }
+
+/* ==== 未关联主节点的从节点（replicaOf 为空）==== */
+.unlinked-block {
+  margin-top: 12px; padding: 10px 14px;
+  background: rgba(148,163,184,0.04); border: 1px dashed rgba(148,163,184,0.2);
+  border-radius: 8px;
+}
+.unlinked-label {
+  font-size: 11px; color: rgba(255,255,255,0.55); margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.unlinked-list { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ==== 强化 rail 方向箭头（复制 ↓ 实线 + 故障转移 ↑ 虚线）==== */
+.ms-branch-rail {
+  width: 64px; flex-shrink: 0;
+  border-left: 2px solid rgba(147,197,253,0.65);
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: 2px 0 2px 8px; margin: 4px 0;
+  position: relative;
+}
+.ms-branch-rail::after {
+  content: ''; position: absolute; right: 8px; top: 4px; bottom: 4px;
+  border-right: 2px dashed rgba(251,191,36,0.7);
+}
+.ms-rail-repl {
+  font-size: 10px; color: rgba(147,197,253,0.9);
+  writing-mode: vertical-lr; letter-spacing: 1px; font-weight: 600;
+}
+.ms-rail-fo {
+  font-size: 10px; color: rgba(251,191,36,0.9);
+  writing-mode: vertical-lr; letter-spacing: 1px; font-weight: 600;
+  text-align: right;
+}
 </style>
