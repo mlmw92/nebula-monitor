@@ -43,6 +43,7 @@
 - ⚠️ **agent 端若有采集/上报改动**（如在线用户字段、进程 CPU 修正），必须 server 与 agent 同时升级并重分发 agent 二进制，
   否则旧 agent 上报结构不匹配会导致功能回归（如在线用户变空白）。
 - ⚠️ 构建会产生临时文件（`build_*.ps1`、`server.log`、`agent.log`、`build.log` 等），提交前清理，避免污染仓库。
+- ❌ 升级时漏跑 `build/build-web.sh`，导致 `release.sh` 把 **旧前端** 打进包（`release.sh` 此前只检查 `dist/artifacts/web` 是否存在、不校验新鲜度）。现已修复：`release.sh` 自动按需重建前端与二进制，单命令即可，勿再手动分步。
 - ℹ️ 纯脚本/文档改动（如 `install-server.sh` 健康检查修复）不需要重编译二进制，但 `VERSION` 不变、无需走本流程。
 
 ## 4. 验证（部署后）
@@ -61,11 +62,15 @@ journalctl -u monitor-server | grep 'Server 启动'   # 日志 version 字段应
 - `nebula-monitor-v{VERSION}-upgrade.tar.gz` — 增量升级（仅 bin + web，轻量）
 
 ```bash
-# 在第 2 步之后追加：
-bash build/build-web.sh           # 构建前端 → dist/artifacts/web/
+# 在第 2 步之后追加（release.sh 会自动构建前端、按需重编译二进制，无需手动 build-web.sh）：
 bash build/fetch-packages.sh      # 可选：下载 node + vm → dist/artifacts/packages/
-bash build/release.sh             # 组装两个 tarball
+bash build/release.sh             # 组装两个 tarball（自动 build-web / 按需 cross-compile）
 ```
+
+> `build/release.sh` 现已**自动按需构建**：前端源(`web/src`)比产物更新或缺失时自动 `build/build-web.sh`；
+> 二进制缺失、或前端产物(`web/dist`，被 server embed 内嵌)比现有二进制新时自动 `build/cross-compile.sh`。
+> 因此日常“升级版本”只需：改 `VERSION` → 跑 `release.sh` 一步到位，不会再出现“前端没打进包”的问题。
+> 单独跑 `build-web.sh` / `cross-compile.sh` 仍受支持（用于只想要散落产物时）。
 
 ### full 包用法
 

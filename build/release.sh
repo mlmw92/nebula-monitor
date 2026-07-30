@@ -31,17 +31,41 @@ c_ok()   { printf '\033[32m[完成]\033[0m %s\n' "$*"; }
 c_warn() { printf '\033[33m[警告]\033[0m %s\n' "$*"; }
 die()    { printf '\033[31m[错误]\033[0m %s\n' "$*"; exit 1; }
 
-# ============================ 前置检查 ============================
+# ============================ 前置检查（缺失/陈旧则自动构建，无需人工干预） ============================
 # 注：NTFS 不一定保留 unix +x 位，所以用"存在+非空"判即可；chmod 会在拷贝后补上。
+# 设计目标：release.sh 单命令即可完成发布物组装，无需人工先跑 build-web.sh / cross-compile.sh。
+#   - 仅在产物缺失、或源比产物更新时才自动重建（幂等；CI 中已存在且最新则跳过，不重复耗时）。
+#   - Server 二进制通过 embed 内嵌前端，因此前端比现有二进制更新时必须重编译，否则打进包的
+#     bin 与 web/ 会不一致（这是此前“升级包前端是旧版”的根因）。
 BIN_DIR="dist/artifacts/bin"
 WEB_DIR="dist/artifacts/web"
 PKG_DIR="dist/artifacts/packages"
-[[ -s "${BIN_DIR}/server/linux/amd64/server" ]] \
-  || die "缺少 ${BIN_DIR}/server/linux/amd64/server，请先运行 build/cross-compile.sh"
-[[ -s "${BIN_DIR}/agent/linux/amd64/agent" ]] \
-  || die "缺少 ${BIN_DIR}/agent/linux/amd64/agent，请先运行 build/cross-compile.sh"
-[[ -s "${WEB_DIR}/index.html" ]] \
-  || die "缺少 ${WEB_DIR}/index.html，请先运行 build/build-web.sh"
+
+# 1) 前端：源(web/src)有更新或缺失时，自动重建到 dist/artifacts/web
+WEB_OUT="${WEB_DIR}/index.html"
+fresh_web="$(find web/src -newer "$WEB_OUT" 2>/dev/null || true)"
+if [[ ! -s "$WEB_OUT" ]] || [[ -n "$fresh_web" ]]; then
+  c_info "前端源有更新或缺失，自动执行 build/build-web.sh 重建前端"
+  bash build/build-web.sh
+fi
+[[ -s "$WEB_OUT" ]] || die "缺少 ${WEB_OUT}，请先运行 build/build-web.sh"
+
+# 2) 二进制：缺失、或前端产物(web/dist，被 embed)比现有二进制更新时，自动重编译
+SERVER_BIN="${BIN_DIR}/server/linux/amd64/server"
+AGENT_BIN="${BIN_DIR}/agent/linux/amd64/agent"
+need_bin=0
+if [[ ! -s "$SERVER_BIN" ]] || [[ ! -s "$AGENT_BIN" ]]; then
+  need_bin=1
+elif [[ -e web/dist ]] && [[ web/dist -nt "$SERVER_BIN" ]]; then
+  # 前端已重建（web/dist 比二进制新）→ 重编译以把最新前端 embed 进 server
+  need_bin=1
+fi
+if (( need_bin )); then
+  c_info "二进制缺失或陈旧，自动执行 build/cross-compile.sh"
+  bash build/cross-compile.sh
+fi
+[[ -s "$SERVER_BIN" ]] || die "缺少 ${SERVER_BIN}，请先运行 build/cross-compile.sh"
+[[ -s "$AGENT_BIN" ]]  || die "缺少 ${AGENT_BIN}，请先运行 build/cross-compile.sh"
 
 # ============================ 准备 full 包 stage ============================
 # 让 stage 目录直接命名为包顶层目录名（${NAME}-full），打包时无需 -s 重命名
