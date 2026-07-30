@@ -55,7 +55,7 @@
 
     <!-- 待应用 -->
     <div class="glass panel" v-if="pending">
-      <div class="panel-title">待应用升级</div>
+      <div class="panel-title">待升级</div>
       <div class="pending-grid">
         <div class="pending-row">
           <span class="r-label">新版本</span>
