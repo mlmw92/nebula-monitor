@@ -198,8 +198,8 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 		})
 	}
 
-	// 2. CLUSTER NODES 解析拓扑，遍历所有 master 与 replica
-	masters, replicasByMaster, err := redisClusterNodes(cfg.Addr, cfg.Password)
+	// 2. CLUSTER NODES 解析拓扑（含 slot 区间），遍历所有 master 与 replica
+	masters, replicasByMaster, slotsByMaster, err := redisClusterNodes(cfg.Addr, cfg.Password)
 	if err != nil {
 		slog.Warn("CLUSTER NODES 解析失败", "addr", cfg.Addr, "err", err)
 		return metrics, instances
@@ -221,6 +221,23 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 		ri.Role = "master"
 		metrics = append(metrics, m...)
 		instances = append(instances, ri)
+		// 2.1b slot 区间元信息指标（每个区间一条，值为槽位数），供前端绘制分片图
+		for _, rng := range slotsByMaster[masterAddr] {
+			metrics = append(metrics, model.Metric{
+				Node: c.node,
+				Name: "redis_cluster_slot_range",
+				Labels: map[string]string{
+					"node":     c.node,
+					"instance": masterAddr,
+					"topology": "cluster",
+					"group":    cfg.Name,
+					"role":     "master",
+					"range":    rng,
+				},
+				Value:     slotRangeCount(rng),
+				Timestamp: now,
+			})
+		}
 		// 2.2 replicas（关联到当前 master）
 		for _, replicaAddr := range replicasByMaster[masterAddr] {
 			rm, rri := c.collectStandalone(cfg, replicaAddr, now)
@@ -423,26 +440,30 @@ func redisClusterInfo(addr, password string) (map[string]string, error) {
 	return parseInfoText(resp), nil
 }
 
-// redisClusterNodes 执行 CLUSTER NODES，返回所有 master 节点地址列表以及 master→replicas 映射。
-func redisClusterNodes(addr, password string) ([]string, map[string][]string, error) {
+// redisClusterNodes 执行 CLUSTER NODES，返回 master 地址列表、master→replicas 映射、master→slot 区间映射。
+func redisClusterNodes(addr, password string) ([]string, map[string][]string, map[string][]string, error) {
 	conn, err := dialRedis(addr, password)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer conn.Close()
 	resp, err := sendCommand(conn, "CLUSTER", "NODES")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	masters, replicas := parseClusterTopology(resp)
-	return masters, replicas, nil
+	masters, replicas, slots := parseClusterTopology(resp)
+	return masters, replicas, slots, nil
 }
 
 // parseClusterTopology 解析 CLUSTER NODES 输出。
-// 返回：master 节点地址列表（去重且忽略无效 addr），以及 masterAddr→[]replicaAddr 映射。
-func parseClusterTopology(resp string) ([]string, map[string][]string) {
+// 行格式：<id> <ip:port@cport> <flags> <master> <ping> <pong> <epoch> <link> <slot>...
+// slot 从第 9 个字段开始（仅 master 行有），格式：单槽 "7000"、区间 "0-5460"、
+// 迁移中 "[7000->-id]"（忽略）。
+// 返回：master 地址列表（去重且忽略无效 addr）、masterAddr→[]replicaAddr、masterAddr→[]slotRange。
+func parseClusterTopology(resp string) ([]string, map[string][]string, map[string][]string) {
 	type rawNode struct {
 		id, addr, flags, masterID string
+		slots                     []string
 	}
 	var nodes []rawNode
 	for _, line := range strings.Split(resp, "\n") {
@@ -460,6 +481,15 @@ func parseClusterTopology(resp string) ([]string, map[string][]string) {
 		}
 		if len(f) > 3 {
 			n.masterID = f[3]
+		}
+		// slot 字段从 index 8 开始；迁移中槽位（"[...]" 包裹）忽略
+		if len(f) > 8 {
+			for _, s := range f[8:] {
+				if strings.HasPrefix(s, "[") {
+					continue
+				}
+				n.slots = append(n.slots, s)
+			}
 		}
 		// addr 格式 host:port@cluster-port，去掉 @ 之后
 		if idx := strings.Index(n.addr, "@"); idx >= 0 {
@@ -481,6 +511,7 @@ func parseClusterTopology(resp string) ([]string, map[string][]string) {
 	var masters []string
 	seen := map[string]bool{}
 	replicasByMaster := map[string][]string{}
+	slotsByMaster := map[string][]string{}
 	for _, n := range nodes {
 		if n.addr == "" || strings.HasPrefix(n.addr, ":") {
 			continue
@@ -490,13 +521,29 @@ func parseClusterTopology(resp string) ([]string, map[string][]string) {
 				masters = append(masters, n.addr)
 				seen[n.addr] = true
 			}
+			if len(n.slots) > 0 {
+				slotsByMaster[n.addr] = append(slotsByMaster[n.addr], n.slots...)
+			}
 		} else if strings.Contains(n.flags, "slave") && n.masterID != "" {
 			if m, ok := masterByID[n.masterID]; ok {
 				replicasByMaster[m] = append(replicasByMaster[m], n.addr)
 			}
 		}
 	}
-	return masters, replicasByMaster
+	return masters, replicasByMaster, slotsByMaster
+}
+
+// slotRangeCount 计算 slot 区间包含的槽位数。单槽 "7000" → 1；区间 "0-5460" → 5461。
+func slotRangeCount(r string) float64 {
+	if i := strings.Index(r, "-"); i >= 0 {
+		lo, err1 := strconv.Atoi(strings.TrimSpace(r[:i]))
+		hi, err2 := strconv.Atoi(strings.TrimSpace(r[i+1:]))
+		if err1 == nil && err2 == nil && hi >= lo {
+			return float64(hi - lo + 1)
+		}
+		return 0
+	}
+	return 1
 }
 
 // sentinelGetMaster 执行 SENTINEL get-master-addr-by-name <name>，返回 master 的 host:port。

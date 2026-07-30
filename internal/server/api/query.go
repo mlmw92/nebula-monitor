@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -589,6 +590,20 @@ func round2(v float64) float64 {
 	return float64(int64(v*100+0.5)) / 100
 }
 
+// slotRangeStart 返回 slot 区间的起始槽位号（"0-5460" → 0；单槽 "7000" → 7000）。
+func slotRangeStart(r string) int {
+	if i := strings.Index(r, "-"); i >= 0 {
+		if v, err := strconv.Atoi(strings.TrimSpace(r[:i])); err == nil {
+			return v
+		}
+		return 0
+	}
+	if v, err := strconv.Atoi(strings.TrimSpace(r)); err == nil {
+		return v
+	}
+	return 0
+}
+
 // ---- 中间件监控：Redis ----
 
 // handleRedisInstances 聚合所有 Redis 实例的最新状态与关键指标，供前端列表展示。
@@ -645,6 +660,8 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 		ReplicaOf string `json:"replicaOf,omitempty"`
 		// 集群中 replica→master 关联（replica 实例上 labels.cluster_master_of），用于关系图
 		// ClusterMasterOf removed: unified into ReplicaOf
+		// 集群 master 的 slot 区间列表（来自 redis_cluster_slot_range 元信息指标），用于分片图
+		SlotRanges []string `json:"slotRanges,omitempty"`
 	}
 
 	// 以 "node|instance" 为 key 建立实例索引
@@ -734,6 +751,41 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 			}
 			// 集群中 replica→master 关联标签透传
 			// cluster replica 关系已由 labels.replica_of 在初始化时写入 ReplicaOf
+		}
+	}
+
+	// 2.5 聚合集群 master 的 slot 区间（redis_cluster_slot_range 元信息指标）
+	if slotSeries, err := a.store.QueryAllLatest("redis_cluster_slot_range", nil); err == nil {
+		for _, s := range slotSeries {
+			node := s.Labels["node"]
+			instance := s.Labels["instance"]
+			rng := s.Labels["range"]
+			if node == "" || instance == "" || rng == "" {
+				continue
+			}
+			ri, ok := instances[node+"|"+instance]
+			if !ok {
+				continue
+			}
+			// 去重
+			exists := false
+			for _, r2 := range ri.SlotRanges {
+				if r2 == rng {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				ri.SlotRanges = append(ri.SlotRanges, rng)
+			}
+		}
+		// 按区间起始槽位排序，保证分片图从左到右递增
+		for _, ri := range instances {
+			if len(ri.SlotRanges) > 1 {
+				sort.Slice(ri.SlotRanges, func(a, b int) bool {
+					return slotRangeStart(ri.SlotRanges[a]) < slotRangeStart(ri.SlotRanges[b])
+				})
+			}
 		}
 	}
 

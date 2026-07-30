@@ -120,26 +120,92 @@
               <span class="dim">masters: {{ grp.masters.length }}</span>
               <span class="dim">· replicas: {{ grp.slaves.length }}</span>
               <span class="dim">· 总节点 {{ grp.masters.length + grp.slaves.length }}</span>
+              <span class="dim" v-if="clusterSlotStats(grp).assigned > 0">
+                · slots {{ clusterSlotStats(grp).assigned }}/16384 ({{ clusterSlotStats(grp).pct }}%)
+              </span>
             </span>
           </div>
-          <div class="topo-relation">
-            <div class="rel-edges">
-              <div v-for="(m, idx) in grp.masters" :key="'cm-'+idx" class="rel-master-block">
-                <div class="rel-node rel-master" :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }" @click="openDetail(m)">
-                  <div class="rel-node-name" :title="m.instance">{{ m.instance }}</div>
-                  <div class="rel-node-meta">
-                    <span :class="['dot', m.up ? 'up' : 'down']"></span>
-                    <span>{{ m.up ? '在线' : '离线' }}</span>
-                    <span class="dim">·</span>
-                    <span>{{ formatNum(m.ops) }} ops/s</span>
-                    <span class="dim">·</span>
-                    <span>{{ formatBytes(m.usedMemory) }}</span>
-                  </div>
+
+          <!-- Slot 数据分片条：16384 槽按 master 着色分段 -->
+          <div class="slot-section" v-if="clusterSlotView(grp).length">
+            <div class="slot-section-label">数据分片（Slot 分配）</div>
+            <div class="slot-bar">
+              <div
+                v-for="seg in clusterSlotView(grp)"
+                :key="'seg-'+seg.master.instance+'-'+seg.range"
+                class="slot-seg"
+                :class="{ 'is-down': !seg.master.up }"
+                :style="{ flexGrow: seg.count, background: seg.color }"
+                :title="seg.master.instance + ' · slots ' + seg.range + '（' + seg.count + ' 槽）'"
+                @click="openDetail(seg.master)"
+              ></div>
+              <div
+                v-if="clusterSlotStats(grp).unassigned > 0"
+                class="slot-seg slot-seg-empty"
+                :style="{ flexGrow: clusterSlotStats(grp).unassigned }"
+                :title="'未分配槽位：' + clusterSlotStats(grp).unassigned"
+              ></div>
+            </div>
+            <div class="slot-legend">
+              <span
+                v-for="(m, mi) in grp.masters.filter(mm => (mm.slotRanges || []).length)"
+                :key="'lg-'+m.instance"
+                class="slot-legend-item"
+                :title="'slots ' + (m.slotRanges || []).join(', ')"
+                @click="openDetail(m)"
+              >
+                <span class="slot-swatch" :style="{ background: slotColor(grp, mi) }"></span>
+                <span class="mono">{{ m.instance }}</span>
+                <span class="dim">slots {{ (m.slotRanges || []).join(', ') }}</span>
+                <span class="dim">（{{ slotRangeTotal(m.slotRanges) }} 槽）</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Master-Slave 主从复制与故障转移 -->
+          <div class="slot-section-label" style="margin-top: 4px">主从复制与故障转移</div>
+          <div class="ms-tree">
+            <div v-for="(m, idx) in grp.masters" :key="'cm-'+idx" class="ms-unit">
+              <!-- Master 节点 -->
+              <div
+                class="rel-node rel-master ms-master"
+                :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }"
+                :style="{ borderLeftColor: slotColor(grp, idx) }"
+                @click="openDetail(m)"
+              >
+                <div class="rel-node-name" :title="m.instance">
+                  <span class="role-badge role-badge-m">M</span>
+                  {{ m.instance }}
                 </div>
-                <!-- 关联 replicas -->
-                <div v-if="grp.slaves.filter(s => s.replicaOf === m.instance).length" class="rel-slaves">
-                  <div v-for="s in grp.slaves.filter(ss => ss.replicaOf === m.instance)" :key="s.instance" class="rel-slave" :class="{ 'is-down': !s.up }" @click.stop="openDetail(s)">
-                    <span class="rel-slave-tag">slave</span>
+                <div class="rel-node-meta">
+                  <span :class="['dot', m.up ? 'up' : 'down']"></span>
+                  <span>{{ m.up ? '在线' : '离线' }}</span>
+                  <span class="dim">·</span>
+                  <span>{{ formatNum(m.ops) }} ops/s</span>
+                  <span class="dim">·</span>
+                  <span>{{ formatBytes(m.usedMemory) }}</span>
+                </div>
+                <div class="rel-node-meta" v-if="(m.slotRanges || []).length">
+                  <span class="slot-chip" :style="{ borderColor: slotColor(grp, idx), color: slotColor(grp, idx) }">
+                    slots {{ (m.slotRanges || []).join(', ') }} · {{ slotRangeTotal(m.slotRanges) }} 槽
+                  </span>
+                </div>
+              </div>
+              <!-- 复制链路 + failover 路径 -->
+              <div v-if="grp.slaves.filter(s => s.replicaOf === m.instance).length" class="ms-branch">
+                <div class="ms-branch-rail">
+                  <span class="ms-rail-label">复制 ↓</span>
+                  <span class="ms-rail-failover">↑ 故障转移</span>
+                </div>
+                <div class="ms-slaves">
+                  <div
+                    v-for="s in grp.slaves.filter(ss => ss.replicaOf === m.instance)"
+                    :key="s.instance"
+                    class="rel-slave ms-slave"
+                    :class="{ 'is-down': !s.up }"
+                    @click.stop="openDetail(s)"
+                  >
+                    <span class="role-badge role-badge-s">S</span>
                     <span :title="s.instance">{{ s.instance }}</span>
                     <span :class="['dot', s.up ? 'up' : 'down']"></span>
                     <span class="dim">{{ s.up ? formatNum(s.ops) + ' ops/s' : '离线' }}</span>
@@ -148,6 +214,10 @@
                 </div>
               </div>
             </div>
+          </div>
+          <div class="topo-legend">
+            <span class="topo-legend-item"><span class="legend-line legend-solid"></span>数据复制（master → slave）</span>
+            <span class="topo-legend-item"><span class="legend-line legend-dash"></span>故障转移（slave 升主，slave → master）</span>
           </div>
         </div>
       </template>
@@ -209,23 +279,30 @@
               <span class="dim">· replicas: {{ grp.slaves.length }}</span>
             </span>
           </div>
-          <div class="topo-relation">
-            <div class="rel-edges">
-              <div v-for="(m, idx) in grp.masters" :key="'rm-'+idx" class="rel-master-block">
-                <div class="rel-node rel-master" :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }" @click="openDetail(m)">
-                  <div class="rel-node-name" :title="m.instance">{{ m.instance }}</div>
-                  <div class="rel-node-meta">
-                    <span :class="['dot', m.up ? 'up' : 'down']"></span>
-                    <span>{{ m.up ? '在线' : '离线' }}</span>
-                    <span class="dim">·</span>
-                    <span>{{ formatNum(m.ops) }} ops/s</span>
-                    <span class="dim">·</span>
-                    <span>{{ formatBytes(m.usedMemory) }}</span>
-                  </div>
+          <div class="ms-tree">
+            <div v-for="(m, idx) in grp.masters" :key="'rm-'+idx" class="ms-unit">
+              <div class="rel-node rel-master ms-master" :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }" @click="openDetail(m)">
+                <div class="rel-node-name" :title="m.instance">
+                  <span class="role-badge role-badge-m">M</span>
+                  {{ m.instance }}
                 </div>
-                <div v-if="grp.slaves.filter(s => s.replicaOf === m.instance).length" class="rel-slaves">
-                  <div v-for="s in grp.slaves.filter(ss => ss.replicaOf === m.instance)" :key="s.instance" class="rel-slave" :class="{ 'is-down': !s.up }" @click.stop="openDetail(s)">
-                    <span class="rel-slave-tag">slave</span>
+                <div class="rel-node-meta">
+                  <span :class="['dot', m.up ? 'up' : 'down']"></span>
+                  <span>{{ m.up ? '在线' : '离线' }}</span>
+                  <span class="dim">·</span>
+                  <span>{{ formatNum(m.ops) }} ops/s</span>
+                  <span class="dim">·</span>
+                  <span>{{ formatBytes(m.usedMemory) }}</span>
+                </div>
+              </div>
+              <div v-if="grp.slaves.filter(s => s.replicaOf === m.instance).length" class="ms-branch">
+                <div class="ms-branch-rail">
+                  <span class="ms-rail-label">复制 ↓</span>
+                  <span class="ms-rail-failover">↑ 故障转移</span>
+                </div>
+                <div class="ms-slaves">
+                  <div v-for="s in grp.slaves.filter(ss => ss.replicaOf === m.instance)" :key="s.instance" class="rel-slave ms-slave" :class="{ 'is-down': !s.up }" @click.stop="openDetail(s)">
+                    <span class="role-badge role-badge-s">S</span>
                     <span :title="s.instance">{{ s.instance }}</span>
                     <span :class="['dot', s.up ? 'up' : 'down']"></span>
                     <span class="dim">{{ s.up ? formatNum(s.ops) + ' ops/s' : '离线' }}</span>
@@ -234,6 +311,10 @@
                 </div>
               </div>
             </div>
+          </div>
+          <div class="topo-legend">
+            <span class="topo-legend-item"><span class="legend-line legend-solid"></span>数据复制（master → slave）</span>
+            <span class="topo-legend-item"><span class="legend-line legend-dash"></span>故障转移（slave 升主，slave → master）</span>
           </div>
         </div>
       </template>
@@ -702,6 +783,59 @@ const topologyGroups = computed(() => {
     standalones,
   }
 })
+
+// ---- 集群 Slot 分片视图 ----
+const CLUSTER_SLOT_TOTAL = 16384
+const SLOT_PALETTE = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#22d3ee', '#fb923c', '#4ade80', '#818cf8', '#f87171']
+
+// slotColor 返回组内第 idx 个 master 的分配色（与分片条/图例/master 卡片同色）
+function slotColor(grp, idx) {
+  return SLOT_PALETTE[idx % SLOT_PALETTE.length]
+}
+
+// slotRangeStart 解析区间起始槽位（"0-5460"→0；单槽 "7000"→7000）
+function slotRangeStart(r) {
+  const i = String(r).indexOf('-')
+  if (i >= 0) return parseInt(String(r).slice(0, i), 10) || 0
+  return parseInt(r, 10) || 0
+}
+
+// slotRangeCount 计算区间槽位数（"0-5460"→5461；单槽→1）
+function slotRangeCount(r) {
+  const i = String(r).indexOf('-')
+  if (i >= 0) {
+    const lo = parseInt(String(r).slice(0, i), 10) || 0
+    const hi = parseInt(String(r).slice(i + 1), 10) || 0
+    return hi >= lo ? hi - lo + 1 : 0
+  }
+  return 1
+}
+
+// slotRangeTotal 计算一个 master 所有区间的总槽位数
+function slotRangeTotal(ranges) {
+  return (ranges || []).reduce((s, r) => s + slotRangeCount(r), 0)
+}
+
+// clusterSlotView 展开组内所有 master 的 slot 区间为分段条数据
+function clusterSlotView(grp) {
+  const segs = []
+  grp.masters.forEach((m, mi) => {
+    for (const r of m.slotRanges || []) {
+      segs.push({ master: m, range: r, count: slotRangeCount(r), color: slotColor(grp, mi) })
+    }
+  })
+  // 按起始槽位排序，保证分片条从左到右递增
+  return segs.sort((a, b) => slotRangeStart(a.range) - slotRangeStart(b.range))
+}
+
+// clusterSlotStats 汇总组内槽位分配情况
+function clusterSlotStats(grp) {
+  let assigned = 0
+  for (const m of grp.masters) assigned += slotRangeTotal(m.slotRanges)
+  if (assigned > CLUSTER_SLOT_TOTAL) assigned = CLUSTER_SLOT_TOTAL
+  const unassigned = CLUSTER_SLOT_TOTAL - assigned
+  return { assigned, unassigned, pct: Math.round((assigned / CLUSTER_SLOT_TOTAL) * 100) }
+}
 
 // 集群健康度判定（基于 topologyGroups 中 cluster 组的 masters 状态）
 function clusterHealth(grp) {
@@ -1656,7 +1790,7 @@ function handleResize() {
 /* 实例列表：碎片率告警色 */
 .rate-warn { color: #f87171; }
 
-/* ==== Cluster 拓扑：master → replicas ==== */
+/* ==== Cluster 拓扑：master → replicas（旧样式保留，兼容哨兵组）==== */
 .rel-edges { align-items: flex-start; }
 .rel-master-block { display: flex; flex-direction: column; gap: 8px; min-width: 180px; }
 .rel-slaves { display: flex; flex-direction: column; gap: 6px; padding-left: 14px; border-left: 2px dashed rgba(99,179,237,0.35); }
@@ -1664,4 +1798,75 @@ function handleResize() {
 .rel-slave:hover { background: rgba(99,102,241,0.14); border-color: rgba(99,102,241,0.45); }
 .rel-slave.is-down { opacity: .55; }
 .rel-slave-tag { background: rgba(99,102,241,0.22); color: #a5b4fc; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+
+/* ==== Slot 分片条 ==== */
+.slot-section { margin-bottom: 14px; }
+.slot-section-label { font-size: 12px; color: rgba(255,255,255,0.55); margin-bottom: 8px; letter-spacing: 0.02em; }
+.slot-bar {
+  display: flex; height: 16px; border-radius: 6px; overflow: hidden;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+  flex-basis: 0;
+}
+.slot-seg { min-width: 2px; flex-shrink: 1; flex-basis: 0; cursor: pointer; transition: filter .15s ease; }
+.slot-seg:hover { filter: brightness(1.3); }
+.slot-seg.is-down { opacity: .45; }
+.slot-seg-empty { background: repeating-linear-gradient(45deg, rgba(148,163,184,0.15) 0 4px, transparent 4px 8px); cursor: default; }
+.slot-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; }
+.slot-legend-item {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  padding: 3px 8px; border-radius: 6px; cursor: pointer;
+  background: rgba(255,255,255,0.03); border: 1px solid transparent;
+  transition: all .15s ease;
+}
+.slot-legend-item:hover { border-color: rgba(99,179,237,0.35); background: rgba(255,255,255,0.06); }
+.slot-legend-item .dim { color: rgba(255,255,255,0.4); }
+.slot-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+
+/* ==== Master-Slave 层次树（复制 + 故障转移）==== */
+.ms-tree { display: flex; flex-direction: column; gap: 14px; }
+.ms-unit { display: flex; flex-direction: column; gap: 0; }
+.ms-master { border-left: 3px solid transparent; min-width: 0; }
+.ms-master .rel-node-name { display: flex; align-items: center; gap: 8px; }
+.role-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 5px;
+  font-size: 11px; font-weight: 700; flex-shrink: 0;
+}
+.role-badge-m { background: rgba(220,56,45,0.22); color: #ff8a80; border: 1px solid rgba(220,56,45,0.4); }
+.role-badge-s { background: rgba(34,197,94,0.18); color: #4ade80; border: 1px solid rgba(34,197,94,0.35); width: 16px; height: 16px; font-size: 10px; border-radius: 4px; }
+.slot-chip {
+  font-size: 11px; font-family: var(--mono);
+  padding: 1px 8px; border-radius: 4px; border: 1px dashed;
+}
+/* 分支：左轨为复制实线（向下），右侧虚线为 failover（向上） */
+.ms-branch { display: flex; gap: 0; margin-left: 10px; }
+.ms-branch-rail {
+  position: relative; width: 56px; flex-shrink: 0;
+  border-left: 2px solid rgba(99,179,237,0.55);
+  border-right: none;
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: 2px 0 2px 6px; margin: 4px 0;
+}
+.ms-branch-rail::after {
+  content: ''; position: absolute; right: 6px; top: 4px; bottom: 4px;
+  border-right: 2px dashed rgba(245,158,11,0.55);
+}
+.ms-rail-label { font-size: 10px; color: rgba(147,197,253,0.85); writing-mode: vertical-lr; letter-spacing: 1px; }
+.ms-rail-failover { font-size: 10px; color: rgba(251,191,36,0.85); writing-mode: vertical-lr; letter-spacing: 1px; }
+.ms-slaves { display: flex; flex-direction: column; gap: 6px; flex: 1; padding: 4px 0; }
+.ms-slave { position: relative; }
+.ms-slave::before {
+  content: ''; position: absolute; left: -10px; top: 50%;
+  width: 10px; height: 1px; background: rgba(99,179,237,0.45);
+}
+
+/* ==== 拓扑图例 ==== */
+.topo-legend {
+  display: flex; gap: 20px; margin-top: 12px; padding-top: 10px;
+  border-top: 1px dashed rgba(255,255,255,0.08);
+}
+.topo-legend-item { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255,255,255,0.5); }
+.legend-line { display: inline-block; width: 24px; height: 0; }
+.legend-solid { border-top: 2px solid rgba(99,179,237,0.65); }
+.legend-dash { border-top: 2px dashed rgba(245,158,11,0.65); }
 </style>
