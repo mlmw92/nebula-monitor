@@ -208,50 +208,13 @@
       </template>
     </div>
 
-    <!-- ===== 区块2：分布可视化（环形图）===== -->
-    <div class="chart-section glass">
-      <div class="section-title">分布概览</div>
-      <div class="pie-row">
-        <div class="pie-item">
-          <div :ref="el => setChartRef(el, 'topologyPie')" class="pie-chart"></div>
-          <div class="pie-title">部署拓扑分布</div>
-        </div>
-        <div class="pie-item">
-          <div :ref="el => setChartRef(el, 'rolePie')" class="pie-chart"></div>
-          <div class="pie-title">角色分布</div>
-        </div>
-        <div class="pie-item">
-          <div :ref="el => setChartRef(el, 'statusPie')" class="pie-chart"></div>
-          <div class="pie-title">在线状态</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ===== 区块3：性能排行（横向柱状图）===== -->
-    <div class="chart-section glass">
-      <div class="section-title">性能排行 Top 10</div>
-      <div class="bar-row">
-        <div class="bar-item">
-          <div class="bar-sub-title">内存使用量 Top 10</div>
-          <div :ref="el => setChartRef(el, 'memBar')" class="bar-chart"></div>
-        </div>
-        <div class="bar-item">
-          <div class="bar-sub-title">OPS Top 10</div>
-          <div :ref="el => setChartRef(el, 'opsBar')" class="bar-chart"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ===== 区块4：缓存命中率 ===== -->
-    <div class="chart-section glass">
-      <div class="section-title">缓存命中率</div>
-      <div :ref="el => setChartRef(el, 'hitRateBar')" class="hitrate-chart"></div>
-    </div>
-
-    <!-- ===== 区块5：实例列表 ===== -->
+    <!-- ===== 区块2：实例列表 ===== -->
     <div class="table-section glass">
       <div class="table-toolbar">
-        <div class="section-title no-bar">实例列表</div>
+        <div>
+          <div class="section-title no-bar">实例列表</div>
+          <div class="section-desc">核心运行指标。异常实例为页面本地判定结果，不等同于告警中心事件。</div>
+        </div>
         <div class="toolbar-right">
           <el-select v-model="filterStatus" placeholder="状态" clearable size="small" style="width: 100px">
             <el-option label="全部" value="" />
@@ -344,6 +307,54 @@
           </template>
         </el-table-column>
       </el-table>
+    </div>
+
+    <!-- ===== 区块3：性能排行（横向柱状图）===== -->
+    <div class="chart-section glass">
+      <div class="section-title">性能排行 Top 10</div>
+      <div class="section-desc">用于快速定位资源占用和请求压力最高的实例，排序随自动刷新增量更新。</div>
+      <div class="bar-row">
+        <div class="bar-item">
+          <div class="bar-sub-title">内存使用量 Top 10</div>
+          <div class="chart-note">展示 Redis 当前 used_memory，适合排查容量压力和内存倾斜。</div>
+          <div :ref="el => setChartRef(el, 'memBar')" class="bar-chart"></div>
+        </div>
+        <div class="bar-item">
+          <div class="bar-sub-title">OPS Top 10</div>
+          <div class="chart-note">展示当前每秒命令处理量，适合识别热点实例。</div>
+          <div :ref="el => setChartRef(el, 'opsBar')" class="bar-chart"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 区块4：缓存命中率 ===== -->
+    <div class="chart-section glass">
+      <div class="section-title">缓存命中率</div>
+      <div class="section-desc">命中率低通常表示缓存穿透、过期策略或业务访问模式需要检查。</div>
+      <div :ref="el => setChartRef(el, 'hitRateBar')" class="hitrate-chart"></div>
+    </div>
+
+    <!-- ===== 区块5：分布可视化（环形图）===== -->
+    <div class="chart-section glass secondary-section">
+      <div class="section-title">分布概览</div>
+      <div class="section-desc">用于了解监控覆盖范围和角色构成，属于辅助信息。</div>
+      <div class="pie-row">
+        <div class="pie-item">
+          <div :ref="el => setChartRef(el, 'topologyPie')" class="pie-chart"></div>
+          <div class="pie-title">部署拓扑分布</div>
+          <div class="chart-note">按单机、主从、哨兵、集群统计实例数量。</div>
+        </div>
+        <div class="pie-item">
+          <div :ref="el => setChartRef(el, 'rolePie')" class="pie-chart"></div>
+          <div class="pie-title">角色分布</div>
+          <div class="chart-note">按 master、slave、sentinel 等角色统计。</div>
+        </div>
+        <div class="pie-item">
+          <div :ref="el => setChartRef(el, 'statusPie')" class="pie-chart"></div>
+          <div class="pie-title">在线状态</div>
+          <div class="chart-note">仅反映 Redis 实例最近一次采集是否可达。</div>
+        </div>
+      </div>
     </div>
 
     <!-- ===== 区块6：实例详情抽屉 ===== -->
@@ -625,6 +636,14 @@ const chartRefs = {}
 const chartInstances = {}
 const trendRefs = {}
 const trendChartsMap = {}
+const CHART_PALETTE = ['#38bdf8', '#22c55e', '#f59e0b', '#94a3b8', '#64748b']
+const AXIS_COLOR = '#8aa0b8'
+const SPLIT_COLOR = 'rgba(148, 163, 184, 0.12)'
+const TOOLTIP_STYLE = {
+  backgroundColor: 'rgba(11,17,32,0.94)',
+  borderColor: 'rgba(148,163,184,0.24)',
+  textStyle: { color: '#e5edf7' },
+}
 
 function setChartRef(el, key) {
   if (el) chartRefs[key] = el
@@ -676,12 +695,15 @@ function renderCharts() {
 }
 
 function getOrCreate(key) {
-  if (chartInstances[key]) {
-    chartInstances[key].dispose()
-  }
   if (!chartRefs[key]) return null
-  chartInstances[key] = initChart(chartRefs[key])
+  if (!chartInstances[key] || chartInstances[key].isDisposed()) {
+    chartInstances[key] = initChart(chartRefs[key])
+  }
   return chartInstances[key]
+}
+
+function updateChart(chart, option) {
+  chart.setOption(option, { notMerge: false, lazyUpdate: true })
 }
 
 function renderTopologyPie() {
@@ -693,15 +715,15 @@ function renderTopologyPie() {
     counts[t] = (counts[t] || 0) + 1
   })
   const data = Object.entries(counts).map(([name, value]) => ({ name: topoLabel(name), value }))
-  chart.setOption({
-    tooltip: { trigger: 'item', backgroundColor: 'rgba(11,17,32,0.92)', borderColor: 'rgba(34,211,238,0.3)', textStyle: { color: '#e5edf7' } },
-    legend: { bottom: 0, textStyle: { color: '#9fb3c8', fontSize: 11 }, itemWidth: 10, itemHeight: 6 },
+  updateChart(chart, {
+    tooltip: { trigger: 'item', ...TOOLTIP_STYLE },
+    legend: { bottom: 0, textStyle: { color: AXIS_COLOR, fontSize: 11 }, itemWidth: 10, itemHeight: 6 },
     series: [{
       type: 'pie', radius: ['45%', '72%'], center: ['50%', '42%'],
       avoidLabelOverlap: true, itemStyle: { borderColor: '#0a0e14', borderWidth: 2 },
       label: { show: true, color: '#e5edf7', fontSize: 12, formatter: '{c}' },
       labelLine: { lineStyle: { color: '#9fb3c8' } },
-      color: ['#22d3ee', '#3b82f6', '#a855f7', '#f59e0b', '#22c55e'],
+      color: CHART_PALETTE,
       data,
     }],
   })
@@ -716,15 +738,15 @@ function renderRolePie() {
     counts[r] = (counts[r] || 0) + 1
   })
   const data = Object.entries(counts).map(([name, value]) => ({ name: roleLabel(name), value }))
-  chart.setOption({
-    tooltip: { trigger: 'item', backgroundColor: 'rgba(11,17,32,0.92)', borderColor: 'rgba(34,211,238,0.3)', textStyle: { color: '#e5edf7' } },
-    legend: { bottom: 0, textStyle: { color: '#9fb3c8', fontSize: 11 }, itemWidth: 10, itemHeight: 6 },
+  updateChart(chart, {
+    tooltip: { trigger: 'item', ...TOOLTIP_STYLE },
+    legend: { bottom: 0, textStyle: { color: AXIS_COLOR, fontSize: 11 }, itemWidth: 10, itemHeight: 6 },
     series: [{
       type: 'pie', radius: ['45%', '72%'], center: ['50%', '42%'],
       avoidLabelOverlap: true, itemStyle: { borderColor: '#0a0e14', borderWidth: 2 },
       label: { show: true, color: '#e5edf7', fontSize: 12, formatter: '{c}' },
       labelLine: { lineStyle: { color: '#9fb3c8' } },
-      color: ['#dc382d', '#22c55e', '#f59e0b', '#6b7c93'],
+      color: ['#dc382d', '#22c55e', '#f59e0b', '#94a3b8'],
       data,
     }],
   })
@@ -735,9 +757,9 @@ function renderStatusPie() {
   if (!chart) return
   const up = stats.up
   const down = stats.down
-  chart.setOption({
-    tooltip: { trigger: 'item', backgroundColor: 'rgba(11,17,32,0.92)', borderColor: 'rgba(34,211,238,0.3)', textStyle: { color: '#e5edf7' } },
-    legend: { bottom: 0, textStyle: { color: '#9fb3c8', fontSize: 11 }, itemWidth: 10, itemHeight: 6 },
+  updateChart(chart, {
+    tooltip: { trigger: 'item', ...TOOLTIP_STYLE },
+    legend: { bottom: 0, textStyle: { color: AXIS_COLOR, fontSize: 11 }, itemWidth: 10, itemHeight: 6 },
     series: [{
       type: 'pie', radius: ['45%', '72%'], center: ['50%', '42%'],
       itemStyle: { borderColor: '#0a0e14', borderWidth: 2 },
@@ -753,15 +775,15 @@ function renderMemBar() {
   const chart = getOrCreate('memBar')
   if (!chart) return
   const sorted = [...instances.value].filter(i => i.usedMemory > 0).sort((a, b) => b.usedMemory - a.usedMemory).slice(0, 10).reverse()
-  chart.setOption({
+  updateChart(chart, {
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
       backgroundColor: 'rgba(11,17,32,0.92)', borderColor: 'rgba(34,211,238,0.3)', textStyle: { color: '#e5edf7' },
       formatter: (p) => `${p[0].name}<br/>${formatBytes(p[0].value)}`,
     },
     grid: { left: 10, right: 60, top: 8, bottom: 8, containLabel: true },
-    xAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10, formatter: (v) => formatBytesShort(v) }, splitLine: { lineStyle: { color: 'rgba(34,211,238,0.08)' } } },
-    yAxis: { type: 'category', data: sorted.map(i => i.name || i.instance), axisLabel: { color: '#9fb3c8', fontSize: 11, width: 120, overflow: 'truncate' }, axisLine: { lineStyle: { color: '#9fb3c8' } } },
+    xAxis: { type: 'value', axisLabel: { color: AXIS_COLOR, fontSize: 10, formatter: (v) => formatBytesShort(v) }, splitLine: { lineStyle: { color: SPLIT_COLOR } } },
+    yAxis: { type: 'category', data: sorted.map(i => i.name || i.instance), axisLabel: { color: AXIS_COLOR, fontSize: 11, width: 120, overflow: 'truncate' }, axisLine: { lineStyle: { color: AXIS_COLOR } } },
     series: [{
       type: 'bar', data: sorted.map(i => i.usedMemory), barWidth: '55%',
       itemStyle: {
@@ -783,7 +805,7 @@ function renderOpsBar() {
   const chart = getOrCreate('opsBar')
   if (!chart) return
   const sorted = [...instances.value].filter(i => i.ops > 0).sort((a, b) => b.ops - a.ops).slice(0, 10).reverse()
-  chart.setOption({
+  updateChart(chart, {
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
       backgroundColor: 'rgba(11,17,32,0.92)', borderColor: 'rgba(34,211,238,0.3)', textStyle: { color: '#e5edf7' },
@@ -803,7 +825,7 @@ function renderHitRateBar() {
   const chart = getOrCreate('hitRateBar')
   if (!chart) return
   const sorted = [...instances.value].filter(i => i.hitRate > 0).sort((a, b) => a.hitRate - b.hitRate)
-  chart.setOption({
+  updateChart(chart, {
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
       backgroundColor: 'rgba(11,17,32,0.92)', borderColor: 'rgba(34,211,238,0.3)', textStyle: { color: '#e5edf7' },
@@ -851,17 +873,17 @@ function openDetail(row) {
 
 function buildTrendCharts(row) {
   const list = [
-    { key: 'mem', label: '内存使用率', metric: 'redis_used_memory_percent', unit: '%', color: COLORS.purple, current: row.memPercent, currentText: row.memPercent + '%' },
-    { key: 'clients', label: '连接客户端数', metric: 'redis_connected_clients', unit: '', color: COLORS.blue, current: row.clients, currentText: formatNum(row.clients) },
-    { key: 'ops', label: '命令速率(OPS)', metric: 'redis_ops_per_sec', unit: '', color: COLORS.cyan, current: row.ops, currentText: formatNum(row.ops) },
-    { key: 'hitrate', label: '缓存命中率', metric: 'redis_hit_rate', unit: '%', color: COLORS.green, current: row.hitRate, currentText: row.hitRate + '%' },
-    { key: 'keys', label: '键数量', metric: 'redis_keys', unit: '', color: COLORS.amber, current: row.keys, currentText: formatNum(row.keys) },
-    { key: 'frag', label: '内存碎片率', metric: 'redis_memory_fragmentation_ratio', unit: '', color: '#a855f7', current: null, currentText: '-' },
-    { key: 'evicted', label: '淘汰键数', metric: 'redis_evicted_keys', unit: '', color: COLORS.red, current: null, currentText: '-' },
-    { key: 'uptime', label: '运行时长', metric: 'redis_uptime_in_seconds', unit: 's', color: '#6b7c93', current: row.uptime, currentText: formatUptime(row.uptime) },
+    { key: 'mem', label: '内存使用率', metric: 'redis_used_memory_percent', unit: '%', color: '#38bdf8', current: row.memPercent, currentText: row.memPercent + '%' },
+    { key: 'clients', label: '连接客户端数', metric: 'redis_connected_clients', unit: '', color: '#22c55e', current: row.clients, currentText: formatNum(row.clients) },
+    { key: 'ops', label: '命令速率(OPS)', metric: 'redis_ops_per_sec', unit: '', color: '#f59e0b', current: row.ops, currentText: formatNum(row.ops) },
+    { key: 'hitrate', label: '缓存命中率', metric: 'redis_hit_rate', unit: '%', color: '#22c55e', current: row.hitRate, currentText: row.hitRate + '%' },
+    { key: 'keys', label: '键数量', metric: 'redis_keys', unit: '', color: '#94a3b8', current: row.keys, currentText: formatNum(row.keys) },
+    { key: 'frag', label: '内存碎片率', metric: 'redis_memory_fragmentation_ratio', unit: '', color: '#64748b', current: null, currentText: '-' },
+    { key: 'evicted', label: '淘汰键数', metric: 'redis_evicted_keys', unit: '', color: '#ef4444', current: null, currentText: '-' },
+    { key: 'uptime', label: '运行时长', metric: 'redis_uptime_in_seconds', unit: 's', color: '#94a3b8', current: row.uptime, currentText: formatUptime(row.uptime) },
   ]
   if (row.role === 'slave') {
-    list.push({ key: 'lag', label: '复制延迟(秒)', metric: 'redis_replication_lag', unit: 's', color: COLORS.red, current: null, currentText: '-' })
+    list.push({ key: 'lag', label: '复制延迟(秒)', metric: 'redis_replication_lag', unit: 's', color: '#ef4444', current: null, currentText: '-' })
   }
   trendCharts.value = list
 }
@@ -903,15 +925,15 @@ async function loadTrendData() {
       }
       const c = getOrCreateTrend(chart.key)
       if (c) {
-        c.setOption({
+        updateChart(c, {
           grid: { left: 48, right: 14, top: 8, bottom: 22, containLabel: true },
-          tooltip: { trigger: 'axis', backgroundColor: 'rgba(11,17,32,0.92)', borderColor: chart.color, textStyle: { color: '#e5edf7' } },
-          xAxis: { type: 'time', axisLine: { lineStyle: { color: '#9fb3c8' } }, axisLabel: { color: '#9fb3c8', fontSize: 10, hideOverlap: true }, splitLine: { show: false } },
-          yAxis: { type: 'value', min: 0, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { lineStyle: { color: 'rgba(34,211,238,0.08)' } } },
+          tooltip: { trigger: 'axis', ...TOOLTIP_STYLE, borderColor: chart.color },
+          xAxis: { type: 'time', axisLine: { lineStyle: { color: AXIS_COLOR } }, axisLabel: { color: AXIS_COLOR, fontSize: 10, hideOverlap: true }, splitLine: { show: false } },
+          yAxis: { type: 'value', min: 0, axisLabel: { color: AXIS_COLOR, fontSize: 10 }, splitLine: { lineStyle: { color: SPLIT_COLOR } } },
           series: [{
             type: 'line', smooth: true, showSymbol: false, data: points,
-            lineStyle: { color: chart.color, width: 2, shadowColor: chart.color, shadowBlur: 8 },
-            areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: chart.color + '55' }, { offset: 1, color: chart.color + '03' }]) },
+            lineStyle: { color: chart.color, width: 2 },
+            areaStyle: { color: chart.color + '18' },
           }],
         })
       }
@@ -922,9 +944,10 @@ async function loadTrendData() {
 }
 
 function getOrCreateTrend(key) {
-  if (trendChartsMap[key]) trendChartsMap[key].dispose()
   if (!trendRefs[key]) return null
-  trendChartsMap[key] = initChart(trendRefs[key])
+  if (!trendChartsMap[key] || trendChartsMap[key].isDisposed()) {
+    trendChartsMap[key] = initChart(trendRefs[key])
+  }
   return trendChartsMap[key]
 }
 
@@ -1073,12 +1096,12 @@ function handleResize() {
   flex-shrink: 0;
 }
 .kpi-icon svg { width: 20px; height: 20px; }
-.gradient-total .kpi-icon { background: rgba(34, 211, 238, 0.15); color: #22d3ee; }
+.gradient-total .kpi-icon { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
 .gradient-up .kpi-icon { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
 .gradient-down .kpi-icon { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
-.gradient-mem .kpi-icon { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
-.gradient-conn .kpi-icon { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
-.gradient-ops .kpi-icon { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.gradient-mem .kpi-icon { background: rgba(100, 116, 139, 0.15); color: #94a3b8; }
+.gradient-conn .kpi-icon { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
+.gradient-ops .kpi-icon { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
 .kpi-num {
   font-size: 22px;
   font-weight: 700;
@@ -1101,7 +1124,7 @@ function handleResize() {
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
-  margin-bottom: 14px;
+  margin-bottom: 8px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1114,6 +1137,21 @@ function handleResize() {
   border-radius: 2px;
 }
 .section-title.no-bar::before { display: none; }
+.section-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+.chart-note {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.secondary-section {
+  border-style: dashed;
+}
 
 /* 区块2：环形图 */
 .pie-row {
