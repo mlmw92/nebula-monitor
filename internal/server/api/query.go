@@ -605,30 +605,30 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type redisInstanceInfo struct {
-		Node        string  `json:"node"`
-		Instance    string  `json:"instance"`
-		Name        string  `json:"name"`
-		Role        string  `json:"role"`
-		Topology    string  `json:"topology"`
-		Version     string  `json:"version"`
-		Up          bool    `json:"up"`
-		Clients     float64 `json:"clients"`
-		Blocked     float64 `json:"blocked"`
-		UsedMemory  float64 `json:"usedMemory"`
-		MaxMemory   float64 `json:"maxMemory"`
-		MemPercent  float64 `json:"memPercent"`
-		Fragmentation float64 `json:"fragmentation"`
-		Ops         float64 `json:"ops"`
-		Uptime      float64 `json:"uptime"`
-		HitRate     float64 `json:"hitRate"`
-		Keys        float64 `json:"keys"`
-		Evicted     float64 `json:"evicted"`
-		Expired     float64 `json:"expired"`
-		Rejected    float64 `json:"rejected"`
-		ConnectedSlaves float64 `json:"connectedSlaves"`
+		Node              string  `json:"node"`
+		Instance          string  `json:"instance"`
+		Name              string  `json:"name"`
+		Role              string  `json:"role"`
+		Topology          string  `json:"topology"`
+		Version           string  `json:"version"`
+		Up                bool    `json:"up"`
+		Clients           float64 `json:"clients"`
+		Blocked           float64 `json:"blocked"`
+		UsedMemory        float64 `json:"usedMemory"`
+		MaxMemory         float64 `json:"maxMemory"`
+		MemPercent        float64 `json:"memPercent"`
+		Fragmentation     float64 `json:"fragmentation"`
+		Ops               float64 `json:"ops"`
+		Uptime            float64 `json:"uptime"`
+		HitRate           float64 `json:"hitRate"`
+		Keys              float64 `json:"keys"`
+		Evicted           float64 `json:"evicted"`
+		Expired           float64 `json:"expired"`
+		Rejected          float64 `json:"rejected"`
+		ConnectedSlaves   float64 `json:"connectedSlaves"`
 		ReplicationOffset float64 `json:"replicationOffset"`
-		ReplicationLag   float64 `json:"replicationLag"`
-		Group       string  `json:"group"`
+		ReplicationLag    float64 `json:"replicationLag"`
+		Group             string  `json:"group"`
 		// 集群指标（cluster 拓扑实例）。指针用于区分明确采集到 0 与尚未采集到数据。
 		ClusterState         *float64 `json:"clusterState,omitempty"` // 1=ok, 0=fail
 		ClusterSlotsAssigned *float64 `json:"clusterSlotsAssigned,omitempty"`
@@ -642,9 +642,9 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 		SentinelSentinels float64 `json:"sentinelSentinels"`
 		SentinelTilt      float64 `json:"sentinelTilt"`
 		// 哨兵→master 关联（master 实例上 labels.sentinel_master_of），用于关系图
-		SentinelMasterOf string `json:"sentinelMasterOf"`
+		ReplicaOf string `json:"replicaOf,omitempty"`
 		// 集群中 replica→master 关联（replica 实例上 labels.cluster_master_of），用于关系图
-		ClusterMasterOf string `json:"clusterMasterOf"`
+		// ClusterMasterOf removed: unified into ReplicaOf
 	}
 
 	// 以 "node|instance" 为 key 建立实例索引
@@ -659,14 +659,15 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 		key := node + "|" + instance
 		if _, exists := instances[key]; !exists {
 			ri := &redisInstanceInfo{
-				Node:     node,
-				Instance: instance,
-				Name:     s.Labels["name"],
-				Role:     s.Labels["role"],
-				Topology: s.Labels["topology"],
-				Version:  s.Labels["version"],
-				Group:    s.Labels["group"],
-				Up:       s.Points[len(s.Points)-1].Value > 0,
+				Node:      node,
+				Instance:  instance,
+				Name:      s.Labels["name"],
+				Role:      s.Labels["role"],
+				Topology:  s.Labels["topology"],
+				Version:   s.Labels["version"],
+				Group:     s.Labels["group"],
+				ReplicaOf: s.Labels["replica_of"],
+				Up:        s.Points[len(s.Points)-1].Value > 0,
 			}
 			instances[key] = ri
 			keys = append(keys, key)
@@ -680,29 +681,29 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metricMap := map[string]func(ri *redisInstanceInfo, v float64){
-		"redis_connected_clients":     func(ri *redisInstanceInfo, v float64) { ri.Clients = round2(v) },
-		"redis_blocked_clients":       func(ri *redisInstanceInfo, v float64) { ri.Blocked = round2(v) },
-		"redis_used_memory":           func(ri *redisInstanceInfo, v float64) { ri.UsedMemory = round2(v) },
-		"redis_maxmemory":             func(ri *redisInstanceInfo, v float64) { ri.MaxMemory = round2(v) },
-		"redis_used_memory_percent":   func(ri *redisInstanceInfo, v float64) { ri.MemPercent = round2(v) },
+		"redis_connected_clients":          func(ri *redisInstanceInfo, v float64) { ri.Clients = round2(v) },
+		"redis_blocked_clients":            func(ri *redisInstanceInfo, v float64) { ri.Blocked = round2(v) },
+		"redis_used_memory":                func(ri *redisInstanceInfo, v float64) { ri.UsedMemory = round2(v) },
+		"redis_maxmemory":                  func(ri *redisInstanceInfo, v float64) { ri.MaxMemory = round2(v) },
+		"redis_used_memory_percent":        func(ri *redisInstanceInfo, v float64) { ri.MemPercent = round2(v) },
 		"redis_memory_fragmentation_ratio": func(ri *redisInstanceInfo, v float64) { ri.Fragmentation = round2(v) },
-		"redis_ops_per_sec":           func(ri *redisInstanceInfo, v float64) { ri.Ops = round2(v) },
-		"redis_uptime_in_seconds":     func(ri *redisInstanceInfo, v float64) { ri.Uptime = round2(v) },
-		"redis_hit_rate":              func(ri *redisInstanceInfo, v float64) { ri.HitRate = round2(v) },
-		"redis_keys":                  func(ri *redisInstanceInfo, v float64) { ri.Keys = round2(v) },
-		"redis_evicted_keys":          func(ri *redisInstanceInfo, v float64) { ri.Evicted = round2(v) },
-		"redis_expired_keys":          func(ri *redisInstanceInfo, v float64) { ri.Expired = round2(v) },
-		"redis_rejected_connections":  func(ri *redisInstanceInfo, v float64) { ri.Rejected = round2(v) },
-		"redis_connected_slaves":      func(ri *redisInstanceInfo, v float64) { ri.ConnectedSlaves = round2(v) },
-		"redis_replication_offset":    func(ri *redisInstanceInfo, v float64) { ri.ReplicationOffset = round2(v) },
-		"redis_replication_lag":       func(ri *redisInstanceInfo, v float64) { ri.ReplicationLag = round2(v) },
+		"redis_ops_per_sec":                func(ri *redisInstanceInfo, v float64) { ri.Ops = round2(v) },
+		"redis_uptime_in_seconds":          func(ri *redisInstanceInfo, v float64) { ri.Uptime = round2(v) },
+		"redis_hit_rate":                   func(ri *redisInstanceInfo, v float64) { ri.HitRate = round2(v) },
+		"redis_keys":                       func(ri *redisInstanceInfo, v float64) { ri.Keys = round2(v) },
+		"redis_evicted_keys":               func(ri *redisInstanceInfo, v float64) { ri.Evicted = round2(v) },
+		"redis_expired_keys":               func(ri *redisInstanceInfo, v float64) { ri.Expired = round2(v) },
+		"redis_rejected_connections":       func(ri *redisInstanceInfo, v float64) { ri.Rejected = round2(v) },
+		"redis_connected_slaves":           func(ri *redisInstanceInfo, v float64) { ri.ConnectedSlaves = round2(v) },
+		"redis_replication_offset":         func(ri *redisInstanceInfo, v float64) { ri.ReplicationOffset = round2(v) },
+		"redis_replication_lag":            func(ri *redisInstanceInfo, v float64) { ri.ReplicationLag = round2(v) },
 		// 集群指标
-		"redis_cluster_state":           func(ri *redisInstanceInfo, v float64) { ri.ClusterState = floatPtr(v) },
-		"redis_cluster_slots_assigned":  func(ri *redisInstanceInfo, v float64) { ri.ClusterSlotsAssigned = floatPtr(v) },
-		"redis_cluster_slots_ok":        func(ri *redisInstanceInfo, v float64) { ri.ClusterSlotsOk = floatPtr(v) },
-		"redis_cluster_slots_fail":      func(ri *redisInstanceInfo, v float64) { ri.ClusterSlotsFail = floatPtr(v) },
-		"redis_cluster_known_nodes":     func(ri *redisInstanceInfo, v float64) { ri.ClusterKnownNodes = floatPtr(v) },
-		"redis_cluster_size":            func(ri *redisInstanceInfo, v float64) { ri.ClusterSize = floatPtr(v) },
+		"redis_cluster_state":          func(ri *redisInstanceInfo, v float64) { ri.ClusterState = floatPtr(v) },
+		"redis_cluster_slots_assigned": func(ri *redisInstanceInfo, v float64) { ri.ClusterSlotsAssigned = floatPtr(v) },
+		"redis_cluster_slots_ok":       func(ri *redisInstanceInfo, v float64) { ri.ClusterSlotsOk = floatPtr(v) },
+		"redis_cluster_slots_fail":     func(ri *redisInstanceInfo, v float64) { ri.ClusterSlotsFail = floatPtr(v) },
+		"redis_cluster_known_nodes":    func(ri *redisInstanceInfo, v float64) { ri.ClusterKnownNodes = floatPtr(v) },
+		"redis_cluster_size":           func(ri *redisInstanceInfo, v float64) { ri.ClusterSize = floatPtr(v) },
 		// 哨兵指标
 		"redis_sentinel_masters":   func(ri *redisInstanceInfo, v float64) { ri.SentinelMasters = round2(v) },
 		"redis_sentinel_slaves":    func(ri *redisInstanceInfo, v float64) { ri.SentinelSlaves = round2(v) },
@@ -728,13 +729,11 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 			}
 			setter(ri, s.Points[len(s.Points)-1].Value)
 			// 哨兵→master 关联标签透传
-			if sm, ok := s.Labels["sentinel_master_of"]; ok && sm != "" {
-				ri.SentinelMasterOf = sm
+			if sm, ok := s.Labels["sentinel_master_of"]; ok && sm != "" && ri.ReplicaOf == "" {
+				ri.ReplicaOf = "sentinel:" + sm
 			}
 			// 集群中 replica→master 关联标签透传
-			if cm, ok := s.Labels["cluster_master_of"]; ok && cm != "" {
-				ri.ClusterMasterOf = cm
-			}
+			// cluster replica 关系已由 labels.replica_of 在初始化时写入 ReplicaOf
 		}
 	}
 

@@ -17,7 +17,7 @@ import (
 // RedisCollector 采集 Redis 实例指标，支持四种部署模式与 exporter 拉取模式。
 // 每个 RedisInstanceConfig 对应一个采集目标，密码仅存本地，不上报 Server。
 type RedisCollector struct {
-	node     string
+	node      string
 	instances []model.RedisInstanceConfig
 }
 
@@ -71,7 +71,7 @@ func (c *RedisCollector) collectStandalone(cfg model.RedisInstanceConfig, addr s
 		slog.Warn("Redis 采集失败", "addr", addr, "err", err)
 		return nil, model.RedisInstance{
 			Instance: addr, Name: cfg.Name, Node: c.node,
-			Role: "unknown", Topology: cfg.Topology, Up: false,
+			Role: "unknown", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		}
 	}
 	repInfo, _ := redisInfo(addr, cfg.Password, "replication")
@@ -80,15 +80,29 @@ func (c *RedisCollector) collectStandalone(cfg model.RedisInstanceConfig, addr s
 	}
 	labels := redisLabels(c.node, addr, info)
 	labels["topology"] = cfg.Topology
+	labels["group"] = cfg.Name
+	role := info["role"]
+	labels["role"] = role
+	replicaOf := ""
+	if role == "slave" {
+		masterHost := info["master_host"]
+		masterPort := info["master_port"]
+		if masterHost != "" && masterPort != "" {
+			replicaOf = masterHost + ":" + masterPort
+			labels["replica_of"] = replicaOf
+		}
+	}
 	m := mapInfoToMetrics(info, labels, now)
 	ri := model.RedisInstance{
-		Instance: addr,
-		Name:     cfg.Name,
-		Node:     c.node,
-		Role:     info["role"],
-		Topology: cfg.Topology,
-		Version:  info["redis_version"],
-		Up:       true,
+		Instance:  addr,
+		Name:      cfg.Name,
+		Node:      c.node,
+		Role:      role,
+		Topology:  cfg.Topology,
+		Group:     cfg.Name,
+		ReplicaOf: replicaOf,
+		Version:   info["redis_version"],
+		Up:        true,
 	}
 	// 实例存活指标
 	m = append(m, model.Metric{
@@ -115,6 +129,7 @@ func (c *RedisCollector) collectSentinel(cfg model.RedisInstanceConfig, now int6
 	sentLabels := redisLabels(c.node, cfg.Addr, sentInfo)
 	sentLabels["topology"] = cfg.Topology
 	sentLabels["role"] = "sentinel"
+	sentLabels["group"] = cfg.Name
 	for k, v := range mapSentinelMetrics(sentInfo) {
 		metrics = append(metrics, model.Metric{
 			Node: c.node, Name: k, Labels: sentLabels, Value: v, Timestamp: now,
@@ -143,12 +158,16 @@ func (c *RedisCollector) collectSentinel(cfg model.RedisInstanceConfig, now int6
 	for i := range m {
 		if m[i].Labels != nil {
 			m[i].Labels["instance"] = masterAddr
+			m[i].Labels["group"] = cfg.Name
+			m[i].Labels["role"] = "master"
 			m[i].Labels["sentinel_master_of"] = cfg.SentinelName
 		}
 	}
 	ri.Instance = masterAddr
 	ri.Name = cfg.Name + "-master"
 	ri.Topology = cfg.Topology
+	ri.Role = "master"
+	ri.Group = cfg.Name
 	metrics = append(metrics, m...)
 	instances = append(instances, ri)
 	return metrics, instances
@@ -172,6 +191,7 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 	clusterLabels := redisLabels(c.node, cfg.Addr, clusterInfo)
 	clusterLabels["topology"] = "cluster"
 	clusterLabels["role"] = "master"
+	clusterLabels["group"] = cfg.Name
 	for k, v := range mapClusterMetrics(clusterInfo) {
 		metrics = append(metrics, model.Metric{
 			Node: c.node, Name: k, Labels: clusterLabels, Value: v, Timestamp: now,
@@ -191,11 +211,14 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 			if m[i].Labels != nil {
 				m[i].Labels["instance"] = masterAddr
 				m[i].Labels["topology"] = "cluster"
+				m[i].Labels["group"] = cfg.Name
+				m[i].Labels["role"] = "master"
 			}
 		}
 		ri.Instance = masterAddr
 		ri.Name = cfg.Name + "-" + masterAddr
 		ri.Topology = cfg.Topology
+		ri.Role = "master"
 		metrics = append(metrics, m...)
 		instances = append(instances, ri)
 		// 2.2 replicas（关联到当前 master）
@@ -205,12 +228,16 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 				if rm[i].Labels != nil {
 					rm[i].Labels["instance"] = replicaAddr
 					rm[i].Labels["topology"] = "cluster"
-					rm[i].Labels["cluster_master_of"] = masterAddr
+					rm[i].Labels["group"] = cfg.Name
+					rm[i].Labels["role"] = "replica"
+					rm[i].Labels["replica_of"] = masterAddr
 				}
 			}
 			rri.Instance = replicaAddr
 			rri.Name = cfg.Name + "-slave-" + replicaAddr
 			rri.Topology = cfg.Topology
+			rri.Role = "replica"
+			rri.ReplicaOf = masterAddr
 			metrics = append(metrics, rm...)
 			instances = append(instances, rri)
 		}
@@ -341,12 +368,12 @@ func mapClusterMetrics(info map[string]string) map[string]float64 {
 		stateVal = 1
 	}
 	return map[string]float64{
-		"redis_cluster_state":           stateVal,
-		"redis_cluster_slots_assigned":  parseFloat(info["cluster_slots_assigned"]),
-		"redis_cluster_slots_ok":        parseFloat(info["cluster_slots_ok"]),
-		"redis_cluster_slots_fail":      parseFloat(info["cluster_slots_fail"]),
-		"redis_cluster_known_nodes":     parseFloat(info["cluster_known_nodes"]),
-		"redis_cluster_size":            parseFloat(info["cluster_size"]),
+		"redis_cluster_state":          stateVal,
+		"redis_cluster_slots_assigned": parseFloat(info["cluster_slots_assigned"]),
+		"redis_cluster_slots_ok":       parseFloat(info["cluster_slots_ok"]),
+		"redis_cluster_slots_fail":     parseFloat(info["cluster_slots_fail"]),
+		"redis_cluster_known_nodes":    parseFloat(info["cluster_known_nodes"]),
+		"redis_cluster_size":           parseFloat(info["cluster_size"]),
 	}
 }
 

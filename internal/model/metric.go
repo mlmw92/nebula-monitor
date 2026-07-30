@@ -35,19 +35,19 @@ type ProcessStat struct {
 
 // ReportPayload 是 Agent 上报的请求体。
 type ReportPayload struct {
-	Node           string            `json:"node"`                      // 主机名
-	IP             string            `json:"ip"`                        // 主机 IP
-	OS             string            `json:"os"`                        // 操作系统
-	Arch           string            `json:"arch"`                      // CPU 架构
-	Group          string            `json:"group"`                     // 节点分组
-	Secret         string            `json:"secret,omitempty"`          // 接入授权密钥（启用 agentAuth 时校验）
-	Labels         map[string]string `json:"labels,omitempty"`          // 自定义标签
-	Version        string            `json:"version,omitempty"`         // Agent 版本号
-	HostInfo       HostInfo          `json:"hostInfo,omitempty"`        // 主机系统与硬件信息
-	Metrics        []Metric          `json:"metrics"`                   // 指标列表
-	Processes      []ProcessStat     `json:"processes,omitempty"`       // 资源占用 Top 进程
-	RedisInstances []RedisInstance   `json:"redisInstances,omitempty"`  // Redis 实例元信息（不含密码）
-	ReportAt       int64             `json:"reportAt"`                  // 上报时间（毫秒）
+	Node           string            `json:"node"`                     // 主机名
+	IP             string            `json:"ip"`                       // 主机 IP
+	OS             string            `json:"os"`                       // 操作系统
+	Arch           string            `json:"arch"`                     // CPU 架构
+	Group          string            `json:"group"`                    // 节点分组
+	Secret         string            `json:"secret,omitempty"`         // 接入授权密钥（启用 agentAuth 时校验）
+	Labels         map[string]string `json:"labels,omitempty"`         // 自定义标签
+	Version        string            `json:"version,omitempty"`        // Agent 版本号
+	HostInfo       HostInfo          `json:"hostInfo,omitempty"`       // 主机系统与硬件信息
+	Metrics        []Metric          `json:"metrics"`                  // 指标列表
+	Processes      []ProcessStat     `json:"processes,omitempty"`      // 资源占用 Top 进程
+	RedisInstances []RedisInstance   `json:"redisInstances,omitempty"` // Redis 实例元信息（不含密码）
+	ReportAt       int64             `json:"reportAt"`                 // 上报时间（毫秒）
 }
 
 // RedisInstanceConfig 是 Agent 本地配置的 Redis 实例连接信息。
@@ -64,13 +64,15 @@ type RedisInstanceConfig struct {
 
 // RedisInstance 是上报给 Server 的 Redis 实例元信息（不含密码），供 Web 只读展示。
 type RedisInstance struct {
-	Instance  string `json:"instance"`  // 实例地址 host:port
-	Name      string `json:"name"`      // 实例别名
-	Node      string `json:"node"`      // 采集 Agent 节点名
-	Role      string `json:"role"`      // master|slave|sentinel
-	Topology  string `json:"topology"`  // standalone|replication|sentinel|cluster
-	Version   string `json:"version"`   // Redis 版本（来自 INFO Server）
-	Up        bool   `json:"up"`        // 是否可达
+	Instance  string `json:"instance"`            // 实例地址 host:port
+	Name      string `json:"name"`                // 实例别名
+	Node      string `json:"node"`                // 采集 Agent 节点名
+	Role      string `json:"role"`                // master|slave|sentinel|replica
+	Topology  string `json:"topology"`            // standalone|replication|sentinel|cluster
+	Group     string `json:"group"`               // 拓扑分组名（cluster/sentinel 用 cfg.Name，standalone 同名归组）
+	ReplicaOf string `json:"replicaOf,omitempty"` // 主从关系：slave/replica 的 master 地址
+	Version   string `json:"version"`             // Redis 版本（来自 INFO Server）
+	Up        bool   `json:"up"`                  // 是否可达
 }
 
 // DiskStat 表示单个真实文件系统的容量与使用率。
@@ -163,21 +165,21 @@ type AlertRule struct {
 
 // AlertEvent 告警事件（触发或恢复时产生）。
 type AlertEvent struct {
-	ID        string     `json:"id"`               // 事件 ID
-	RuleID    string     `json:"ruleId"`           // 规则 ID
-	RuleName  string     `json:"ruleName"`         // 规则名称
-	Node      string     `json:"node"`             // 节点名
-	NodeIP    string     `json:"nodeIp,omitempty"` // 节点 IP（便于在通知渠道中展示）
+	ID        string     `json:"id"`                 // 事件 ID
+	RuleID    string     `json:"ruleId"`             // 规则 ID
+	RuleName  string     `json:"ruleName"`           // 规则名称
+	Node      string     `json:"node"`               // 节点名
+	NodeIP    string     `json:"nodeIp,omitempty"`   // 节点 IP（便于在通知渠道中展示）
 	Instance  string     `json:"instance,omitempty"` // Redis 等多实例指标的实例标签
-	Metric    string     `json:"metric"`           // 指标名
-	Value     float64    `json:"value"`            // 触发值
-	Operator  string     `json:"operator"`         // 运算符
-	Threshold float64    `json:"threshold"`        // 阈值
-	Severity  Severity   `json:"severity"`         // 严重级别
-	State     AlertState `json:"state"`            // 状态 firing/resolved
-	Message   string     `json:"message"`          // 描述
-	StartsAt  int64      `json:"startsAt"`         // 触发时间（毫秒）
-	EndsAt    int64      `json:"endsAt"`           // 恢复时间（毫秒）
+	Metric    string     `json:"metric"`             // 指标名
+	Value     float64    `json:"value"`              // 触发值
+	Operator  string     `json:"operator"`           // 运算符
+	Threshold float64    `json:"threshold"`          // 阈值
+	Severity  Severity   `json:"severity"`           // 严重级别
+	State     AlertState `json:"state"`              // 状态 firing/resolved
+	Message   string     `json:"message"`            // 描述
+	StartsAt  int64      `json:"startsAt"`           // 触发时间（毫秒）
+	EndsAt    int64      `json:"endsAt"`             // 恢复时间（毫秒）
 }
 
 // NowMillis 返回当前毫秒时间戳。

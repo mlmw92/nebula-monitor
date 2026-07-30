@@ -118,10 +118,11 @@
                 {{ clusterHealthText(grp) }}
               </span>
               <span class="dim">masters: {{ grp.masters.length }}</span>
+              <span class="dim">· replicas: {{ grp.slaves.length }}</span>
+              <span class="dim">· 总节点 {{ grp.masters.length + grp.slaves.length }}</span>
             </span>
           </div>
           <div class="topo-relation">
-            <div class="rel-node rel-center">{{ grp.name }}</div>
             <div class="rel-edges">
               <div v-for="(m, idx) in grp.masters" :key="'cm-'+idx" class="rel-master-block">
                 <div class="rel-node rel-master" :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }" @click="openDetail(m)">
@@ -136,8 +137,8 @@
                   </div>
                 </div>
                 <!-- 关联 replicas -->
-                <div v-if="grp.slaves.filter(s => s.clusterMasterOf === m.instance).length" class="rel-slaves">
-                  <div v-for="s in grp.slaves.filter(ss => ss.clusterMasterOf === m.instance)" :key="s.instance" class="rel-slave" :class="{ 'is-down': !s.up }" @click.stop="openDetail(s)">
+                <div v-if="grp.slaves.filter(s => s.replicaOf === m.instance).length" class="rel-slaves">
+                  <div v-for="s in grp.slaves.filter(ss => ss.replicaOf === m.instance)" :key="s.instance" class="rel-slave" :class="{ 'is-down': !s.up }" @click.stop="openDetail(s)">
                     <span class="rel-slave-tag">slave</span>
                     <span :title="s.instance">{{ s.instance }}</span>
                     <span :class="['dot', s.up ? 'up' : 'down']"></span>
@@ -185,6 +186,51 @@
                   <span>{{ m.up ? '在线' : '离线' }}</span>
                   <span class="dim">·</span>
                   <span>repl offset {{ formatNum(m.replicationOffset) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 主从组 -->
+      <template v-if="topologyGroups.replications.length">
+        <div v-for="grp in topologyGroups.replications" :key="'r-'+grp.name" class="topo-group">
+          <div class="topo-group-header">
+            <span class="topo-group-title">
+              <ReplicaIcon />
+              <strong>主从 {{ grp.name }}</strong>
+            </span>
+            <span class="topo-meta">
+              <span class="badge" :class="clusterHealthClass(grp)">
+                {{ clusterHealthText(grp) }}
+              </span>
+              <span class="dim">masters: {{ grp.masters.length }}</span>
+              <span class="dim">· replicas: {{ grp.slaves.length }}</span>
+            </span>
+          </div>
+          <div class="topo-relation">
+            <div class="rel-edges">
+              <div v-for="(m, idx) in grp.masters" :key="'rm-'+idx" class="rel-master-block">
+                <div class="rel-node rel-master" :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }" @click="openDetail(m)">
+                  <div class="rel-node-name" :title="m.instance">{{ m.instance }}</div>
+                  <div class="rel-node-meta">
+                    <span :class="['dot', m.up ? 'up' : 'down']"></span>
+                    <span>{{ m.up ? '在线' : '离线' }}</span>
+                    <span class="dim">·</span>
+                    <span>{{ formatNum(m.ops) }} ops/s</span>
+                    <span class="dim">·</span>
+                    <span>{{ formatBytes(m.usedMemory) }}</span>
+                  </div>
+                </div>
+                <div v-if="grp.slaves.filter(s => s.replicaOf === m.instance).length" class="rel-slaves">
+                  <div v-for="s in grp.slaves.filter(ss => ss.replicaOf === m.instance)" :key="s.instance" class="rel-slave" :class="{ 'is-down': !s.up }" @click.stop="openDetail(s)">
+                    <span class="rel-slave-tag">slave</span>
+                    <span :title="s.instance">{{ s.instance }}</span>
+                    <span :class="['dot', s.up ? 'up' : 'down']"></span>
+                    <span class="dim">{{ s.up ? formatNum(s.ops) + ' ops/s' : '离线' }}</span>
+                    <span v-if="s.up && s.replicationLag !== undefined && s.replicationLag !== null" class="dim">· lag {{ s.replicationLag }}s</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -487,9 +533,9 @@
             <div class="snap-label">Tilt 模式</div>
             <div class="snap-value" :class="(selected.sentinelTilt||0) > 0 ? 'warn' : 'ok'">{{ (selected.sentinelTilt||0) > 0 ? '是' : '否' }}</div>
           </div>
-          <div class="snap-card" v-if="selected.role === 'master' && selected.sentinelMasterOf">
+          <div class="snap-card" v-if="selected.role === 'master' && selected.replicaOf && selected.replicaOf.startsWith('sentinel:')">
             <div class="snap-label">受 Sentinel 监控</div>
-            <div class="snap-value ok">{{ selected.sentinelMasterOf }}</div>
+            <div class="snap-value ok">{{ selected.replicaOf.slice('sentinel:'.length) }}</div>
           </div>
         </div>
 
@@ -527,6 +573,7 @@ const SearchIcon = Search
 const RefreshIcon = Refresh
 const ClusterIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="6.5" y1="6.5" x2="9.5" y2="9.5"/><line x1="14.5" y1="9.5" x2="17.5" y2="6.5"/><line x1="6.5" y1="17.5" x2="9.5" y2="14.5"/><line x1="14.5" y1="14.5" x2="17.5" y2="17.5"/></svg>' }
 const SentinelIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>' }
+const ReplicaIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="6" rx="1"/><rect x="13" y="14" width="8" height="6" rx="1"/><path d="M11 7h6a2 2 0 0 1 2 2v5"/></svg>' }
 const AlertIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' }
 const ServerIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>' }
 
@@ -626,29 +673,34 @@ const filteredInstances = computed(() => {
   })
 })
 
-// 拓扑分组：用于关系视图
+// 拓扑分组：用于关系视图（基于后端 group 字段，不再正则猜测）
 const topologyGroups = computed(() => {
-  const clusters = {}, sentinels = {}, standalones = []
+  const clusters = {}, sentinels = {}, replications = {}, standalones = []
   for (const i of instances.value) {
+    const g = i.group || i.name || i.instance
     if (i.topology === 'cluster') {
-      // master 名: cfg.Name-host:port；slave 名: cfg.Name-slave-host:port；统一归一到 cfg.Name
-      let g = i.name || ''
-      g = g.replace(/-slave-\S+:\d+$/, '')
-      g = g.replace(/-\S+:\d+$/, '')
-      if (!g) g = i.name
       clusters[g] = clusters[g] || { name: g, masters: [], slaves: [], topology: 'cluster' }
-      if (i.role === 'slave') clusters[g].slaves.push(i)
+      if (i.role === 'slave' || i.role === 'replica') clusters[g].slaves.push(i)
       else clusters[g].masters.push(i)
     } else if (i.topology === 'sentinel') {
-      const g = (i.name || '').replace(/-master$|-sentinel$/i, '') || i.name
       sentinels[g] = sentinels[g] || { name: g, sentinels: [], masters: [], topology: 'sentinel' }
       if (i.role === 'sentinel') sentinels[g].sentinels.push(i)
       else sentinels[g].masters.push(i)
+    } else if (i.topology === 'replication' || (i.replicaOf && i.topology !== 'cluster')) {
+      // 主从模式：同一 group 下的 master 与 slave
+      replications[g] = replications[g] || { name: g, masters: [], slaves: [], topology: 'replication' }
+      if (i.role === 'slave' || i.role === 'replica') replications[g].slaves.push(i)
+      else replications[g].masters.push(i)
     } else {
       standalones.push(i)
     }
   }
-  return { clusters: Object.values(clusters), sentinels: Object.values(sentinels), standalones }
+  return {
+    clusters: Object.values(clusters),
+    sentinels: Object.values(sentinels),
+    replications: Object.values(replications),
+    standalones,
+  }
 })
 
 // 集群健康度判定（基于 topologyGroups 中 cluster 组的 masters 状态）
