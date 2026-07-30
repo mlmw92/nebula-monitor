@@ -252,26 +252,86 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 #### Redis 实例配置示例
 
 ```yaml
+serverURL: "http://10.0.0.1:8080"
+node: "web-01"
+group: "default"
+interval: 15
+
 collectors:
-  redis: true
+  cpu: true
+  memory: true
+  disk: true
+  network: true
+  process: true
+  load: true
+  redis: true                    # ← 总开关，必须开启
+
 redisInstances:
-  - name: "cache-primary"
-    addr: "10.0.0.10:6379"
-    password: "yourpassword"   # 仅存本地，不上报
-    topology: "standalone"     # standalone|replication|sentinel|cluster
-  - name: "sentinel-cluster"
-    addr: "10.0.0.20:26379"
-    password: ""
+  # 1) 单机
+  - name: "redis-standalone"
+    addr: "127.0.0.1:6379"
+    password: "yourpassword"     # 仅存本地，不上报 Server
+    db: 0
+    topology: "standalone"
+
+  # 2) 主从（master / slave 各配一条 standalone，分别填各自地址）
+  - name: "redis-master"
+    addr: "127.0.0.1:6379"
+    password: "yourpassword"
+    topology: "standalone"
+  - name: "redis-slave"
+    addr: "127.0.0.1:6380"
+    password: "yourpassword"
+    topology: "standalone"
+
+  # 3) 哨兵（addr 填任一哨兵节点，sentinelName 填 master 名，Agent 自动发现并采集 master）
+  - name: "redis-sentinel"
+    addr: "127.0.0.1:26379"
+    password: "yourpassword"
     topology: "sentinel"
     sentinelName: "mymaster"
+
+  # 4) 集群（addr 填任一集群节点，Agent 自动遍历全部 master 并采集）
   - name: "redis-cluster"
-    addr: "10.0.0.30:7000"
-    password: ""
+    addr: "127.0.0.1:7000"
+    password: "yourpassword"
     topology: "cluster"
-  - name: "with-exporter"
-    addr: "10.0.0.40:6379"
-    exporterURL: "http://10.0.0.40:9121/metrics"  # 配置后走 exporter 拉取模式
+
+  # 5) Prometheus exporter 模式（exporterURL 填 /metrics，不走直连）
+  - name: "redis-exporter"
+    addr: "127.0.0.1:6379"
+    password: ""
+    topology: "standalone"
+    exporterURL: "http://127.0.0.1:9121/metrics"
 ```
+
+**字段说明**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | 是 | 实例别名，Web 展示用 |
+| `addr` | 是 | 地址 `host:port`（直连为 Redis 地址；sentinel 为哨兵地址；cluster 为任一节点；exporter 为实例地址） |
+| `password` | 否 | 认证密码，`json:"-"` 标记，**仅存 Agent 本地，绝不通过网络上报**，Web 端不可见 |
+| `db` | 否 | 直连模式采集的 DB 号 |
+| `topology` | 是 | `standalone` \| `replication` \| `sentinel` \| `cluster` |
+| `sentinelName` | 哨兵必填 | sentinel 模式监控的 master 名称 |
+| `exporterURL` | exporter 必填 | Prometheus exporter 的 `/metrics` URL；**一旦填写即走 exporter 拉取模式，忽略直连** |
+
+**部署与验证**
+
+1. 编辑 Agent 配置 `agent.yaml` 加入上述配置；
+2. 重启 Agent（必须，采集逻辑依赖 1.2.0+ 二进制）：
+   ```bash
+   systemctl restart monitor-agent   # 或离线包：/etc/monitor-agent/monitor-agent restart
+   ```
+3. 查看采集日志确认无报错：
+   ```bash
+   journalctl -u monitor-agent -f | grep -i redis
+   ```
+4. Web 端左侧菜单「中间件监控」→「Redis」Tab 即可查看：概览卡片、拓扑/角色/状态分布环形图、内存/OPS 排行柱状图、命中率可视化、实例列表、实例详情抽屉（多趋势图）。
+
+> **版本一致性**：Redis 监控涉及 Agent（采集）与 Server（`redis_instance_up` 聚合 + API）两端改动，两端须同时升级到同一版本（≥ 1.2.0），否则 Redis Tab 无数据。
+> **密码安全**：`password` 仅在 Agent 本地用于直连，不上报、不入库、Web 不可见。
 
 ---
 
