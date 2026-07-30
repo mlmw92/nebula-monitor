@@ -642,6 +642,8 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 		SentinelTilt      float64 `json:"sentinelTilt"`
 		// 哨兵→master 关联（master 实例上 labels.sentinel_master_of），用于关系图
 		SentinelMasterOf string `json:"sentinelMasterOf"`
+		// 集群中 replica→master 关联（replica 实例上 labels.cluster_master_of），用于关系图
+		ClusterMasterOf string `json:"clusterMasterOf"`
 	}
 
 	// 以 "node|instance" 为 key 建立实例索引
@@ -722,6 +724,10 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 			// 哨兵→master 关联标签透传
 			if sm, ok := s.Labels["sentinel_master_of"]; ok && sm != "" {
 				ri.SentinelMasterOf = sm
+			}
+			// 集群中 replica→master 关联标签透传
+			if cm, ok := s.Labels["cluster_master_of"]; ok && cm != "" {
+				ri.ClusterMasterOf = cm
 			}
 		}
 	}

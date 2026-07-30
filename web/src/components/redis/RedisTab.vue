@@ -108,7 +108,7 @@
           <div class="topo-relation">
             <div class="rel-node rel-center">{{ grp.name }}</div>
             <div class="rel-edges">
-              <div v-for="(m, idx) in grp.masters" :key="'cm-'+idx" class="rel-edge">
+              <div v-for="(m, idx) in grp.masters" :key="'cm-'+idx" class="rel-master-block">
                 <div class="rel-node rel-master" :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }" @click="openDetail(m)">
                   <div class="rel-node-name" :title="m.instance">{{ m.instance }}</div>
                   <div class="rel-node-meta">
@@ -118,6 +118,16 @@
                     <span>{{ formatNum(m.ops) }} ops/s</span>
                     <span class="dim">·</span>
                     <span>{{ formatBytes(m.usedMemory) }}</span>
+                  </div>
+                </div>
+                <!-- 关联 replicas -->
+                <div v-if="grp.slaves.filter(s => s.clusterMasterOf === m.instance).length" class="rel-slaves">
+                  <div v-for="s in grp.slaves.filter(ss => ss.clusterMasterOf === m.instance)" :key="s.instance" class="rel-slave" :class="{ 'is-down': !s.up }" @click.stop="openDetail(s)">
+                    <span class="rel-slave-tag">slave</span>
+                    <span :title="s.instance">{{ s.instance }}</span>
+                    <span :class="['dot', s.up ? 'up' : 'down']"></span>
+                    <span class="dim">{{ s.up ? formatNum(s.ops) + ' ops/s' : '离线' }}</span>
+                    <span v-if="s.up && s.replicationLag !== undefined && s.replicationLag !== null" class="dim">· lag {{ s.replicationLag }}s</span>
                   </div>
                 </div>
               </div>
@@ -548,9 +558,14 @@ const topologyGroups = computed(() => {
   const clusters = {}, sentinels = {}, standalones = []
   for (const i of instances.value) {
     if (i.topology === 'cluster') {
-      const g = (i.name || '').replace(/-master$|-slave$|-node\d+$/i, '') || i.name
-      clusters[g] = clusters[g] || { name: g, masters: [], topology: 'cluster' }
-      clusters[g].masters.push(i)
+      // master 名: cfg.Name-host:port；slave 名: cfg.Name-slave-host:port；统一归一到 cfg.Name
+      let g = i.name || ''
+      g = g.replace(/-slave-\S+:\d+$/, '')
+      g = g.replace(/-\S+:\d+$/, '')
+      if (!g) g = i.name
+      clusters[g] = clusters[g] || { name: g, masters: [], slaves: [], topology: 'cluster' }
+      if (i.role === 'slave') clusters[g].slaves.push(i)
+      else clusters[g].masters.push(i)
     } else if (i.topology === 'sentinel') {
       const g = (i.name || '').replace(/-master$|-sentinel$/i, '') || i.name
       sentinels[g] = sentinels[g] || { name: g, sentinels: [], masters: [], topology: 'sentinel' }
@@ -1406,4 +1421,13 @@ function handleResize() {
 
 /* 实例列表：碎片率告警色 */
 .rate-warn { color: #f87171; }
+
+/* ==== Cluster 拓扑：master → replicas ==== */
+.rel-edges { align-items: flex-start; }
+.rel-master-block { display: flex; flex-direction: column; gap: 8px; min-width: 180px; }
+.rel-slaves { display: flex; flex-direction: column; gap: 6px; padding-left: 14px; border-left: 2px dashed rgba(99,179,237,0.35); }
+.rel-slave { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 10px; background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.2); border-radius: 8px; cursor: pointer; transition: all .2s ease; flex-wrap: wrap; }
+.rel-slave:hover { background: rgba(99,102,241,0.14); border-color: rgba(99,102,241,0.45); }
+.rel-slave.is-down { opacity: .55; }
+.rel-slave-tag { background: rgba(99,102,241,0.22); color: #a5b4fc; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 </style>

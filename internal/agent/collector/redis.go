@@ -178,13 +178,14 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 		})
 	}
 
-	// 2. CLUSTER NODES 解析拓扑，遍历所有 master
-	masters, err := redisClusterNodes(cfg.Addr, cfg.Password)
+	// 2. CLUSTER NODES 解析拓扑，遍历所有 master 与 replica
+	masters, replicasByMaster, err := redisClusterNodes(cfg.Addr, cfg.Password)
 	if err != nil {
 		slog.Warn("CLUSTER NODES 解析失败", "addr", cfg.Addr, "err", err)
 		return metrics, instances
 	}
 	for _, masterAddr := range masters {
+		// 2.1 master 自身
 		m, ri := c.collectStandalone(cfg, masterAddr, now)
 		for i := range m {
 			if m[i].Labels != nil {
@@ -197,6 +198,22 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 		ri.Topology = cfg.Topology
 		metrics = append(metrics, m...)
 		instances = append(instances, ri)
+		// 2.2 replicas（关联到当前 master）
+		for _, replicaAddr := range replicasByMaster[masterAddr] {
+			rm, rri := c.collectStandalone(cfg, replicaAddr, now)
+			for i := range rm {
+				if rm[i].Labels != nil {
+					rm[i].Labels["instance"] = replicaAddr
+					rm[i].Labels["topology"] = "cluster"
+					rm[i].Labels["cluster_master_of"] = masterAddr
+				}
+			}
+			rri.Instance = replicaAddr
+			rri.Name = cfg.Name + "-slave-" + replicaAddr
+			rri.Topology = cfg.Topology
+			metrics = append(metrics, rm...)
+			instances = append(instances, rri)
+		}
 	}
 	return metrics, instances
 }
@@ -379,42 +396,80 @@ func redisClusterInfo(addr, password string) (map[string]string, error) {
 	return parseInfoText(resp), nil
 }
 
-// redisClusterNodes 执行 CLUSTER NODES，返回所有 master 节点地址列表。
-func redisClusterNodes(addr, password string) ([]string, error) {
+// redisClusterNodes 执行 CLUSTER NODES，返回所有 master 节点地址列表以及 master→replicas 映射。
+func redisClusterNodes(addr, password string) ([]string, map[string][]string, error) {
 	conn, err := dialRedis(addr, password)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer conn.Close()
 	resp, err := sendCommand(conn, "CLUSTER", "NODES")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var masters []string
+	masters, replicas := parseClusterTopology(resp)
+	return masters, replicas, nil
+}
+
+// parseClusterTopology 解析 CLUSTER NODES 输出。
+// 返回：master 节点地址列表（去重且忽略无效 addr），以及 masterAddr→[]replicaAddr 映射。
+func parseClusterTopology(resp string) ([]string, map[string][]string) {
+	type rawNode struct {
+		id, addr, flags, masterID string
+	}
+	var nodes []rawNode
 	for _, line := range strings.Split(resp, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		fields := strings.Split(line, " ")
-		if len(fields) < 2 {
+		f := strings.Split(line, " ")
+		if len(f) < 2 {
 			continue
 		}
-		// fields[1] 是 addr，格式 host:port@cluster_port 或 host:port
-		addrField := fields[1]
-		if idx := strings.Index(addrField, "@"); idx >= 0 {
-			addrField = addrField[:idx]
+		n := rawNode{id: f[0], addr: f[1]}
+		if len(f) > 2 {
+			n.flags = f[2]
 		}
-		// fields[2] 是 flags，含 master 表示主节点
-		if len(fields) > 2 && strings.Contains(fields[2], "master") {
-			// 跳过失败的节点（addr 为 :0 或 hands）
-			if addrField == "" || strings.HasPrefix(addrField, ":") {
-				continue
+		if len(f) > 3 {
+			n.masterID = f[3]
+		}
+		// addr 格式 host:port@cluster-port，去掉 @ 之后
+		if idx := strings.Index(n.addr, "@"); idx >= 0 {
+			n.addr = n.addr[:idx]
+		}
+		nodes = append(nodes, n)
+	}
+	// 先建立 master-id → master-addr 映射
+	masterByID := map[string]string{}
+	for _, n := range nodes {
+		if !strings.Contains(n.flags, "master") {
+			continue
+		}
+		if n.addr == "" || strings.HasPrefix(n.addr, ":") {
+			continue
+		}
+		masterByID[n.id] = n.addr
+	}
+	var masters []string
+	seen := map[string]bool{}
+	replicasByMaster := map[string][]string{}
+	for _, n := range nodes {
+		if n.addr == "" || strings.HasPrefix(n.addr, ":") {
+			continue
+		}
+		if strings.Contains(n.flags, "master") {
+			if !seen[n.addr] {
+				masters = append(masters, n.addr)
+				seen[n.addr] = true
 			}
-			masters = append(masters, addrField)
+		} else if strings.Contains(n.flags, "slave") && n.masterID != "" {
+			if m, ok := masterByID[n.masterID]; ok {
+				replicasByMaster[m] = append(replicasByMaster[m], n.addr)
+			}
 		}
 	}
-	return masters, nil
+	return masters, replicasByMaster
 }
 
 // sentinelGetMaster 执行 SENTINEL get-master-addr-by-name <name>，返回 master 的 host:port。
