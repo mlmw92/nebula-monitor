@@ -274,9 +274,9 @@
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <el-tooltip v-if="isAlert(row)" :content="issueReasons(row).join('；')" placement="top">
-              <span class="status-text status-issue"><span class="status-dot" :class="row.up ? 'up' : 'down'"></span>异常</span>
+              <span class="status-text status-issue"><span class="status-dot" :class="statusClass(row)"></span>异常</span>
             </el-tooltip>
-            <span v-else class="status-text"><span class="status-dot" :class="row.up ? 'up' : 'down'"></span>{{ row.up ? '在线' : '离线' }}</span>
+            <span v-else class="status-text"><span class="status-dot" :class="statusClass(row)"></span>{{ row.up ? '在线' : '离线' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="异常原因" min-width="220" show-overflow-tooltip>
@@ -385,7 +385,7 @@
         <div class="detail-header">
           <div class="dh-left">
             <div class="dh-title">
-              <span class="status-dot lg" :class="selected.up ? 'up' : 'down'"></span>
+              <span class="status-dot lg" :class="statusClass(selected)"></span>
               <span class="mono">{{ selected.instance }}</span>
             </div>
             <div class="dh-meta">
@@ -1028,7 +1028,13 @@ function hitRateClass(r) {
   return 'ok-text'
 }
 function rowClass({ row }) {
-  return row.up ? '' : 'row-down'
+  if (!row.up) return 'row-down'
+  return isAlert(row) ? 'row-issue' : ''
+}
+
+function statusClass(row) {
+  if (!row.up) return 'down'
+  return isAlert(row) ? 'issue' : 'up'
 }
 
 // 复制空状态引导命令到剪贴板
@@ -1269,6 +1275,13 @@ function handleResize() {
 .status-dot.down {
   background: var(--danger);
 }
+.status-dot.issue {
+  background: var(--warn);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.55);
+}
+.status-issue {
+  color: #fbbf24;
+}
 .status-dot.lg {
   width: 12px;
   height: 12px;
@@ -1363,6 +1376,9 @@ function handleResize() {
 }
 :deep(.row-down) {
   opacity: 0.6;
+}
+:deep(.row-issue) {
+  --el-table-tr-bg-color: rgba(245, 158, 11, 0.04);
 }
 :deep(.el-table) {
   cursor: pointer;
