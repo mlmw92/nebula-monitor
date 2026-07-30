@@ -267,11 +267,10 @@ collectors:
   redis: true                    # ← 总开关，必须开启
 
 redisInstances:
-  # 1) 单机
+  # 1) 单机（无需指定 db，监控命令为实例级，与具体库无关）
   - name: "redis-standalone"
     addr: "127.0.0.1:6379"
     password: "yourpassword"     # 仅存本地，不上报 Server
-    db: 0
     topology: "standalone"
 
   # 2) 主从（master / slave 各配一条 standalone，分别填各自地址）
@@ -312,7 +311,7 @@ redisInstances:
 | `name` | 是 | 实例别名，Web 展示用 |
 | `addr` | 是 | 地址 `host:port`（直连为 Redis 地址；sentinel 为哨兵地址；cluster 为任一节点；exporter 为实例地址） |
 | `password` | 否 | 认证密码，`json:"-"` 标记，**仅存 Agent 本地，绝不通过网络上报**，Web 端不可见 |
-| `db` | 否 | 直连模式采集的 DB 号 |
+| `db` | 否 | 预留字段，当前采集为实例级指标，与具体 DB 无关，**无需填写** |
 | `topology` | 是 | `standalone` \| `replication` \| `sentinel` \| `cluster` |
 | `sentinelName` | 哨兵必填 | sentinel 模式监控的 master 名称 |
 | `exporterURL` | exporter 必填 | Prometheus exporter 的 `/metrics` URL；**一旦填写即走 exporter 拉取模式，忽略直连** |
