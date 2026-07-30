@@ -122,18 +122,6 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="磁盘使用" min-width="120">
-          <template #default="{ row }">
-            <div class="usage-cell" v-if="hasMetric(row)">
-              <div class="mini-bar">
-                <div class="mini-bar-fill" :class="rateClass(m(row).disk)" :style="{ width: pct(m(row).disk) + '%' }"></div>
-              </div>
-              <span :class="['rate-sm', rateClass(m(row).disk)]">{{ fmtNum(m(row).disk) }}%</span>
-            </div>
-            <span v-else class="dim">--</span>
-          </template>
-        </el-table-column>
-
         <el-table-column label="CPU" min-width="110">
           <template #default="{ row }">
             <div class="usage-cell" v-if="hasMetric(row)">
@@ -153,6 +141,18 @@
                 <div class="mini-bar-fill" :class="rateClass(m(row).mem)" :style="{ width: pct(m(row).mem) + '%' }"></div>
               </div>
               <span :class="['rate-sm', rateClass(m(row).mem)]">{{ fmtNum(m(row).mem) }}%</span>
+            </div>
+            <span v-else class="dim">--</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="磁盘使用" min-width="120">
+          <template #default="{ row }">
+            <div class="usage-cell" v-if="hasMetric(row)">
+              <div class="mini-bar">
+                <div class="mini-bar-fill" :class="rateClass(m(row).disk)" :style="{ width: pct(m(row).disk) + '%' }"></div>
+              </div>
+              <span :class="['rate-sm', rateClass(m(row).disk)]">{{ fmtNum(m(row).disk) }}%</span>
             </div>
             <span v-else class="dim">--</span>
           </template>
