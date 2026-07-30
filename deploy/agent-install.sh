@@ -428,6 +428,33 @@ EOF
   c_ok "配置已写入: $CONFIG_DIR/agent.yaml"
 }
 
+# ============================ 安装脚本自身到本地 ============================
+# 把 agent-install.sh 拷贝到 CONFIG_DIR，方便用户后续执行 redis 子命令等配置操作。
+# 安装方式可能是 curl|bash 管道（无本地文件），也可能 bash agent-install.sh（有本地文件）。
+# 优先用本地文件；管道方式则从 Server CDN 下载。
+install_self_script() {
+  local target="${CONFIG_DIR}/agent-install.sh"
+  local src_path=""
+
+  # 尝试定位脚本自身路径（非管道执行时 $0 是文件路径）
+  if [[ -f "$0" && -s "$0" ]]; then
+    src_path="$0"
+  fi
+
+  if [[ -n "$src_path" ]]; then
+    cp -a "$src_path" "$target"
+  else
+    # 管道执行：从 Server CDN 下载
+    local url="${SERVER_URL%/}/install/agent-install.sh"
+    if ! download "$url" "$target" "$SECRET" 2>/dev/null; then
+      c_warn "未能从 Server 下载 agent-install.sh 到本地（不影响 Agent 运行；后续配置可改用 curl 管道方式）"
+      return 0
+    fi
+  fi
+  chmod +x "$target" 2>/dev/null || true
+  c_ok "配置脚本已安装: $target（后续可执行 bash $target redis 配置 Redis 监控）"
+}
+
 write_service() {
   cat > "$SERVICE_DIR/monitor-agent.service" <<EOF
 [Unit]
@@ -503,6 +530,7 @@ summary() {
   echo " 采集间隔    : ${INTERVAL}s"
   echo " 采集项      : CPU=$C_CPU MEM=$C_MEM DISK=$C_DISK NET=$C_NET PROC=$C_PROC LOAD=$C_LOAD"
   echo " 配置文件    : $CONFIG_DIR/agent.yaml"
+  echo " 配置脚本    : $CONFIG_DIR/agent-install.sh（执行 redis 子命令配置 Redis 监控）"
   echo " 二进制      : $BIN_DIR/monitor-agent"
   echo "------------------------------------------------------------"
   echo " 查看状态 : systemctl status monitor-agent"
@@ -681,6 +709,7 @@ main() {
   step_labels
   acquire_binary
   generate_config
+  install_self_script
   write_service
   start_service
   connectivity_check
