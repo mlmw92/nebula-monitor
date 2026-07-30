@@ -103,7 +103,7 @@
 
     <!-- ===== 区块1.5：实例拓扑与集群关系 ===== -->
     <div class="chart-section glass" v-if="instances.length">
-      <div class="section-title">实例拓扑与集群关系</div>
+      <div class="section-title">实例拓扑</div>
 
       <!-- 集群组 -->
       <template v-if="topologyGroups.clusters.length">
