@@ -70,6 +70,132 @@
           <div class="kpi-text">总 OPS</div>
         </div>
       </div>
+      <div class="kpi-card gradient-cluster">
+        <div class="kpi-icon"><ClusterIcon /></div>
+        <div class="kpi-body">
+          <div class="kpi-num">{{ stats.clusterCount }}</div>
+          <div class="kpi-text">集群/哨兵组</div>
+        </div>
+      </div>
+      <div class="kpi-card" :class="stats.alertCount > 0 ? 'gradient-alert' : 'gradient-ok'">
+        <div class="kpi-icon"><AlertIcon /></div>
+        <div class="kpi-body">
+          <div class="kpi-num">{{ stats.alertCount }}</div>
+          <div class="kpi-text">告警实例</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 区块1.5：实例拓扑与集群关系 ===== -->
+    <div class="chart-section glass" v-if="instances.length">
+      <div class="section-title">实例拓扑与集群关系</div>
+
+      <!-- 集群组 -->
+      <template v-if="topologyGroups.clusters.length">
+        <div v-for="grp in topologyGroups.clusters" :key="'c-'+grp.name" class="topo-group">
+          <div class="topo-group-header">
+            <span class="topo-group-title">
+              <ClusterIcon />
+              <strong>集群 {{ grp.name }}</strong>
+            </span>
+            <span class="topo-meta">
+              <span class="badge" :class="clusterHealthClass(grp)">
+                {{ clusterHealthText(grp) }}
+              </span>
+              <span class="dim">masters: {{ grp.masters.length }}</span>
+            </span>
+          </div>
+          <div class="topo-relation">
+            <div class="rel-node rel-center">{{ grp.name }}</div>
+            <div class="rel-edges">
+              <div v-for="(m, idx) in grp.masters" :key="'cm-'+idx" class="rel-edge">
+                <div class="rel-node rel-master" :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }" @click="openDetail(m)">
+                  <div class="rel-node-name" :title="m.instance">{{ m.instance }}</div>
+                  <div class="rel-node-meta">
+                    <span :class="['dot', m.up ? 'up' : 'down']"></span>
+                    <span>{{ m.up ? '在线' : '离线' }}</span>
+                    <span class="dim">·</span>
+                    <span>{{ formatNum(m.ops) }} ops/s</span>
+                    <span class="dim">·</span>
+                    <span>{{ formatBytes(m.usedMemory) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 哨兵组 -->
+      <template v-if="topologyGroups.sentinels.length">
+        <div v-for="grp in topologyGroups.sentinels" :key="'s-'+grp.name" class="topo-group">
+          <div class="topo-group-header">
+            <span class="topo-group-title">
+              <SentinelIcon />
+              <strong>哨兵监控 {{ grp.name }}</strong>
+            </span>
+            <span class="topo-meta dim">
+              sentinels: {{ grp.sentinels.length }} · masters: {{ grp.masters.length }}
+            </span>
+          </div>
+          <div class="topo-relation topo-relation-sentinel">
+            <div class="rel-edges rel-edges-left">
+              <div v-for="(s, idx) in grp.sentinels" :key="'sn-'+idx" class="rel-node rel-sentinel" :class="{ 'is-down': !s.up }" @click="openDetail(s)">
+                <div class="rel-node-name" :title="s.instance">{{ s.instance }}</div>
+                <div class="rel-node-meta">
+                  <span :class="['dot', s.up ? 'up' : 'down']"></span>
+                  <span>{{ s.up ? '在线' : '离线' }}</span>
+                  <span class="dim">·</span>
+                  <span>监控 {{ s.sentinelMasters || 0 }} 个 master</span>
+                  <span v-if="s.sentinelTilt" class="dim">· tilt</span>
+                </div>
+              </div>
+            </div>
+            <div class="rel-arrow">→ 监控 →</div>
+            <div class="rel-edges rel-edges-right">
+              <div v-for="(m, idx) in grp.masters" :key="'sm-'+idx" class="rel-node rel-master" :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }" @click="openDetail(m)">
+                <div class="rel-node-name" :title="m.instance">{{ m.instance }}</div>
+                <div class="rel-node-meta">
+                  <span :class="['dot', m.up ? 'up' : 'down']"></span>
+                  <span>{{ m.up ? '在线' : '离线' }}</span>
+                  <span class="dim">·</span>
+                  <span>repl offset {{ formatNum(m.replicationOffset) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 独立实例 -->
+      <template v-if="topologyGroups.standalones.length">
+        <div class="topo-group">
+          <div class="topo-group-header">
+            <span class="topo-group-title">
+              <ServerIcon />
+              <strong>独立实例</strong>
+            </span>
+            <span class="dim">共 {{ topologyGroups.standalones.length }} 个</span>
+          </div>
+          <div class="topo-grid">
+            <div v-for="(i, idx) in topologyGroups.standalones" :key="'sa-'+idx" class="rel-node rel-standalone" :class="{ 'is-down': !i.up, 'is-alert': isAlert(i) }" @click="openDetail(i)">
+              <div class="rel-node-name" :title="i.instance">{{ i.name || i.instance }}</div>
+              <div class="rel-node-meta">
+                <span :class="['dot', i.up ? 'up' : 'down']"></span>
+                <span>{{ i.up ? '在线' : '离线' }}</span>
+                <span class="dim">·</span>
+                <span>{{ i.instance }}</span>
+              </div>
+              <div class="rel-node-meta">
+                <span>{{ formatNum(i.ops) }} ops/s</span>
+                <span class="dim">·</span>
+                <span>{{ formatBytes(i.usedMemory) }}</span>
+                <span v-if="i.role === 'master' && i.connectedSlaves" class="dim">· {{ i.connectedSlaves }} slaves</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- ===== 区块2：分布可视化（环形图）===== -->
@@ -189,6 +315,17 @@
             <span class="mono" :class="hitRateClass(row.hitRate)">{{ row.hitRate }}%</span>
           </template>
         </el-table-column>
+        <el-table-column label="碎片率" width="80" align="right">
+          <template #default="{ row }">
+            <span class="mono" :class="row.fragmentation > 1.5 ? 'rate-warn' : ''">{{ row.fragmentation }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="从节点" width="80" align="right">
+          <template #default="{ row }">
+            <span class="mono" v-if="row.role === 'master' && row.connectedSlaves">{{ row.connectedSlaves }}</span>
+            <span class="dim" v-else>--</span>
+          </template>
+        </el-table-column>
         <el-table-column label="运行时长" width="100">
           <template #default="{ row }">
             <span class="mono">{{ formatUptime(row.uptime) }}</span>
@@ -219,6 +356,96 @@
             <div class="range-tabs">
               <button v-for="r in ranges" :key="r.value" :class="{ active: range === r.value }" @click="changeRange(r.value)">{{ r.label }}</button>
             </div>
+          </div>
+        </div>
+
+        <!-- 关键指标快照 -->
+        <div class="snapshot-grid" v-if="selected">
+          <div class="snap-card">
+            <div class="snap-label">碎片率</div>
+            <div class="snap-value" :class="(selected.fragmentation||0) > 1.5 ? 'warn' : ''">{{ selected.fragmentation || 0 }}</div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-label">阻塞客户端</div>
+            <div class="snap-value">{{ selected.blocked || 0 }}</div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-label">最大内存</div>
+            <div class="snap-value">{{ formatBytes(selected.maxMemory) }}</div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-label">淘汰 / 过期 Key</div>
+            <div class="snap-value">{{ formatNum(selected.evicted) }} / {{ formatNum(selected.expired) }}</div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-label">拒绝连接</div>
+            <div class="snap-value">{{ formatNum(selected.rejected) }}</div>
+          </div>
+          <div class="snap-card" v-if="selected.role === 'master'">
+            <div class="snap-label">从节点 / 复制偏移</div>
+            <div class="snap-value">{{ selected.connectedSlaves || 0 }} / {{ formatNum(selected.replicationOffset) }}</div>
+          </div>
+          <div class="snap-card" v-if="selected.role === 'slave'">
+            <div class="snap-label">复制延迟</div>
+            <div class="snap-value" :class="(selected.replicationLag||0) > 10 ? 'warn' : ''">{{ selected.replicationLag || 0 }} s</div>
+          </div>
+          <div class="snap-card" v-if="selected.role === 'slave'">
+            <div class="snap-label">复制偏移</div>
+            <div class="snap-value">{{ formatNum(selected.replicationOffset) }}</div>
+          </div>
+        </div>
+
+        <!-- 集群健康度（cluster 拓扑） -->
+        <div class="snapshot-grid snapshot-cluster" v-if="selected && selected.topology === 'cluster'">
+          <div class="snap-card snap-card-wide">
+            <div class="snap-label">集群状态</div>
+            <div class="snap-value" :class="selected.clusterState === 1 ? 'ok' : 'warn'">
+              {{ selected.clusterState === 1 ? 'ok · 健康' : '异常' }}
+            </div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-label">槽位 ok</div>
+            <div class="snap-value">{{ selected.clusterSlotsOk || 0 }}</div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-label">槽位 assigned</div>
+            <div class="snap-value">{{ selected.clusterSlotsAssigned || 0 }}</div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-label">槽位失败</div>
+            <div class="snap-value" :class="(selected.clusterSlotsFail||0) > 0 ? 'warn' : 'ok'">{{ selected.clusterSlotsFail || 0 }}</div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-label">集群大小</div>
+            <div class="snap-value">{{ selected.clusterSize || 0 }}</div>
+          </div>
+          <div class="snap-card">
+            <div class="snap-label">已知节点</div>
+            <div class="snap-value">{{ selected.clusterKnownNodes || 0 }}</div>
+          </div>
+        </div>
+
+        <!-- 哨兵监控（sentinel 拓扑） -->
+        <div class="snapshot-grid snapshot-sentinel" v-if="selected && selected.topology === 'sentinel'">
+          <div class="snap-card" v-if="selected.role === 'sentinel'">
+            <div class="snap-label">监控 master</div>
+            <div class="snap-value">{{ selected.sentinelMasters || 0 }}</div>
+          </div>
+          <div class="snap-card" v-if="selected.role === 'sentinel'">
+            <div class="snap-label">监控 slave</div>
+            <div class="snap-value">{{ selected.sentinelSlaves || 0 }}</div>
+          </div>
+          <div class="snap-card" v-if="selected.role === 'sentinel'">
+            <div class="snap-label">同组 sentinel</div>
+            <div class="snap-value">{{ selected.sentinelSentinels || 0 }}</div>
+          </div>
+          <div class="snap-card" v-if="selected.role === 'sentinel'">
+            <div class="snap-label">Tilt 模式</div>
+            <div class="snap-value" :class="(selected.sentinelTilt||0) > 0 ? 'warn' : 'ok'">{{ (selected.sentinelTilt||0) > 0 ? '是' : '否' }}</div>
+          </div>
+          <div class="snap-card" v-if="selected.role === 'master' && selected.sentinelMasterOf">
+            <div class="snap-label">受 Sentinel 监控</div>
+            <div class="snap-value ok">{{ selected.sentinelMasterOf }}</div>
           </div>
         </div>
 
@@ -254,6 +481,10 @@ const ConnectionIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke=
 const ActivityIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>' }
 const SearchIcon = Search
 const RefreshIcon = Refresh
+const ClusterIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="6.5" y1="6.5" x2="9.5" y2="9.5"/><line x1="14.5" y1="9.5" x2="17.5" y2="6.5"/><line x1="6.5" y1="17.5" x2="9.5" y2="14.5"/><line x1="14.5" y1="14.5" x2="17.5" y2="17.5"/></svg>' }
+const SentinelIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>' }
+const AlertIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' }
+const ServerIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>' }
 
 // ---- 数据 ----
 const instances = ref([])
@@ -285,7 +516,16 @@ function loadServerURL() {
 }
 
 // 统计
-const stats = reactive({ total: 0, up: 0, down: 0, totalMemory: 0, totalClients: 0, totalOps: 0 })
+const stats = reactive({ total: 0, up: 0, down: 0, totalMemory: 0, totalClients: 0, totalOps: 0, clusterCount: 0, alertCount: 0 })
+
+// 告警判定：实例不健康
+function isAlert(i) {
+  if (!i.up) return true
+  if (i.topology === 'cluster' && (i.clusterSlotsFail || 0) > 0) return true
+  if ((i.fragmentation || 0) > 1.5) return true
+  if (i.topology === 'sentinel' && (i.sentinelTilt || 0) > 0) return true
+  return false
+}
 
 // 过滤
 const filteredInstances = computed(() => {
@@ -295,11 +535,48 @@ const filteredInstances = computed(() => {
     if (filterTopology.value && i.topology !== filterTopology.value) return false
     if (searchText.value) {
       const s = searchText.value.toLowerCase()
-      if (!i.instance.toLowerCase().includes(s) && !i.node.toLowerCase().includes(s)) return false
+      if (!i.instance.toLowerCase().includes(s) &&
+          !i.node.toLowerCase().includes(s) &&
+          !(i.name || '').toLowerCase().includes(s)) return false
     }
     return true
   })
 })
+
+// 拓扑分组：用于关系视图
+const topologyGroups = computed(() => {
+  const clusters = {}, sentinels = {}, standalones = []
+  for (const i of instances.value) {
+    if (i.topology === 'cluster') {
+      const g = (i.name || '').replace(/-master$|-slave$|-node\d+$/i, '') || i.name
+      clusters[g] = clusters[g] || { name: g, masters: [], topology: 'cluster' }
+      clusters[g].masters.push(i)
+    } else if (i.topology === 'sentinel') {
+      const g = (i.name || '').replace(/-master$|-sentinel$/i, '') || i.name
+      sentinels[g] = sentinels[g] || { name: g, sentinels: [], masters: [], topology: 'sentinel' }
+      if (i.role === 'sentinel') sentinels[g].sentinels.push(i)
+      else sentinels[g].masters.push(i)
+    } else {
+      standalones.push(i)
+    }
+  }
+  return { clusters: Object.values(clusters), sentinels: Object.values(sentinels), standalones }
+})
+
+// 集群健康度判定（基于 topologyGroups 中 cluster 组的 masters 状态）
+function clusterHealth(grp) {
+  const total = grp.masters.length
+  const up = grp.masters.filter(m => m.up).length
+  const failSlots = grp.masters.reduce((s, m) => s + (m.clusterSlotsFail || 0), 0)
+  const stateOk = grp.masters.some(m => m.clusterState === 1)
+  if (total === 0) return { cls: 'down', text: '无 master' }
+  if (up === 0) return { cls: 'down', text: '全部离线' }
+  if (failSlots > 0) return { cls: 'warn', text: `槽位失败 ${failSlots}` }
+  if (!stateOk) return { cls: 'warn', text: '集群状态异常' }
+  return { cls: 'ok', text: '健康' }
+}
+function clusterHealthClass(grp) { return 'badge-' + clusterHealth(grp).cls }
+function clusterHealthText(grp) { return clusterHealth(grp).text }
 
 // ---- 图表引用 ----
 const chartRefs = {}
@@ -338,6 +615,12 @@ function computeStats() {
   stats.totalMemory = list.reduce((s, i) => s + (i.usedMemory || 0), 0)
   stats.totalClients = list.reduce((s, i) => s + (i.clients || 0), 0)
   stats.totalOps = list.reduce((s, i) => s + (i.ops || 0), 0)
+  // 集群数（按 cluster name 去重）
+  const clusterNames = new Set()
+  for (const i of list) if (i.topology === 'cluster' && i.name) clusterNames.add(i.name)
+  stats.clusterCount = clusterNames.size
+  // 告警实例数
+  stats.alertCount = list.filter(isAlert).length
 }
 
 // ---- 渲染概览图表 ----
@@ -1068,4 +1351,59 @@ function handleResize() {
   .bar-row { grid-template-columns: 1fr; }
   .chart-grid { grid-template-columns: 1fr; }
 }
+
+/* ==== 新增 KPI 卡渐变（集群数 / 告警）==== */
+.gradient-cluster { background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(139,92,246,0.12)); }
+.gradient-alert { background: linear-gradient(135deg, rgba(239,68,68,0.22), rgba(220,38,38,0.12)); }
+.gradient-ok { background: linear-gradient(135deg, rgba(34,197,94,0.18), rgba(16,185,129,0.10)); }
+
+/* ==== 实例拓扑与集群关系 ==== */
+.topo-group { margin-top: 16px; padding: 12px 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; }
+.topo-group:first-child { margin-top: 0; }
+.topo-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 12px; flex-wrap: wrap; }
+.topo-group-title { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
+.topo-group-title svg { width: 18px; height: 18px; color: #93c5fd; }
+.topo-meta { font-size: 12px; display: inline-flex; align-items: center; gap: 10px; }
+.topo-meta .dim { color: rgba(255,255,255,0.45); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+.badge-ok { background: rgba(34,197,94,0.15); color: #4ade80; }
+.badge-warn { background: rgba(234,179,8,0.15); color: #fbbf24; }
+.badge-down { background: rgba(239,68,68,0.18); color: #f87171; }
+
+/* cluster 关系：center + 外围 master */
+.topo-relation { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.rel-node { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 14px; min-width: 160px; cursor: pointer; transition: all .2s ease; }
+.rel-node:hover { background: rgba(255,255,255,0.08); border-color: rgba(99,179,237,0.4); }
+.rel-node.is-down { opacity: .55; }
+.rel-node.is-alert { border-color: rgba(239,68,68,0.5); box-shadow: 0 0 0 1px rgba(239,68,68,0.2); }
+.rel-center { background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.18)); border-color: rgba(139,92,246,0.4); font-weight: 600; }
+.rel-center::after { content: ''; }
+.rel-master { border-color: rgba(59,130,246,0.35); }
+.rel-sentinel { border-color: rgba(234,179,8,0.35); background: rgba(234,179,8,0.06); }
+.rel-standalone { border-color: rgba(148,163,184,0.3); }
+.rel-edges { display: flex; gap: 12px; flex-wrap: wrap; flex: 1; }
+.rel-edges-left, .rel-edges-right { flex: 1; min-width: 200px; }
+.rel-edge { position: relative; }
+.rel-edge::before { content: ''; position: absolute; left: -16px; top: 50%; width: 12px; height: 1px; background: linear-gradient(to right, rgba(139,92,246,0.5), rgba(59,130,246,0.5)); }
+.topo-relation-sentinel { justify-content: space-between; }
+.rel-arrow { color: rgba(234,179,8,0.8); font-weight: 600; font-size: 13px; padding: 0 4px; white-space: nowrap; }
+.topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.rel-node-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; word-break: break-all; }
+.rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: rgba(255,255,255,0.75); flex-wrap: wrap; }
+.rel-node-meta .dim { color: rgba(255,255,255,0.4); }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.up { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.5); }
+.dot.down { background: #f87171; }
+
+/* ==== 详情抽屉：关键指标快照 ==== */
+.snapshot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin: 16px 0 4px; }
+.snap-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px 14px; }
+.snap-card-wide { grid-column: span 2; }
+.snap-label { font-size: 12px; color: rgba(255,255,255,0.55); margin-bottom: 6px; }
+.snap-value { font-size: 18px; font-weight: 600; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.snap-value.ok { color: #4ade80; }
+.snap-value.warn { color: #f87171; }
+
+/* 实例列表：碎片率告警色 */
+.rate-warn { color: #f87171; }
 </style>
