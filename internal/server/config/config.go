@@ -30,6 +30,8 @@ type Config struct {
 	Auth            AuthConfig      `yaml:"auth"`            // 登录认证配置
 	Upgrade         UpgradeConfig   `yaml:"upgrade"`         // Web 系统升级模块配置
 	NotifyFile      string          `yaml:"notifyFile"`      // 通知渠道独立配置文件（Web 端配置写入，优先于 server.yaml 的 notify 段）
+	DialtestFile    string          `yaml:"dialtestFile"`    // 拨测任务配置文件
+	ReportDir       string          `yaml:"reportDir"`       // 报告存储目录
 }
 
 // AuthConfig 登录认证配置（启用后访问需登录，token 有效期 24h）
@@ -64,6 +66,7 @@ type TSDBConfig struct {
 type AlertConfig struct {
 	Enabled         bool   `yaml:"enabled"`         // 是否启用告警
 	RulesFile       string `yaml:"rulesFile"`       // 规则文件路径
+	MaintenanceFile string `yaml:"maintenanceFile"` // 维护窗口文件路径
 	EvalInterval    int    `yaml:"evalInterval"`    // 评估间隔（秒）
 	RecoverInterval int    `yaml:"recoverInterval"` // 恢复检查间隔（秒）
 }
@@ -148,7 +151,7 @@ func Default() *Config {
 		NodeMeta:       "/etc/monitor-server/nodes.json",
 		DataDir:        "/var/lib/monitor-server",
 		OfflineTimeout: 60,
-		Alert:          AlertConfig{Enabled: true, RulesFile: "/etc/monitor-server/rules.yaml", EvalInterval: 15, RecoverInterval: 30},
+		Alert:          AlertConfig{Enabled: true, RulesFile: "/etc/monitor-server/rules.yaml", MaintenanceFile: "/etc/monitor-server/maintenance.yaml", EvalInterval: 15, RecoverInterval: 30},
 		Notify: NotifyConfig{
 			Email:    EmailConfig{Enabled: false, SMTPPort: 587, UseStartTLS: true},
 			Webhook:  WebhookConfig{Enabled: false},
@@ -161,6 +164,8 @@ func Default() *Config {
 		AgentScriptPath: "./deploy/agent-install.sh",
 		WebDir:          "/etc/monitor-server/web",
 		NotifyFile:      "/etc/monitor-server/notify.yaml",
+		DialtestFile:    "/etc/monitor-server/dialtest.yaml",
+		ReportDir:       "/var/lib/monitor-server/reports",
 		Auth:            AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: ""},
 		Upgrade: UpgradeConfig{
 			Enabled:    true,

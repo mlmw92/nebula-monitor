@@ -12,8 +12,10 @@ import (
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/config"
+	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
+	"github.com/nebula/monitor/internal/server/report"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/upgrade"
 	"github.com/nebula/monitor/internal/version"
@@ -34,6 +36,28 @@ type AlertStore interface {
 	Active() []model.AlertEvent
 }
 
+// MaintenanceProvider 提供维护窗口读写（由 alert 包实现）。
+type MaintenanceProvider interface {
+	Get() model.MaintenanceWindow
+	Set(mw model.MaintenanceWindow)
+}
+
+// DialtestProvider 提供拨测任务 CRUD（由 dialtest 包实现）。
+type DialtestProvider interface {
+	List() []dialtest.Task
+	Get(id string) (dialtest.Task, bool)
+	Create(t dialtest.Task) dialtest.Task
+	Update(t dialtest.Task) error
+	Delete(id string) error
+}
+
+// ReportProvider 提供报告生成与查询（由 report 包实现）。
+type ReportProvider interface {
+	Generate(rt report.ReportType) (string, error)
+	GetHTML(id string) (string, error)
+	History() []report.ReportMeta
+}
+
 // API 聚合所有 REST 接口依赖。
 type API struct {
 	store     storage.Storage
@@ -47,11 +71,14 @@ type API struct {
 	upgrader  *upgrade.Manager
 	notifyMgr *notify.Manager
 	engine    *alert.Engine
+	maintenance MaintenanceProvider
+	dialtest  DialtestProvider
+	report    ReportProvider
 }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -73,6 +100,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/processes", a.handleProcesses)
 
 	mux.HandleFunc("GET /api/v1/middleware/redis/instances", a.handleRedisInstances)
+	mux.HandleFunc("GET /api/v1/middleware/mysql/instances", a.handleMySQLInstances)
+	mux.HandleFunc("GET /api/v1/middleware/postgres/instances", a.handlePostgresInstances)
+	mux.HandleFunc("GET /api/v1/middleware/nginx/instances", a.handleNginxInstances)
+	mux.HandleFunc("GET /api/v1/middleware/kafka/instances", a.handleKafkaInstances)
+	mux.HandleFunc("GET /api/v1/middleware/docker/containers", a.handleDockerContainers)
+	mux.HandleFunc("GET /api/v1/middleware/rocketmq/instances", a.handleRocketMQInstances)
 
 	mux.HandleFunc("GET /api/v1/alerts", a.handleAlerts)
 	mux.HandleFunc("GET /api/v1/rules", a.handleRulesList)
@@ -99,6 +132,19 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/notify", a.handleNotifyPut)
 	mux.HandleFunc("POST /api/v1/notify/test", a.handleNotifyTest)
 	mux.HandleFunc("POST /api/v1/alerts/test", a.handleAlertTest)
+
+	mux.HandleFunc("GET /api/v1/maintenance", a.handleMaintenanceGet)
+	mux.HandleFunc("PUT /api/v1/maintenance", a.handleMaintenanceSet)
+
+	mux.HandleFunc("GET /api/v1/dialtest/tasks", a.handleDialtestList)
+	mux.HandleFunc("POST /api/v1/dialtest/tasks", a.handleDialtestCreate)
+	mux.HandleFunc("PUT /api/v1/dialtest/tasks/{id}", a.handleDialtestUpdate)
+	mux.HandleFunc("DELETE /api/v1/dialtest/tasks/{id}", a.handleDialtestDelete)
+	mux.HandleFunc("GET /api/v1/dialtest/latest", a.handleDialtestLatest)
+
+	mux.HandleFunc("POST /api/v1/report/generate", a.handleReportGenerate)
+	mux.HandleFunc("GET /api/v1/report/download", a.handleReportDownload)
+	mux.HandleFunc("GET /api/v1/report/history", a.handleReportHistory)
 }
 
 // handleInstallInfo 返回 Agent 一行安装命令（server 地址取自请求 Host，secret 取自配置）。

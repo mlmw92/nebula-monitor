@@ -85,6 +85,19 @@
           </div>
         </div>
 
+        <!-- 端口状态 -->
+        <div v-if="portStatuses.length > 0" class="port-section">
+          <div class="section-title">端口状态</div>
+          <div class="port-list">
+            <div v-for="ps in portStatuses" :key="ps.port" class="port-item" :class="{ up: ps.up, down: !ps.up }">
+              <span class="port-dot"></span>
+              <span class="port-num">{{ ps.port }}</span>
+              <span class="port-state">{{ ps.up ? '在线' : '离线' }}</span>
+              <span v-if="ps.latency" class="port-latency">{{ ps.latency.toFixed(1) }}ms</span>
+            </div>
+          </div>
+        </div>
+
         <!-- 实时趋势 + IO -->
         <div class="section-title">实时趋势</div>
         <div class="panel-hint">说明：以下为通过 WebSocket 实时上报的采样（每秒 1 条，横轴为采样时刻，仅保留最近 60 个点）。</div>
@@ -241,6 +254,7 @@ const netIfaces = ref(['all'])
 const loadingNode = ref(false)
 const autoRefresh = ref(true)
 const procSearch = ref('')
+const portStatuses = ref([])
 
 const rt = reactive({
   cpu: 0, mem: 0, disk: 0, net: '0 B/s', netSent: '0 B/s',
@@ -489,11 +503,34 @@ async function loadAlerts(name) {
   } catch (e) { /* ignore */ }
 }
 
+async function loadPortStatuses(name) {
+  try {
+    const upData = await http.get(`/api/v1/query/latest?node=${encodeURIComponent(name)}&metric=port_up`)
+    const latData = await http.get(`/api/v1/query/latest?node=${encodeURIComponent(name)}&metric=port_latency`)
+    const upMap = {}
+    if (upData.series) for (const s of upData.series) {
+      const port = s.labels?.port
+      if (port && s.points?.length > 0) upMap[port] = s.points[s.points.length - 1].value > 0
+    }
+    const latMap = {}
+    if (latData.series) for (const s of latData.series) {
+      const port = s.labels?.port
+      if (port && s.points?.length > 0) latMap[port] = s.points[s.points.length - 1].value
+    }
+    portStatuses.value = Object.keys(upMap).map(port => ({
+      port,
+      up: upMap[port],
+      latency: latMap[port] || 0,
+    })).sort((a, b) => a.port.localeCompare(b.port))
+  } catch (e) { portStatuses.value = [] }
+}
+
 function onSelect(name) {
   selected.value = name
   connectWS(name)
   loadProcesses(name)
   loadAlerts(name)
+  loadPortStatuses(name)
   if (activeTab.value === 'monitor') {
     nextTick(() => {
       initMonitorCharts()
@@ -734,6 +771,7 @@ onMounted(async () => {
     connectWS(selected.value)
     loadProcesses(selected.value)
     loadAlerts(selected.value)
+    loadPortStatuses(selected.value)
   }
   await nextTick()
   initRealtimeCharts()
@@ -770,6 +808,18 @@ onUnmounted(() => {
 .node-tabs :deep(.el-tabs__header) { background: rgba(255,255,255,0.04); margin: 0; }
 .node-tabs :deep(.el-tabs__content) { padding: 16px 20px; }
 .tab-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.port-section { margin-top: 16px; }
+.port-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.port-item { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; font-size: 13px; background: rgba(255,255,255,0.04); }
+.port-item.up { border-left: 3px solid #3fb950; }
+.port-item.down { border-left: 3px solid #dc382d; opacity: 0.7; }
+.port-dot { width: 6px; height: 6px; border-radius: 50%; }
+.port-item.up .port-dot { background: #3fb950; box-shadow: 0 0 4px rgba(63,185,80,0.5); }
+.port-item.down .port-dot { background: #dc382d; }
+.port-num { font-family: var(--mono); font-weight: 600; }
+.port-state { color: var(--text-dim); font-size: 12px; }
+.port-latency { color: var(--text-muted); font-size: 11px; }
+
 .section-title {
   margin: 18px 0 10px;
   font-size: 14px;

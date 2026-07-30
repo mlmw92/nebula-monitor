@@ -98,8 +98,13 @@ usage() {
 用法: $0 [子命令] [选项]
 
 子命令：
-  (无)                安装 Agent（交互式分步引导，默认不开启 Redis 监控）
+  (无)                安装 Agent（交互式分步引导，默认不开启中间件监控）
   redis               配置 Redis 中间件监控（引导填写实例并合并到 agent.yaml）
+  mysql               配置 MySQL 中间件监控
+  postgres            配置 PostgreSQL 中间件监控
+  nginx               配置 Nginx 中间件监控
+  kafka               配置 Kafka 中间件监控
+  rocketmq            配置 RocketMQ 中间件监控
 
 选项：
   --server <url>      上报的 Server 地址，如 http://10.0.0.1:8080
@@ -117,24 +122,34 @@ usage() {
   bash agent-install.sh                      # 交互式安装 Agent
   bash agent-install.sh --yes --server http://10.0.0.1:8080
   bash agent-install.sh redis                # 配置 Redis 监控（安装后执行）
+  bash agent-install.sh mysql                # 配置 MySQL 监控
+  bash agent-install.sh postgres             # 配置 PostgreSQL 监控
+  bash agent-install.sh nginx                # 配置 Nginx 监控
+  bash agent-install.sh kafka                # 配置 Kafka 监控
+  bash agent-install.sh rocketmq             # 配置 RocketMQ 监控
 EOF
   exit 0
 }
 
 # ============================ 子命令分发 ============================
-# 首个参数为 redis 时进入 Redis 配置流程（不安装/不覆盖 Agent 二进制）。
+# 首个参数为中间件子命令时进入配置流程（不安装/不覆盖 Agent 二进制）。
+# 支持的子命令: redis mysql postgres nginx kafka rocketmq
 SUBCOMMAND=""
 if [[ $# -gt 0 ]]; then
   case "$1" in
-    redis) SUBCOMMAND="redis"; shift ;;
+    redis|mysql|postgres|nginx|kafka|rocketmq)
+      SUBCOMMAND="$1"; shift ;;
     -h|--help) usage ;;
     --*) ;;  # 以 -- 开头的是选项，不是子命令
-    *)  # 非选项参数视为子命令（仅支持 redis，其他报错）
-      if [[ "$1" == "redis" || "$1" == "Redis" || "$1" == "REDIS" ]]; then
-        SUBCOMMAND="redis"; shift
-      else
-        die "未知参数或子命令: $1（用 -h 查看帮助；支持的子命令: redis）"
-      fi
+    *)
+      local_lower="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
+      case "$local_lower" in
+        redis|mysql|postgres|nginx|kafka|rocketmq)
+          SUBCOMMAND="$local_lower"; shift ;;
+        *)
+          die "未知参数或子命令: $1（用 -h 查看帮助；支持的子命令: redis mysql postgres nginx kafka rocketmq）"
+          ;;
+      esac
       ;;
   esac
 fi
@@ -698,6 +713,192 @@ redis_config() {
   echo "============================================================"
 }
 
+# ============================ 通用中间件配置 ============================
+# 通用中间件配置函数，通过参数区分 MySQL/PostgreSQL/Nginx/Kafka/RocketMQ。
+# 用法: middleware_config <type>
+#   type: mysql|postgres|nginx|kafka|rocketmq
+middleware_config() {
+  local mw_type="$1"
+  local mw_name mw_collector mw_instances_key
+  case "$mw_type" in
+    mysql)    mw_name="MySQL";       mw_collector="mysql";    mw_instances_key="mysqlInstances" ;;
+    postgres) mw_name="PostgreSQL";  mw_collector="postgres"; mw_instances_key="postgresInstances" ;;
+    nginx)    mw_name="Nginx";       mw_collector="nginx";    mw_instances_key="nginxInstances" ;;
+    kafka)    mw_name="Kafka";       mw_collector="kafka";    mw_instances_key="kafkaInstances" ;;
+    rocketmq) mw_name="RocketMQ";    mw_collector="rocketmq"; mw_instances_key="rocketmqInstances" ;;
+    *) die "不支持的中间件类型: $mw_type" ;;
+  esac
+
+  echo "============================================================"
+  echo " ${mw_name} 中间件监控配置"
+  echo "------------------------------------------------------------"
+  echo " 本向导引导你填写 ${mw_name} 实例，写入 ${CONFIG_DIR}/agent.yaml"
+  echo " 并开启 collectors.${mw_collector}，完成后自动重启 agent。"
+  echo " 密码仅存本机 agent.yaml，不上报 Server。"
+  echo "============================================================"
+  echo
+
+  local cfg="${CONFIG_DIR}/agent.yaml"
+  if [[ ! -f "$cfg" ]]; then
+    die "未找到 $cfg，请先安装 Agent（bash agent-install.sh）"
+  fi
+
+  cp -a "$cfg" "${cfg}.bak.$(date +%s)"
+  c_ok "已备份原配置: ${cfg}.bak.*"
+
+  local instances_yaml=""
+  local idx=0
+  while true; do
+    idx=$((idx + 1))
+    echo
+    echo "--- 配置第 $idx 个 ${mw_name} 实例（留空名称跳过结束）---"
+
+    local name addr user password exporter_url extra_fields=""
+    prompt name "实例别名（如 ${mw_type}-primary）" ""
+    [[ -z "$name" ]] && { echo "已结束实例添加。"; break; }
+
+    prompt addr "地址 host:port（如 127.0.0.1:${mw_type}_port）" "127.0.0.1"
+
+    case "$mw_type" in
+      mysql)
+        prompt user "用户名" "root"
+        prompt password "密码（仅存本地不上报）" ""
+        echo "请选择部署拓扑："
+        choose "拓扑类型" 1 "单机(standalone)" "主从(replication)" "exporter(Prometheus)"
+        local topo=""
+        case "$CHOICE_VAL" in
+          单机*) topo="standalone" ;;
+          主从*) topo="replication" ;;
+          exporter*) topo="standalone" ;;
+        esac
+        if [[ "$CHOICE_VAL" == exporter* ]]; then
+          prompt exporter_url "exporter /metrics URL" "http://127.0.0.1:9104/metrics"
+        fi
+        extra_fields="topology"
+        ;;
+      postgres)
+        prompt user "用户名" "postgres"
+        prompt password "密码（仅存本地不上报）" ""
+        local database ssl_mode
+        prompt database "数据库名" "postgres"
+        prompt ssl_mode "SSL 模式（disable/require/verify-ca/verify-full）" "disable"
+        extra_fields="database: \"${database}\""$'\n'"    sslMode: \"${ssl_mode}\""$'\n'"    topology: \"standalone\""
+        ;;
+      nginx)
+        local status_path
+        prompt status_path "stub_status 路径（如 /nginx_status）" "/nginx_status"
+        extra_fields="statusPath: \"${status_path}\""
+        ;;
+      kafka)
+        local version
+        prompt version "Kafka 版本（如 2.8.0，用于展示）" "2.8.0"
+        extra_fields="version: \"${version}\""
+        ;;
+      rocketmq)
+        extra_fields=""
+        ;;
+    esac
+
+    # 生成 YAML 片段
+    instances_yaml+="  - name: \"${name}\""$'\n'
+    instances_yaml+="    addr: \"${addr}\""$'\n'
+    if [[ -n "$user" ]]; then
+      instances_yaml+="    user: \"${user}\""$'\n'
+    fi
+    if [[ -n "$password" ]]; then
+      instances_yaml+="    password: \"${password}\""$'\n'
+    fi
+    if [[ "$mw_type" == "nginx" && -n "$status_path" ]]; then
+      instances_yaml+="    statusPath: \"${status_path}\""$'\n'
+    fi
+    if [[ "$mw_type" == "postgres" ]]; then
+      instances_yaml+="    database: \"${database}\""$'\n'
+      instances_yaml+="    sslMode: \"${ssl_mode}\""$'\n'
+      instances_yaml+="    topology: \"standalone\""$'\n'
+    fi
+    if [[ "$mw_type" == "mysql" ]]; then
+      instances_yaml+="    topology: \"${topo}\""$'\n'
+    fi
+    if [[ "$mw_type" == "kafka" && -n "$version" ]]; then
+      instances_yaml+="    version: \"${version}\""$'\n'
+    fi
+    if [[ -n "$exporter_url" ]]; then
+      instances_yaml+="    exporterURL: \"${exporter_url}\""$'\n'
+    fi
+
+    c_ok "已添加实例: $name ($addr)"
+
+    if ! confirm "是否继续添加下一个 ${mw_name} 实例？" "no"; then
+      break
+    fi
+  done
+
+  if [[ -z "$instances_yaml" ]]; then
+    c_warn "未添加任何 ${mw_name} 实例，配置未变更。"
+    exit 0
+  fi
+
+  echo
+  c_info "即将写入以下 ${mw_name} 配置到 $cfg："
+  echo "----------------------------------------"
+  printf 'collectors:\n  %s: true\n\n%s:\n%s' "$mw_collector" "$mw_instances_key" "$instances_yaml"
+  echo "----------------------------------------"
+
+  if ! confirm "确认写入并重启 agent？" "yes"; then
+    echo "已取消，配置未变更。"
+    exit 0
+  fi
+
+  # 步骤1：开启 collectors
+  if grep -qE "^[[:space:]]*${mw_collector}:" "$cfg" 2>/dev/null; then
+    sed -i -E "s/^([[:space:]]*)${mw_collector}:[[:space:]]*.*/\\1${mw_collector}: true/" "$cfg"
+  elif grep -qE '^[[:space:]]*collectors:' "$cfg" 2>/dev/null; then
+    sed -i -E "/^[[:space:]]*collectors:/a\  ${mw_collector}: true" "$cfg"
+  else
+    printf "\ncollectors:\n  %s: true\n" "$mw_collector" >> "$cfg"
+  fi
+  c_ok "已开启 collectors.${mw_collector}"
+
+  # 步骤2：写入 instances 段
+  local tmp_file
+  tmp_file="$(mktemp)"
+  awk -v found=0 -v key="${mw_instances_key}:" '
+    $0 ~ "^" key { found=1; next }
+    found == 1 && /^[[:space:]]+/ { next }
+    found == 1 && /^[^[:space:]]/ { found=0 }
+    found == 0 { print }
+  ' "$cfg" > "$tmp_file"
+  mv "$tmp_file" "$cfg"
+
+  printf '\n%s:\n%s' "$mw_instances_key" "$instances_yaml" >> "$cfg"
+  c_ok "已写入 ${mw_instances_key} 配置"
+
+  # 重启 agent
+  if have_cmd systemctl; then
+    c_info "重启 monitor-agent 服务..."
+    systemctl restart monitor-agent 2>/dev/null || true
+    sleep 2
+    local st
+    st="$(systemctl is-active monitor-agent 2>/dev/null || echo unknown)"
+    if [[ "$st" == "active" ]]; then
+      c_ok "Agent 已重启并运行中"
+    else
+      c_warn "Agent 服务状态: $st，请查看日志: journalctl -u monitor-agent -n 50"
+    fi
+  else
+    c_warn "未检测到 systemctl，请手动重启 agent 进程"
+  fi
+
+  echo
+  echo "============================================================"
+  echo " ${mw_name} 监控配置完成"
+  echo "------------------------------------------------------------"
+  echo " 配置文件   : $cfg"
+  echo " 查看日志   : journalctl -u monitor-agent -f | grep -i ${mw_collector}"
+  echo " Web 端     : 中间件监控 → ${mw_name} Tab 查看实例"
+  echo "============================================================"
+}
+
 # ============================ 主流程 ============================
 main() {
   detect_env
@@ -718,9 +919,13 @@ main() {
   summary
 }
 
-# 子命令分发：redis → 配置 Redis 监控；否则走默认安装流程
-if [[ "$SUBCOMMAND" == "redis" ]]; then
-  redis_config
-else
-  main
-fi
+# 子命令分发：redis/mysql/postgres/nginx/kafka/rocketmq → 配置中间件监控；否则走默认安装流程
+case "$SUBCOMMAND" in
+  redis)    redis_config ;;
+  mysql)    middleware_config mysql ;;
+  postgres) middleware_config postgres ;;
+  nginx)    middleware_config nginx ;;
+  kafka)    middleware_config kafka ;;
+  rocketmq) middleware_config rocketmq ;;
+  *)        main ;;
+esac

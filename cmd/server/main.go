@@ -16,9 +16,11 @@ import (
 	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/api"
 	"github.com/nebula/monitor/internal/server/config"
+	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/receiver"
+	"github.com/nebula/monitor/internal/server/report"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/upgrade"
 	"github.com/nebula/monitor/internal/version"
@@ -65,9 +67,10 @@ func main() {
 	// 告警相关
 	rules := alert.NewRulesStore(cfg.Alert.RulesFile)
 	alertStore := alert.NewVMAlertStore(store)
+	maintenance := alert.NewMaintenanceStore(cfg.Alert.MaintenanceFile)
 	notifiers := alert.BuildNotifiers(cfg.Notify)
 	hub := api.NewHub()
-	engine := alert.NewEngine(store, nodeMgr, rules, alertStore, notifiers, hub, cfg.Alert.EvalInterval)
+	engine := alert.NewEngine(store, nodeMgr, rules, alertStore, notifiers, hub, maintenance, cfg.Alert.EvalInterval)
 
 	// 通知配置管理：独立文件（Web 端可配置），启动时优先加载该文件，不存在则
 	// 用 server.yaml 的 notify 段初始化并落盘；保存时通过 SetNotifiers 热加载。
@@ -83,6 +86,14 @@ func main() {
 
 	// 上报接收
 	recv := receiver.New(store, nodeMgr, cfg.AgentAuth)
+
+	// 拨测模块
+	dialtestStore := dialtest.NewStore(cfg.DialtestFile)
+	dialtestSched := dialtest.NewScheduler(dialtestStore, store)
+	dialtestSched.Start(ctx)
+
+	// 报告生成模块
+	reportGen := report.NewGenerator(store, nodeMgr, cfg.ReportDir)
 
 	// 系统升级管理器
 	var upgrader *upgrade.Manager
@@ -104,7 +115,7 @@ func main() {
 	}
 
 	// API
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)

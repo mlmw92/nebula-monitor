@@ -128,6 +128,19 @@
           勾选要接收告警的渠道；留空表示不发送通知。未启用的渠道请先在「通知配置」中开启。
         </div>
       </el-form-item>
+      <el-form-item label="静默规则">
+        <el-switch v-model="form.silenced" />
+        <span class="form-hint" style="margin-left: 12px;">开启后该规则停止评估触发，不影响其他规则</span>
+      </el-form-item>
+      <el-form-item v-if="form.silenced" label="静默截止">
+        <el-date-picker
+          v-model="silenceUntilDate"
+          type="datetime"
+          placeholder="选择静默截止时间（留空表示不限时）"
+          style="width: 100%"
+        />
+        <div class="form-hint">到截止时间后自动解除静默；不选则持续静默直到手动关闭</div>
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="$emit('close')">取消</el-button>
@@ -160,6 +173,13 @@ const form = reactive({
   nodes: [],
   enabled: true,
   notify: [],
+  silenced: false,
+  silenceUntil: 0,
+})
+
+const silenceUntilDate = computed({
+  get: () => form.silenceUntil ? new Date(form.silenceUntil) : null,
+  set: (v) => { form.silenceUntil = v ? v.getTime() : 0 },
 })
 
 watch(
@@ -177,6 +197,8 @@ watch(
     form.nodes = r && r.nodes ? [...r.nodes] : []
     form.enabled = r ? r.enabled : true
     form.notify = r && r.notify ? [...r.notify] : []
+    form.silenced = r ? r.silenced || false : false
+    form.silenceUntil = r ? r.silenceUntil || 0 : 0
   },
   { immediate: true }
 )

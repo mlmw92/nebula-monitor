@@ -43,7 +43,11 @@ func main() {
 	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644)
 	defer os.Remove(pidFile)
 
-	coll := collector.New(cfg.Node, cfg.Group, cfg.Labels, cfg.Collectors, cfg.RedisInstances)
+	coll := collector.New(cfg.Node, cfg.Group, cfg.Labels, cfg.Collectors,
+		cfg.RedisInstances, cfg.MySQLInstances, cfg.PostgresInstances,
+		cfg.NginxInstances, cfg.KafkaInstances, cfg.DockerInstances,
+		cfg.RocketMQInstances, cfg.PortChecks,
+	)
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
 	slog.Info("Agent 启动", "node", cfg.Node, "server", cfg.ServerURL, "interval", cfg.Interval, "version", version.Version)
@@ -61,24 +65,43 @@ func main() {
 
 func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *config.Config) {
 	metrics, procs := coll.Collect()
+
+	// 中间件采集
 	redisMetrics, redisInstances := coll.CollectRedis()
-	if len(redisMetrics) > 0 {
-		metrics = append(metrics, redisMetrics...)
-	}
+	metrics = append(metrics, redisMetrics...)
+	mysqlMetrics, mysqlInstances := coll.CollectMySQL()
+	metrics = append(metrics, mysqlMetrics...)
+	pgMetrics, pgInstances := coll.CollectPostgres()
+	metrics = append(metrics, pgMetrics...)
+	nginxMetrics, nginxInstances := coll.CollectNginx()
+	metrics = append(metrics, nginxMetrics...)
+	kafkaMetrics, kafkaInstances := coll.CollectKafka()
+	metrics = append(metrics, kafkaMetrics...)
+	dockerMetrics, dockerInstances := coll.CollectDocker()
+	metrics = append(metrics, dockerMetrics...)
+	rmqMetrics, rmqInstances := coll.CollectRocketMQ()
+	metrics = append(metrics, rmqMetrics...)
+
 	osName, arch, ip := coll.HostInfo()
 	payload := model.ReportPayload{
-		Node:           cfg.Node,
-		IP:             ip,
-		OS:             osName,
-		Arch:           arch,
-		Group:          cfg.Group,
-		Labels:         cfg.Labels,
-		Version:        version.Version,
-		HostInfo:       collector.CollectHostInfo(),
-		Metrics:        metrics,
-		Processes:      procs,
-		RedisInstances: redisInstances,
-		ReportAt:       model.NowMillis(),
+		Node:              cfg.Node,
+		IP:                ip,
+		OS:                osName,
+		Arch:              arch,
+		Group:             cfg.Group,
+		Labels:            cfg.Labels,
+		Version:           version.Version,
+		HostInfo:          collector.CollectHostInfo(),
+		Metrics:           metrics,
+		Processes:         procs,
+		RedisInstances:    redisInstances,
+		MySQLInstances:    mysqlInstances,
+		PostgresInstances: pgInstances,
+		NginxInstances:    nginxInstances,
+		KafkaInstances:    kafkaInstances,
+		DockerInstances:   dockerInstances,
+		RocketMQInstances: rmqInstances,
+		ReportAt:          model.NowMillis(),
 	}
 	resp, err := rep.ReportFull(payload)
 	if err != nil {

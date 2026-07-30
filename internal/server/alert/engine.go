@@ -29,6 +29,7 @@ type Engine struct {
 	alerts       *VMAlertStore
 	notifiers    []Notifier
 	broadcaster  Broadcaster
+	maintenance  *MaintenanceStore
 	evalInterval int
 	mu           sync.Mutex
 	states       map[string]*ruleState
@@ -41,7 +42,7 @@ type ruleState struct {
 
 // NewEngine 创建引擎。
 func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
-	alerts *VMAlertStore, notifiers []Notifier, broadcaster Broadcaster, evalInterval int) *Engine {
+	alerts *VMAlertStore, notifiers []Notifier, broadcaster Broadcaster, maintenance *MaintenanceStore, evalInterval int) *Engine {
 	if evalInterval <= 0 {
 		evalInterval = 15
 	}
@@ -52,6 +53,7 @@ func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
 		alerts:       alerts,
 		notifiers:    notifiers,
 		broadcaster:  broadcaster,
+		maintenance:  maintenance,
 		evalInterval: evalInterval,
 		states:       map[string]*ruleState{},
 	}
@@ -87,6 +89,15 @@ func (e *Engine) evaluate() {
 	for _, r := range rules {
 		if !r.Enabled {
 			continue
+		}
+		// 静默期跳过：Silenced 为 true 且未到期则跳过评估
+		if r.Silenced {
+			if r.SilenceUntil == 0 || now < r.SilenceUntil {
+				continue
+			}
+			// 到期自动解除静默
+			r.Silenced = false
+			_ = e.rules.Update(r)
 		}
 		for _, n := range nodes {
 			if !matchesGroup(r.Group, n.Group) {
@@ -251,8 +262,13 @@ func (e *Engine) TestEmail() error {
 	return fmt.Errorf("邮件渠道未启用或未配置（请先在「通知配置」中开启并保存）")
 }
 
-// notify 按规则配置的渠道发送通知。
+// notify 按规则配置的渠道发送通知。维护窗口活跃时跳过通知（事件仍记录）。
 func (e *Engine) notify(ev model.AlertEvent) {
+	// 维护窗口检查：活跃时跳过通知发送
+	if e.maintenance != nil && e.maintenance.IsActive(model.NowMillis()) {
+		slog.Info("维护窗口活跃，跳过通知", "rule", ev.RuleName, "event", ev.ID)
+		return
+	}
 	chs := e.ruleNotifyChannels(ev.RuleID)
 	// 规则未指定渠道时不发送任何通知
 	if len(chs) == 0 {

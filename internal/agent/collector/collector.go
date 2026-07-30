@@ -15,14 +15,30 @@ type Collector struct {
 	labels map[string]string
 	cfg    config.CollectorToggle
 
-	cpu  *CPUCollector
-	disk *DiskCollector
-	net  *NetworkCollector
-	redis *RedisCollector
+	cpu    *CPUCollector
+	disk   *DiskCollector
+	net    *NetworkCollector
+	redis  *RedisCollector
+	mysql  *MySQLCollector
+	pg     *PostgresCollector
+	nginx  *NginxCollector
+	kafka  *KafkaCollector
+	docker *DockerCollector
+	rmq    *RocketMQCollector
+	port   *PortCollector
 }
 
 // New 创建 Collector。
-func New(node, group string, labels map[string]string, cfg config.CollectorToggle, redisInstances []model.RedisInstanceConfig) *Collector {
+func New(node, group string, labels map[string]string, cfg config.CollectorToggle,
+	redisInstances []model.RedisInstanceConfig,
+	mysqlInstances []model.MySQLInstanceConfig,
+	postgresInstances []model.PostgresInstanceConfig,
+	nginxInstances []model.NginxInstanceConfig,
+	kafkaInstances []model.KafkaInstanceConfig,
+	dockerInstances []model.DockerInstanceConfig,
+	rocketmqInstances []model.RocketMQInstanceConfig,
+	portChecks []string,
+) *Collector {
 	c := &Collector{
 		node:   node,
 		group:  group,
@@ -34,6 +50,27 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	}
 	if cfg.Redis {
 		c.redis = NewRedisCollector(node, redisInstances)
+	}
+	if cfg.MySQL {
+		c.mysql = NewMySQLCollector(node, mysqlInstances)
+	}
+	if cfg.Postgres {
+		c.pg = NewPostgresCollector(node, postgresInstances)
+	}
+	if cfg.Nginx {
+		c.nginx = NewNginxCollector(node, nginxInstances)
+	}
+	if cfg.Kafka {
+		c.kafka = NewKafkaCollector(node, kafkaInstances)
+	}
+	if cfg.Docker {
+		c.docker = NewDockerCollector(node, dockerInstances)
+	}
+	if cfg.RocketMQ {
+		c.rmq = NewRocketMQCollector(node, rocketmqInstances)
+	}
+	if cfg.Port {
+		c.port = NewPortCollector(node, portChecks)
 	}
 	return c
 }
@@ -76,6 +113,11 @@ func (c *Collector) Collect() ([]model.Metric, []model.ProcessStat) {
 			add(m.Name, m.Value, m.Labels)
 		}
 	}
+	if c.cfg.Port && c.port != nil {
+		for _, m := range c.port.Collect() {
+			add(m.Name, m.Value, m.Labels)
+		}
+	}
 
 	var procs []model.ProcessStat
 	if c.cfg.Process {
@@ -91,6 +133,54 @@ func (c *Collector) CollectRedis() ([]model.Metric, []model.RedisInstance) {
 		return nil, nil
 	}
 	return c.redis.Collect()
+}
+
+// CollectMySQL 采集 MySQL 指标。
+func (c *Collector) CollectMySQL() ([]model.Metric, []model.MySQLInstance) {
+	if c.mysql == nil {
+		return nil, nil
+	}
+	return c.mysql.Collect()
+}
+
+// CollectPostgres 采集 PostgreSQL 指标。
+func (c *Collector) CollectPostgres() ([]model.Metric, []model.PostgresInstance) {
+	if c.pg == nil {
+		return nil, nil
+	}
+	return c.pg.Collect()
+}
+
+// CollectNginx 采集 Nginx 指标。
+func (c *Collector) CollectNginx() ([]model.Metric, []model.NginxInstance) {
+	if c.nginx == nil {
+		return nil, nil
+	}
+	return c.nginx.Collect()
+}
+
+// CollectKafka 采集 Kafka 指标。
+func (c *Collector) CollectKafka() ([]model.Metric, []model.KafkaInstance) {
+	if c.kafka == nil {
+		return nil, nil
+	}
+	return c.kafka.Collect()
+}
+
+// CollectDocker 采集 Docker 容器指标。
+func (c *Collector) CollectDocker() ([]model.Metric, []model.DockerInstance) {
+	if c.docker == nil {
+		return nil, nil
+	}
+	return c.docker.Collect()
+}
+
+// CollectRocketMQ 采集 RocketMQ 指标。
+func (c *Collector) CollectRocketMQ() ([]model.Metric, []model.RocketMQInstance) {
+	if c.rmq == nil {
+		return nil, nil
+	}
+	return c.rmq.Collect()
 }
 
 // HostInfo 返回主机静态信息（OS/Arch/IP），用于上报体。

@@ -46,8 +46,14 @@ type ReportPayload struct {
 	HostInfo       HostInfo          `json:"hostInfo,omitempty"`       // 主机系统与硬件信息
 	Metrics        []Metric          `json:"metrics"`                  // 指标列表
 	Processes      []ProcessStat     `json:"processes,omitempty"`      // 资源占用 Top 进程
-	RedisInstances []RedisInstance   `json:"redisInstances,omitempty"` // Redis 实例元信息（不含密码）
-	ReportAt       int64             `json:"reportAt"`                 // 上报时间（毫秒）
+	RedisInstances    []RedisInstance    `json:"redisInstances,omitempty"`    // Redis 实例元信息（不含密码）
+	MySQLInstances    []MySQLInstance    `json:"mysqlInstances,omitempty"`    // MySQL 实例元信息
+	PostgresInstances []PostgresInstance `json:"postgresInstances,omitempty"` // PostgreSQL 实例元信息
+	NginxInstances    []NginxInstance    `json:"nginxInstances,omitempty"`    // Nginx 实例元信息
+	KafkaInstances    []KafkaInstance    `json:"kafkaInstances,omitempty"`    // Kafka 实例元信息
+	DockerInstances   []DockerInstance   `json:"dockerInstances,omitempty"`   // Docker 容器元信息
+	RocketMQInstances []RocketMQInstance `json:"rocketmqInstances,omitempty"` // RocketMQ 实例元信息
+	ReportAt          int64              `json:"reportAt"`                    // 上报时间（毫秒）
 }
 
 // RedisInstanceConfig 是 Agent 本地配置的 Redis 实例连接信息。
@@ -73,6 +79,139 @@ type RedisInstance struct {
 	ReplicaOf string `json:"replicaOf,omitempty"` // 主从关系：slave/replica 的 master 地址
 	Version   string `json:"version"`             // Redis 版本（来自 INFO Server）
 	Up        bool   `json:"up"`                  // 是否可达
+}
+
+// ---- MySQL ----
+
+// MySQLInstanceConfig 是 Agent 本地配置的 MySQL 实例连接信息。密码不上报。
+type MySQLInstanceConfig struct {
+	Name        string `yaml:"name"`        // 实例别名
+	Addr        string `yaml:"addr"`        // MySQL 地址 host:port
+	User        string `yaml:"user"`        // 用户名
+	Password    string `yaml:"password"`    // 密码（json:"-"）
+	Topology    string `yaml:"topology"`    // standalone|replication
+	ExporterURL string `yaml:"exporterURL"` // exporter 模式的 /metrics URL（留空走直连）
+}
+
+// MySQLInstance 是上报给 Server 的 MySQL 实例元信息。
+type MySQLInstance struct {
+	Instance  string `json:"instance"`  // host:port
+	Name      string `json:"name"`      // 实例别名
+	Node      string `json:"node"`      // 采集 Agent 节点名
+	Role      string `json:"role"`      // master|slave
+	Topology  string `json:"topology"`  // standalone|replication
+	Group     string `json:"group"`     // 分组名
+	ReplicaOf string `json:"replicaOf,omitempty"`
+	Version   string `json:"version"`   // MySQL 版本
+	Up        bool   `json:"up"`
+}
+
+// ---- PostgreSQL ----
+
+// PostgresInstanceConfig 是 Agent 本地配置的 PostgreSQL 实例连接信息。密码不上报。
+type PostgresInstanceConfig struct {
+	Name        string `yaml:"name"`
+	Addr        string `yaml:"addr"`      // host:port
+	Database    string `yaml:"database"`  // 连接的数据库名
+	User        string `yaml:"user"`
+	Password    string `yaml:"password"`  // json:"-"
+	SSLMode     string `yaml:"sslMode"`   // disable|require|verify-ca|verify-full
+	Topology    string `yaml:"topology"`  // standalone|replication
+	ExporterURL string `yaml:"exporterURL"`
+}
+
+// PostgresInstance 是上报给 Server 的 PostgreSQL 实例元信息。
+type PostgresInstance struct {
+	Instance  string `json:"instance"`
+	Name      string `json:"name"`
+	Node      string `json:"node"`
+	Role      string `json:"role"`     // master|standby
+	Topology  string `json:"topology"`
+	Group     string `json:"group"`
+	ReplicaOf string `json:"replicaOf,omitempty"`
+	Version   string `json:"version"`  // PostgreSQL 版本
+	Database  string `json:"database"` // 连接的数据库名
+	Up        bool   `json:"up"`
+}
+
+// ---- Nginx ----
+
+// NginxInstanceConfig 是 Agent 本地配置的 Nginx 实例连接信息。
+type NginxInstanceConfig struct {
+	Name        string `yaml:"name"`
+	Addr        string `yaml:"addr"`        // host:port
+	StatusPath  string `yaml:"statusPath"`  // stub_status 路径，如 /nginx_status
+	ExporterURL string `yaml:"exporterURL"` // VTS exporter URL
+}
+
+// NginxInstance 是上报给 Server 的 Nginx 实例元信息。
+type NginxInstance struct {
+	Instance string `json:"instance"`
+	Name     string `json:"name"`
+	Node     string `json:"node"`
+	Group    string `json:"group"`
+	Version  string `json:"version"` // nginx 版本（从响应头或 stub_status 获取）
+	Up       bool   `json:"up"`
+}
+
+// ---- Kafka ----
+
+// KafkaInstanceConfig 是 Agent 本地配置的 Kafka 实例连接信息。
+type KafkaInstanceConfig struct {
+	Name        string `yaml:"name"`
+	Addr        string `yaml:"addr"`        // Broker 地址 host:port
+	Version     string `yaml:"version"`     // Kafka 版本（用于展示）
+	ExporterURL string `yaml:"exporterURL"` // JMX exporter URL
+}
+
+// KafkaInstance 是上报给 Server 的 Kafka 实例元信息。
+type KafkaInstance struct {
+	Instance string `json:"instance"` // Broker 地址
+	Name     string `json:"name"`
+	Node     string `json:"node"`
+	Group    string `json:"group"`   // 集群分组名
+	Role     string `json:"role"`    // broker|controller
+	Version  string `json:"version"` // Kafka 版本
+	Up       bool   `json:"up"`
+}
+
+// ---- Docker ----
+
+// DockerInstanceConfig 是 Agent 本地配置的 Docker 连接信息。
+type DockerInstanceConfig struct {
+	Name string `yaml:"name"`
+	Addr string `yaml:"addr"` // Docker daemon 地址，如 unix:///var/run/docker.sock 或 tcp://10.0.0.1:2375
+}
+
+// DockerInstance 是上报给 Server 的 Docker 容器元信息。
+type DockerInstance struct {
+	Instance     string `json:"instance"`     // 容器 ID（短 ID）
+	Name         string `json:"name"`         // 容器名
+	Node         string `json:"node"`
+	Group        string `json:"group"`
+	Image        string `json:"image"`        // 镜像名
+	Status       string `json:"status"`       // running|paused|exited
+	Up           bool   `json:"up"`
+}
+
+// ---- RocketMQ ----
+
+// RocketMQInstanceConfig 是 Agent 本地配置的 RocketMQ 实例连接信息。
+type RocketMQInstanceConfig struct {
+	Name        string `yaml:"name"`
+	Addr        string `yaml:"addr"`        // NameServer 地址 host:port
+	ExporterURL string `yaml:"exporterURL"` // Prometheus exporter URL
+}
+
+// RocketMQInstance 是上报给 Server 的 RocketMQ 实例元信息。
+type RocketMQInstance struct {
+	Instance string `json:"instance"` // NameServer/Broker 地址
+	Name     string `json:"name"`
+	Node     string `json:"node"`
+	Group    string `json:"group"`   // 集群名
+	Role     string `json:"role"`    // nameserver|broker
+	Version  string `json:"version"` // RocketMQ 版本
+	Up       bool   `json:"up"`
 }
 
 // DiskStat 表示单个真实文件系统的容量与使用率。
@@ -149,20 +288,30 @@ const (
 
 // AlertRule 阈值告警规则。
 type AlertRule struct {
-	ID        string   `json:"id"`        // 规则 ID
-	Name      string   `json:"name"`      // 规则名称
-	Metric    string   `json:"metric"`    // 指标名，如 cpu_usage
-	Operator  string   `json:"operator"`  // 比较运算符: > >= < <= == !=
-	Threshold float64  `json:"threshold"` // 阈值
-	For       string   `json:"for"`       // 持续时间，如 "5m"
-	Severity  Severity `json:"severity"`  // 严重级别
-	Group     string   `json:"group"`     // 作用的节点分组（空表示全部）
-	Scope     string   `json:"scope"`     // 应用范围：all（全部主机，默认）或 specified（指定主机）
-	Nodes     []string `json:"nodes"`     // 指定主机列表（scope=specified 时生效）
-	Notify    []string `json:"notify"`    // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示全部已启用渠道
-	Enabled   bool     `json:"enabled"`   // 是否启用
-	CreatedAt int64    `json:"createdAt"` // 创建时间（毫秒）
-	UpdatedAt int64    `json:"updatedAt"` // 更新时间（毫秒）
+	ID          string   `json:"id"`          // 规则 ID
+	Name        string   `json:"name"`        // 规则名称
+	Metric      string   `json:"metric"`      // 指标名，如 cpu_usage
+	Operator    string   `json:"operator"`    // 比较运算符: > >= < <= == !=
+	Threshold   float64  `json:"threshold"`   // 阈值
+	For         string   `json:"for"`         // 持续时间，如 "5m"
+	Severity    Severity `json:"severity"`    // 严重级别
+	Group       string   `json:"group"`       // 作用的节点分组（空表示全部）
+	Scope       string   `json:"scope"`       // 应用范围：all（全部主机，默认）或 specified（指定主机）
+	Nodes       []string `json:"nodes"`       // 指定主机列表（scope=specified 时生效）
+	Notify      []string `json:"notify"`      // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示全部已启用渠道
+	Enabled     bool     `json:"enabled"`     // 是否启用
+	Silenced    bool     `json:"silenced"`    // 是否静默（临时停止评估触发）
+	SilenceUntil int64   `json:"silenceUntil,omitempty"` // 静默截止时间（毫秒），0 表示不限时
+	CreatedAt   int64    `json:"createdAt"`   // 创建时间（毫秒）
+	UpdatedAt   int64    `json:"updatedAt"`   // 更新时间（毫秒）
+}
+
+// MaintenanceWindow 维护窗口，启用时全局抑制告警通知（事件仍记录）。
+type MaintenanceWindow struct {
+	Enabled bool   `json:"enabled"` // 是否启用
+	Start   int64  `json:"start"`   // 开始时间（毫秒）
+	End     int64  `json:"end"`     // 结束时间（毫秒）
+	Reason  string `json:"reason"`  // 维护原因
 }
 
 // AlertEvent 告警事件（触发或恢复时产生）。

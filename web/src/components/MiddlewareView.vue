@@ -18,38 +18,59 @@
         </template>
         <RedisTab v-if="activeTab === 'redis'" />
       </el-tab-pane>
-      <el-tab-pane label="MySQL" name="mysql" disabled>
+      <el-tab-pane label="MySQL" name="mysql">
         <template #label>
-          <el-tooltip content="即将支持" placement="top">
-            <span class="tab-label disabled">
-              <span class="tab-dot mysql"></span>MySQL
-            </span>
-          </el-tooltip>
+          <span class="tab-label">
+            <span class="tab-dot mysql"></span>MySQL
+          </span>
         </template>
+        <MySQLTab v-if="activeTab === 'mysql'" />
       </el-tab-pane>
-      <el-tab-pane label="PostgreSQL" name="postgres" disabled>
+      <el-tab-pane label="PostgreSQL" name="postgres">
         <template #label>
-          <el-tooltip content="即将支持" placement="top">
-            <span class="tab-label disabled">
-              <span class="tab-dot postgres"></span>PostgreSQL
-            </span>
-          </el-tooltip>
+          <span class="tab-label">
+            <span class="tab-dot postgres"></span>PostgreSQL
+          </span>
         </template>
+        <PostgresTab v-if="activeTab === 'postgres'" />
+      </el-tab-pane>
+      <el-tab-pane label="Nginx" name="nginx">
+        <template #label>
+          <span class="tab-label">
+            <span class="tab-dot nginx"></span>Nginx
+          </span>
+        </template>
+        <NginxTab v-if="activeTab === 'nginx'" />
+      </el-tab-pane>
+      <el-tab-pane label="Kafka" name="kafka">
+        <template #label>
+          <span class="tab-label">
+            <span class="tab-dot kafka"></span>Kafka
+          </span>
+        </template>
+        <KafkaTab v-if="activeTab === 'kafka'" />
+      </el-tab-pane>
+      <el-tab-pane label="Docker" name="docker">
+        <template #label>
+          <span class="tab-label">
+            <span class="tab-dot docker"></span>Docker
+          </span>
+        </template>
+        <DockerTab v-if="activeTab === 'docker'" />
+      </el-tab-pane>
+      <el-tab-pane label="RocketMQ" name="rocketmq">
+        <template #label>
+          <span class="tab-label">
+            <span class="tab-dot rocketmq"></span>RocketMQ
+          </span>
+        </template>
+        <RocketMQTab v-if="activeTab === 'rocketmq'" />
       </el-tab-pane>
       <el-tab-pane label="MongoDB" name="mongo" disabled>
         <template #label>
           <el-tooltip content="即将支持" placement="top">
             <span class="tab-label disabled">
               <span class="tab-dot mongo"></span>MongoDB
-            </span>
-          </el-tooltip>
-        </template>
-      </el-tab-pane>
-      <el-tab-pane label="Kafka" name="kafka" disabled>
-        <template #label>
-          <el-tooltip content="即将支持" placement="top">
-            <span class="tab-label disabled">
-              <span class="tab-dot kafka"></span>Kafka
             </span>
           </el-tooltip>
         </template>
@@ -61,6 +82,12 @@
 <script setup>
 import { ref } from 'vue'
 import RedisTab from './redis/RedisTab.vue'
+import MySQLTab from './mysql/MySQLTab.vue'
+import PostgresTab from './postgres/PostgresTab.vue'
+import NginxTab from './nginx/NginxTab.vue'
+import KafkaTab from './kafka/KafkaTab.vue'
+import DockerTab from './docker/DockerTab.vue'
+import RocketMQTab from './rocketmq/RocketMQTab.vue'
 
 const activeTab = ref('redis')
 </script>
@@ -109,8 +136,11 @@ const activeTab = ref('redis')
 .tab-dot.redis { background: #dc382d; box-shadow: 0 0 8px rgba(220, 56, 45, 0.5); }
 .tab-dot.mysql { background: #4479a1; }
 .tab-dot.postgres { background: #336791; }
-.tab-dot.mongo { background: #47a248; }
+.tab-dot.nginx { background: #009639; }
 .tab-dot.kafka { background: #231f20; border: 1px solid #666; }
+.tab-dot.docker { background: #2496ed; }
+.tab-dot.rocketmq { background: #d77429; }
+.tab-dot.mongo { background: #47a248; }
 :deep(.el-tabs__content) {
   padding: 0 !important;
 }
