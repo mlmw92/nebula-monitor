@@ -421,7 +421,7 @@
             <span class="mono">{{ formatNum(row.clients) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="内存使用" min-width="160">
+        <el-table-column label="内存使用" width="130">
           <template #default="{ row }">
             <div class="mem-cell">
               <div class="mem-text mono">{{ formatBytes(row.usedMemory) }}</div>
@@ -486,30 +486,7 @@
       <div :ref="el => setChartRef(el, 'hitRateBar')" class="hitrate-chart"></div>
     </div>
 
-    <!-- ===== 区块5：分布可视化（环形图）===== -->
-    <div class="chart-section glass secondary-section">
-      <div class="section-title">分布概览</div>
-      <div class="section-desc">用于了解监控覆盖范围和角色构成，属于辅助信息。</div>
-      <div class="pie-row">
-        <div class="pie-item">
-          <div :ref="el => setChartRef(el, 'topologyPie')" class="pie-chart"></div>
-          <div class="pie-title">部署拓扑分布</div>
-          <div class="chart-note">按单机、主从、哨兵、集群统计实例数量。</div>
-        </div>
-        <div class="pie-item">
-          <div :ref="el => setChartRef(el, 'rolePie')" class="pie-chart"></div>
-          <div class="pie-title">角色分布</div>
-          <div class="chart-note">按 master、slave、sentinel 等角色统计。</div>
-        </div>
-        <div class="pie-item">
-          <div :ref="el => setChartRef(el, 'statusPie')" class="pie-chart"></div>
-          <div class="pie-title">在线状态</div>
-          <div class="chart-note">仅反映 Redis 实例最近一次采集是否可达。</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ===== 区块6：实例详情抽屉 ===== -->
+    <!-- ===== 区块5：实例详情抽屉 ===== -->
     <el-drawer v-model="detailVisible" size="60%" :with-header="false" direction="rtl" class="detail-drawer">
       <div class="detail-content" v-if="selected">
         <!-- 实例元信息卡 -->
@@ -917,9 +894,11 @@ function computeStats() {
   stats.totalMemory = list.reduce((s, i) => s + (i.usedMemory || 0), 0)
   stats.totalClients = list.reduce((s, i) => s + (i.clients || 0), 0)
   stats.totalOps = list.reduce((s, i) => s + (i.ops || 0), 0)
-  // 集群数（按 cluster name 去重）
+  // 集群/哨兵组数（按 group 去重，等同于 agent.yaml 中的 redisInstances[*].name）
   const clusterNames = new Set()
-  for (const i of list) if (i.topology === 'cluster' && i.name) clusterNames.add(i.name)
+  for (const i of list) {
+    if ((i.topology === 'cluster' || i.topology === 'sentinel') && i.group) clusterNames.add(i.group)
+  }
   stats.clusterCount = clusterNames.size
   // 告警实例数
   stats.alertCount = list.filter(isAlert).length
@@ -927,9 +906,6 @@ function computeStats() {
 
 // ---- 渲染概览图表 ----
 function renderCharts() {
-  renderTopologyPie()
-  renderRolePie()
-  renderStatusPie()
   renderMemBar()
   renderOpsBar()
   renderHitRateBar()
@@ -945,71 +921,6 @@ function getOrCreate(key) {
 
 function updateChart(chart, option) {
   chart.setOption(option, { notMerge: false, lazyUpdate: true })
-}
-
-function renderTopologyPie() {
-  const chart = getOrCreate('topologyPie')
-  if (!chart) return
-  const counts = {}
-  instances.value.forEach(i => {
-    const t = i.topology || 'unknown'
-    counts[t] = (counts[t] || 0) + 1
-  })
-  const data = Object.entries(counts).map(([name, value]) => ({ name: topoLabel(name), value }))
-  updateChart(chart, {
-    tooltip: { trigger: 'item', ...TOOLTIP_STYLE },
-    legend: { bottom: 0, textStyle: { color: AXIS_COLOR, fontSize: 11 }, itemWidth: 10, itemHeight: 6 },
-    series: [{
-      type: 'pie', radius: ['45%', '72%'], center: ['50%', '42%'],
-      avoidLabelOverlap: true, itemStyle: { borderColor: '#0a0e14', borderWidth: 2 },
-      label: { show: true, color: '#e5edf7', fontSize: 12, formatter: '{c}' },
-      labelLine: { lineStyle: { color: '#9fb3c8' } },
-      color: CHART_PALETTE,
-      data,
-    }],
-  })
-}
-
-function renderRolePie() {
-  const chart = getOrCreate('rolePie')
-  if (!chart) return
-  const counts = {}
-  instances.value.forEach(i => {
-    const r = i.role || 'unknown'
-    counts[r] = (counts[r] || 0) + 1
-  })
-  const data = Object.entries(counts).map(([name, value]) => ({ name: roleLabel(name), value }))
-  updateChart(chart, {
-    tooltip: { trigger: 'item', ...TOOLTIP_STYLE },
-    legend: { bottom: 0, textStyle: { color: AXIS_COLOR, fontSize: 11 }, itemWidth: 10, itemHeight: 6 },
-    series: [{
-      type: 'pie', radius: ['45%', '72%'], center: ['50%', '42%'],
-      avoidLabelOverlap: true, itemStyle: { borderColor: '#0a0e14', borderWidth: 2 },
-      label: { show: true, color: '#e5edf7', fontSize: 12, formatter: '{c}' },
-      labelLine: { lineStyle: { color: '#9fb3c8' } },
-      color: ['#dc382d', '#22c55e', '#f59e0b', '#94a3b8'],
-      data,
-    }],
-  })
-}
-
-function renderStatusPie() {
-  const chart = getOrCreate('statusPie')
-  if (!chart) return
-  const up = stats.up
-  const down = stats.down
-  updateChart(chart, {
-    tooltip: { trigger: 'item', ...TOOLTIP_STYLE },
-    legend: { bottom: 0, textStyle: { color: AXIS_COLOR, fontSize: 11 }, itemWidth: 10, itemHeight: 6 },
-    series: [{
-      type: 'pie', radius: ['45%', '72%'], center: ['50%', '42%'],
-      itemStyle: { borderColor: '#0a0e14', borderWidth: 2 },
-      label: { show: true, color: '#e5edf7', fontSize: 12, formatter: '{c}' },
-      labelLine: { lineStyle: { color: '#9fb3c8' } },
-      color: ['#22c55e', '#ef4444'],
-      data: [{ name: '在线', value: up }, { name: '离线', value: down }],
-    }],
-  })
 }
 
 function renderMemBar() {
@@ -1400,28 +1311,7 @@ function handleResize() {
   border-style: dashed;
 }
 
-/* 区块2：环形图 */
-.pie-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-}
-.pie-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.pie-chart {
-  width: 100%;
-  height: 220px;
-}
-.pie-title {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-top: -8px;
-}
-
-/* 区块3：柱状图 */
+/* 区块2：柱状图 */
 .bar-row {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
