@@ -20,7 +20,7 @@
           </svg>
         </button>
       </div>
-      <p class="empty-hint">已安装 Agent 的节点也可直接运行：<code>bash /etc/monitor-agent/agent-install.sh redis</code></p>
+      <p class="empty-hint">若节点没有本地脚本，先下载到本地再交互运行：<code>{{ redisInstallCmdAlt }}</code></p>
       <p class="empty-hint">配置完成后约 15-30 秒数据将出现在此页面。详细配置说明请参阅 README.md。</p>
     </div>
 
@@ -266,11 +266,16 @@ let refreshTimer = null
 
 // Server 真实地址（取自 /api/v1/install-info，参考「添加主机」功能）
 const serverURL = ref('')
-const redisInstallCmd = computed(() =>
+// 主命令：节点上已有 agent-install.sh（agent 安装时已自拷贝到 /etc/monitor-agent/），
+// 直接本地运行可进入交互式向导（stdin 为终端，能正常 read）。
+const redisInstallCmd = computed(() => 'bash /etc/monitor-agent/agent-install.sh redis')
+// 备选命令：节点没有本地脚本时，先下载到本地再以交互方式运行。
+// 注意：不要用 curl ... | bash 管道方式（管道会占用 stdin，交互向导无法输入）。
+const redisInstallCmdAlt = computed(() =>
   (serverURL.value
     ? `curl -fsSL ${serverURL.value}/install/agent-install.sh`
     : 'curl -fsSL http://<server>:8080/install/agent-install.sh') +
-  ' | bash -s -- redis'
+  ' -o /tmp/agent-install.sh && bash /tmp/agent-install.sh redis'
 )
 function loadServerURL() {
   http
