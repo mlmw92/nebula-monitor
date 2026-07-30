@@ -572,6 +572,8 @@ redis_config() {
     echo "--- 配置第 $idx 个 Redis 实例（留空名称跳过结束）---"
 
     local name addr password topology sentinel_name exporter_url
+    sentinel_name=""
+    exporter_url=""
     prompt name "实例别名（用于展示，如 cache-primary）" ""
     [[ -z "$name" ]] && { echo "已结束实例添加。"; break; }
 
