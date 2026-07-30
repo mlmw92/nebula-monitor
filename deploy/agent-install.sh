@@ -574,7 +574,7 @@ redis_config() {
     local name addr password topology sentinel_name exporter_url
     sentinel_name=""
     exporter_url=""
-    prompt name "实例别名（用于展示，如 cache-primary）" ""
+    prompt name "集群/逻辑组名（集群/哨兵模式下同名实例归为一组；单机下作展示别名，如 cache-primary）" ""
     [[ -z "$name" ]] && { echo "已结束实例添加。"; break; }
 
     prompt addr "实例地址 host:port（如 127.0.0.1:6379）" "127.0.0.1:6379"

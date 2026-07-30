@@ -105,13 +105,17 @@
     <div class="chart-section glass" v-if="instances.length">
       <div class="section-title">实例拓扑</div>
 
-      <!-- 集群组 -->
+      <!-- 集群组（多集群横向并排，单集群自适应宽度） -->
       <template v-if="topologyGroups.clusters.length">
-        <div v-for="grp in topologyGroups.clusters" :key="'c-'+grp.name" class="topo-group">
+        <div class="topo-clusters-grid">
+        <div v-for="grp in topologyGroups.clusters" :key="'c-'+grp.name" class="topo-group topo-cluster-card">
           <div class="topo-group-header">
             <span class="topo-group-title">
               <ClusterIcon />
-              <strong>集群 {{ grp.name }}</strong>
+              <strong>集群 {{ grp.name || '未命名' }}</strong>
+              <el-tooltip content="集群名来自 agent 配置文件 /etc/monitor-agent/config.yaml 中 redisInstances[*].name，用于将多个实例归入同一逻辑集群；留空则按实例地址独立展示。建议为同一集群的多个实例配置相同的 name。" placement="top">
+                <span class="name-source-hint">name ← agent 配置</span>
+              </el-tooltip>
             </span>
             <span class="topo-meta">
               <span class="badge" :class="clusterHealthClass(grp)">
@@ -162,54 +166,67 @@
             </div>
           </div>
 
-          <!-- Master-Slave 主从复制与故障转移 -->
-          <div class="slot-section-label" style="margin-top: 4px">主从复制与故障转移</div>
-          <div class="ms-tree">
-            <div v-for="(m, idx) in grp.masters" :key="'cm-'+idx" class="ms-unit">
-              <!-- Master 节点 -->
-              <div
-                class="rel-node rel-master ms-master"
-                :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }"
-                :style="{ borderLeftColor: slotColor(grp, idx) }"
-                @click="openDetail(m)"
-              >
-                <div class="rel-node-name" :title="m.instance">
-                  <span class="role-badge role-badge-m">M</span>
-                  {{ m.instance }}
+          <!-- 主从复制与故障转移：复制 ↓ 实线（master→slave），故障转移 ↑ 虚线（slave 升主） -->
+          <div class="ms-section">
+            <div class="ms-section-label">
+              <span class="ms-label-repl">数据复制 ↓ master → slave</span>
+              <span class="ms-label-fo">故障转移 ↑ slave 升主</span>
+            </div>
+            <div class="ms-tree">
+              <div v-for="(m, idx) in grp.masters" :key="'cm-'+m.instance" class="ms-unit">
+                <!-- Master 节点 -->
+                <div
+                  class="rel-node rel-master ms-master"
+                  :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }"
+                  :style="{ borderLeftColor: slotColor(grp, idx) }"
+                  @click="openDetail(m)"
+                >
+                  <div class="rel-node-name" :title="m.instance">
+                    <span class="role-badge role-badge-m">M</span>
+                    {{ m.instance }}
+                  </div>
+                  <div class="rel-node-meta">
+                    <span :class="['dot', m.up ? 'up' : 'down']"></span>
+                    <span>{{ m.up ? '在线' : '离线' }}</span>
+                    <span class="dim">·</span>
+                    <span>{{ formatNum(m.ops) }} ops/s</span>
+                    <span class="dim">·</span>
+                    <span>{{ formatBytes(m.usedMemory) }}</span>
+                  </div>
+                  <div class="rel-node-meta" v-if="(m.slotRanges || []).length">
+                    <span class="slot-chip" :style="{ borderColor: slotColor(grp, idx), color: slotColor(grp, idx) }">
+                      slots {{ (m.slotRanges || []).join(', ') }} · {{ slotRangeTotal(m.slotRanges) }} 槽
+                    </span>
+                  </div>
                 </div>
-                <div class="rel-node-meta">
-                  <span :class="['dot', m.up ? 'up' : 'down']"></span>
-                  <span>{{ m.up ? '在线' : '离线' }}</span>
-                  <span class="dim">·</span>
-                  <span>{{ formatNum(m.ops) }} ops/s</span>
-                  <span class="dim">·</span>
-                  <span>{{ formatBytes(m.usedMemory) }}</span>
-                </div>
-                <div class="rel-node-meta" v-if="(m.slotRanges || []).length">
-                  <span class="slot-chip" :style="{ borderColor: slotColor(grp, idx), color: slotColor(grp, idx) }">
-                    slots {{ (m.slotRanges || []).join(', ') }} · {{ slotRangeTotal(m.slotRanges) }} 槽
-                  </span>
-                </div>
-              </div>
-              <!-- 复制链路 + failover 路径 -->
-              <div v-if="grp.slaves.filter(s => s.replicaOf === m.instance).length" class="ms-branch">
-                <div class="ms-branch-rail">
-                  <span class="ms-rail-label">复制 ↓</span>
-                  <span class="ms-rail-failover">↑ 故障转移</span>
-                </div>
-                <div class="ms-slaves">
-                  <div
-                    v-for="s in grp.slaves.filter(ss => ss.replicaOf === m.instance)"
-                    :key="s.instance"
-                    class="rel-slave ms-slave"
-                    :class="{ 'is-down': !s.up }"
-                    @click.stop="openDetail(s)"
-                  >
-                    <span class="role-badge role-badge-s">S</span>
-                    <span :title="s.instance">{{ s.instance }}</span>
-                    <span :class="['dot', s.up ? 'up' : 'down']"></span>
-                    <span class="dim">{{ s.up ? formatNum(s.ops) + ' ops/s' : '离线' }}</span>
-                    <span v-if="s.up && s.replicationLag !== undefined && s.replicationLag !== null" class="dim">· lag {{ s.replicationLag }}s</span>
+                <!-- 复制链路 + failover 路径（按预聚合映射直接取，避免匹配失败） -->
+                <div v-if="(grp.slavesByMaster[m.instance] || []).length" class="ms-branch">
+                  <div class="ms-branch-rail">
+                    <span class="ms-rail-repl" title="数据复制方向：master 将写入同步给 slave">复制 ↓</span>
+                    <span class="ms-rail-fo" title="故障转移方向：master 宕机时，对应 slave 提升为新 master">故障转移 ↑</span>
+                  </div>
+                  <div class="ms-slaves">
+                    <div
+                      v-for="s in grp.slavesByMaster[m.instance]"
+                      :key="'cs-'+s.instance"
+                      class="rel-node rel-slave ms-slave-card"
+                      :class="{ 'is-down': !s.up }"
+                      @click.stop="openDetail(s)"
+                    >
+                      <div class="ms-slave-head">
+                        <span class="role-badge role-badge-s">S</span>
+                        <span class="mono" :title="s.instance">{{ s.instance }}</span>
+                      </div>
+                      <div class="ms-slave-meta">
+                        <span :class="['dot', s.up ? 'up' : 'down']"></span>
+                        <span>{{ s.up ? '在线' : '离线' }}</span>
+                        <span class="dim">·</span>
+                        <span>{{ s.up ? formatNum(s.ops) + ' ops/s' : '离线' }}</span>
+                        <span v-if="s.up && s.replicationLag !== undefined && s.replicationLag !== null" class="dim">· lag {{ s.replicationLag }}s</span>
+                        <span class="dim">·</span>
+                        <span>{{ formatBytes(s.usedMemory) }}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -219,6 +236,7 @@
             <span class="topo-legend-item"><span class="legend-line legend-solid"></span>数据复制（master → slave）</span>
             <span class="topo-legend-item"><span class="legend-line legend-dash"></span>故障转移（slave 升主，slave → master）</span>
           </div>
+        </div>
         </div>
       </template>
 
@@ -760,9 +778,15 @@ const topologyGroups = computed(() => {
   for (const i of instances.value) {
     const g = i.group || i.name || i.instance
     if (i.topology === 'cluster') {
-      clusters[g] = clusters[g] || { name: g, masters: [], slaves: [], topology: 'cluster' }
-      if (i.role === 'slave' || i.role === 'replica') clusters[g].slaves.push(i)
-      else clusters[g].masters.push(i)
+      clusters[g] = clusters[g] || { name: g, masters: [], slaves: [], slavesByMaster: {}, topology: 'cluster' }
+      if (i.role === 'slave' || i.role === 'replica') {
+        clusters[g].slaves.push(i)
+        // 按 replicaOf 预聚合到对应 master，避免渲染时再 filter 匹配失败导致从节点不显示
+        if (i.replicaOf) {
+          clusters[g].slavesByMaster[i.replicaOf] = clusters[g].slavesByMaster[i.replicaOf] || []
+          clusters[g].slavesByMaster[i.replicaOf].push(i)
+        }
+      } else clusters[g].masters.push(i)
     } else if (i.topology === 'sentinel') {
       sentinels[g] = sentinels[g] || { name: g, sentinels: [], masters: [], topology: 'sentinel' }
       if (i.role === 'sentinel') sentinels[g].sentinels.push(i)
@@ -1869,4 +1893,47 @@ function handleResize() {
 .legend-line { display: inline-block; width: 24px; height: 0; }
 .legend-solid { border-top: 2px solid rgba(99,179,237,0.65); }
 .legend-dash { border-top: 2px dashed rgba(245,158,11,0.65); }
+
+/* ==== 多集群横向并排（auto-fill），单集群自适应 ==== */
+.topo-clusters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+.topo-cluster-card { margin-top: 0; height: fit-content; }
+.name-source-hint {
+  font-size: 10px; color: rgba(255,255,255,0.4);
+  border: 1px dashed rgba(255,255,255,0.18); padding: 1px 7px;
+  border-radius: 4px; cursor: help; margin-left: 4px;
+  white-space: nowrap;
+}
+.name-source-hint:hover { color: rgba(147,197,253,0.9); border-color: rgba(147,197,253,0.45); }
+
+/* ==== 主从复制 + 故障转移强化 ==== */
+.ms-section { margin-top: 12px; }
+.ms-section-label {
+  display: flex; gap: 14px; margin-bottom: 10px; font-size: 11px; flex-wrap: wrap;
+  letter-spacing: 0.02em;
+}
+.ms-label-repl { color: rgba(147,197,253,0.9); }
+.ms-label-fo { color: rgba(251,191,36,0.9); }
+.ms-rail-repl { font-size: 10px; color: rgba(147,197,253,0.9); writing-mode: vertical-lr; letter-spacing: 1px; font-weight: 600; }
+.ms-rail-fo { font-size: 10px; color: rgba(251,191,36,0.9); writing-mode: vertical-lr; letter-spacing: 1px; font-weight: 600; }
+
+/* 从节点完整卡片：在线状态/ops/lag/内存 */
+.ms-slave-card {
+  display: flex; flex-direction: column; align-items: flex-start;
+  gap: 4px; min-width: 200px; max-width: 100%;
+  padding: 8px 12px;
+  background: rgba(34,197,94,0.06);
+  border: 1px solid rgba(34,197,94,0.28);
+  border-left: 3px solid rgba(34,197,94,0.55);
+  cursor: pointer; transition: all .2s ease;
+}
+.ms-slave-card:hover { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.5); }
+.ms-slave-card.is-down { opacity: .55; background: rgba(239,68,68,0.05); border-color: rgba(239,68,68,0.3); border-left-color: rgba(239,68,68,0.55); }
+.ms-slave-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; }
+.ms-slave-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: rgba(255,255,255,0.75); flex-wrap: wrap; }
+.ms-slave-meta .dim { color: rgba(255,255,255,0.4); }
 </style>
