@@ -12,7 +12,7 @@
       <h2 class="empty-title">尚未配置 Redis 监控</h2>
       <p class="empty-desc">当前没有已采集的 Redis 实例。请在运行 Agent 的节点上执行以下命令，按引导配置 Redis 实例：</p>
       <div class="empty-cmd">
-        <code>curl -fsSL http://&lt;server&gt;:8080/install/agent-install.sh | bash -s -- redis</code>
+        <code>{{ redisInstallCmd }}</code>
         <button class="copy-btn" @click="copyCmd" title="复制命令">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -263,6 +263,21 @@ const filterTopology = ref('')
 const searchText = ref('')
 const refreshInterval = ref(30)
 let refreshTimer = null
+
+// Server 真实地址（取自 /api/v1/install-info，参考「添加主机」功能）
+const serverURL = ref('')
+const redisInstallCmd = computed(() =>
+  (serverURL.value
+    ? `curl -fsSL ${serverURL.value}/install/agent-install.sh`
+    : 'curl -fsSL http://<server>:8080/install/agent-install.sh') +
+  ' | bash -s -- redis'
+)
+function loadServerURL() {
+  http
+    .get('/api/v1/install-info')
+    .then((info) => { if (info && info.serverURL) serverURL.value = info.serverURL })
+    .catch(() => {})
+}
 
 // 统计
 const stats = reactive({ total: 0, up: 0, down: 0, totalMemory: 0, totalClients: 0, totalOps: 0 })
@@ -642,7 +657,7 @@ function rowClass({ row }) {
 
 // 复制空状态引导命令到剪贴板
 function copyCmd() {
-  const cmd = "curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- redis"
+  const cmd = redisInstallCmd.value
   if (navigator.clipboard) {
     navigator.clipboard.writeText(cmd).then(() => {
       ElMessage.success('命令已复制到剪贴板')
@@ -661,6 +676,7 @@ function copyCmd() {
 // ---- 生命周期 ----
 onMounted(() => {
   loadInstances()
+  loadServerURL()
   onRefreshChange()
   window.addEventListener('resize', handleResize)
 })
