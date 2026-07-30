@@ -46,6 +46,15 @@
             <span v-else class="muted">不发送</span>
           </template>
         </el-table-column>
+        <el-table-column label="应用范围" min-width="140">
+          <template #default="{ row }">
+            <template v-if="row.scope === 'specified'">
+              <el-tag type="warning" size="small">指定主机</el-tag>
+              <span class="scope-count">{{ (row.nodes || []).length }} 台</span>
+            </template>
+            <el-tag v-else type="success" size="small">全部主机</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="持续" width="80">
           <template #default="{ row }">{{ row.for === '0' ? '立即' : row.for }}</template>
         </el-table-column>
@@ -257,6 +266,11 @@ onUnmounted(() => {
   align-items: center;
 }
 .muted {
+  color: var(--muted, #909399);
+}
+.scope-count {
+  margin-left: 6px;
+  font-size: 12px;
   color: var(--muted, #909399);
 }
 </style>

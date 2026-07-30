@@ -92,6 +92,9 @@ func (e *Engine) evaluate() {
 			if !matchesGroup(r.Group, n.Group) {
 				continue
 			}
+			if !matchesScope(r.Scope, r.Nodes, n.Hostname) {
+				continue
+			}
 			for _, sample := range e.latestMetricSamples(n.Hostname, r.Metric) {
 				key := r.ID + "|" + n.Hostname + "|" + sample.instance
 				st := e.states[key]

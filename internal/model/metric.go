@@ -157,6 +157,8 @@ type AlertRule struct {
 	For       string   `json:"for"`       // 持续时间，如 "5m"
 	Severity  Severity `json:"severity"`  // 严重级别
 	Group     string   `json:"group"`     // 作用的节点分组（空表示全部）
+	Scope     string   `json:"scope"`     // 应用范围：all（全部主机，默认）或 specified（指定主机）
+	Nodes     []string `json:"nodes"`     // 指定主机列表（scope=specified 时生效）
 	Notify    []string `json:"notify"`    // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示全部已启用渠道
 	Enabled   bool     `json:"enabled"`   // 是否启用
 	CreatedAt int64    `json:"createdAt"` // 创建时间（毫秒）

@@ -31,6 +31,20 @@ func matchesGroup(ruleGroup, nodeGroup string) bool {
 	return ruleGroup == "" || ruleGroup == nodeGroup
 }
 
+// matchesScope 判断节点是否在规则的应用范围内。
+// scope 为 "specified" 时只允许 nodes 列表中的节点；其他值（含空、"all"）表示全部主机。
+func matchesScope(scope string, nodes []string, node string) bool {
+	if scope == "specified" {
+		for _, n := range nodes {
+			if n == node {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
 // triggerMessage 构造告警描述。
 func triggerMessage(r model.AlertRule, node string, value float64) string {
 	return "节点 " + node + " 指标 " + r.Metric + " = " + formatFloat(value) +

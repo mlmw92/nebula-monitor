@@ -86,6 +86,33 @@
           </el-form-item>
         </el-col>
       </el-row>
+      <el-form-item label="应用范围">
+        <el-radio-group v-model="form.scope">
+          <el-radio value="all">全部主机</el-radio>
+          <el-radio value="specified">指定主机</el-radio>
+        </el-radio-group>
+      </el-form-item>
+      <el-form-item v-if="form.scope === 'specified'" label="选择主机">
+        <el-select
+          v-model="form.nodes"
+          multiple
+          filterable
+          collapse-tags
+          collapse-tags-tooltip
+          placeholder="请选择要应用规则的主机（可多选）"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="n in nodeList"
+            :key="n.hostname"
+            :value="n.hostname"
+            :label="n.displayName ? n.displayName + ' (' + n.hostname + ')' : n.hostname"
+          />
+        </el-select>
+        <div class="form-hint">
+          已选 {{ form.nodes.length }} 台主机；未选时规则对全部主机不生效，请至少选择一台。
+        </div>
+      </el-form-item>
       <el-form-item label="通知渠道">
         <el-checkbox-group v-model="form.notify">
           <el-checkbox
@@ -110,13 +137,15 @@
 </template>
 
 <script setup>
-import { reactive, ref, computed, watch } from 'vue'
+import { reactive, ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import http from '../api/http'
 import { metricGroups, metricMap } from '../metrics/dictionary'
 
 const props = defineProps({ rule: Object, groups: Array, channels: { type: Array, default: () => [] } })
 const emit = defineEmits(['close', 'saved'])
+
+const nodeList = ref([])
 
 const form = reactive({
   id: '',
@@ -127,6 +156,8 @@ const form = reactive({
   for: '5m',
   severity: '',
   group: '',
+  scope: 'all',
+  nodes: [],
   enabled: true,
   notify: [],
 })
@@ -142,11 +173,24 @@ watch(
     form.for = r ? r.for || '5m' : '5m'
     form.severity = r ? r.severity : ''
     form.group = r ? r.group : ''
+    form.scope = r && r.scope ? r.scope : 'all'
+    form.nodes = r && r.nodes ? [...r.nodes] : []
     form.enabled = r ? r.enabled : true
     form.notify = r && r.notify ? [...r.notify] : []
   },
   { immediate: true }
 )
+
+onMounted(loadNodes)
+
+async function loadNodes() {
+  try {
+    const data = await http.get('/api/v1/nodes')
+    nodeList.value = data.nodes || []
+  } catch {
+    nodeList.value = []
+  }
+}
 
 // 指标下拉：默认展示全部分组，输入时按中文名/英文名/描述/单位过滤
 const filteredGroups = ref(metricGroups)
@@ -178,6 +222,10 @@ async function submit() {
     ElMessage.warning('请填写完整：规则名称、指标、阈值、告警级别均为必填项')
     return
   }
+  if (form.scope === 'specified' && (!form.nodes || form.nodes.length === 0)) {
+    ElMessage.warning('应用范围为「指定主机」时，请至少选择一台主机')
+    return
+  }
   const body = {
     name: form.name,
     metric: form.metric,
@@ -186,6 +234,8 @@ async function submit() {
     for: form.for,
     severity: form.severity,
     group: form.group,
+    scope: form.scope || 'all',
+    nodes: form.scope === 'specified' ? form.nodes : [],
     enabled: form.enabled,
     notify: form.notify || [],
   }
