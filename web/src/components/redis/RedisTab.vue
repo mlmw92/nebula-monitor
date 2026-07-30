@@ -81,7 +81,7 @@
         <div class="kpi-icon"><AlertIcon /></div>
         <div class="kpi-body">
           <div class="kpi-num">{{ stats.alertCount }}</div>
-          <div class="kpi-text">告警实例</div>
+          <div class="kpi-text">异常实例</div>
         </div>
       </div>
     </div>
@@ -293,10 +293,12 @@
           </template>
         </el-table-column>
         <el-table-column label="版本" prop="version" width="90" />
-        <el-table-column label="状态" width="80">
+        <el-table-column label="状态" width="110">
           <template #default="{ row }">
-            <span class="status-dot" :class="row.up ? 'up' : 'down'"></span>
-            {{ row.up ? '在线' : '离线' }}
+            <el-tooltip v-if="isAlert(row)" :content="issueReasons(row).join('；')" placement="top">
+              <span class="status-text status-issue"><span class="status-dot" :class="row.up ? 'up' : 'down'"></span>异常</span>
+            </el-tooltip>
+            <span v-else class="status-text"><span class="status-dot" :class="row.up ? 'up' : 'down'"></span>{{ row.up ? '在线' : '离线' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="客户端数" width="90" align="right">
@@ -409,29 +411,29 @@
         <div class="snapshot-grid snapshot-cluster" v-if="selected && selected.topology === 'cluster'">
           <div class="snap-card snap-card-wide">
             <div class="snap-label">集群状态</div>
-            <div class="snap-value" :class="selected.clusterState === 1 ? 'ok' : 'warn'">
-              {{ selected.clusterState === 1 ? 'ok · 健康' : '异常' }}
+            <div class="snap-value" :class="clusterStateClass(selected)">
+              {{ clusterStateText(selected) }}
             </div>
           </div>
           <div class="snap-card">
             <div class="snap-label">槽位 ok</div>
-            <div class="snap-value">{{ selected.clusterSlotsOk || 0 }}</div>
+            <div class="snap-value">{{ metricText(selected.clusterSlotsOk) }}</div>
           </div>
           <div class="snap-card">
             <div class="snap-label">槽位 assigned</div>
-            <div class="snap-value">{{ selected.clusterSlotsAssigned || 0 }}</div>
+            <div class="snap-value">{{ metricText(selected.clusterSlotsAssigned) }}</div>
           </div>
           <div class="snap-card">
             <div class="snap-label">槽位失败</div>
-            <div class="snap-value" :class="(selected.clusterSlotsFail||0) > 0 ? 'warn' : 'ok'">{{ selected.clusterSlotsFail || 0 }}</div>
+            <div class="snap-value" :class="selected.clusterSlotsFail > 0 ? 'warn' : 'ok'">{{ metricText(selected.clusterSlotsFail) }}</div>
           </div>
           <div class="snap-card">
             <div class="snap-label">集群大小</div>
-            <div class="snap-value">{{ selected.clusterSize || 0 }}</div>
+            <div class="snap-value">{{ metricText(selected.clusterSize) }}</div>
           </div>
           <div class="snap-card">
             <div class="snap-label">已知节点</div>
-            <div class="snap-value">{{ selected.clusterKnownNodes || 0 }}</div>
+            <div class="snap-value">{{ metricText(selected.clusterKnownNodes) }}</div>
           </div>
         </div>
 
@@ -528,13 +530,35 @@ function loadServerURL() {
 // 统计
 const stats = reactive({ total: 0, up: 0, down: 0, totalMemory: 0, totalClients: 0, totalOps: 0, clusterCount: 0, alertCount: 0 })
 
-// 告警判定：实例不健康
+// 页面局部健康检查，不等同于告警中心的告警事件。
+function issueReasons(i) {
+  const reasons = []
+  if (!i.up) reasons.push('实例离线')
+  if (i.topology === 'cluster' && i.clusterState === 0) reasons.push('集群状态异常')
+  if (i.topology === 'cluster' && (i.clusterSlotsFail || 0) > 0) reasons.push(`槽位失败 ${i.clusterSlotsFail}`)
+  if ((i.fragmentation || 0) > 1.5) reasons.push(`内存碎片率 ${i.fragmentation}`)
+  if (i.topology === 'sentinel' && (i.sentinelTilt || 0) > 0) reasons.push('哨兵处于 TILT 状态')
+  return reasons
+}
+
 function isAlert(i) {
-  if (!i.up) return true
-  if (i.topology === 'cluster' && (i.clusterSlotsFail || 0) > 0) return true
-  if ((i.fragmentation || 0) > 1.5) return true
-  if (i.topology === 'sentinel' && (i.sentinelTilt || 0) > 0) return true
-  return false
+  return issueReasons(i).length > 0
+}
+
+function metricText(value) {
+  return value === undefined || value === null ? '-' : value
+}
+
+function clusterStateText(instance) {
+  if (instance.clusterState === 1) return 'ok · 健康'
+  if (instance.clusterState === 0) return '异常'
+  return '未采集'
+}
+
+function clusterStateClass(instance) {
+  if (instance.clusterState === 1) return 'ok'
+  if (instance.clusterState === 0) return 'warn'
+  return ''
 }
 
 // 过滤

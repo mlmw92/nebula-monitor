@@ -628,13 +628,13 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 		ReplicationOffset float64 `json:"replicationOffset"`
 		ReplicationLag   float64 `json:"replicationLag"`
 		Group       string  `json:"group"`
-		// 集群指标（cluster 拓扑实例）
-		ClusterState     float64 `json:"clusterState"`     // 1=ok, 0=fail
-		ClusterSlotsAssigned float64 `json:"clusterSlotsAssigned"`
-		ClusterSlotsOk       float64 `json:"clusterSlotsOk"`
-		ClusterSlotsFail     float64 `json:"clusterSlotsFail"`
-		ClusterKnownNodes    float64 `json:"clusterKnownNodes"`
-		ClusterSize          float64 `json:"clusterSize"`
+		// 集群指标（cluster 拓扑实例）。指针用于区分明确采集到 0 与尚未采集到数据。
+		ClusterState         *float64 `json:"clusterState,omitempty"` // 1=ok, 0=fail
+		ClusterSlotsAssigned *float64 `json:"clusterSlotsAssigned,omitempty"`
+		ClusterSlotsOk       *float64 `json:"clusterSlotsOk,omitempty"`
+		ClusterSlotsFail     *float64 `json:"clusterSlotsFail,omitempty"`
+		ClusterKnownNodes    *float64 `json:"clusterKnownNodes,omitempty"`
+		ClusterSize          *float64 `json:"clusterSize,omitempty"`
 		// 哨兵指标（sentinel 拓扑实例）
 		SentinelMasters   float64 `json:"sentinelMasters"`
 		SentinelSlaves    float64 `json:"sentinelSlaves"`
@@ -673,6 +673,11 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. 批量查询关键指标，按 instance 标签填充到实例
+	floatPtr := func(v float64) *float64 {
+		vv := round2(v)
+		return &vv
+	}
+
 	metricMap := map[string]func(ri *redisInstanceInfo, v float64){
 		"redis_connected_clients":     func(ri *redisInstanceInfo, v float64) { ri.Clients = round2(v) },
 		"redis_blocked_clients":       func(ri *redisInstanceInfo, v float64) { ri.Blocked = round2(v) },
@@ -691,12 +696,12 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 		"redis_replication_offset":    func(ri *redisInstanceInfo, v float64) { ri.ReplicationOffset = round2(v) },
 		"redis_replication_lag":       func(ri *redisInstanceInfo, v float64) { ri.ReplicationLag = round2(v) },
 		// 集群指标
-		"redis_cluster_state":           func(ri *redisInstanceInfo, v float64) { ri.ClusterState = round2(v) },
-		"redis_cluster_slots_assigned":  func(ri *redisInstanceInfo, v float64) { ri.ClusterSlotsAssigned = round2(v) },
-		"redis_cluster_slots_ok":        func(ri *redisInstanceInfo, v float64) { ri.ClusterSlotsOk = round2(v) },
-		"redis_cluster_slots_fail":      func(ri *redisInstanceInfo, v float64) { ri.ClusterSlotsFail = round2(v) },
-		"redis_cluster_known_nodes":     func(ri *redisInstanceInfo, v float64) { ri.ClusterKnownNodes = round2(v) },
-		"redis_cluster_size":            func(ri *redisInstanceInfo, v float64) { ri.ClusterSize = round2(v) },
+		"redis_cluster_state":           func(ri *redisInstanceInfo, v float64) { ri.ClusterState = floatPtr(v) },
+		"redis_cluster_slots_assigned":  func(ri *redisInstanceInfo, v float64) { ri.ClusterSlotsAssigned = floatPtr(v) },
+		"redis_cluster_slots_ok":        func(ri *redisInstanceInfo, v float64) { ri.ClusterSlotsOk = floatPtr(v) },
+		"redis_cluster_slots_fail":      func(ri *redisInstanceInfo, v float64) { ri.ClusterSlotsFail = floatPtr(v) },
+		"redis_cluster_known_nodes":     func(ri *redisInstanceInfo, v float64) { ri.ClusterKnownNodes = floatPtr(v) },
+		"redis_cluster_size":            func(ri *redisInstanceInfo, v float64) { ri.ClusterSize = floatPtr(v) },
 		// 哨兵指标
 		"redis_sentinel_masters":   func(ri *redisInstanceInfo, v float64) { ri.SentinelMasters = round2(v) },
 		"redis_sentinel_slaves":    func(ri *redisInstanceInfo, v float64) { ri.SentinelSlaves = round2(v) },
