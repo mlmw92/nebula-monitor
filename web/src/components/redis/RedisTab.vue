@@ -582,12 +582,15 @@ const topologyGroups = computed(() => {
 function clusterHealth(grp) {
   const total = grp.masters.length
   const up = grp.masters.filter(m => m.up).length
-  const failSlots = grp.masters.reduce((s, m) => s + (m.clusterSlotsFail || 0), 0)
-  const stateOk = grp.masters.some(m => m.clusterState === 1)
   if (total === 0) return { cls: 'down', text: '无 master' }
   if (up === 0) return { cls: 'down', text: '全部离线' }
-  if (failSlots > 0) return { cls: 'warn', text: `槽位失败 ${failSlots}` }
-  if (!stateOk) return { cls: 'warn', text: '集群状态异常' }
+  // 槽位失败（仅 cfg.Addr master 会上报该 metric，取该值；其他 master 字段为 0/undefined）
+  const reportedFailSlots = grp.masters.find(m => m.clusterSlotsFail !== undefined && m.clusterSlotsFail !== null)?.clusterSlotsFail || 0
+  if (reportedFailSlots > 0) return { cls: 'warn', text: `槽位失败 ${reportedFailSlots}` }
+  // cluster_state 同理：仅 cfg.Addr master 上报；只有明确采集到且为 0 才视为异常，
+  // 避免 cfg.Addr 不在采集链上（或 agent 版本未上报该字段）时把所有 master 的 0 误判为异常。
+  const reportedState = grp.masters.find(m => m.clusterState === 0 || m.clusterState === 1)?.clusterState
+  if (reportedState === 0) return { cls: 'warn', text: '集群状态异常' }
   return { cls: 'ok', text: '健康' }
 }
 function clusterHealthClass(grp) { return 'badge-' + clusterHealth(grp).cls }
