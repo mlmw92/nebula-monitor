@@ -249,7 +249,25 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `collectors` | 采集项开关（cpu/memory/disk/network/process/load/redis） |
 | `redisInstances` | Redis 实例连接配置列表（数组，密码仅存本地不上报） |
 
-#### Redis 实例配置示例
+#### 通过命令一键配置（推荐）
+
+安装 Agent 后，在任何被监控节点上执行以下命令，按交互引导填写 Redis 实例即可（无需手编 yaml）：
+
+```bash
+# 在线方式（从 Server CDN 拉取脚本）
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- redis
+
+# 或直接调用本机已安装的脚本
+bash /etc/monitor-agent/agent-install.sh redis
+```
+
+向导会引导你逐个填写：实例别名、地址、密码、拓扑类型（单机/哨兵/集群/exporter），完成后自动写入 `agent.yaml`、开启 `collectors.redis` 并重启 Agent。**密码仅存本机，不上报 Server。**
+
+> 该命令仅修改配置并重启 Agent，不安装/覆盖二进制。可多次执行以更新实例列表（会覆盖原有 `redisInstances` 段）。
+
+#### 手动编辑 YAML（高级）
+
+也可直接编辑 `/etc/monitor-agent/agent.yaml`，字段说明如下：
 
 ```yaml
 serverURL: "http://10.0.0.1:8080"

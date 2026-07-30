@@ -95,8 +95,13 @@ choose() {
 # ============================ 参数解析 ============================
 usage() {
   cat <<EOF
-用法: $0 [选项]
+用法: $0 [子命令] [选项]
 
+子命令：
+  (无)                安装 Agent（交互式分步引导，默认不开启 Redis 监控）
+  redis               配置 Redis 中间件监控（引导填写实例并合并到 agent.yaml）
+
+选项：
   --server <url>      上报的 Server 地址，如 http://10.0.0.1:8080
   --secret <key>      接入授权密钥（Server 启用 agentAuth 时必填）
   --node <name>       节点名（默认本机 hostname）
@@ -109,11 +114,30 @@ usage() {
   -h, --help          显示本帮助
 
 示例：
-  bash agent-install.sh                      # 交互式分步引导
+  bash agent-install.sh                      # 交互式安装 Agent
   bash agent-install.sh --yes --server http://10.0.0.1:8080
+  bash agent-install.sh redis                # 配置 Redis 监控（安装后执行）
 EOF
   exit 0
 }
+
+# ============================ 子命令分发 ============================
+# 首个参数为 redis 时进入 Redis 配置流程（不安装/不覆盖 Agent 二进制）。
+SUBCOMMAND=""
+if [[ $# -gt 0 ]]; then
+  case "$1" in
+    redis) SUBCOMMAND="redis"; shift ;;
+    -h|--help) usage ;;
+    --*) ;;  # 以 -- 开头的是选项，不是子命令
+    *)  # 非选项参数视为子命令（仅支持 redis，其他报错）
+      if [[ "$1" == "redis" || "$1" == "Redis" || "$1" == "REDIS" ]]; then
+        SUBCOMMAND="redis"; shift
+      else
+        die "未知参数或子命令: $1（用 -h 查看帮助；支持的子命令: redis）"
+      fi
+      ;;
+  esac
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -487,6 +511,163 @@ summary() {
   echo "============================================================"
 }
 
+# ============================ Redis 监控配置 ============================
+# 子命令: agent-install.sh redis
+# 功能：交互式引导用户填写 Redis 实例信息，生成 YAML 片段并合并到 agent.yaml，
+#       开启 collectors.redis，重启 agent 服务。不安装/覆盖二进制。
+redis_config() {
+  echo "============================================================"
+  echo " Redis 中间件监控配置"
+  echo "------------------------------------------------------------"
+  echo " 本向导引导你填写 Redis 实例，写入 ${CONFIG_DIR}/agent.yaml"
+  echo " 并开启 collectors.redis，完成后自动重启 agent。"
+  echo " 密码仅存本机 agent.yaml，不上报 Server。"
+  echo "============================================================"
+  echo
+
+  # 前置检查：agent.yaml 必须已存在
+  local cfg="${CONFIG_DIR}/agent.yaml"
+  if [[ ! -f "$cfg" ]]; then
+    die "未找到 $cfg，请先安装 Agent（bash agent-install.sh）"
+  fi
+
+  # 备份原配置
+  cp -a "$cfg" "${cfg}.bak.$(date +%s)"
+  c_ok "已备份原配置: ${cfg}.bak.*"
+
+  # 收集实例（循环添加，直到用户选择结束）
+  local instances_yaml=""
+  local idx=0
+  while true; do
+    idx=$((idx + 1))
+    echo
+    echo "--- 配置第 $idx 个 Redis 实例（留空名称跳过结束）---"
+
+    local name addr password topology sentinel_name exporter_url
+    prompt name "实例别名（用于展示，如 cache-primary）" ""
+    [[ -z "$name" ]] && { echo "已结束实例添加。"; break; }
+
+    prompt addr "实例地址 host:port（如 127.0.0.1:6379）" "127.0.0.1:6379"
+    prompt password "认证密码（无密码留空，仅存本地不上报）" ""
+
+    echo "请选择部署拓扑："
+    choose "拓扑类型" 1 "单机(standalone)" "哨兵(sentinel)" "集群(cluster)" "exporter(Prometheus)"
+    local topo=""
+    case "$CHOICE_VAL" in
+      单机*) topo="standalone" ;;
+      哨兵*) topo="sentinel" ;;
+      集群*) topo="cluster" ;;
+      exporter*) topo="standalone" ;;  # exporter 模式 topology 填 standalone，靠 exporterURL 触发
+    esac
+
+    if [[ "$topo" == "sentinel" ]]; then
+      prompt sentinel_name "哨兵监控的 master 名称（如 mymaster）" "mymaster"
+    fi
+
+    if [[ "$CHOICE_VAL" == exporter* ]]; then
+      prompt exporter_url "exporter /metrics URL（如 http://127.0.0.1:9121/metrics）" "http://127.0.0.1:9121/metrics"
+    fi
+
+    # 生成该实例的 YAML 片段
+    instances_yaml+="  - name: \"${name}\""$'\n'
+    instances_yaml+="    addr: \"${addr}\""$'\n'
+    if [[ -n "$password" ]]; then
+      instances_yaml+="    password: \"${password}\""$'\n'
+    fi
+    instances_yaml+="    topology: \"${topo}\""$'\n'
+    if [[ -n "$sentinel_name" ]]; then
+      instances_yaml+="    sentinelName: \"${sentinel_name}\""$'\n'
+    fi
+    if [[ -n "$exporter_url" ]]; then
+      instances_yaml+="    exporterURL: \"${exporter_url}\""$'\n'
+    fi
+
+    c_ok "已添加实例: $name ($addr, $topo)"
+
+    if ! confirm "是否继续添加下一个 Redis 实例？" "no"; then
+      break
+    fi
+  done
+
+  if [[ -z "$instances_yaml" ]]; then
+    c_warn "未添加任何 Redis 实例，配置未变更。"
+    exit 0
+  fi
+
+  echo
+  c_info "即将写入以下 Redis 配置到 $cfg："
+  echo "----------------------------------------"
+  printf 'collectors:\n  redis: true\n\nredisInstances:\n%s' "$instances_yaml"
+  echo "----------------------------------------"
+
+  if ! confirm "确认写入并重启 agent？" "yes"; then
+    echo "已取消，配置未变更。"
+    exit 0
+  fi
+
+  # 合并到 agent.yaml：
+  # 1) 若已有 collectors 段，确保其中 redis: true（无则追加）
+  # 2) 若已有 redisInstances 段，整体替换；否则追加到文件末尾
+  # 采用 sed/awk 操作，兼容已存在的 collectors 段。
+
+  # 步骤1：处理 collectors.redis
+  # 先检查是否存在 collectors 段且含 redis 字段
+  if grep -qE '^[[:space:]]*redis:' "$cfg" 2>/dev/null; then
+    # 已有 redis 行，强制改为 true（不管原来 true/false）
+    sed -i -E 's/^([[:space:]]*)redis:[[:space:]]*.*/\1redis: true/' "$cfg"
+  elif grep -qE '^[[:space:]]*collectors:' "$cfg" 2>/dev/null; then
+    # 有 collectors 段但无 redis 行，在 collectors: 下一行插入
+    sed -i -E '/^[[:space:]]*collectors:/a\  redis: true' "$cfg"
+  else
+    # 无 collectors 段，追加
+    printf '\ncollectors:\n  redis: true\n' >> "$cfg"
+  fi
+  c_ok "已开启 collectors.redis"
+
+  # 步骤2：处理 redisInstances
+  # 先删除已存在的 redisInstances 段（从 redisInstances: 行到文件末尾或下一个顶层键）
+  # 用 awk 找到 redisInstances: 行，跳过其后所有缩进行，保留其他内容
+  local tmp_file
+  tmp_file="$(mktemp)"
+  awk -v found=0 '
+    /^redisInstances:/ { found=1; next }
+    found == 1 && /^[[:space:]]+/ { next }
+    found == 1 && /^[^[:space:]]/ { found=0 }
+    found == 0 { print }
+  ' "$cfg" > "$tmp_file"
+  mv "$tmp_file" "$cfg"
+
+  # 追加新的 redisInstances 段
+  printf '\nredisInstances:\n%s' "$instances_yaml" >> "$cfg"
+  c_ok "已写入 redisInstances 配置"
+
+  # 重启 agent
+  if have_cmd systemctl; then
+    c_info "重启 monitor-agent 服务..."
+    systemctl restart monitor-agent 2>/dev/null || true
+    sleep 2
+    local st
+    st="$(systemctl is-active monitor-agent 2>/dev/null || echo unknown)"
+    if [[ "$st" == "active" ]]; then
+      c_ok "Agent 已重启并运行中"
+    else
+      c_warn "Agent 服务状态: $st，请查看日志: journalctl -u monitor-agent -n 50"
+    fi
+  else
+    c_warn "未检测到 systemctl，请手动重启 agent 进程"
+  fi
+
+  echo
+  echo "============================================================"
+  echo " Redis 监控配置完成"
+  echo "------------------------------------------------------------"
+  echo " 配置文件   : $cfg"
+  echo " 查看日志   : journalctl -u monitor-agent -f | grep -i redis"
+  echo " Web 端     : 中间件监控 → Redis Tab 查看实例"
+  echo " 详细配置   : 参阅 README.md Redis 实例配置说明"
+  echo "============================================================"
+}
+
 # ============================ 主流程 ============================
 main() {
   detect_env
@@ -506,4 +687,9 @@ main() {
   summary
 }
 
-main "$@"
+# 子命令分发：redis → 配置 Redis 监控；否则走默认安装流程
+if [[ "$SUBCOMMAND" == "redis" ]]; then
+  redis_config
+else
+  main
+fi

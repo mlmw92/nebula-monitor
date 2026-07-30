@@ -1,5 +1,31 @@
 <template>
   <div class="redis-tab">
+    <!-- 空状态：无实例时引导用户配置 -->
+    <div v-if="!loading && instances.length === 0" class="empty-guide glass">
+      <div class="empty-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">
+          <ellipse cx="12" cy="5" rx="9" ry="3"/>
+          <path d="M3 5v6c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          <path d="M3 11v6c0 1.66 4 3 9 3s9-1.34 9-3v-6"/>
+        </svg>
+      </div>
+      <h2 class="empty-title">尚未配置 Redis 监控</h2>
+      <p class="empty-desc">当前没有已采集的 Redis 实例。请在运行 Agent 的节点上执行以下命令，按引导配置 Redis 实例：</p>
+      <div class="empty-cmd">
+        <code>curl -fsSL http://&lt;server&gt;:8080/install/agent-install.sh | bash -s -- redis</code>
+        <button class="copy-btn" @click="copyCmd" title="复制命令">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+        </button>
+      </div>
+      <p class="empty-hint">已安装 Agent 的节点也可直接运行：<code>bash /etc/monitor-agent/agent-install.sh redis</code></p>
+      <p class="empty-hint">配置完成后约 15-30 秒数据将出现在此页面。详细配置说明请参阅 README.md。</p>
+    </div>
+
+    <!-- 有数据时的正常布局 -->
+    <template v-if="instances.length > 0">
     <!-- ===== 区块1：统计概览卡片 ===== -->
     <div class="kpi-row">
       <div class="kpi-card gradient-total">
@@ -208,12 +234,14 @@
         </div>
       </div>
     </el-drawer>
+    </template><!-- /有数据时的正常布局 -->
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Search, Refresh } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import http from '../../api/http'
 import { echarts, initChart, COLORS } from '../../charts/echarts'
 
@@ -612,6 +640,24 @@ function rowClass({ row }) {
   return row.up ? '' : 'row-down'
 }
 
+// 复制空状态引导命令到剪贴板
+function copyCmd() {
+  const cmd = "curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- redis"
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(cmd).then(() => {
+      ElMessage.success('命令已复制到剪贴板')
+    }).catch(() => {})
+  } else {
+    // 降级：创建临时 textarea
+    const ta = document.createElement('textarea')
+    ta.value = cmd
+    document.body.appendChild(ta)
+    ta.select()
+    try { document.execCommand('copy'); ElMessage.success('命令已复制到剪贴板') } catch (e) {}
+    document.body.removeChild(ta)
+  }
+}
+
 // ---- 生命周期 ----
 onMounted(() => {
   loadInstances()
@@ -918,6 +964,80 @@ function handleResize() {
 .tc-chart {
   width: 100%;
   height: 160px;
+}
+
+/* 空状态引导 */
+.empty-guide {
+  text-align: center;
+  padding: 60px 24px;
+  margin-bottom: 16px;
+}
+.empty-icon {
+  color: var(--text-dim);
+  opacity: 0.4;
+  margin-bottom: 16px;
+}
+.empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.empty-desc {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 20px;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.6;
+}
+.empty-cmd {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.empty-cmd code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.copy-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s, background 0.15s;
+}
+.copy-btn:hover {
+  color: var(--accent);
+  background: rgba(34, 211, 238, 0.1);
+}
+.empty-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 8px;
+  line-height: 1.6;
+}
+.empty-hint code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1px 6px;
+  border-radius: 3px;
 }
 
 /* 响应式 */
