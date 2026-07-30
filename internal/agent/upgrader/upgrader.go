@@ -81,6 +81,11 @@ DIR="$(dirname "$BIN")"
 TMP="$(mktemp "$DIR/.agent-upgrade-bin.XXXXXX")"
 URL='%s'
 SECRET='%s'
+# 配置目录与脚本安装路径（与 agent-install.sh 的 CONFIG_DIR 一致）
+CONF_DIR="/etc/monitor-agent"
+INSTALL_SCRIPT="$CONF_DIR/agent-install.sh"
+# agent-install.sh 在 Server CDN 上的路径
+SCRIPT_URL="$(dirname "$URL")/../install/agent-install.sh"
 MAX=3
 
 LOG "=== agent 升级脚本启动 ==="
@@ -174,6 +179,17 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl start monitor-agent
   sleep 2
   LOG "服务状态: $(systemctl is-active monitor-agent 2>/dev/null || echo unknown)"
+fi
+
+# 同步 agent-install.sh 到本地配置目录（方便用户后续执行 redis 子命令等配置操作）
+# 首次安装若走 curl|bash 管道，本地不会残留脚本；此处补齐。
+mkdir -p "$CONF_DIR" 2>/dev/null || true
+LOG "同步配置脚本: $SCRIPT_URL -> $INSTALL_SCRIPT"
+if curl -fsSL "${HDR[@]}" "$SCRIPT_URL" -o "$INSTALL_SCRIPT" 2>/dev/null; then
+  chmod +x "$INSTALL_SCRIPT" 2>/dev/null || true
+  LOG "配置脚本已同步: $INSTALL_SCRIPT"
+else
+  LOG "警告: 未能同步 agent-install.sh（不影响 Agent 运行；可手动 curl 下载）"
 fi
 
 LOG "=== agent 升级完成 ==="
