@@ -457,7 +457,9 @@ func dialRedis(addr, password string) (net.Conn, error) {
 			conn.Close()
 			return nil, fmt.Errorf("AUTH 失败: %w", err)
 		}
-		if !strings.HasPrefix(resp, "+") {
+		// RESP 简单字符串 "+OK" 在 readResponse 中已剥去首字符 '+'，返回 "OK"。
+		// AUTH 成功的唯一标准是响应为 "OK"；其余情况（如 "-ERR ..."）会在 sendCommand 处已返回 error。
+		if resp != "OK" {
 			conn.Close()
 			return nil, fmt.Errorf("AUTH 被拒绝: %s", resp)
 		}
