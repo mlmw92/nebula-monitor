@@ -81,8 +81,23 @@
         <div class="kpi-icon"><AlertIcon /></div>
         <div class="kpi-body">
           <div class="kpi-num">{{ stats.alertCount }}</div>
-          <div class="kpi-text">异常实例</div>
+          <div class="kpi-text">健康风险</div>
         </div>
+      </div>
+    </div>
+
+    <div v-if="stats.alertCount > 0" class="alert-summary glass">
+      <div class="alert-summary-head">
+        <AlertIcon />
+        <span>检测到 {{ stats.alertCount }} 个实例存在健康风险</span>
+      </div>
+      <div class="alert-summary-desc">在线实例仍可连接；异常实例表示触发了页面健康检查规则，请优先查看下方实例列表的“异常原因”。</div>
+      <div class="alert-summary-list">
+        <span v-for="item in alertInstances.slice(0, 6)" :key="item.node + item.instance" class="issue-chip" @click="openDetail(item)">
+          <span class="mono">{{ item.instance }}</span>
+          <span class="issue-chip-reason">{{ issueReasons(item).join('；') }}</span>
+        </span>
+        <span v-if="alertInstances.length > 6" class="issue-chip muted">+{{ alertInstances.length - 6 }} 个</span>
       </div>
     </div>
 
@@ -262,6 +277,12 @@
               <span class="status-text status-issue"><span class="status-dot" :class="row.up ? 'up' : 'down'"></span>异常</span>
             </el-tooltip>
             <span v-else class="status-text"><span class="status-dot" :class="row.up ? 'up' : 'down'"></span>{{ row.up ? '在线' : '离线' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="异常原因" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="isAlert(row)" class="issue-reasons">{{ issueReasons(row).join('；') }}</span>
+            <span v-else class="dim-text">-</span>
           </template>
         </el-table-column>
         <el-table-column label="客户端数" width="90" align="right">
@@ -555,6 +576,8 @@ function issueReasons(i) {
 function isAlert(i) {
   return issueReasons(i).length > 0
 }
+
+const alertInstances = computed(() => instances.value.filter(isAlert))
 
 function metricText(value) {
   return value === undefined || value === null ? '-' : value
@@ -1278,6 +1301,65 @@ function handleResize() {
   color: var(--text-dim);
   min-width: 36px;
   text-align: right;
+}
+.issue-reasons {
+  color: #fbbf24;
+  font-size: 12px;
+}
+.dim-text {
+  color: var(--text-dim);
+}
+.alert-summary {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.06);
+}
+.alert-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fbbf24;
+  font-weight: 600;
+  font-size: 14px;
+}
+.alert-summary-head svg {
+  width: 18px;
+  height: 18px;
+}
+.alert-summary-desc {
+  margin-top: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.alert-summary-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.issue-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.issue-chip:hover {
+  border-color: rgba(245, 158, 11, 0.55);
+}
+.issue-chip.muted {
+  color: var(--text-dim);
+  cursor: default;
+}
+.issue-chip-reason {
+  color: #fbbf24;
 }
 :deep(.row-down) {
   opacity: 0.6;
