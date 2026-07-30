@@ -41,11 +41,20 @@ BIN_DIR="dist/artifacts/bin"
 WEB_DIR="dist/artifacts/web"
 PKG_DIR="dist/artifacts/packages"
 
-# 1) 前端：源(web/src)有更新或缺失时，自动重建到 dist/artifacts/web
+# 1) 前端：源(web/src)有更新或缺失、或产物内嵌版本与 VERSION 文件不一致时，自动重建到 dist/artifacts/web
+# 注：仅改根目录 VERSION（不动前端源码）时，find -newer 检测不到变化，会漏重建导致
+#     打包进的 Web 版本号滞后于本次发布版本，故额外比对产物内嵌版本号。
 WEB_OUT="${WEB_DIR}/index.html"
 fresh_web="$(find web/src -newer "$WEB_OUT" 2>/dev/null || true)"
-if [[ ! -s "$WEB_OUT" ]] || [[ -n "$fresh_web" ]]; then
-  c_info "前端源有更新或缺失，自动执行 build/build-web.sh 重建前端"
+# 从前端产物 assets/version-*.js 中提取内嵌版本号（形如 const o="1.5.6"）
+web_embedded_ver="$(grep -hoE '"[0-9]+\.[0-9]+\.[0-9]+[^"]*"' "$WEB_DIR"/assets/version-*.js 2>/dev/null | head -1 | tr -d '"' || true)"
+ver_mismatch=0
+if [[ -n "$web_embedded_ver" && "$web_embedded_ver" != "$VERSION" ]]; then
+  c_warn "前端产物内嵌版本($web_embedded_ver)与 VERSION 文件($VERSION)不一致，强制重建前端"
+  ver_mismatch=1
+fi
+if [[ ! -s "$WEB_OUT" ]] || [[ -n "$fresh_web" ]] || (( ver_mismatch )); then
+  c_info "前端源有更新/缺失或版本不一致，自动执行 build/build-web.sh 重建前端"
   bash build/build-web.sh
 fi
 [[ -s "$WEB_OUT" ]] || die "缺少 ${WEB_OUT}，请先运行 build/build-web.sh"
