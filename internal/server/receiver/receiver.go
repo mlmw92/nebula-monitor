@@ -83,13 +83,22 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		if ri.Up {
 			upVal = 1
 		}
+		// group 优先取 Redis 实例自身分组（agent 配置的 name，如集群名），
+		// 为空时回退到节点分组，避免展示成默认的 "default"。
+		group := ri.Group
+		if group == "" {
+			group = payload.Group
+		}
 		labels := map[string]string{
-			"group":     payload.Group,
+			"group":     group,
 			"instance":  ri.Instance,
 			"name":      ri.Name,
 			"role":      ri.Role,
 			"topology":  ri.Topology,
 			"version":   ri.Version,
+		}
+		if ri.ReplicaOf != "" {
+			labels["replica_of"] = ri.ReplicaOf
 		}
 		metrics = append(metrics, model.Metric{
 			Node: payload.Node, Name: "redis_instance_up", Labels: labels, Value: upVal, Timestamp: payload.ReportAt,

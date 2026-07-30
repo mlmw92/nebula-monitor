@@ -122,7 +122,7 @@ func (c *RedisCollector) collectSentinel(cfg model.RedisInstanceConfig, now int6
 		slog.Warn("Sentinel 采集失败", "addr", cfg.Addr, "err", err)
 		instances = append(instances, model.RedisInstance{
 			Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
-			Role: "sentinel", Topology: cfg.Topology, Up: false,
+			Role: "sentinel", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		})
 		return nil, instances
 	}
@@ -140,7 +140,7 @@ func (c *RedisCollector) collectSentinel(cfg model.RedisInstanceConfig, now int6
 	})
 	instances = append(instances, model.RedisInstance{
 		Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
-		Role: "sentinel", Topology: cfg.Topology,
+		Role: "sentinel", Topology: cfg.Topology, Group: cfg.Name,
 		Version: sentInfo["redis_version"], Up: true,
 	})
 
@@ -184,7 +184,7 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 		slog.Warn("Cluster 采集失败", "addr", cfg.Addr, "err", err)
 		instances = append(instances, model.RedisInstance{
 			Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
-			Role: "master", Topology: cfg.Topology, Up: false,
+			Role: "master", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		})
 		return nil, instances
 	}
@@ -272,7 +272,7 @@ func (c *RedisCollector) collectExporter(cfg model.RedisInstanceConfig, now int6
 		slog.Warn("Redis exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, model.RedisInstance{
 			Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
-			Role: "unknown", Topology: cfg.Topology, Up: false,
+			Role: "unknown", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		}
 	}
 	defer resp.Body.Close()
@@ -281,13 +281,13 @@ func (c *RedisCollector) collectExporter(cfg model.RedisInstanceConfig, now int6
 		slog.Warn("Redis exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, model.RedisInstance{
 			Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
-			Role: "unknown", Topology: cfg.Topology, Up: false,
+			Role: "unknown", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		}
 	}
 	metrics := parsePrometheusText(string(body), c.node, cfg.Addr, now)
 	ri := model.RedisInstance{
 		Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
-		Role: "master", Topology: cfg.Topology, Up: true,
+		Role: "master", Topology: cfg.Topology, Group: cfg.Name, Up: true,
 	}
 	// 从指标中提取 version 标签
 	for _, m := range metrics {
