@@ -532,6 +532,7 @@ const ServerIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="cur
 
 // ---- 数据 ----
 const instances = ref([])
+const activeAlerts = ref([])
 const loading = ref(false)
 const filterStatus = ref('')
 const filterTopology = ref('')
@@ -562,14 +563,28 @@ function loadServerURL() {
 // 统计
 const stats = reactive({ total: 0, up: 0, down: 0, totalMemory: 0, totalClients: 0, totalOps: 0, clusterCount: 0, alertCount: 0 })
 
-// 页面局部健康检查，不等同于告警中心的告警事件。
+const alertsByInstance = computed(() => {
+  const m = new Map()
+  for (const alert of activeAlerts.value) {
+    if (!alert.instance) continue
+    const key = `${alert.node}|${alert.instance}`
+    const list = m.get(key) || []
+    list.push(alert)
+    m.set(key, list)
+  }
+  return m
+})
+
+function instanceAlerts(i) {
+  return alertsByInstance.value.get(`${i.node}|${i.instance}`) || []
+}
+
 function issueReasons(i) {
   const reasons = []
   if (!i.up) reasons.push('实例离线')
-  if (i.topology === 'cluster' && i.clusterState === 0) reasons.push('集群状态异常')
-  if (i.topology === 'cluster' && (i.clusterSlotsFail || 0) > 0) reasons.push(`槽位失败 ${i.clusterSlotsFail}`)
-  if ((i.fragmentation || 0) > 1.5) reasons.push(`内存碎片率 ${i.fragmentation}`)
-  if (i.topology === 'sentinel' && (i.sentinelTilt || 0) > 0) reasons.push('哨兵处于 TILT 状态')
+  for (const alert of instanceAlerts(i)) {
+    reasons.push(alert.message || `${alert.ruleName || alert.rule || '告警规则'} 触发`)
+  }
   return reasons
 }
 
@@ -679,8 +694,12 @@ function setTrendRef(el, key) {
 async function loadInstances() {
   loading.value = true
   try {
-    const data = await http.get('/api/v1/middleware/redis/instances')
-    instances.value = data.instances || []
+    const [instancesData, alertsData] = await Promise.all([
+      http.get('/api/v1/middleware/redis/instances'),
+      http.get('/api/v1/alerts?state=firing'),
+    ])
+    instances.value = instancesData.instances || []
+    activeAlerts.value = (alertsData.alerts || []).filter(a => a.instance)
     computeStats()
     await nextTick()
     renderCharts()

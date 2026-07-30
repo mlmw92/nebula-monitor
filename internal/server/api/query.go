@@ -501,6 +501,7 @@ func (a *API) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		node = r.URL.Query().Get("node")
 	}
 	state := r.URL.Query().Get("state")
+	instance := r.URL.Query().Get("instance")
 	var events []model.AlertEvent
 	if state == "active" || state == string(model.AlertStateFiring) {
 		events = a.alerts.Active()
@@ -513,10 +514,10 @@ func (a *API) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 		events = a.alerts.Recent(limit)
 	}
-	if node != "" {
+	if node != "" || instance != "" {
 		filtered := make([]model.AlertEvent, 0, len(events))
 		for _, e := range events {
-			if e.Node == node {
+			if (node == "" || e.Node == node) && (instance == "" || e.Instance == instance) {
 				filtered = append(filtered, e)
 			}
 		}

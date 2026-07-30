@@ -168,6 +168,7 @@ type AlertEvent struct {
 	RuleName  string     `json:"ruleName"`         // 规则名称
 	Node      string     `json:"node"`             // 节点名
 	NodeIP    string     `json:"nodeIp,omitempty"` // 节点 IP（便于在通知渠道中展示）
+	Instance  string     `json:"instance,omitempty"` // Redis 等多实例指标的实例标签
 	Metric    string     `json:"metric"`           // 指标名
 	Value     float64    `json:"value"`            // 触发值
 	Operator  string     `json:"operator"`         // 运算符

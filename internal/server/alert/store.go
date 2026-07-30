@@ -33,6 +33,7 @@ func (s *VMAlertStore) Add(e model.AlertEvent) {
 				"rule":     e.RuleID,
 				"name":     e.RuleName,
 				"host":     e.Node,
+				"instance": e.Instance,
 				"severity": string(e.Severity),
 				"state":    string(e.State),
 			},
@@ -60,7 +61,7 @@ func (s *VMAlertStore) Recent(limit int) []model.AlertEvent {
 		if len(ser.Points) == 0 {
 			continue
 		}
-		key := ser.Labels["rule"] + "|" + ser.Labels["host"] + "|" + ser.Labels["state"]
+		key := ser.Labels["rule"] + "|" + ser.Labels["host"] + "|" + ser.Labels["instance"] + "|" + ser.Labels["state"]
 		p := ser.Points[len(ser.Points)-1]
 		ev := buildEvent(ser.Labels, p.Timestamp, p.Value)
 		if cur, ok := latest[key]; !ok || ev.StartsAt > cur.StartsAt {
@@ -81,26 +82,43 @@ func (s *VMAlertStore) Recent(limit int) []model.AlertEvent {
 	return out
 }
 
-// Active 返回当前活跃（firing）告警。
+// Active 返回当前活跃（firing）告警。对于同一规则、节点和实例，只保留最新状态仍为 firing 的事件。
 func (s *VMAlertStore) Active() []model.AlertEvent {
-	series, err := s.store.QueryInstant("system", alertMetric, map[string]string{"state": string(model.AlertStateFiring)})
+	series, err := s.store.QueryInstant("system", alertMetric, nil)
 	if err != nil {
 		slog.Warn("活跃告警查询失败", "err", err)
 		return nil
 	}
-	var out []model.AlertEvent
+	latest := map[string]model.AlertEvent{}
 	for _, ser := range series {
 		if len(ser.Points) == 0 {
 			continue
 		}
 		p := ser.Points[len(ser.Points)-1]
-		// 仅保留最近 7 天内的 active
 		if time.Now().UnixMilli()-p.Timestamp > int64(7*24*time.Hour) {
 			continue
 		}
-		out = append(out, buildEvent(ser.Labels, p.Timestamp, p.Value))
+		ev := buildEvent(ser.Labels, p.Timestamp, p.Value)
+		key := ev.RuleID + "|" + ev.Node + "|" + ev.Instance
+		if cur, ok := latest[key]; !ok || eventTime(ev) > eventTime(cur) {
+			latest[key] = ev
+		}
 	}
+	out := make([]model.AlertEvent, 0, len(latest))
+	for _, ev := range latest {
+		if ev.State == model.AlertStateFiring {
+			out = append(out, ev)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return eventTime(out[i]) > eventTime(out[j]) })
 	return out
+}
+
+func eventTime(ev model.AlertEvent) int64 {
+	if ev.EndsAt != 0 {
+		return ev.EndsAt
+	}
+	return ev.StartsAt
 }
 
 // buildEvent 从 VM 序列标签与点构造告警事件。
@@ -113,6 +131,7 @@ func buildEvent(labels map[string]string, ts int64, value float64) model.AlertEv
 		RuleID:    labels["rule"],
 		RuleName:  labels["name"],
 		Node:      labels["host"],
+		Instance:  labels["instance"],
 		Severity:  model.Severity(labels["severity"]),
 		State:     state,
 		Value:     value,

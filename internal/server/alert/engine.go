@@ -92,44 +92,43 @@ func (e *Engine) evaluate() {
 			if !matchesGroup(r.Group, n.Group) {
 				continue
 			}
-			p, ok := e.latestMetricValue(n.Hostname, r.Metric)
-			if !ok {
-				continue
-			}
-			key := r.ID + "|" + n.Hostname
-			st := e.states[key]
-			if st == nil {
-				st = &ruleState{}
-				e.states[key] = st
-			}
-			cond := Compare(r.Operator, p, r.Threshold)
-			if cond {
-				if st.aboveSince == 0 {
-					st.aboveSince = now
+			for _, sample := range e.latestMetricSamples(n.Hostname, r.Metric) {
+				key := r.ID + "|" + n.Hostname + "|" + sample.instance
+				st := e.states[key]
+				if st == nil {
+					st = &ruleState{}
+					e.states[key] = st
 				}
-				forSec := parseFor(r.For)
-				if !st.firing && now-st.aboveSince >= forSec*1000 {
-					st.firing = true
-					e.fire(r, n.Hostname, p, now)
+				cond := Compare(r.Operator, sample.value, r.Threshold)
+				if cond {
+					if st.aboveSince == 0 {
+						st.aboveSince = now
+					}
+					forSec := parseFor(r.For)
+					if !st.firing && now-st.aboveSince >= forSec*1000 {
+						st.firing = true
+						e.fire(r, n.Hostname, sample.instance, sample.value, now)
+					}
+				} else {
+					if st.firing {
+						st.firing = false
+						e.resolve(r, n.Hostname, sample.instance, sample.value, now)
+					}
+					st.aboveSince = 0
 				}
-			} else {
-				if st.firing {
-					st.firing = false
-					e.resolve(r, n.Hostname, p, now)
-				}
-				st.aboveSince = 0
 			}
 		}
 	}
 }
 
-func (e *Engine) fire(r model.AlertRule, node string, value float64, now int64) {
+func (e *Engine) fire(r model.AlertRule, node, instance string, value float64, now int64) {
 	ev := model.AlertEvent{
 		ID:        genEventID(),
 		RuleID:    r.ID,
 		RuleName:  r.Name,
 		Node:      node,
 		NodeIP:    e.nodeIP(node),
+		Instance:  instance,
 		Metric:    r.Metric,
 		Value:     value,
 		Operator:  r.Operator,
@@ -149,13 +148,14 @@ func (e *Engine) fire(r model.AlertRule, node string, value float64, now int64) 
 		"severity", r.Severity, "channels", r.Notify)
 }
 
-func (e *Engine) resolve(r model.AlertRule, node string, value float64, now int64) {
+func (e *Engine) resolve(r model.AlertRule, node, instance string, value float64, now int64) {
 	ev := model.AlertEvent{
 		ID:        genEventID(),
 		RuleID:    r.ID,
 		RuleName:  r.Name,
 		Node:      node,
 		NodeIP:    e.nodeIP(node),
+		Instance:  instance,
 		Metric:    r.Metric,
 		Value:     value,
 		Operator:  r.Operator,
@@ -295,18 +295,36 @@ func genEventID() string {
 	return "e-" + strconv.FormatUint(uint64(time.Now().UnixNano()), 36) + "-" + strconv.FormatInt(rand.Int63(), 36)
 }
 
-// latestMetricValue 返回节点某指标的最新值。
-// 对于 disk_used_percent，使用全部真实磁盘的汇总使用率（sum(disk_used)/sum(disk_total)），
-// 避免只取单个挂载点（可能是随机或虚拟挂载）导致的漏报/误报，与前端展示保持一致。
-func (e *Engine) latestMetricValue(node, metric string) (float64, bool) {
+type metricSample struct {
+	instance string
+	value    float64
+}
+
+// latestMetricSamples 返回节点某指标的全部最新时序样本。
+// 普通主机指标通常只有一个无 instance 标签的样本；Redis 等多实例指标按 instance 分别评估。
+// 对于 disk_used_percent，保持全部真实磁盘汇总的既有语义。
+func (e *Engine) latestMetricSamples(node, metric string) []metricSample {
 	if metric == "disk_used_percent" {
-		return aggregatedDiskUsage(e.store, node)
+		if value, ok := aggregatedDiskUsage(e.store, node); ok {
+			return []metricSample{{value: value}}
+		}
+		return nil
 	}
-	p, err := e.store.QueryLatest(node, metric, nil)
-	if err != nil || p == nil {
-		return 0, false
+	series, err := e.store.QueryInstant(node, metric, nil)
+	if err != nil {
+		return nil
 	}
-	return p.Value, true
+	samples := make([]metricSample, 0, len(series))
+	for _, s := range series {
+		if len(s.Points) == 0 {
+			continue
+		}
+		samples = append(samples, metricSample{
+			instance: s.Labels["instance"],
+			value:    s.Points[len(s.Points)-1].Value,
+		})
+	}
+	return samples
 }
 
 // aggregatedDiskUsage 汇总节点全部真实磁盘的总使用率（百分比）。
