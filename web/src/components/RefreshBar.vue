@@ -12,6 +12,7 @@
         <el-option v-for="o in ivals" :key="o.value" :label="o.label" :value="o.value" />
       </el-select>
       <span v-if="lastUpdate" class="rb-time">更新于 {{ lastUpdate }}</span>
+      <span v-if="auto" class="rb-countdown">{{ countdown }}s 后刷新</span>
       <el-button size="small" :icon="RefreshIcon" :loading="loading" @click="trigger">刷新</el-button>
     </div>
   </div>
@@ -41,24 +42,43 @@ const ivals = computed(() =>
 const auto = ref(true)
 const interval = ref(props.interval)
 const lastUpdate = ref('')
+const countdown = ref(props.interval)
 let timer = null
+let countdownTimer = null
 
 watch(() => props.interval, (v) => { interval.value = v })
 
 function trigger() {
   lastUpdate.value = new Date().toLocaleTimeString()
+  countdown.value = interval.value
   emit('refresh')
 }
 function onIntervalChange(v) {
   emit('update:interval', v)
   restart()
 }
+function startCountdown() {
+  stopCountdown()
+  countdown.value = interval.value
+  countdownTimer = setInterval(() => {
+    if (countdown.value > 0) countdown.value--
+  }, 1000)
+}
+function stopCountdown() {
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
+}
 function start() {
   stop()
-  if (auto.value) timer = setInterval(trigger, interval.value * 1000)
+  if (auto.value) {
+    timer = setInterval(() => trigger(), interval.value * 1000)
+    startCountdown()
+  } else {
+    stopCountdown()
+  }
 }
 function stop() {
   if (timer) { clearInterval(timer); timer = null }
+  stopCountdown()
 }
 function restart() { start() }
 
@@ -85,5 +105,12 @@ onUnmounted(stop)
 .rb-time {
   font-size: 12px;
   color: var(--text-muted);
+}
+.rb-countdown {
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--accent);
+  min-width: 64px;
+  text-align: right;
 }
 </style>

@@ -18,13 +18,27 @@
     <template v-if="hosts.length > 0">
       <!-- KPI -->
       <div class="kpi-row">
-        <div class="kpi-card gradient-host"><div class="kpi-body"><div class="kpi-num">{{ hostStats.hosts }}</div><div class="kpi-text">Docker 主机</div></div></div>
-        <div class="kpi-card gradient-total"><div class="kpi-body"><div class="kpi-num">{{ hostStats.total }}</div><div class="kpi-text">容器总数</div></div></div>
-        <div class="kpi-card gradient-up"><div class="kpi-body"><div class="kpi-num">{{ hostStats.running }}</div><div class="kpi-text">运行中</div></div></div>
-        <div class="kpi-card gradient-down"><div class="kpi-body"><div class="kpi-num">{{ hostStats.stopped }}</div><div class="kpi-text">已停止</div></div></div>
-        <div class="kpi-card gradient-ops"><div class="kpi-body"><div class="kpi-num">{{ hostStats.images }}</div><div class="kpi-text">镜像数</div></div></div>
-        <div class="kpi-card gradient-conn"><div class="kpi-body"><div class="kpi-num">{{ resStats.cpu.toFixed(1) }}%</div><div class="kpi-text">容器总 CPU</div></div></div>
-        <div class="kpi-card gradient-mem"><div class="kpi-body"><div class="kpi-num">{{ formatBytes(resStats.mem) }}</div><div class="kpi-text">容器总内存</div></div></div>
+        <KpiCard :value="hostStats.hosts" label="Docker 主机" tone="host">
+          <template #icon><ServerIcon /></template>
+        </KpiCard>
+        <KpiCard :value="hostStats.total" label="容器总数" tone="total">
+          <template #icon><BoxIcon /></template>
+        </KpiCard>
+        <KpiCard :value="hostStats.running" label="运行中" tone="up">
+          <template #icon><PlayIcon /></template>
+        </KpiCard>
+        <KpiCard :value="hostStats.stopped" label="已停止" tone="down">
+          <template #icon><StopIcon /></template>
+        </KpiCard>
+        <KpiCard :value="hostStats.images" label="镜像数" tone="ops">
+          <template #icon><ImageIcon /></template>
+        </KpiCard>
+        <KpiCard :value="resStats.cpu.toFixed(1) + '%'" label="容器总 CPU" tone="cluster">
+          <template #icon><CpuIcon /></template>
+        </KpiCard>
+        <KpiCard :value="formatBytes(resStats.mem)" label="容器总内存" tone="mem">
+          <template #icon><MemoryIcon /></template>
+        </KpiCard>
       </div>
 
       <!-- Docker 主机 -->
@@ -107,8 +121,18 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import RefreshBar from '../RefreshBar.vue'
+import KpiCard from '../KpiCard.vue'
 import * as echarts from 'echarts'
 import http from '../../api/http'
+
+// ---- 图标组件（内联 SVG，避免依赖 lucide） ----
+const ServerIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/><line x1="7" y1="7" x2="7" y2="7"/><line x1="7" y1="17" x2="7" y2="17"/></svg>' }
+const BoxIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>' }
+const PlayIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>' }
+const StopIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>' }
+const ImageIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>' }
+const CpuIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>' }
+const MemoryIcon = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 19v-3"/><path d="M10 19v-3"/><path d="M14 19v-3"/><path d="M18 19v-3"/><path d="M8 11V9"/><path d="M16 11V9"/><path d="M12 11V9"/><path d="M2 15h20"/><path d="M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v1.1a2 2 0 0 0 0 3.837V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5.063a2 2 0 0 0 0-3.837Z"/></svg>' }
 
 const loading = ref(true)
 const containers = ref([])
@@ -209,17 +233,7 @@ onMounted(load)
 .empty-desc { color: var(--text-dim); margin: 0 0 8px; font-size: 13px; }
 .empty-desc code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; font-family: var(--mono); }
 .empty-hint { color: var(--text-muted); font-size: 12px; }
-.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.kpi-card { border-radius: var(--radius); padding: 16px; }
-.kpi-num { font-size: 24px; font-weight: 700; }
-.kpi-text { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-.gradient-host { background: linear-gradient(135deg, #16202e, #243349); }
-.gradient-total { background: linear-gradient(135deg, #1c2129, #2d3548); }
-.gradient-up { background: linear-gradient(135deg, #1a3a2a, #2d5a3d); }
-.gradient-down { background: linear-gradient(135deg, #3a1a1a, #5a2d2d); }
-.gradient-ops { background: linear-gradient(135deg, #2a1a3a, #4a2d5d); }
-.gradient-conn { background: linear-gradient(135deg, #1a2a3a, #2d4a5d); }
-.gradient-mem { background: linear-gradient(135deg, #3a2a1a, #5d4a2d); }
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
 .host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }

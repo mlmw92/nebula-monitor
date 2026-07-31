@@ -29,62 +29,30 @@
     <template v-if="instances.length > 0">
     <!-- ===== 区块1：统计概览卡片 ===== -->
     <div class="kpi-row">
-      <div class="kpi-card gradient-total">
-        <div class="kpi-icon"><DatabaseIcon /></div>
-        <div class="kpi-body">
-          <div class="kpi-num">{{ stats.total }}</div>
-          <div class="kpi-text">实例总数</div>
-        </div>
-      </div>
-      <div class="kpi-card gradient-up">
-        <div class="kpi-icon"><CheckCircleIcon /></div>
-        <div class="kpi-body">
-          <div class="kpi-num">{{ stats.up }}</div>
-          <div class="kpi-text">在线实例</div>
-        </div>
-      </div>
-      <div class="kpi-card gradient-down">
-        <div class="kpi-icon"><XCircleIcon /></div>
-        <div class="kpi-body">
-          <div class="kpi-num">{{ stats.down }}</div>
-          <div class="kpi-text">离线实例</div>
-        </div>
-      </div>
-      <div class="kpi-card gradient-mem">
-        <div class="kpi-icon"><MemoryIcon /></div>
-        <div class="kpi-body">
-          <div class="kpi-num">{{ formatBytes(stats.totalMemory) }}</div>
-          <div class="kpi-text">总内存使用</div>
-        </div>
-      </div>
-      <div class="kpi-card gradient-conn">
-        <div class="kpi-icon"><ConnectionIcon /></div>
-        <div class="kpi-body">
-          <div class="kpi-num">{{ stats.totalClients }}</div>
-          <div class="kpi-text">总连接客户端</div>
-        </div>
-      </div>
-      <div class="kpi-card gradient-ops">
-        <div class="kpi-icon"><ActivityIcon /></div>
-        <div class="kpi-body">
-          <div class="kpi-num">{{ formatNum(stats.totalOps) }}</div>
-          <div class="kpi-text">总 OPS</div>
-        </div>
-      </div>
-      <div class="kpi-card gradient-cluster">
-        <div class="kpi-icon"><ClusterIcon /></div>
-        <div class="kpi-body">
-          <div class="kpi-num">{{ stats.clusterCount }}</div>
-          <div class="kpi-text">集群/哨兵组</div>
-        </div>
-      </div>
-      <div class="kpi-card" :class="stats.alertCount > 0 ? 'gradient-alert' : 'gradient-ok'">
-        <div class="kpi-icon"><AlertIcon /></div>
-        <div class="kpi-body">
-          <div class="kpi-num">{{ stats.alertCount }}</div>
-          <div class="kpi-text">健康风险</div>
-        </div>
-      </div>
+      <KpiCard :value="stats.total" label="实例总数" tone="total">
+        <template #icon><DatabaseIcon /></template>
+      </KpiCard>
+      <KpiCard :value="stats.up" label="在线实例" tone="up">
+        <template #icon><CheckCircleIcon /></template>
+      </KpiCard>
+      <KpiCard :value="stats.down" label="离线实例" tone="down">
+        <template #icon><XCircleIcon /></template>
+      </KpiCard>
+      <KpiCard :value="formatBytes(stats.totalMemory)" label="总内存使用" tone="mem">
+        <template #icon><MemoryIcon /></template>
+      </KpiCard>
+      <KpiCard :value="stats.totalClients" label="总连接客户端" tone="conn">
+        <template #icon><ConnectionIcon /></template>
+      </KpiCard>
+      <KpiCard :value="formatNum(stats.totalOps)" label="总 OPS" tone="ops">
+        <template #icon><ActivityIcon /></template>
+      </KpiCard>
+      <KpiCard :value="stats.clusterCount" label="集群/哨兵组" tone="cluster">
+        <template #icon><ClusterIcon /></template>
+      </KpiCard>
+      <KpiCard :value="stats.alertCount" label="健康风险" :tone="stats.alertCount > 0 ? 'alert' : 'ok'">
+        <template #icon><AlertIcon /></template>
+      </KpiCard>
     </div>
 
     <div v-if="stats.alertCount > 0" class="alert-summary glass">
@@ -615,6 +583,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Search } from '@element-plus/icons-vue'
 import RefreshBar from '../RefreshBar.vue'
+import KpiCard from '../KpiCard.vue'
 import { ElMessage } from 'element-plus'
 import http from '../../api/http'
 import { echarts, initChart, COLORS } from '../../charts/echarts'
@@ -1199,69 +1168,12 @@ function handleResize() {
   padding: 16px;
 }
 
-/* 区块1：KPI 卡片 */
+/* 区块1：KPI 卡片（使用共享 KpiCard 组件，样式见 KpiCard.vue） */
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
   margin-bottom: 16px;
-}
-.kpi-card {
-  border-radius: var(--radius);
-  padding: 10px 11px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  border: 1px solid var(--border);
-  position: relative;
-  overflow: hidden;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-.kpi-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-}
-.kpi-card::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 2px;
-  opacity: 0.8;
-}
-.gradient-total::before { background: linear-gradient(90deg, #22d3ee, #3b82f6); }
-.gradient-up::before { background: linear-gradient(90deg, #22c55e, #16a34a); }
-.gradient-down::before { background: linear-gradient(90deg, #ef4444, #dc2626); }
-.gradient-mem::before { background: linear-gradient(90deg, #a855f7, #7c3aed); }
-.gradient-conn::before { background: linear-gradient(90deg, #3b82f6, #2563eb); }
-.gradient-ops::before { background: linear-gradient(90deg, #f59e0b, #d97706); }
-.kpi-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.kpi-icon svg { width: 16px; height: 16px; }
-.gradient-total .kpi-icon { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
-.gradient-up .kpi-icon { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
-.gradient-down .kpi-icon { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
-.gradient-mem .kpi-icon { background: rgba(100, 116, 139, 0.15); color: #94a3b8; }
-.gradient-conn .kpi-icon { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
-.gradient-ops .kpi-icon { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
-.kpi-num {
-  font-size: 18px;
-  font-weight: 700;
-  font-family: var(--mono);
-  letter-spacing: -0.02em;
-  line-height: 1.15;
-}
-.kpi-text {
-  font-size: 10px;
-  color: var(--text-dim);
-  margin-top: 1px;
-  white-space: nowrap;
 }
 
 /* 通用 section */
@@ -1628,11 +1540,6 @@ function handleResize() {
   .bar-row { grid-template-columns: 1fr; }
   .chart-grid { grid-template-columns: 1fr; }
 }
-
-/* ==== 新增 KPI 卡渐变（集群数 / 告警）==== */
-.gradient-cluster { background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(139,92,246,0.12)); }
-.gradient-alert { background: linear-gradient(135deg, rgba(239,68,68,0.22), rgba(220,38,38,0.12)); }
-.gradient-ok { background: linear-gradient(135deg, rgba(34,197,94,0.18), rgba(16,185,129,0.10)); }
 
 /* ==== 实例拓扑与集群关系 ==== */
 .topo-group { margin-top: 16px; padding: 12px 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; }
