@@ -47,12 +47,16 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 **告警**
 
 - 阈值规则：`>` `>=` `<` `<=` `==` `!=` + 持续时长（For）+ firing/resolved 状态机 + 事件去重
+- 规则静默：支持按规则设置静默开关 + 截止时间（到期自动解除），静默期间跳过评估
+- 维护窗口：全局维护期，期间抑制所有告警通知
 - 通知渠道：邮件（SMTP，多收件人）、Webhook（多地址）、钉钉、飞书、企业微信（自定义机器人 Webhook，均支持配置多个群，钉钉/飞书支持加签，钉钉/企业微信支持 @ 多人）
 
 **前端**
 
-- 登录、总览、主机列表（Agent 版本低于服务端时显示红点）、主机详情、告警列表、规则新增/编辑、分组管理
-- **中间件监控**：独立一级菜单，Tab 布局（一种中间件一个 Tab）。已实现 Redis Tab：统计概览卡片 + 拓扑/角色/状态分布环形图 + 内存/OPS 排行柱状图 + 命中率可视化 + 实例列表表格 + 实例详情抽屉（多趋势图）。
+- 登录、总览、主机列表（Agent 版本低于服务端时显示红点）、主机详情（含端口状态区块）、告警列表、规则新增/编辑（含静默设置）、分组管理
+- **中间件监控**：独立一级菜单，Tab 布局（一种中间件一个 Tab）。已实现 Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ 七个 Tab：统计概览卡片 + 实例列表表格 + 实例详情抽屉（多趋势图）。
+- **服务拨测**：拨测任务管理页面（新增/编辑/删除/启用切换），实时展示拨测结果（在线状态/延迟/证书到期）。
+- **巡检报告**：报告生成页面（日报/周报/月报选择 + 即时生成 + 下载 + 历史记录）。
 - **系统升级**：Web 上传 upgrade 包 → 解析版本 → 立即升级（备份+替换+重启）/ 回滚 + 升级历史；Agent 不主动推送，由管理员在主机列表手动触发
 - 升级按钮提交后 15 秒冷却（显示"请等待 Ns"并禁用），防止 server 重启期间重复点击
 
@@ -61,12 +65,37 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 | 指标 | 说明 |
 |------|------|
 | Redis | 支持单机/主从/哨兵/集群四种部署模式；Agent 内置直连（RESP 协议）+ Prometheus exporter 双采集模式；实例密码仅存 Agent 本地不上报；上报 redis_instance_up 存活状态 + 20+ 核心指标（连接数/内存/OPS/命中率/键空间/复制延迟/哨兵/集群等） |
+| MySQL | `go-sql-driver/mysql` 直连 `SHOW GLOBAL STATUS` / `SHOW SLAVE STATUS` + Prometheus exporter 双采集模式；密码仅存本地；支持 standalone / replication 拓扑；22 项核心指标（QPS/TPS/连接数/InnoDB 缓冲池/慢查询/主从延迟/复制状态等） |
+| PostgreSQL | `lib/pq` 直连 `pg_stat_database` / `pg_stat_replication` 等系统视图 + exporter 双模式；密码仅存本地；20 项指标（连接数/事务提交回滚/缓存命中率/死锁/复制延迟/WAL 写入量等） |
+| Nginx | HTTP GET `stub_status` 页面解析 + VTS exporter 双模式；10 项指标（活跃连接/接受/处理/请求数/读写等待） |
+| Kafka | `sarama` AdminClient 直连（Broker/Topic/ConsumerGroup）+ JMX exporter 双模式；22 项指标（Broker 吞吐/ISR 收缩/Topic 分区/Consumer Lag/请求队列等） |
+| Docker | Docker Engine API（`/var/run/docker.sock` Unix Socket）自动发现容器 + stats 资源采集；16 项指标（容器 CPU/内存/网络/磁盘 IO/运行状态/重启次数/镜像数） |
+| RocketMQ | HTTP API 直连 NameServer/Broker 统计端点 + exporter 双模式；18 项指标（Broker TPS/消息积压量/消费延迟/生产者消费者 TPS/今日生产消费总数等） |
+
+**服务拨测**
+
+- HTTP / HTTPS / TCP / ICMP 四种拨测类型
+- 定时调度器，支持自定义检测间隔与超时
+- SSL/TLS 证书到期时间检测
+- 任务 CRUD API + Web 可视化管理页面
+- 拨测结果指标 `dial_test_up` / `dial_test_latency` / `dial_test_cert_expiry` 写入时序库
+
+**端口监控**
+
+- Agent 内置 TCP 端口存活检测，可配置目标端口列表
+- 上报 `port_up` / `port_latency` 指标
+- Web 主机详情页端口状态区块（在线/离线/延迟展示）
+
+**巡检报告**
+
+- 日报 / 周报 / 月报 HTML 模板渲染
+- 主机资源趋势（CPU/内存/磁盘）+ SLA 可用性统计
+- Web 端报告生成/下载/历史查询
 
 ### 路线图（未实现）
 
-- **更多中间件**：MySQL / PostgreSQL / MongoDB / Kafka / Nginx / Docker / Kubernetes
-- **更多通知渠道**：钉钉 / 飞书 / 企业微信 / Slack / Telegram
-- **告警增强**：静默 / 维护期、抑制与分组
+- **更多中间件**：MongoDB / Kubernetes
+- **告警增强**：告警抑制与分组
 - **可观测性增强**：自定义仪表盘、指标自动发现、历史数据导出
 - **多用户与权限**：SSO 登录、角色权限管理
 
@@ -221,6 +250,8 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `agentAuth.secret` | 授权密钥；启用且留空时启动自动生成 |
 | `agentBinDir` | Agent 二进制分发目录（自带 CDN） |
 | `agentScriptPath` | Agent 安装脚本路径（`/install/agent-install.sh`） |
+| `dialtestFile` | 拨测任务配置文件（默认 `/etc/monitor-server/dialtest.yaml`） |
+| `reportDir` | 报告存储目录（默认 `/var/lib/monitor-server/reports`） |
 
 > **Web 通知配置**：登录后在「通知配置」页可视化配置邮件 / Webhook / 钉钉 / 飞书 / 企业微信，支持多收件人、多群（多 Webhook 地址）、@ 成员；保存即写入独立 `notifyFile` 并热加载，无需重启。敏感字段（SMTP 密码、机器人加签密钥）读取时脱敏，留空表示不修改。
 
@@ -246,19 +277,35 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `group` | 分组 |
 | `secret` | 接入授权密钥（与 Server 一致） |
 | `interval` | 采集间隔（秒） |
-| `collectors` | 采集项开关（cpu/memory/disk/network/process/load/redis） |
+| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / kafka / docker / rocketmq） |
 | `redisInstances` | Redis 实例连接配置列表（数组，密码仅存本地不上报） |
+| `mysqlInstances` | MySQL 实例连接配置列表（数组，密码仅存本地不上报） |
+| `postgresInstances` | PostgreSQL 实例连接配置列表（数组，密码仅存本地不上报） |
+| `nginxInstances` | Nginx 实例连接配置列表（数组） |
+| `kafkaInstances` | Kafka 实例连接配置列表（数组） |
+| `dockerInstances` | Docker 实例连接配置列表（数组） |
+| `rocketmqInstances` | RocketMQ 实例连接配置列表（数组） |
 
 #### 通过命令一键配置（推荐）
 
-安装 Agent 后，在任何被监控节点上执行以下命令，按交互引导填写 Redis 实例即可（无需手编 yaml）：
+安装 Agent 后，在任何被监控节点上执行以下命令，按交互引导填写实例即可（无需手编 yaml）：
 
 ```bash
 # 在线方式（从 Server CDN 拉取脚本）
 curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- redis
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- mysql
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- postgres
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- nginx
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- kafka
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- rocketmq
 
 # 或直接调用本机已安装的脚本
 bash /etc/monitor-agent/agent-install.sh redis
+bash /etc/monitor-agent/agent-install.sh mysql
+bash /etc/monitor-agent/agent-install.sh postgres
+bash /etc/monitor-agent/agent-install.sh nginx
+bash /etc/monitor-agent/agent-install.sh kafka
+bash /etc/monitor-agent/agent-install.sh rocketmq
 ```
 
 向导会引导你逐个填写：实例别名、地址、密码、拓扑类型（单机/哨兵/集群/exporter），完成后自动写入 `agent.yaml`、开启 `collectors.redis` 并重启 Agent。**密码仅存本机，不上报 Server。**
@@ -365,6 +412,12 @@ redisInstances:
 | GET | `/api/v1/query/latest?node=&metric=` | 最新点 |
 | GET | `/api/v1/processes?node=` | 进程 TOP |
 | GET | `/api/v1/middleware/redis/instances` | Redis 实例列表（聚合最新状态与指标） |
+| GET | `/api/v1/middleware/mysql/instances` | MySQL 实例列表（聚合最新状态与指标） |
+| GET | `/api/v1/middleware/postgres/instances` | PostgreSQL 实例列表 |
+| GET | `/api/v1/middleware/nginx/instances` | Nginx 实例列表 |
+| GET | `/api/v1/middleware/kafka/instances` | Kafka 实例列表 |
+| GET | `/api/v1/middleware/docker/instances` | Docker 实例列表 |
+| GET | `/api/v1/middleware/rocketmq/instances` | RocketMQ 实例列表 |
 | GET | `/api/v1/alerts?state=active` | 告警事件 |
 | GET/POST/PUT/DELETE | `/api/v1/rules` | 告警规则 CRUD |
 | GET | `/ws?topic=metrics&node=` | 实时指标（WebSocket） |
@@ -374,6 +427,12 @@ redisInstances:
 | POST | `/api/v1/system/upgrade/apply` | 立即应用 |
 | POST | `/api/v1/system/upgrade/rollback` | 回滚到最近备份 |
 | GET | `/api/v1/system/upgrade/history` | 升级历史 |
+| GET/POST/PUT/DELETE | `/api/v1/dialtest/tasks` | 拨测任务 CRUD |
+| GET | `/api/v1/dialtest/latest` | 最近拨测结果 |
+| POST | `/api/v1/report/generate` | 生成巡检报告 |
+| GET | `/api/v1/report/download` | 下载报告 HTML |
+| GET | `/api/v1/report/history` | 报告历史列表 |
+| GET/PUT | `/api/v1/maintenance` | 维护窗口查看/设置 |
 
 ---
 
