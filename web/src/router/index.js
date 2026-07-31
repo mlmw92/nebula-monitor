@@ -9,6 +9,11 @@ const routes = [
     meta: { public: true },
   },
   {
+    path: '/screen',
+    name: 'screen',
+    component: () => import('../components/screen/ScreenView.vue'),
+  },
+  {
     path: '/',
     component: () => import('../layouts/MainLayout.vue'),
     children: [

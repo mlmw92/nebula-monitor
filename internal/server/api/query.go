@@ -16,6 +16,7 @@ import (
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/report"
+	"github.com/nebula/monitor/internal/server/screencfg"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/upgrade"
 	"github.com/nebula/monitor/internal/version"
@@ -70,6 +71,7 @@ type API struct {
 	auth      config.AuthConfig
 	upgrader  *upgrade.Manager
 	notifyMgr *notify.Manager
+	screenMgr *screencfg.Manager
 	engine    *alert.Engine
 	maintenance MaintenanceProvider
 	dialtest  DialtestProvider
@@ -77,8 +79,8 @@ type API struct {
 }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -132,6 +134,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/notify", a.handleNotifyGet)
 	mux.HandleFunc("PUT /api/v1/notify", a.handleNotifyPut)
 	mux.HandleFunc("POST /api/v1/notify/test", a.handleNotifyTest)
+
+	mux.HandleFunc("GET /api/v1/screen/config", a.handleScreenGet)
+	mux.HandleFunc("PUT /api/v1/screen/config", a.handleScreenPut)
 	mux.HandleFunc("POST /api/v1/alerts/test", a.handleAlertTest)
 
 	mux.HandleFunc("GET /api/v1/maintenance", a.handleMaintenanceGet)

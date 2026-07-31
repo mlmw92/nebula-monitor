@@ -32,6 +32,26 @@ type Config struct {
 	NotifyFile      string          `yaml:"notifyFile"`      // 通知渠道独立配置文件（Web 端配置写入，优先于 server.yaml 的 notify 段）
 	DialtestFile    string          `yaml:"dialtestFile"`    // 拨测任务配置文件
 	ReportDir       string          `yaml:"reportDir"`       // 报告存储目录
+	ScreenFile      string          `yaml:"screenFile"`      // 数据大屏模块显隐配置文件（Web 端设置写入）
+}
+
+// ScreenConfig 数据大屏模块显隐配置（全局单份，与 notify 一致）。
+// Modules 为模块开关表，key 见前端设置项：topology/gauges/risk/alerts/redis/trends/kpiTop。
+type ScreenConfig struct {
+	Modules map[string]bool `yaml:"modules" json:"modules"`
+}
+
+// DefaultScreenConfig 返回默认全开的大屏模块配置。
+func DefaultScreenConfig() ScreenConfig {
+	return ScreenConfig{Modules: map[string]bool{
+		"topology": true,
+		"gauges":   true,
+		"risk":     true,
+		"alerts":   true,
+		"redis":    true,
+		"trends":   true,
+		"kpiTop":   true,
+	}}
 }
 
 // AuthConfig 登录认证配置（启用后访问需登录，token 有效期 24h）
@@ -166,6 +186,7 @@ func Default() *Config {
 		NotifyFile:      "/etc/monitor-server/notify.yaml",
 		DialtestFile:    "/etc/monitor-server/dialtest.yaml",
 		ReportDir:       "/var/lib/monitor-server/reports",
+		ScreenFile:      "/etc/monitor-server/screen.yaml",
 		Auth:            AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: ""},
 		Upgrade: UpgradeConfig{
 			Enabled:    true,

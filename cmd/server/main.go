@@ -21,6 +21,7 @@ import (
 	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/receiver"
 	"github.com/nebula/monitor/internal/server/report"
+	"github.com/nebula/monitor/internal/server/screencfg"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/upgrade"
 	"github.com/nebula/monitor/internal/version"
@@ -95,6 +96,13 @@ func main() {
 	// 报告生成模块
 	reportGen := report.NewGenerator(store, nodeMgr, cfg.ReportDir)
 
+	// 数据大屏模块显隐配置管理：独立文件（Web 端设置写入），不存在则用默认全开初始化并落盘。
+	screenMgr, err := screencfg.New(cfg.ScreenFile, config.DefaultScreenConfig())
+	if err != nil {
+		slog.Error("初始化大屏配置失败", "err", err)
+		os.Exit(1)
+	}
+
 	// 系统升级管理器
 	var upgrader *upgrade.Manager
 	if cfg.Upgrade.Enabled {
@@ -115,7 +123,7 @@ func main() {
 	}
 
 	// API
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)
