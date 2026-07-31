@@ -484,7 +484,66 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 		}
 		return out[i].Name < out[j].Name
 	})
-	writeJSON(w, 200, map[string]interface{}{"containers": out})
+
+	// Docker 主机（daemon）汇总：即便无容器也能展示接入状态与镜像/容器数
+	type dockerHostInfo struct {
+		Node              string  `json:"node"`
+		Daemon            string  `json:"daemon"`
+		Group             string  `json:"group"`
+		ContainersTotal   float64 `json:"containersTotal"`
+		ContainersRunning float64 `json:"containersRunning"`
+		ContainersStopped float64 `json:"containersStopped"`
+		ImagesTotal       float64 `json:"imagesTotal"`
+	}
+	hosts := map[string]*dockerHostInfo{}
+	var hostKeys []string
+	if totalSeries, err := a.store.QueryAllLatest("docker_containers_total", nil); err == nil {
+		for _, s := range totalSeries {
+			node := s.Labels["node"]
+			daemon := s.Labels["instance"]
+			if node == "" || daemon == "" || len(s.Points) == 0 {
+				continue
+			}
+			key := node + "|" + daemon
+			if _, ok := hosts[key]; !ok {
+				hosts[key] = &dockerHostInfo{
+					Node:            node,
+					Daemon:          daemon,
+					Group:           s.Labels["group"],
+					ContainersTotal: s.Points[len(s.Points)-1].Value,
+				}
+				hostKeys = append(hostKeys, key)
+			}
+		}
+	}
+	for metric, setter := range map[string]func(*dockerHostInfo, float64){
+		"docker_containers_running":  func(h *dockerHostInfo, v float64) { h.ContainersRunning = v },
+		"docker_containers_stopped":  func(h *dockerHostInfo, v float64) { h.ContainersStopped = v },
+		"docker_images_total":         func(h *dockerHostInfo, v float64) { h.ImagesTotal = v },
+	} {
+		series, err := a.store.QueryAllLatest(metric, nil)
+		if err != nil {
+			slog.Warn("聚合 Docker daemon 指标查询失败", "metric", metric, "err", err)
+			continue
+		}
+		for _, s := range series {
+			node := s.Labels["node"]
+			daemon := s.Labels["instance"]
+			if node == "" || daemon == "" || len(s.Points) == 0 {
+				continue
+			}
+			if h, ok := hosts[node+"|"+daemon]; ok {
+				setter(h, s.Points[len(s.Points)-1].Value)
+			}
+		}
+	}
+	hostOut := make([]dockerHostInfo, 0, len(hostKeys))
+	for _, k := range hostKeys {
+		hostOut = append(hostOut, *hosts[k])
+	}
+	sort.Slice(hostOut, func(i, j int) bool { return hostOut[i].Node < hostOut[j].Node })
+
+	writeJSON(w, 200, map[string]interface{}{"containers": out, "hosts": hostOut})
 }
 
 // ---- RocketMQ ----

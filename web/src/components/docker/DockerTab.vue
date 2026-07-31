@@ -1,6 +1,16 @@
 <template>
   <div class="mw-tab">
-    <div v-if="!loading && containers.length === 0" class="empty-guide glass">
+    <div class="toolbar">
+      <div class="tb-left">
+        <el-switch v-model="autoRefresh" @change="toggleAuto" size="small" />
+        <span class="tb-label">自动刷新</span>
+        <span v-if="lastUpdate" class="tb-time">更新于 {{ lastUpdate }}</span>
+      </div>
+      <el-button size="small" :icon="RefreshIcon" :loading="loading" @click="load">刷新</el-button>
+    </div>
+
+    <!-- 未配置：全平台没有任何 Docker 主机上报 -->
+    <div v-if="!loading && hosts.length === 0" class="empty-guide glass">
       <div class="empty-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">
           <path d="M22 12c0-5.523-4.477-10-10-10S2 6.477 2 12s4.477 10 10 10 10-4.477 10-10z"/>
@@ -8,23 +18,45 @@
         </svg>
       </div>
       <h2 class="empty-title">尚未配置 Docker 监控</h2>
-      <p class="empty-desc">当前没有已采集的 Docker 容器。请在运行 Agent 的节点上配置 Docker daemon 地址。</p>
-      <p class="empty-hint">配置完成后约 15-30 秒数据将出现在此页面。</p>
+      <p class="empty-desc">当前没有任何节点上报 Docker 数据。请在运行 Agent 的节点 agent.yaml 中开启 <code>collectors.docker</code> 并配置 <code>dockerInstances</code>。</p>
+      <p class="empty-hint">配置完成后约 15-30 秒，本页将出现 Docker 主机卡片。</p>
     </div>
 
-    <template v-if="containers.length > 0">
+    <template v-if="hosts.length > 0">
+      <!-- KPI -->
       <div class="kpi-row">
-        <div class="kpi-card gradient-total"><div class="kpi-body"><div class="kpi-num">{{ stats.total }}</div><div class="kpi-text">容器总数</div></div></div>
-        <div class="kpi-card gradient-up"><div class="kpi-body"><div class="kpi-num">{{ stats.running }}</div><div class="kpi-text">运行中</div></div></div>
-        <div class="kpi-card gradient-down"><div class="kpi-body"><div class="kpi-num">{{ stats.stopped }}</div><div class="kpi-text">已停止</div></div></div>
-        <div class="kpi-card gradient-conn"><div class="kpi-body"><div class="kpi-num">{{ stats.totalCPU.toFixed(1) }}%</div><div class="kpi-text">总 CPU</div></div></div>
-        <div class="kpi-card gradient-ops"><div class="kpi-body"><div class="kpi-num">{{ formatBytes(stats.totalMem) }}</div><div class="kpi-text">总内存</div></div></div>
-        <div class="kpi-card gradient-mem"><div class="kpi-body"><div class="kpi-num">{{ formatBytes(stats.totalNetRx) }}</div><div class="kpi-text">总网络接收</div></div></div>
+        <div class="kpi-card gradient-host"><div class="kpi-body"><div class="kpi-num">{{ hostStats.hosts }}</div><div class="kpi-text">Docker 主机</div></div></div>
+        <div class="kpi-card gradient-total"><div class="kpi-body"><div class="kpi-num">{{ hostStats.total }}</div><div class="kpi-text">容器总数</div></div></div>
+        <div class="kpi-card gradient-up"><div class="kpi-body"><div class="kpi-num">{{ hostStats.running }}</div><div class="kpi-text">运行中</div></div></div>
+        <div class="kpi-card gradient-down"><div class="kpi-body"><div class="kpi-num">{{ hostStats.stopped }}</div><div class="kpi-text">已停止</div></div></div>
+        <div class="kpi-card gradient-ops"><div class="kpi-body"><div class="kpi-num">{{ hostStats.images }}</div><div class="kpi-text">镜像数</div></div></div>
+        <div class="kpi-card gradient-conn"><div class="kpi-body"><div class="kpi-num">{{ resStats.cpu.toFixed(1) }}%</div><div class="kpi-text">容器总 CPU</div></div></div>
+        <div class="kpi-card gradient-mem"><div class="kpi-body"><div class="kpi-num">{{ formatBytes(resStats.mem) }}</div><div class="kpi-text">容器总内存</div></div></div>
       </div>
 
+      <!-- Docker 主机 -->
+      <div class="chart-section glass">
+        <div class="section-title">Docker 主机</div>
+        <div class="host-grid">
+          <div v-for="h in hosts" :key="h.node + '|' + h.daemon" class="host-card">
+            <div class="host-head">
+              <span class="host-dot" :class="hostClass(h)"></span>
+              <span class="host-node">{{ h.node }}</span>
+              <span class="host-group">{{ h.group }}</span>
+            </div>
+            <div class="host-daemon mono">{{ h.daemon }}</div>
+            <div class="host-stats">
+              <span>容器 <b>{{ h.containersTotal }}</b>（运行 {{ h.containersRunning }} / 停止 {{ h.containersStopped }}）</span>
+              <span>镜像 <b>{{ h.imagesTotal }}</b></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 容器列表 -->
       <div class="chart-section glass">
         <div class="section-title">容器列表</div>
-        <el-table :data="containers" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass">
+        <el-table :data="containers" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" empty-text="当前 Docker 主机上没有任何容器">
           <el-table-column prop="name" label="容器名" min-width="150" />
           <el-table-column prop="node" label="节点" width="120" />
           <el-table-column prop="image" label="镜像" min-width="200" show-overflow-tooltip />
@@ -80,25 +112,40 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { Refresh as RefreshIcon } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import http from '../../api/http'
 
 const loading = ref(true)
 const containers = ref([])
+const hosts = ref([])
 const drawerVisible = ref(false)
 const selected = ref(null)
 const chartRef = ref(null)
+const autoRefresh = ref(true)
+const lastUpdate = ref('')
 let chartInstance = null
+let timer = null
 
-const stats = computed(() => {
-  const s = { total: 0, running: 0, stopped: 0, totalCPU: 0, totalMem: 0, totalNetRx: 0 }
+const hostStats = computed(() => {
+  const s = { hosts: 0, total: 0, running: 0, stopped: 0, images: 0 }
+  for (const h of hosts.value) {
+    s.hosts++
+    s.total += h.containersTotal || 0
+    s.running += h.containersRunning || 0
+    s.stopped += h.containersStopped || 0
+    s.images += h.imagesTotal || 0
+  }
+  return s
+})
+
+const resStats = computed(() => {
+  const s = { cpu: 0, mem: 0, netRx: 0 }
   for (const c of containers.value) {
-    s.total++
-    if (c.status === 'running') s.running++; else s.stopped++
-    s.totalCPU += c.cpuPercent || 0
-    s.totalMem += c.memUsage || 0
-    s.totalNetRx += c.netRx || 0
+    s.cpu += c.cpuPercent || 0
+    s.mem += c.memUsage || 0
+    s.netRx += c.netRx || 0
   }
   return s
 })
@@ -110,7 +157,22 @@ async function load() {
   try {
     const data = await http.get('/api/v1/middleware/docker/containers')
     containers.value = data.containers || []
+    hosts.value = data.hosts || []
+    lastUpdate.value = new Date().toLocaleTimeString()
   } catch (e) { console.error(e) } finally { loading.value = false }
+}
+
+function startAuto() {
+  stopAuto()
+  if (autoRefresh.value) timer = setInterval(load, 15000)
+}
+function stopAuto() { if (timer) { clearInterval(timer); timer = null } }
+function toggleAuto() { startAuto() }
+
+function hostClass(h) {
+  if (h.containersRunning > 0) return 'dot-up'
+  if (h.containersTotal > 0) return 'dot-warn'
+  return 'dot-idle'
 }
 
 function openDetail(row) {
@@ -153,28 +215,47 @@ function statusType(s) { if (s === 'running') return 'success'; if (s === 'pause
 function memClass(p) { if (!p) return ''; if (p >= 90) return 'metric-bad'; if (p >= 70) return 'metric-warn'; return 'metric-good' }
 function rowClass({ row }) { return row.up ? '' : 'row-down' }
 
-onMounted(load)
+onMounted(() => { load(); startAuto() })
+onUnmounted(stopAuto)
 </script>
 
 <style scoped>
 .mw-tab { padding: 4px 0; }
+.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.tb-left { display: flex; align-items: center; gap: 8px; }
+.tb-label { font-size: 13px; color: var(--text-dim); }
+.tb-time { font-size: 12px; color: var(--text-muted); }
 .empty-guide { text-align: center; padding: 48px 24px; }
 .empty-icon { color: var(--text-muted); margin-bottom: 16px; }
 .empty-title { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
 .empty-desc { color: var(--text-dim); margin: 0 0 8px; font-size: 13px; }
+.empty-desc code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; font-family: var(--mono); }
 .empty-hint { color: var(--text-muted); font-size: 12px; }
-.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .kpi-card { border-radius: var(--radius); padding: 16px; }
 .kpi-num { font-size: 24px; font-weight: 700; }
 .kpi-text { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.gradient-host { background: linear-gradient(135deg, #16202e, #243349); }
 .gradient-total { background: linear-gradient(135deg, #1c2129, #2d3548); }
 .gradient-up { background: linear-gradient(135deg, #1a3a2a, #2d5a3d); }
 .gradient-down { background: linear-gradient(135deg, #3a1a1a, #5a2d2d); }
-.gradient-conn { background: linear-gradient(135deg, #1a2a3a, #2d4a5d); }
 .gradient-ops { background: linear-gradient(135deg, #2a1a3a, #4a2d5d); }
+.gradient-conn { background: linear-gradient(135deg, #1a2a3a, #2d4a5d); }
 .gradient-mem { background: linear-gradient(135deg, #3a2a1a, #5d4a2d); }
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.host-card { padding: 14px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); }
+.host-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.host-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.dot-up { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+.dot-warn { background: #f0883e; }
+.dot-idle { background: #6e7681; }
+.host-node { font-size: 14px; font-weight: 600; }
+.host-group { font-size: 11px; color: var(--text-muted); background: rgba(255,255,255,0.06); padding: 1px 8px; border-radius: 10px; }
+.host-daemon { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; word-break: break-all; }
+.host-stats { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
+.host-stats b { color: var(--text); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
 .metric-good { color: #3fb950; }
 .metric-warn { color: #f0883e; }
