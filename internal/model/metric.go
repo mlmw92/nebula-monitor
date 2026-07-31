@@ -53,6 +53,7 @@ type ReportPayload struct {
 	KafkaInstances    []KafkaInstance    `json:"kafkaInstances,omitempty"`    // Kafka 实例元信息
 	DockerInstances   []DockerInstance   `json:"dockerInstances,omitempty"`   // Docker 容器元信息
 	RocketMQInstances []RocketMQInstance `json:"rocketmqInstances,omitempty"` // RocketMQ 实例元信息
+	K8sInstances      []K8sInstance      `json:"k8sInstances,omitempty"`      // Kubernetes 集群元信息
 	ReportAt          int64              `json:"reportAt"`                    // 上报时间（毫秒）
 }
 
@@ -212,6 +213,30 @@ type RocketMQInstance struct {
 	Role     string `json:"role"`    // nameserver|broker
 	Version  string `json:"version"` // RocketMQ 版本
 	Up       bool   `json:"up"`
+}
+
+// ---- Kubernetes ----
+
+// K8sInstanceConfig 是 Agent 本地配置的 Kubernetes 集群连接信息。
+// Kubeconfig/Token 等凭据仅存 Agent 本地，不上报 Server（K8sInstance 结构本身不含凭据字段）。
+type K8sInstanceConfig struct {
+	Name          string `yaml:"name"`          // 集群别名（用于展示）
+	APIServer     string `yaml:"apiServer"`     // apiserver 地址 https://host:6443；留空则从 kubeconfig 取
+	Kubeconfig    string `yaml:"kubeconfig"`    // kubeconfig 文件路径（仅存本地，不上报）
+	Token         string `yaml:"token"`         // ServiceAccount Bearer Token（仅存本地，不上报）
+	InsecureTLS   bool   `yaml:"insecureTLS"`   // 是否跳过 apiserver 证书校验
+	MetricsServer bool   `yaml:"metricsServer"` // 是否启用 metrics-server 采集 Node 资源用量
+	ExporterURL   string `yaml:"exporterURL"`   // kube-state-metrics 的 /metrics URL（留空走直连）
+}
+
+// K8sInstance 是上报给 Server 的 Kubernetes 集群元信息（不含凭据），供 Web 只读展示。
+type K8sInstance struct {
+	Instance string `json:"instance"` // apiserver 地址（唯一键）
+	Name     string `json:"name"`     // 集群别名
+	Node     string `json:"node"`     // 采集 Agent 节点名
+	Group    string `json:"group"`    // 集群分组名（= cfg.Name）
+	Version  string `json:"version"`  // K8s server 版本（来自 /version）
+	Up       bool   `json:"up"`       // apiserver 是否可达
 }
 
 // DiskStat 表示单个真实文件系统的容量与使用率。

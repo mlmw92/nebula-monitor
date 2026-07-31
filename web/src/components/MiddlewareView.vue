@@ -4,7 +4,7 @@
     <div class="page-header">
       <div class="header-left">
         <h2 class="page-title">中间件监控</h2>
-        <p class="page-desc">Redis / MySQL / PostgreSQL / MongoDB / Kafka 实例监控与可视化</p>
+        <p class="page-desc">Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes 实例监控与可视化</p>
       </div>
     </div>
 
@@ -66,6 +66,14 @@
         </template>
         <RocketMQTab v-if="activeTab === 'rocketmq'" />
       </el-tab-pane>
+      <el-tab-pane label="Kubernetes" name="k8s">
+        <template #label>
+          <span class="tab-label">
+            <span class="tab-dot k8s"></span>Kubernetes
+          </span>
+        </template>
+        <K8sTab v-if="activeTab === 'k8s'" />
+      </el-tab-pane>
       <el-tab-pane label="MongoDB" name="mongo" disabled>
         <template #label>
           <el-tooltip content="即将支持" placement="top">
@@ -88,6 +96,7 @@ import NginxTab from './nginx/NginxTab.vue'
 import KafkaTab from './kafka/KafkaTab.vue'
 import DockerTab from './docker/DockerTab.vue'
 import RocketMQTab from './rocketmq/RocketMQTab.vue'
+import K8sTab from './k8s/K8sTab.vue'
 
 const activeTab = ref('redis')
 </script>
@@ -140,6 +149,7 @@ const activeTab = ref('redis')
 .tab-dot.kafka { background: #231f20; border: 1px solid #666; }
 .tab-dot.docker { background: #2496ed; }
 .tab-dot.rocketmq { background: #d77429; }
+.tab-dot.k8s { background: #326ce5; box-shadow: 0 0 8px rgba(50, 108, 229, 0.5); }
 .tab-dot.mongo { background: #47a248; }
 :deep(.el-tabs__content) {
   padding: 0 !important;

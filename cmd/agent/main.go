@@ -46,7 +46,7 @@ func main() {
 	coll := collector.New(cfg.Node, cfg.Group, cfg.Labels, cfg.Collectors,
 		cfg.RedisInstances, cfg.MySQLInstances, cfg.PostgresInstances,
 		cfg.NginxInstances, cfg.KafkaInstances, cfg.DockerInstances,
-		cfg.RocketMQInstances, cfg.PortChecks,
+		cfg.RocketMQInstances, cfg.K8sInstances, cfg.PortChecks,
 	)
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
@@ -81,6 +81,8 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 	metrics = append(metrics, dockerMetrics...)
 	rmqMetrics, rmqInstances := coll.CollectRocketMQ()
 	metrics = append(metrics, rmqMetrics...)
+	k8sMetrics, k8sInstances := coll.CollectK8s()
+	metrics = append(metrics, k8sMetrics...)
 
 	osName, arch, ip := coll.HostInfo()
 	payload := model.ReportPayload{
@@ -101,6 +103,7 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 		KafkaInstances:    kafkaInstances,
 		DockerInstances:   dockerInstances,
 		RocketMQInstances: rmqInstances,
+		K8sInstances:      k8sInstances,
 		ReportAt:          model.NowMillis(),
 	}
 	resp, err := rep.ReportFull(payload)

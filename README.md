@@ -54,7 +54,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 **前端**
 
 - 登录、总览、主机列表（Agent 版本低于服务端时显示红点）、主机详情（含端口状态区块）、告警列表、规则新增/编辑（含静默设置）、分组管理
-- **中间件监控**：独立一级菜单，Tab 布局（一种中间件一个 Tab）。已实现 Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ 七个 Tab：统计概览卡片 + 实例列表表格 + 实例详情抽屉（多趋势图）。
+- **中间件监控**：独立一级菜单，Tab 布局（一种中间件一个 Tab）。已实现 Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes 八个 Tab：统计概览卡片 + 实例列表表格 + 实例详情抽屉（多趋势图）。
 - **服务拨测**：拨测任务管理页面（新增/编辑/删除/启用切换），实时展示拨测结果（在线状态/延迟/证书到期）。
 - **巡检报告**：报告生成页面（日报/周报/月报选择 + 即时生成 + 下载 + 历史记录）。
 - **系统升级**：Web 上传 upgrade 包 → 解析版本 → 立即升级（备份+替换+重启）/ 回滚 + 升级历史；Agent 不主动推送，由管理员在主机列表手动触发
@@ -71,6 +71,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 | Kafka | `sarama` AdminClient 直连（Broker/Topic/ConsumerGroup）+ JMX exporter 双模式；22 项指标（Broker 吞吐/ISR 收缩/Topic 分区/Consumer Lag/请求队列等） |
 | Docker | Docker Engine API（`/var/run/docker.sock` Unix Socket）自动发现容器 + stats 资源采集；16 项指标（容器 CPU/内存/网络/磁盘 IO/运行状态/重启次数/镜像数） |
 | RocketMQ | HTTP API 直连 NameServer/Broker 统计端点 + exporter 双模式；18 项指标（Broker TPS/消息积压量/消费延迟/生产者消费者 TPS/今日生产消费总数等） |
+| Kubernetes | 标准库 net/http 直连 apiserver REST（kubeconfig/token 认证，不引入 client-go）+ kube-state-metrics/metrics-server exporter 双模式；采集单元为整个集群；集群健康/Node 状态与资源/Deployment・StatefulSet・DaemonSet 副本就绪/Pod 总数与异常统计；凭据仅存 Agent 本地不上报 |
 
 **服务拨测**
 
@@ -94,7 +95,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 
 ### 路线图（未实现）
 
-- **更多中间件**：MongoDB / Kubernetes
+- **更多中间件**：MongoDB
 - **告警增强**：告警抑制与分组
 - **可观测性增强**：自定义仪表盘、指标自动发现、历史数据导出
 - **多用户与权限**：SSO 登录、角色权限管理
@@ -277,7 +278,7 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `group` | 分组 |
 | `secret` | 接入授权密钥（与 Server 一致） |
 | `interval` | 采集间隔（秒） |
-| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / kafka / docker / rocketmq / port） |
+| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / kafka / docker / rocketmq / k8s / port） |
 | `redisInstances` | Redis 实例连接配置列表（数组，密码仅存本地不上报） |
 | `mysqlInstances` | MySQL 实例连接配置列表（数组，密码仅存本地不上报） |
 | `postgresInstances` | PostgreSQL 实例连接配置列表（数组，密码仅存本地不上报） |
@@ -285,6 +286,7 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `kafkaInstances` | Kafka 实例连接配置列表（数组） |
 | `dockerInstances` | Docker 实例连接配置列表（数组） |
 | `rocketmqInstances` | RocketMQ 实例连接配置列表（数组） |
+| `k8sInstances` | Kubernetes 集群连接配置列表（数组，kubeconfig/token 仅存本地不上报） |
 | `portChecks` | TCP 端口存活检测列表（数组），如 `["80","443","3306"]`，开启 `collectors.port` 后生效 |
 
 #### 通过命令一键配置（推荐）
@@ -299,6 +301,7 @@ curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- postgres
 curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- nginx
 curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- kafka
 curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- rocketmq
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- k8s
 
 # 或直接调用本机已安装的脚本
 bash /etc/monitor-agent/agent-install.sh redis
@@ -307,6 +310,7 @@ bash /etc/monitor-agent/agent-install.sh postgres
 bash /etc/monitor-agent/agent-install.sh nginx
 bash /etc/monitor-agent/agent-install.sh kafka
 bash /etc/monitor-agent/agent-install.sh rocketmq
+bash /etc/monitor-agent/agent-install.sh k8s
 ```
 
 向导会引导你逐个填写对应中间件的实例信息（别名、地址、账号/密码、拓扑类型等），完成后自动写入 `agent.yaml`、开启对应的 `collectors` 开关并重启 Agent。**密码仅存本机，不上报 Server。**
@@ -551,6 +555,43 @@ rocketmqInstances:
 | `addr` | 是 | NameServer 地址 `host:port` |
 | `exporterURL` | exporter 选填 | 填写后走 rocketmq-exporter 拉取模式 |
 
+---
+
+**Kubernetes 配置示例**
+
+```yaml
+collectors:
+  k8s: true
+
+k8sInstances:
+  # 方式①：kubeconfig 文件认证
+  - name: "prod-cluster"
+    kubeconfig: "/root/.kube/config"   # 仅存本地不上报
+    insecureTLS: true                  # 自签名证书跳过校验
+    metricsServer: true                # 启用 metrics-server 采集节点 CPU/内存
+  # 方式②：apiServer + ServiceAccount Token
+  - name: "staging-cluster"
+    apiServer: "https://10.0.0.2:6443"
+    token: "eyJhbGciOi..."             # 仅存本地不上报
+    insecureTLS: true
+    metricsServer: false
+    # exporterURL: "http://127.0.0.1:8080/metrics"  # 可选 kube-state-metrics
+```
+
+**Kubernetes 字段说明**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | 是 | 集群别名 |
+| `apiServer` | 条件 | apiserver 地址 `https://host:6443`；留空则从 kubeconfig 取 |
+| `kubeconfig` | 条件 | kubeconfig 文件路径（与 apiServer+token 二选一，仅存本地不上报） |
+| `token` | 条件 | ServiceAccount Bearer Token（配 apiServer 使用，仅存本地不上报） |
+| `insecureTLS` | 选填 | 跳过 apiserver 证书校验（默认 false） |
+| `metricsServer` | 选填 | 启用 metrics-server 采集 Node/Pod CPU/内存使用率（默认 false） |
+| `exporterURL` | exporter 选填 | 填写后走 kube-state-metrics /metrics 拉取模式 |
+
+> 认证仅支持 token / client-cert 两种；exec/plugin（如云厂商 IAM 鉴权）不支持，需要时用 token 模式替代。
+
 **部署与验证**
 
 > 以下以 Redis 为例，其余中间件步骤完全一致，仅替换对应的 `collectors` 开关与实例段，并在 Web 端进入对应的中间件 Tab 查看。
@@ -562,9 +603,9 @@ rocketmqInstances:
    ```
 3. 查看采集日志确认无报错：
    ```bash
-   journalctl -u monitor-agent -f | grep -iE 'redis|mysql|postgres|nginx|kafka|docker|rocketmq'
+   journalctl -u monitor-agent -f | grep -iE 'redis|mysql|postgres|nginx|kafka|docker|rocketmq|k8s'
    ```
-4. Web 端左侧菜单「中间件监控」→ 对应中间件 Tab（Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ）查看：概览卡片、实例列表、实例详情抽屉（多趋势图）。
+4. Web 端左侧菜单「中间件监控」→ 对应中间件 Tab（Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes）查看：概览卡片、实例列表、实例详情抽屉（多趋势图）。
 
 > **版本一致性**：中间件监控涉及 Agent（采集）与 Server（实例聚合 + API）两端改动，两端须同时升级到同一版本（≥ 1.2.0），否则对应 Tab 无数据。
 > **密码安全**：各中间件 `password` 仅在 Agent 本地用于直连，`json:"-"` 标记，不上报、不入库、Web 不可见。
@@ -590,6 +631,7 @@ rocketmqInstances:
 | GET | `/api/v1/middleware/kafka/instances` | Kafka 实例列表 |
 | GET | `/api/v1/middleware/docker/instances` | Docker 实例列表 |
 | GET | `/api/v1/middleware/rocketmq/instances` | RocketMQ 实例列表 |
+| GET | `/api/v1/middleware/k8s/instances` | Kubernetes 集群列表（集群聚合 + Node/异常 Pod 明细） |
 | GET | `/api/v1/alerts?state=active` | 告警事件 |
 | GET/POST/PUT/DELETE | `/api/v1/rules` | 告警规则 CRUD |
 | GET | `/ws?topic=metrics&node=` | 实时指标（WebSocket） |

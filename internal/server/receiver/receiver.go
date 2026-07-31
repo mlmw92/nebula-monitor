@@ -104,6 +104,26 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 			Node: payload.Node, Name: "redis_instance_up", Labels: labels, Value: upVal, Timestamp: payload.ReportAt,
 		})
 	}
+	// Kubernetes 集群元信息转为 k8s_cluster_up 指标写入 VM，保证集群存活与版本可聚合查询。
+	for _, ki := range payload.K8sInstances {
+		upVal := 0.0
+		if ki.Up {
+			upVal = 1
+		}
+		group := ki.Group
+		if group == "" {
+			group = payload.Group
+		}
+		labels := map[string]string{
+			"group":    group,
+			"instance": ki.Instance,
+			"name":     ki.Name,
+			"version":  ki.Version,
+		}
+		metrics = append(metrics, model.Metric{
+			Node: payload.Node, Name: "k8s_cluster_up", Labels: labels, Value: upVal, Timestamp: payload.ReportAt,
+		})
+	}
 
 	if err := r.storage.Write(metrics); err != nil {
 		slog.Error("写入 VM 失败", "node", payload.Node, "err", err)

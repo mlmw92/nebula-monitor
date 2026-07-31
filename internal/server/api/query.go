@@ -106,6 +106,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/middleware/kafka/instances", a.handleKafkaInstances)
 	mux.HandleFunc("GET /api/v1/middleware/docker/containers", a.handleDockerContainers)
 	mux.HandleFunc("GET /api/v1/middleware/rocketmq/instances", a.handleRocketMQInstances)
+	mux.HandleFunc("GET /api/v1/middleware/k8s/instances", a.handleK8sInstances)
 
 	mux.HandleFunc("GET /api/v1/alerts", a.handleAlerts)
 	mux.HandleFunc("GET /api/v1/rules", a.handleRulesList)

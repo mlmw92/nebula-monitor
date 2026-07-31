@@ -27,6 +27,7 @@ type Config struct {
 	KafkaInstances    []model.KafkaInstanceConfig    `yaml:"kafkaInstances"`    // Kafka 实例连接配置
 	DockerInstances   []model.DockerInstanceConfig   `yaml:"dockerInstances"`   // Docker 连接配置
 	RocketMQInstances []model.RocketMQInstanceConfig `yaml:"rocketmqInstances"` // RocketMQ 实例连接配置
+	K8sInstances      []model.K8sInstanceConfig      `yaml:"k8sInstances"`      // Kubernetes 集群连接配置
 	PortChecks        []string                  `yaml:"portChecks"`         // TCP 端口存活检测列表，如 ["80","443","3306"]
 }
 
@@ -45,6 +46,7 @@ type CollectorToggle struct {
 	Kafka    bool `yaml:"kafka"`    // Kafka 中间件监控，默认关闭
 	Docker   bool `yaml:"docker"`   // Docker 容器监控，默认关闭
 	RocketMQ bool `yaml:"rocketmq"` // RocketMQ 中间件监控，默认关闭
+	K8s      bool `yaml:"k8s"`      // Kubernetes 集群监控，默认关闭
 	Port     bool `yaml:"port"`     // 端口存活检测，默认关闭
 }
 

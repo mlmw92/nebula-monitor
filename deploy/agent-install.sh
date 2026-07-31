@@ -105,6 +105,7 @@ usage() {
   nginx               配置 Nginx 中间件监控
   kafka               配置 Kafka 中间件监控
   rocketmq            配置 RocketMQ 中间件监控
+  k8s                 配置 Kubernetes 集群监控（填 apiserver/kubeconfig/token）
 
 选项：
   --server <url>      上报的 Server 地址，如 http://10.0.0.1:8080
@@ -127,27 +128,28 @@ usage() {
   bash agent-install.sh nginx                # 配置 Nginx 监控
   bash agent-install.sh kafka                # 配置 Kafka 监控
   bash agent-install.sh rocketmq             # 配置 RocketMQ 监控
+  bash agent-install.sh k8s                  # 配置 Kubernetes 集群监控
 EOF
   exit 0
 }
 
 # ============================ 子命令分发 ============================
 # 首个参数为中间件子命令时进入配置流程（不安装/不覆盖 Agent 二进制）。
-# 支持的子命令: redis mysql postgres nginx kafka rocketmq
+# 支持的子命令: redis mysql postgres nginx kafka rocketmq k8s
 SUBCOMMAND=""
 if [[ $# -gt 0 ]]; then
   case "$1" in
-    redis|mysql|postgres|nginx|kafka|rocketmq)
+    redis|mysql|postgres|nginx|kafka|rocketmq|k8s)
       SUBCOMMAND="$1"; shift ;;
     -h|--help) usage ;;
     --*) ;;  # 以 -- 开头的是选项，不是子命令
     *)
       local_lower="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
       case "$local_lower" in
-        redis|mysql|postgres|nginx|kafka|rocketmq)
+        redis|mysql|postgres|nginx|kafka|rocketmq|k8s)
           SUBCOMMAND="$local_lower"; shift ;;
         *)
-          die "未知参数或子命令: $1（用 -h 查看帮助；支持的子命令: redis mysql postgres nginx kafka rocketmq）"
+          die "未知参数或子命令: $1（用 -h 查看帮助；支持的子命令: redis mysql postgres nginx kafka rocketmq k8s）"
           ;;
       esac
       ;;
@@ -949,6 +951,158 @@ middleware_config() {
   echo "============================================================"
 }
 
+# ============================ Kubernetes 集群配置 ============================
+# K8s 采集单元为整个集群（Agent 持 kubeconfig/token 从集群外访问 apiserver），
+# 字段与其它中间件的 host:port + user/password 模式不同，因此独立实现。
+k8s_config() {
+  echo "============================================================"
+  echo " Kubernetes 集群监控配置"
+  echo "------------------------------------------------------------"
+  echo " 本向导引导你填写 K8s 集群连接信息，写入 ${CONFIG_DIR}/agent.yaml"
+  echo " 并开启 collectors.k8s，完成后自动重启 agent。"
+  echo " kubeconfig/token 仅存本机 agent.yaml，不上报 Server。"
+  echo " 支持两种认证：① kubeconfig 文件路径；② apiServer + ServiceAccount Token。"
+  echo "============================================================"
+  echo
+
+  local cfg="${CONFIG_DIR}/agent.yaml"
+  if [[ ! -f "$cfg" ]]; then
+    die "未找到 $cfg，请先安装 Agent（bash agent-install.sh）"
+  fi
+
+  cp -a "$cfg" "${cfg}.bak.$(date +%s)"
+  c_ok "已备份原配置: ${cfg}.bak.*"
+
+  local instances_yaml=""
+  local idx=0
+  while true; do
+    idx=$((idx + 1))
+    echo
+    echo "--- 配置第 $idx 个 Kubernetes 集群（留空集群别名跳过结束）---"
+
+    local name api_server auth_mode kubeconfig token insecure_tls metrics_server exporter_url
+    prompt name "集群别名（如 prod-cluster）" ""
+    [[ -z "$name" ]] && { echo "已结束集群添加。"; break; }
+
+    echo "请选择认证方式："
+    choose "认证方式" 1 "kubeconfig 文件" "apiServer + Token"
+    case "$CHOICE_VAL" in
+      kubeconfig*)
+        prompt kubeconfig "kubeconfig 文件路径" "/root/.kube/config"
+        prompt api_server "apiServer 地址（留空从 kubeconfig 取）" ""
+        ;;
+      *)
+        prompt api_server "apiServer 地址（如 https://10.0.0.1:6443）" "https://127.0.0.1:6443"
+        prompt token "ServiceAccount Bearer Token（仅存本地）" ""
+        ;;
+    esac
+
+    if confirm "是否跳过 apiserver 证书校验（自签名证书常需）？" "yes"; then
+      insecure_tls="true"
+    else
+      insecure_tls="false"
+    fi
+
+    if confirm "是否启用 metrics-server 采集节点 CPU/内存使用率？" "yes"; then
+      metrics_server="true"
+    else
+      metrics_server="false"
+    fi
+
+    if confirm "是否使用 kube-state-metrics exporter 模式？" "no"; then
+      prompt exporter_url "kube-state-metrics /metrics URL" "http://127.0.0.1:8080/metrics"
+    fi
+
+    # 生成 YAML 片段
+    instances_yaml+="  - name: \"${name}\""$'\n'
+    if [[ -n "$api_server" ]]; then
+      instances_yaml+="    apiServer: \"${api_server}\""$'\n'
+    fi
+    if [[ -n "$kubeconfig" ]]; then
+      instances_yaml+="    kubeconfig: \"${kubeconfig}\""$'\n'
+    fi
+    if [[ -n "$token" ]]; then
+      instances_yaml+="    token: \"${token}\""$'\n'
+    fi
+    instances_yaml+="    insecureTLS: ${insecure_tls}"$'\n'
+    instances_yaml+="    metricsServer: ${metrics_server}"$'\n'
+    if [[ -n "$exporter_url" ]]; then
+      instances_yaml+="    exporterURL: \"${exporter_url}\""$'\n'
+    fi
+
+    c_ok "已添加集群: $name"
+
+    if ! confirm "是否继续添加下一个 K8s 集群？" "no"; then
+      break
+    fi
+  done
+
+  if [[ -z "$instances_yaml" ]]; then
+    c_warn "未添加任何 K8s 集群，配置未变更。"
+    exit 0
+  fi
+
+  echo
+  c_info "即将写入以下 Kubernetes 配置到 $cfg："
+  echo "----------------------------------------"
+  printf 'collectors:\n  k8s: true\n\nk8sInstances:\n%s' "$instances_yaml"
+  echo "----------------------------------------"
+
+  if ! confirm "确认写入并重启 agent？" "yes"; then
+    echo "已取消，配置未变更。"
+    exit 0
+  fi
+
+  # 步骤1：开启 collectors.k8s
+  if grep -qE '^[[:space:]]*k8s:' "$cfg" 2>/dev/null; then
+    sed -i -E "s/^([[:space:]]*)k8s:[[:space:]]*.*/\\1k8s: true/" "$cfg"
+  elif grep -qE '^[[:space:]]*collectors:' "$cfg" 2>/dev/null; then
+    sed -i -E "/^[[:space:]]*collectors:/a\  k8s: true" "$cfg"
+  else
+    printf "\ncollectors:\n  k8s: true\n" >> "$cfg"
+  fi
+  c_ok "已开启 collectors.k8s"
+
+  # 步骤2：写入 k8sInstances 段
+  local tmp_file
+  tmp_file="$(mktemp)"
+  awk -v found=0 -v key="k8sInstances:" '
+    $0 ~ "^" key { found=1; next }
+    found == 1 && /^[[:space:]]+/ { next }
+    found == 1 && /^[^[:space:]]/ { found=0 }
+    found == 0 { print }
+  ' "$cfg" > "$tmp_file"
+  mv "$tmp_file" "$cfg"
+
+  printf '\nk8sInstances:\n%s' "$instances_yaml" >> "$cfg"
+  c_ok "已写入 k8sInstances 配置"
+
+  # 重启 agent
+  if have_cmd systemctl; then
+    c_info "重启 monitor-agent 服务..."
+    systemctl restart monitor-agent 2>/dev/null || true
+    sleep 2
+    local st
+    st="$(systemctl is-active monitor-agent 2>/dev/null || echo unknown)"
+    if [[ "$st" == "active" ]]; then
+      c_ok "Agent 已重启并运行中"
+    else
+      c_warn "Agent 服务状态: $st，请查看日志: journalctl -u monitor-agent -n 50"
+    fi
+  else
+    c_warn "未检测到 systemctl，请手动重启 agent 进程"
+  fi
+
+  echo
+  echo "============================================================"
+  echo " Kubernetes 监控配置完成"
+  echo "------------------------------------------------------------"
+  echo " 配置文件   : $cfg"
+  echo " 查看日志   : journalctl -u monitor-agent -f | grep -i k8s"
+  echo " Web 端     : 中间件监控 → Kubernetes Tab 查看集群"
+  echo "============================================================"
+}
+
 # ============================ 主流程 ============================
 main() {
   detect_env
@@ -969,7 +1123,7 @@ main() {
   summary
 }
 
-# 子命令分发：redis/mysql/postgres/nginx/kafka/rocketmq → 配置中间件监控；否则走默认安装流程
+# 子命令分发：redis/mysql/postgres/nginx/kafka/rocketmq/k8s → 配置中间件监控；否则走默认安装流程
 case "$SUBCOMMAND" in
   redis)    redis_config ;;
   mysql)    middleware_config mysql ;;
@@ -977,5 +1131,6 @@ case "$SUBCOMMAND" in
   nginx)    middleware_config nginx ;;
   kafka)    middleware_config kafka ;;
   rocketmq) middleware_config rocketmq ;;
+  k8s)      k8s_config ;;
   *)        main ;;
 esac

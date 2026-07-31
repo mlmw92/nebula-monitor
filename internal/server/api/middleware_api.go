@@ -786,3 +786,184 @@ func (a *API) handleReportDownload(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleReportHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"reports": a.report.History()})
 }
+
+// ---- Kubernetes ----
+
+func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
+	upSeries, err := a.store.QueryAllLatest("k8s_cluster_up", nil)
+	if err != nil {
+		slog.Error("查询 K8s 集群失败", "err", err)
+		http.Error(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+
+	type k8sClusterInfo struct {
+		Node                 string  `json:"node"`
+		Instance             string  `json:"instance"`
+		Name                 string  `json:"name"`
+		Version              string  `json:"version"`
+		Up                   bool    `json:"up"`
+		Group                string  `json:"group"`
+		NodesTotal           float64 `json:"nodesTotal"`
+		NodesReady           float64 `json:"nodesReady"`
+		PodsTotal            float64 `json:"podsTotal"`
+		PodsRunning          float64 `json:"podsRunning"`
+		PodsPending          float64 `json:"podsPending"`
+		PodsFailed           float64 `json:"podsFailed"`
+		DeploymentsTotal     float64 `json:"deploymentsTotal"`
+		DeploymentsUnhealthy float64 `json:"deploymentsUnhealthy"`
+		StatefulSetsTotal    float64 `json:"statefulSetsTotal"`
+		StatefulSetsUnhealthy float64 `json:"statefulSetsUnhealthy"`
+		DaemonSetsTotal      float64 `json:"daemonSetsTotal"`
+		DaemonSetsUnhealthy  float64 `json:"daemonSetsUnhealthy"`
+	}
+
+	clusters := map[string]*k8sClusterInfo{}
+	var keys []string
+	for _, s := range upSeries {
+		node := s.Labels["node"]
+		instance := s.Labels["instance"]
+		if node == "" || instance == "" || len(s.Points) == 0 {
+			continue
+		}
+		key := node + "|" + instance
+		if _, exists := clusters[key]; !exists {
+			ci := &k8sClusterInfo{
+				Node:     node,
+				Instance: instance,
+				Name:     s.Labels["name"],
+				Version:  s.Labels["version"],
+				Group:    s.Labels["group"],
+				Up:       s.Points[len(s.Points)-1].Value > 0,
+			}
+			clusters[key] = ci
+			keys = append(keys, key)
+		}
+	}
+
+	metricMap := map[string]func(ci *k8sClusterInfo, v float64){
+		"k8s_nodes_total":            func(ci *k8sClusterInfo, v float64) { ci.NodesTotal = v },
+		"k8s_nodes_ready":            func(ci *k8sClusterInfo, v float64) { ci.NodesReady = v },
+		"k8s_pods_total":             func(ci *k8sClusterInfo, v float64) { ci.PodsTotal = v },
+		"k8s_pods_running":           func(ci *k8sClusterInfo, v float64) { ci.PodsRunning = v },
+		"k8s_pods_pending":           func(ci *k8sClusterInfo, v float64) { ci.PodsPending = v },
+		"k8s_pods_failed":            func(ci *k8sClusterInfo, v float64) { ci.PodsFailed = v },
+		"k8s_deployments_total":      func(ci *k8sClusterInfo, v float64) { ci.DeploymentsTotal = v },
+		"k8s_deployments_unhealthy":  func(ci *k8sClusterInfo, v float64) { ci.DeploymentsUnhealthy = v },
+		"k8s_statefulsets_total":     func(ci *k8sClusterInfo, v float64) { ci.StatefulSetsTotal = v },
+		"k8s_statefulsets_unhealthy": func(ci *k8sClusterInfo, v float64) { ci.StatefulSetsUnhealthy = v },
+		"k8s_daemonsets_total":       func(ci *k8sClusterInfo, v float64) { ci.DaemonSetsTotal = v },
+		"k8s_daemonsets_unhealthy":   func(ci *k8sClusterInfo, v float64) { ci.DaemonSetsUnhealthy = v },
+	}
+	for metricName, setter := range metricMap {
+		series, err := a.store.QueryAllLatest(metricName, nil)
+		if err != nil {
+			slog.Warn("聚合 K8s 集群指标查询失败", "metric", metricName, "err", err)
+			continue
+		}
+		for _, s := range series {
+			node := s.Labels["node"]
+			instance := s.Labels["instance"]
+			if node == "" || instance == "" || len(s.Points) == 0 {
+				continue
+			}
+			ci, ok := clusters[node+"|"+instance]
+			if !ok {
+				continue
+			}
+			setter(ci, s.Points[len(s.Points)-1].Value)
+		}
+	}
+
+	clusterOut := make([]k8sClusterInfo, 0, len(keys))
+	for _, k := range keys {
+		clusterOut = append(clusterOut, *clusters[k])
+	}
+	sort.Slice(clusterOut, func(i, j int) bool { return clusterOut[i].Name < clusterOut[j].Name })
+
+	// 节点明细
+	type k8sNodeInfo struct {
+		Cluster   string  `json:"cluster"`
+		Instance  string  `json:"instance"`
+		NodeName  string  `json:"nodeName"`
+		Role      string  `json:"role"`
+		Ready     bool    `json:"ready"`
+		CPUCores  float64 `json:"cpuCores"`
+		MemBytes  float64 `json:"memBytes"`
+	}
+	nodes := map[string]*k8sNodeInfo{}
+	var nodeKeys []string
+	if readySeries, err := a.store.QueryAllLatest("k8s_node_ready", nil); err == nil {
+		for _, s := range readySeries {
+			instance := s.Labels["instance"]
+			nodeName := s.Labels["node_name"]
+			if instance == "" || nodeName == "" || len(s.Points) == 0 {
+				continue
+			}
+			key := instance + "|" + nodeName
+			if _, ok := nodes[key]; !ok {
+				nodes[key] = &k8sNodeInfo{
+					Cluster:  s.Labels["name"],
+					Instance: instance,
+					NodeName: nodeName,
+					Role:     s.Labels["role"],
+					Ready:    s.Points[len(s.Points)-1].Value > 0,
+				}
+				nodeKeys = append(nodeKeys, key)
+			}
+		}
+	}
+	for metric, setter := range map[string]func(*k8sNodeInfo, float64){
+		"k8s_node_cpu_usage_cores": func(n *k8sNodeInfo, v float64) { n.CPUCores = round2(v) },
+		"k8s_node_mem_usage_bytes": func(n *k8sNodeInfo, v float64) { n.MemBytes = round2(v) },
+	} {
+		series, err := a.store.QueryAllLatest(metric, nil)
+		if err != nil {
+			continue
+		}
+		for _, s := range series {
+			instance := s.Labels["instance"]
+			nodeName := s.Labels["node_name"]
+			if instance == "" || nodeName == "" || len(s.Points) == 0 {
+				continue
+			}
+			if n, ok := nodes[instance+"|"+nodeName]; ok {
+				setter(n, s.Points[len(s.Points)-1].Value)
+			}
+		}
+	}
+	nodeOut := make([]k8sNodeInfo, 0, len(nodeKeys))
+	for _, k := range nodeKeys {
+		nodeOut = append(nodeOut, *nodes[k])
+	}
+	sort.Slice(nodeOut, func(i, j int) bool { return nodeOut[i].NodeName < nodeOut[j].NodeName })
+
+	// 异常 Pod 明细
+	type k8sPodInfo struct {
+		Cluster   string `json:"cluster"`
+		Instance  string `json:"instance"`
+		Namespace string `json:"namespace"`
+		Pod       string `json:"pod"`
+		Phase     string `json:"phase"`
+	}
+	var podOut []k8sPodInfo
+	if phaseSeries, err := a.store.QueryAllLatest("k8s_pod_phase", nil); err == nil {
+		for _, s := range phaseSeries {
+			instance := s.Labels["instance"]
+			pod := s.Labels["pod"]
+			if instance == "" || pod == "" || len(s.Points) == 0 || s.Points[len(s.Points)-1].Value == 0 {
+				continue
+			}
+			podOut = append(podOut, k8sPodInfo{
+				Cluster:   s.Labels["name"],
+				Instance:  instance,
+				Namespace: s.Labels["namespace"],
+				Pod:       pod,
+				Phase:     s.Labels["phase"],
+			})
+		}
+	}
+	sort.Slice(podOut, func(i, j int) bool { return podOut[i].Pod < podOut[j].Pod })
+
+	writeJSON(w, 200, map[string]interface{}{"clusters": clusterOut, "nodes": nodeOut, "pods": podOut})
+}

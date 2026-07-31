@@ -25,6 +25,7 @@ type Collector struct {
 	kafka  *KafkaCollector
 	docker *DockerCollector
 	rmq    *RocketMQCollector
+	k8s    *K8sCollector
 	port   *PortCollector
 }
 
@@ -37,6 +38,7 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	kafkaInstances []model.KafkaInstanceConfig,
 	dockerInstances []model.DockerInstanceConfig,
 	rocketmqInstances []model.RocketMQInstanceConfig,
+	k8sInstances []model.K8sInstanceConfig,
 	portChecks []string,
 ) *Collector {
 	c := &Collector{
@@ -68,6 +70,9 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	}
 	if cfg.RocketMQ {
 		c.rmq = NewRocketMQCollector(node, rocketmqInstances)
+	}
+	if cfg.K8s {
+		c.k8s = NewK8sCollector(node, k8sInstances)
 	}
 	if cfg.Port {
 		c.port = NewPortCollector(node, portChecks)
@@ -181,6 +186,14 @@ func (c *Collector) CollectRocketMQ() ([]model.Metric, []model.RocketMQInstance)
 		return nil, nil
 	}
 	return c.rmq.Collect()
+}
+
+// CollectK8s 采集 Kubernetes 集群指标。
+func (c *Collector) CollectK8s() ([]model.Metric, []model.K8sInstance) {
+	if c.k8s == nil {
+		return nil, nil
+	}
+	return c.k8s.Collect()
 }
 
 // HostInfo 返回主机静态信息（OS/Arch/IP），用于上报体。
