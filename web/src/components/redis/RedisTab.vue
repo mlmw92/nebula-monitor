@@ -1203,16 +1203,16 @@ function handleResize() {
 /* 区块1：KPI 卡片 */
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 10px;
   margin-bottom: 16px;
 }
 .kpi-card {
   border-radius: var(--radius);
-  padding: 16px 14px;
+  padding: 10px 11px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 9px;
   border: 1px solid var(--border);
   position: relative;
   overflow: hidden;
@@ -1236,15 +1236,15 @@ function handleResize() {
 .gradient-conn::before { background: linear-gradient(90deg, #3b82f6, #2563eb); }
 .gradient-ops::before { background: linear-gradient(90deg, #f59e0b, #d97706); }
 .kpi-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
-.kpi-icon svg { width: 20px; height: 20px; }
+.kpi-icon svg { width: 16px; height: 16px; }
 .gradient-total .kpi-icon { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
 .gradient-up .kpi-icon { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
 .gradient-down .kpi-icon { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
@@ -1252,16 +1252,17 @@ function handleResize() {
 .gradient-conn .kpi-icon { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
 .gradient-ops .kpi-icon { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
 .kpi-num {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   font-family: var(--mono);
   letter-spacing: -0.02em;
-  line-height: 1.2;
+  line-height: 1.15;
 }
 .kpi-text {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-dim);
-  margin-top: 2px;
+  margin-top: 1px;
+  white-space: nowrap;
 }
 
 /* 通用 section */
@@ -1623,7 +1624,7 @@ function handleResize() {
 
 /* 响应式 */
 @media (max-width: 1200px) {
-  .kpi-row { grid-template-columns: repeat(3, 1fr); }
+  .kpi-row { grid-template-columns: repeat(4, 1fr); }
   .pie-row { grid-template-columns: 1fr; }
   .bar-row { grid-template-columns: 1fr; }
   .chart-grid { grid-template-columns: 1fr; }
