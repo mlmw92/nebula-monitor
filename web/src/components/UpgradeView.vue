@@ -14,7 +14,7 @@
         </div>
         <div class="ver-item">
           <span class="ver-label">构建时间</span>
-          <span class="ver-val">{{ currentVersion.buildTime || '-' }}</span>
+          <span class="ver-val">{{ fmtBuildTime(currentVersion.buildTime) }}</span>
         </div>
       </div>
     </div>
@@ -262,6 +262,14 @@ async function doRollback() {
 function fmtTime(s) {
   if (!s) return '-'
   return new Date(s).toLocaleString()
+}
+function fmtBuildTime(s) {
+  if (!s || s === 'unknown') return '-'
+  try {
+    return new Date(s).toLocaleString()
+  } catch {
+    return s
+  }
 }
 function actionLabel(a) {
   if (a === 'apply') return '升级'
