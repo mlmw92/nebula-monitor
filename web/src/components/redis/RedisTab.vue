@@ -703,7 +703,9 @@ const filteredInstances = computed(() => {
 const topologyGroups = computed(() => {
   const clusters = {}, sentinels = {}, replications = {}, standalones = []
   for (const i of instances.value) {
-    const g = i.name || i.group || i.instance
+    // 分组键用 group 优先：cluster/sentinel 同组各节点 group 相同（=agent 配置的实例名），
+    // 而 name 在 cluster 下带地址后缀各不相同，用 name 会把同一集群打散成多张卡。
+    const g = i.group || i.name || i.instance
     if (i.topology === 'cluster') {
       clusters[g] = clusters[g] || { name: g, masters: [], slaves: [], slavesByMaster: {}, unlinkedSlaves: [], topology: 'cluster' }
       if (i.role === 'slave' || i.role === 'replica') {
@@ -858,11 +860,11 @@ function computeStats() {
   stats.totalMemory = list.reduce((s, i) => s + (i.usedMemory || 0), 0)
   stats.totalClients = list.reduce((s, i) => s + (i.clients || 0), 0)
   stats.totalOps = list.reduce((s, i) => s + (i.ops || 0), 0)
-  // 集群/哨兵组数（按 name 去重，name 即 agent.yaml 中的 redisInstances[*].name）
+  // 集群/哨兵组数（按 group 去重，group 即同集群各节点相同的分组名）
   const clusterNames = new Set()
   for (const i of list) {
     if (i.topology === 'cluster' || i.topology === 'sentinel') {
-      const key = i.name || i.group
+      const key = i.group || i.name
       if (key) clusterNames.add(key)
     }
   }
