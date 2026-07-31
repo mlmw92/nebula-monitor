@@ -1,5 +1,6 @@
 <template>
   <div class="mw-tab">
+    <RefreshBar :loading="loading" @refresh="load" />
     <!-- 空状态 -->
     <div v-if="!loading && instances.length === 0" class="empty-guide glass">
       <div class="empty-icon">
@@ -125,6 +126,7 @@
 import { ref, onMounted, computed, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import http from '../../api/http'
+import RefreshBar from '../RefreshBar.vue'
 
 const loading = ref(true)
 const instances = ref([])

@@ -1,5 +1,6 @@
 <template>
   <div class="mw-tab">
+    <RefreshBar :loading="loading" @refresh="load" />
     <div v-if="!loading && instances.length === 0" class="empty-guide glass">
       <div class="empty-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">
@@ -74,6 +75,7 @@
 import { ref, onMounted, computed, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import http from '../../api/http'
+import RefreshBar from '../RefreshBar.vue'
 
 const loading = ref(true)
 const instances = ref([])

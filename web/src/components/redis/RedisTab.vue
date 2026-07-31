@@ -1,5 +1,6 @@
 <template>
   <div class="redis-tab">
+    <RefreshBar :loading="loading" :intervals="redisIntervals" v-model:interval="refreshInterval" @refresh="loadInstances" />
     <!-- 空状态：无实例时引导用户配置 -->
     <div v-if="!loading && instances.length === 0" class="empty-guide glass">
       <div class="empty-icon">
@@ -375,13 +376,6 @@
             <el-option label="集群" value="cluster" />
           </el-select>
           <el-input v-model="searchText" placeholder="搜索实例/节点" clearable size="small" style="width: 200px" :prefix-icon="SearchIcon" />
-          <el-select v-model="refreshInterval" size="small" style="width: 110px" @change="onRefreshChange">
-            <el-option label="不刷新" :value="0" />
-            <el-option label="10秒" :value="10" />
-            <el-option label="30秒" :value="30" />
-            <el-option label="60秒" :value="60" />
-          </el-select>
-          <el-button size="small" @click="loadInstances" :icon="RefreshIcon">刷新</el-button>
         </div>
       </div>
       <el-table :data="filteredInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe>
@@ -619,7 +613,8 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { Search, Refresh } from '@element-plus/icons-vue'
+import { Search } from '@element-plus/icons-vue'
+import RefreshBar from '../RefreshBar.vue'
 import { ElMessage } from 'element-plus'
 import http from '../../api/http'
 import { echarts, initChart, COLORS } from '../../charts/echarts'
@@ -647,7 +642,11 @@ const filterStatus = ref('')
 const filterTopology = ref('')
 const searchText = ref('')
 const refreshInterval = ref(30)
-let refreshTimer = null
+const redisIntervals = [
+  { label: '10秒', value: 10 },
+  { label: '30秒', value: 30 },
+  { label: '60秒', value: 60 },
+]
 
 // Server 真实地址（取自 /api/v1/install-info，参考「添加主机」功能）
 const serverURL = ref('')
@@ -1103,13 +1102,7 @@ function getOrCreateTrend(key) {
   return trendChartsMap[key]
 }
 
-// ---- 刷新 ----
-function onRefreshChange() {
-  if (refreshTimer) clearInterval(refreshTimer)
-  if (refreshInterval.value > 0) {
-    refreshTimer = setInterval(loadInstances, refreshInterval.value * 1000)
-  }
-}
+// ---- 刷新（由顶部 RefreshBar 组件统一管理）----
 
 // ---- 格式化工具 ----
 function formatBytes(b) {
@@ -1188,11 +1181,9 @@ function copyCmd() {
 onMounted(() => {
   loadInstances()
   loadServerURL()
-  onRefreshChange()
   window.addEventListener('resize', handleResize)
 })
 onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
   window.removeEventListener('resize', handleResize)
   Object.values(chartInstances).forEach(c => c && c.dispose())
   Object.values(trendChartsMap).forEach(c => c && c.dispose())

@@ -1,13 +1,6 @@
 <template>
   <div class="mw-tab">
-    <div class="toolbar">
-      <div class="tb-left">
-        <el-switch v-model="autoRefresh" @change="toggleAuto" size="small" />
-        <span class="tb-label">自动刷新</span>
-        <span v-if="lastUpdate" class="tb-time">更新于 {{ lastUpdate }}</span>
-      </div>
-      <el-button size="small" :icon="RefreshIcon" :loading="loading" @click="load">刷新</el-button>
-    </div>
+    <RefreshBar :loading="loading" @refresh="load" />
 
     <!-- 未配置：全平台没有任何 Docker 主机上报 -->
     <div v-if="!loading && hosts.length === 0" class="empty-guide glass">
@@ -113,7 +106,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
-import { Refresh as RefreshIcon } from '@element-plus/icons-vue'
+import RefreshBar from '../RefreshBar.vue'
 import * as echarts from 'echarts'
 import http from '../../api/http'
 
@@ -123,10 +116,7 @@ const hosts = ref([])
 const drawerVisible = ref(false)
 const selected = ref(null)
 const chartRef = ref(null)
-const autoRefresh = ref(true)
-const lastUpdate = ref('')
 let chartInstance = null
-let timer = null
 
 const hostStats = computed(() => {
   const s = { hosts: 0, total: 0, running: 0, stopped: 0, images: 0 }
@@ -161,13 +151,6 @@ async function load() {
     lastUpdate.value = new Date().toLocaleTimeString()
   } catch (e) { console.error(e) } finally { loading.value = false }
 }
-
-function startAuto() {
-  stopAuto()
-  if (autoRefresh.value) timer = setInterval(load, 15000)
-}
-function stopAuto() { if (timer) { clearInterval(timer); timer = null } }
-function toggleAuto() { startAuto() }
 
 function hostClass(h) {
   if (h.containersRunning > 0) return 'dot-up'
@@ -215,16 +198,11 @@ function statusType(s) { if (s === 'running') return 'success'; if (s === 'pause
 function memClass(p) { if (!p) return ''; if (p >= 90) return 'metric-bad'; if (p >= 70) return 'metric-warn'; return 'metric-good' }
 function rowClass({ row }) { return row.up ? '' : 'row-down' }
 
-onMounted(() => { load(); startAuto() })
-onUnmounted(stopAuto)
+onMounted(load)
 </script>
 
 <style scoped>
 .mw-tab { padding: 4px 0; }
-.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.tb-left { display: flex; align-items: center; gap: 8px; }
-.tb-label { font-size: 13px; color: var(--text-dim); }
-.tb-time { font-size: 12px; color: var(--text-muted); }
 .empty-guide { text-align: center; padding: 48px 24px; }
 .empty-icon { color: var(--text-muted); margin-bottom: 16px; }
 .empty-title { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
