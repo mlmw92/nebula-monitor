@@ -172,7 +172,6 @@ async function load() {
     const data = await http.get('/api/v1/middleware/docker/containers')
     containers.value = data.containers || []
     hosts.value = data.hosts || []
-    lastUpdate.value = new Date().toLocaleTimeString()
   } catch (e) { console.error(e) } finally { loading.value = false }
 }
 
