@@ -260,6 +260,8 @@ async function submit() {
     nodes: form.scope === 'specified' ? form.nodes : [],
     enabled: form.enabled,
     notify: form.notify || [],
+    silenced: form.silenced,
+    silenceUntil: form.silenceUntil,
   }
   try {
     if (form.id) await http.put('/api/v1/rules/' + form.id, body)

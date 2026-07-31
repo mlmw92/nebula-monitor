@@ -20,6 +20,50 @@
       </div>
     </div>
 
+    <!-- 维护窗口 -->
+    <div class="glass panel" style="margin-bottom: 16px">
+      <div class="panel-title-row">
+        <span class="panel-title" style="margin-bottom: 0">维护窗口</span>
+        <el-switch
+          v-model="maintenance.enabled"
+          active-text="已开启"
+          inactive-text="已关闭"
+          @change="saveMaintenance"
+        />
+      </div>
+      <template v-if="maintenance.enabled">
+        <div class="maintenance-row">
+          <div class="maintenance-item">
+            <span class="maintenance-label">开始时间</span>
+            <el-date-picker
+              v-model="maintenanceStart"
+              type="datetime"
+              placeholder="选择开始时间"
+              format="YYYY-MM-DD HH:mm"
+              value-format="x"
+              @change="saveMaintenance"
+            />
+          </div>
+          <div class="maintenance-item">
+            <span class="maintenance-label">结束时间</span>
+            <el-date-picker
+              v-model="maintenanceEnd"
+              type="datetime"
+              placeholder="选择结束时间"
+              format="YYYY-MM-DD HH:mm"
+              value-format="x"
+              @change="saveMaintenance"
+            />
+          </div>
+          <div class="maintenance-item" style="flex: 1">
+            <span class="maintenance-label">原因</span>
+            <el-input v-model="maintenance.reason" placeholder="如：版本升级、数据迁移..." @blur="saveMaintenance" />
+          </div>
+        </div>
+        <div class="maintenance-hint">维护窗口期间，所有告警通知将被抑制，告警事件仍会正常记录</div>
+      </template>
+    </div>
+
     <!-- 告警规则 -->
     <div class="glass panel" style="margin-bottom: 16px">
       <div class="panel-title-row">
@@ -127,6 +171,7 @@ const groups = ref([])
 const editing = ref(null)
 const eventFilter = ref('firing')
 const testing = ref(false)
+const maintenance = ref({ enabled: false, start: 0, end: 0, reason: '' })
 // 全部渠道及其展示名；enabled 由通知配置决定，未启用的渠道在新建规则时置灰。
 const CHANNEL_META = [
   { value: 'email', label: '邮件' },
@@ -159,6 +204,35 @@ function channelLabel(v) {
 function fmt(ts) {
   if (!ts) return '-'
   return new Date(ts).toLocaleString('zh-CN', { hour12: false })
+}
+
+const maintenanceStart = computed({
+  get: () => maintenance.value.start ? new Date(maintenance.value.start) : null,
+  set: (v) => { maintenance.value.start = v ? (typeof v === 'number' ? v : v.getTime()) : 0 },
+})
+const maintenanceEnd = computed({
+  get: () => maintenance.value.end ? new Date(maintenance.value.end) : null,
+  set: (v) => { maintenance.value.end = v ? (typeof v === 'number' ? v : v.getTime()) : 0 },
+})
+
+async function loadMaintenance() {
+  try {
+    const mw = await http.get('/api/v1/maintenance')
+    if (mw) maintenance.value = mw
+  } catch (e) { /* ignore */ }
+}
+
+async function saveMaintenance() {
+  try {
+    await http.put('/api/v1/maintenance', {
+      enabled: maintenance.value.enabled,
+      start: maintenance.value.start,
+      end: maintenance.value.end,
+      reason: maintenance.value.reason,
+    })
+  } catch (e) {
+    ElMessage.error('保存维护窗口失败')
+  }
 }
 
 async function load() {
@@ -246,6 +320,7 @@ async function toggleRule(rule) {
 // 每 30s 自动刷新告警列表，确保实时性
 onMounted(() => {
   load()
+  loadMaintenance()
   timer = setInterval(load, 30000)
 })
 
@@ -267,6 +342,31 @@ onUnmounted(() => {
 }
 .muted {
   color: var(--muted, #909399);
+}
+.maintenance-row {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.maintenance-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+}
+.maintenance-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.maintenance-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--amber, #e6a23c);
+  background: rgba(230, 162, 60, 0.08);
+  padding: 6px 12px;
+  border-radius: 4px;
 }
 .scope-count {
   margin-left: 6px;
