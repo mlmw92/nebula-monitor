@@ -82,9 +82,6 @@
             <span class="topo-group-title">
               <ClusterIcon />
               <strong>集群 {{ grp.name || '未命名' }}</strong>
-              <el-tooltip content="集群名直接读取 agent 配置 /etc/monitor-agent/config.yaml → redisInstances[*].name（同一集群下所有实例需配置相同的 name）。修改后重启 agent 生效。" placement="top">
-                <span class="name-source-hint">name ← agent.yaml → redisInstances[*].name</span>
-              </el-tooltip>
             </span>
             <span class="topo-meta">
               <span class="badge" :class="clusterHealthClass(grp)">
@@ -706,7 +703,7 @@ const filteredInstances = computed(() => {
 const topologyGroups = computed(() => {
   const clusters = {}, sentinels = {}, replications = {}, standalones = []
   for (const i of instances.value) {
-    const g = i.group || i.name || i.instance
+    const g = i.name || i.group || i.instance
     if (i.topology === 'cluster') {
       clusters[g] = clusters[g] || { name: g, masters: [], slaves: [], slavesByMaster: {}, unlinkedSlaves: [], topology: 'cluster' }
       if (i.role === 'slave' || i.role === 'replica') {
@@ -861,10 +858,13 @@ function computeStats() {
   stats.totalMemory = list.reduce((s, i) => s + (i.usedMemory || 0), 0)
   stats.totalClients = list.reduce((s, i) => s + (i.clients || 0), 0)
   stats.totalOps = list.reduce((s, i) => s + (i.ops || 0), 0)
-  // 集群/哨兵组数（按 group 去重，等同于 agent.yaml 中的 redisInstances[*].name）
+  // 集群/哨兵组数（按 name 去重，name 即 agent.yaml 中的 redisInstances[*].name）
   const clusterNames = new Set()
   for (const i of list) {
-    if ((i.topology === 'cluster' || i.topology === 'sentinel') && i.group) clusterNames.add(i.group)
+    if (i.topology === 'cluster' || i.topology === 'sentinel') {
+      const key = i.name || i.group
+      if (key) clusterNames.add(key)
+    }
   }
   stats.clusterCount = clusterNames.size
   // 告警实例数

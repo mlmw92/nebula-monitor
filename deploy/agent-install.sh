@@ -962,6 +962,7 @@ k8s_config() {
   echo " 并开启 collectors.k8s，完成后自动重启 agent。"
   echo " kubeconfig/token 仅存本机 agent.yaml，不上报 Server。"
   echo " 支持两种认证：① kubeconfig 文件路径；② apiServer + ServiceAccount Token。"
+  echo " 兼容标准 K8s 与 k3s（k3s kubeconfig 默认在 /etc/rancher/k3s/k3s.yaml，且内置 metrics-server）。"
   echo "============================================================"
   echo
 
@@ -988,7 +989,7 @@ k8s_config() {
     choose "认证方式" 1 "kubeconfig 文件" "apiServer + Token"
     case "$CHOICE_VAL" in
       kubeconfig*)
-        prompt kubeconfig "kubeconfig 文件路径" "/root/.kube/config"
+        prompt kubeconfig "kubeconfig 文件路径（k3s 默认 /etc/rancher/k3s/k3s.yaml，标准 K8s 默认 /root/.kube/config）" "/root/.kube/config"
         prompt api_server "apiServer 地址（留空从 kubeconfig 取）" ""
         ;;
       *)

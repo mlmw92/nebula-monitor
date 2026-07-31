@@ -71,7 +71,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 | Kafka | `sarama` AdminClient 直连（Broker/Topic/ConsumerGroup）+ JMX exporter 双模式；22 项指标（Broker 吞吐/ISR 收缩/Topic 分区/Consumer Lag/请求队列等） |
 | Docker | Docker Engine API（`/var/run/docker.sock` Unix Socket）自动发现容器 + stats 资源采集；16 项指标（容器 CPU/内存/网络/磁盘 IO/运行状态/重启次数/镜像数） |
 | RocketMQ | HTTP API 直连 NameServer/Broker 统计端点 + exporter 双模式；18 项指标（Broker TPS/消息积压量/消费延迟/生产者消费者 TPS/今日生产消费总数等） |
-| Kubernetes | 标准库 net/http 直连 apiserver REST（kubeconfig/token 认证，不引入 client-go）+ kube-state-metrics/metrics-server exporter 双模式；采集单元为整个集群；集群健康/Node 状态与资源/Deployment・StatefulSet・DaemonSet 副本就绪/Pod 总数与异常统计；凭据仅存 Agent 本地不上报 |
+| Kubernetes | 标准库 net/http 直连 apiserver REST（kubeconfig/token 认证，不引入 client-go）+ kube-state-metrics/metrics-server exporter 双模式；基于标准 K8s API，兼容标准 K8s 与 k3s；采集单元为整个集群；集群健康/Node 状态与资源/Deployment・StatefulSet・DaemonSet 副本就绪/Pod 总数与异常统计；凭据仅存 Agent 本地不上报 |
 
 **服务拨测**
 
@@ -591,6 +591,20 @@ k8sInstances:
 | `exporterURL` | exporter 选填 | 填写后走 kube-state-metrics /metrics 拉取模式 |
 
 > 认证仅支持 token / client-cert 两种；exec/plugin（如云厂商 IAM 鉴权）不支持，需要时用 token 模式替代。
+>
+> **兼容标准 K8s 与 k3s**：采集基于标准 apiserver REST API，与发行版无关。k3s 使用时注意两点：
+> - kubeconfig 默认在 `/etc/rancher/k3s/k3s.yaml`（非 `/root/.kube/config`），配置 `kubeconfig` 字段填此路径；
+> - k3s 默认内置 metrics-server，直接开 `metricsServer: true` 即可采集节点 CPU/内存使用率；
+> - k3s kubeconfig 内 server 默认为 `https://127.0.0.1:6443`，若 Agent 与 k3s 不同机，需用 `apiServer` 字段覆盖为节点真实地址。
+>
+> **k3s 配置示例**：
+> ```yaml
+> k8sInstances:
+>   - name: "k3s-cluster"
+>     kubeconfig: "/etc/rancher/k3s/k3s.yaml"
+>     insecureTLS: true      # k3s 默认自签名证书
+>     metricsServer: true    # k3s 内置 metrics-server
+> ```
 
 **部署与验证**
 

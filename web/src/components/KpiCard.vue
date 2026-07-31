@@ -19,10 +19,11 @@ defineProps({
 <style scoped>
 .kpi-card {
   border-radius: var(--radius);
-  padding: 10px 11px;
+  padding: 15px 15px;
+  min-height: 70px;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 11px;
   border: 1px solid var(--border);
   background: var(--bg-card);
   position: relative;
@@ -43,17 +44,17 @@ defineProps({
   opacity: 0.8;
 }
 .kpi-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 .kpi-icon :deep(svg) {
-  width: 16px;
-  height: 16px;
+  width: 19px;
+  height: 19px;
 }
 .kpi-body {
   display: flex;
