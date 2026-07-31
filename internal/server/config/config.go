@@ -44,13 +44,17 @@ type ScreenConfig struct {
 // DefaultScreenConfig 返回默认全开的大屏模块配置。
 func DefaultScreenConfig() ScreenConfig {
 	return ScreenConfig{Modules: map[string]bool{
-		"topology": true,
-		"gauges":   true,
-		"risk":     true,
-		"alerts":   true,
-		"redis":    true,
-		"trends":   true,
-		"kpiTop":   true,
+		"kpiTop":      true,
+		"topology":    true,
+		"gauges":      true,
+		"risk":        true,
+		"alerts":      true,
+		"containers":  true,
+		"trends":      true,
+		"healthScore": true,
+		"alertLevels": true,
+		"dbConn":      true,
+		"redis":       true,
 	}}
 }
 

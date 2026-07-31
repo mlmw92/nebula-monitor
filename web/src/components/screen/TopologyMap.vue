@@ -86,10 +86,11 @@ const props = defineProps({
   metrics: { type: Object, default: () => ({}) },
   alerts: { type: Array, default: () => [] },
   redisStats: { type: Object, default: () => ({}) }, // { total, up, down, clusterCount, alertCount }
+  dockerStats: { type: Object, default: () => ({}) }, // { total, running, stopped, abnormal }
   healthScore: { type: Number, default: 100 },
   healthLevel: { type: String, default: 'green' }, // green | amber | red
 })
-const emit = defineEmits(['select-node', 'select-redis'])
+const emit = defineEmits(['select-node', 'select-redis', 'select-docker'])
 const router = useRouter()
 
 // viewBox 逻辑坐标系（与 DOM 百分比定位共用同一比例）
@@ -99,7 +100,8 @@ const CY = VB.h / 2
 
 const hover = ref(null)
 
-const COLOR = { green: '#00d9a3', amber: '#f59e0b', red: '#f43f5e' }
+// 蓝色科技风：健康核颜色（green 为亮蓝，amber/red 保留预警/故障）
+const COLOR = { green: '#38bdf8', amber: '#f59e0b', red: '#f43f5e' }
 const coreHex = computed(() => COLOR[props.healthLevel] || COLOR.green)
 
 // 主机按 group 聚合
@@ -158,6 +160,24 @@ const placedNodes = computed(() => {
       alerting: (rs.alertCount || 0) > 0,
       tip: [`实例 ${rs.total} 个`, `在线 ${rs.up || 0} · 离线 ${rs.down || 0}`, `集群/哨兵 ${rs.clusterCount || 0} 组`],
       onClick: () => emit('select-redis'),
+    })
+  }
+
+  // Docker 容器节点
+  const ds = props.dockerStats || {}
+  if (ds.total) {
+    let tone = 'ok'
+    if ((ds.abnormal || 0) > 0) tone = 'danger'
+    else if ((ds.stopped || 0) > 0) tone = 'warn'
+    items.push({
+      id: 'docker',
+      kind: 'docker',
+      title: '容器集群',
+      meta: `运行 ${ds.running || 0}/${ds.total}`,
+      tone,
+      alerting: (ds.abnormal || 0) > 0,
+      tip: [`容器 ${ds.total} 个`, `运行 ${ds.running || 0} · 停止 ${ds.stopped || 0}`, (ds.abnormal || 0) ? `异常 ${ds.abnormal}` : '无异常'],
+      onClick: () => emit('select-docker'),
     })
   }
 

@@ -1,6 +1,6 @@
 <template>
-  <div class="screen" :class="healthLevel">
-    <!-- 中心拓扑图（SVG/DOM，无 WebGL） -->
+  <div class="screen blue-theme" :class="healthLevel">
+    <!-- 中心拓扑图（SVG/DOM，无 WebGL），铺满中列 -->
     <TopologyMap
       v-if="cfg.modules.topology"
       class="scene-layer"
@@ -8,144 +8,145 @@
       :metrics="metrics"
       :alerts="activeAlerts"
       :redis-stats="redisSummary"
+      :docker-stats="dockerSummary"
       :health-score="healthScore"
       :health-level="healthLevel"
       @select-node="goNode"
       @select-redis="goRedis"
+      @select-docker="goDocker"
     />
 
-    <!-- 顶部 HUD 栏 -->
+    <!-- 顶部标题栏 -->
     <header class="hud-top">
-      <div class="hud-brand">
-        <div class="brand-mark"></div>
-        <div class="brand-txt">
-          <h1>NebulaEye 监控大屏</h1>
-          <p>Cluster Situation Awareness</p>
-        </div>
+      <div class="hud-side hud-left-side">
+        <div class="corner tl"></div>
       </div>
-      <div class="hud-clock mono">{{ clock }}</div>
-      <div class="hud-actions">
-        <el-tag :type="healthTagType" effect="dark" size="large" class="health-badge">
-          {{ healthLabel }} · {{ healthScore }}分
-        </el-tag>
+      <div class="hud-title">
+        <span class="title-deco left"></span>
+        <h1>服务器运维数据可视化大屏</h1>
+        <span class="title-deco right"></span>
+      </div>
+      <div class="hud-side hud-right-side">
+        <span class="hud-clock mono">{{ clock }}</span>
         <el-button :icon="Setting" circle size="small" @click="settingOpen = true" title="设置" />
         <el-button :icon="FullScreen" circle size="small" @click="toggleFullscreen" title="全屏" />
         <el-button :icon="Back" circle size="small" @click="$router.push('/')" title="返回" />
       </div>
     </header>
 
-    <!-- 左侧 HUD：KPI + 资源概况 + 风险分布 + 健康度环 -->
-    <aside class="hud-left">
-      <div class="kpi-col" v-if="cfg.modules.kpiTop">
-        <div class="glass panel-mini kpi-mini">
-          <div class="km-label">主机总数</div>
-          <div class="km-val cyan">{{ nodes.length }}</div>
-        </div>
-        <div class="glass panel-mini kpi-mini">
-          <div class="km-label">在线</div>
-          <div class="km-val green">{{ onlineCount }}</div>
-        </div>
-        <div class="glass panel-mini kpi-mini">
-          <div class="km-label">告警中</div>
-          <div class="km-val red">{{ firingCount }}</div>
-        </div>
-        <div class="glass panel-mini kpi-mini">
-          <div class="km-label">离线</div>
-          <div class="km-val amber">{{ offlineCount }}</div>
+    <!-- 顶部 KPI 横排（6 卡片） -->
+    <div class="kpi-row" v-if="cfg.modules.kpiTop">
+      <div class="glass kpi-card" v-for="k in kpis" :key="k.key">
+        <div class="kpi-label">{{ k.label }}</div>
+        <div class="kpi-val" :class="k.tone">
+          {{ k.value }}<span class="kpi-unit" v-if="k.unit">{{ k.unit }}</span>
         </div>
       </div>
+    </div>
 
+    <!-- 左列 -->
+    <aside class="col-left">
       <ScreenGauges
         v-if="cfg.modules.gauges"
         :cpu="avgCpu"
         :mem="avgMem"
         :disk="avgDisk"
         :online-rate="onlineRate"
+        :load-pct="avgLoadPct"
+        :group-count="groupCount"
       />
-
       <ScreenRisk
         v-if="cfg.modules.risk"
         :nodes="nodes"
         :metrics="metrics"
         :alerts="activeAlerts"
       />
-
-      <div class="glass panel-mini health-mini">
-        <div class="hm-title">系统健康度</div>
-        <div class="hm-ring" :class="healthLevel">
-          <svg viewBox="0 0 120 120">
-            <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="9" />
-            <circle
-              cx="60" cy="60" r="52" fill="none"
-              :stroke="ringColor" stroke-width="9" stroke-linecap="round"
-              :stroke-dasharray="ringDash" transform="rotate(-90 60 60)" class="ring-prog"
-            />
-          </svg>
-          <div class="hm-center">
-            <span class="hm-num">{{ healthScore }}</span>
-            <span class="hm-unit">分</span>
-          </div>
-        </div>
-        <div class="hm-rows">
-          <div class="hm-row"><span class="d green"></span>在线率<b>{{ onlineRate }}%</b></div>
-          <div class="hm-row"><span class="d red"></span>活跃告警<b>{{ firingCount }}</b></div>
-          <div class="hm-row"><span class="d amber"></span>离线主机<b>{{ offlineCount }}</b></div>
-        </div>
-      </div>
     </aside>
 
-    <!-- 右侧 HUD：告警列表 + 中间件监控 -->
-    <aside class="hud-right" v-if="cfg.modules.alerts || cfg.modules.redis">
-      <div class="glass panel-mini alert-mini" v-if="cfg.modules.alerts">
-        <div class="am-title">
+    <!-- 右列 -->
+    <aside class="col-right">
+      <div class="glass panel-mini alert-table" v-if="cfg.modules.alerts">
+        <div class="at-title">
           <span class="alert-pulse" v-if="firingCount"></span>
-          实时告警
-          <span class="am-count">{{ firingCount }}</span>
+          故障告警列表
+          <span class="at-count">{{ firingCount }}</span>
         </div>
-        <div class="am-list" v-if="activeAlerts.length">
+        <div class="at-head">
+          <span class="at-c-lv">级别</span>
+          <span class="at-c-dev">告警设备</span>
+          <span class="at-c-time">发生时间</span>
+          <span class="at-c-st">状态</span>
+        </div>
+        <div class="at-body" v-if="activeAlerts.length">
           <div
-            v-for="a in activeAlerts.slice(0, 12)"
+            v-for="a in activeAlerts.slice(0, 10)"
             :key="a.id"
-            class="am-row"
+            class="at-row"
             :class="a.severity"
             @click="goNode(a.node)"
           >
-            <span class="dot"></span>
-            <div class="am-body">
-              <div class="am-name">{{ a.ruleName }}</div>
-              <div class="am-meta">{{ a.node }} · {{ fmt(a.startsAt) }}</div>
-            </div>
-            <el-tag :type="a.severity === 'critical' ? 'danger' : 'warning'" size="small" effect="dark">
-              {{ a.severity === 'critical' ? '严重' : '警告' }}
-            </el-tag>
+            <span class="at-c-lv">
+              <span class="lv-dot" :class="a.severity"></span>
+              {{ a.severity === 'critical' ? '故障' : a.severity === 'warning' ? '预警' : '提示' }}
+            </span>
+            <span class="at-c-dev" :title="a.ruleName + ' · ' + a.node">{{ a.node }}</span>
+            <span class="at-c-time mono">{{ fmtShort(a.startsAt) }}</span>
+            <span class="at-c-st" :class="a.severity">未处理</span>
           </div>
         </div>
-        <div class="am-empty" v-else>
+        <div class="at-empty" v-else>
           <span class="ok">✓</span>
           <span>集群运行正常</span>
         </div>
       </div>
+      <ScreenContainers v-if="cfg.modules.containers" @summary="onDockerSummary" />
       <ScreenRedis v-if="cfg.modules.redis" @select="goRedis" @summary="onRedisSummary" />
     </aside>
 
-    <!-- 底部 HUD：趋势图 -->
-    <footer class="hud-bottom" v-if="cfg.modules.trends">
-      <ScreenTrend title="集群 CPU 平均使用率" :series="cpuSeries" unit="%" :color="COLORS.cyan" />
-      <ScreenTrend title="集群内存平均使用率" :series="memSeries" unit="%" :color="COLORS.purple" />
-      <ScreenTrend title="集群网络入流量" :series="netSeries" unit="rate" :color="COLORS.blue" />
+    <!-- 底部四格 -->
+    <footer class="hud-bottom">
+      <div class="bottom-cell" v-if="cfg.modules.trends">
+        <div class="glass panel-mini trend-pack">
+          <div class="tp-title">资源使用趋势</div>
+          <div class="tp-body">
+            <ScreenTrend title="CPU" :series="cpuSeries" unit="%" :color="COLORS.cyan" compact />
+            <ScreenTrend title="内存" :series="memSeries" unit="%" :color="COLORS.blue" compact />
+            <ScreenTrend title="入流量" :series="netSeries" unit="rate" :color="COLORS.purple" compact />
+          </div>
+        </div>
+      </div>
+      <div class="bottom-cell" v-if="cfg.modules.healthScore">
+        <ScreenHealthScore
+          :score="healthScore"
+          :online-rate="onlineRate"
+          :alert-free-rate="alertFreeRate"
+          :cpu-headroom="cpuHeadroom"
+          :disk-headroom="diskHeadroom"
+        />
+      </div>
+      <div class="bottom-cell" v-if="cfg.modules.alertLevels">
+        <ScreenAlertLevels :alerts="activeAlerts" />
+      </div>
+      <div class="bottom-cell" v-if="cfg.modules.dbConn">
+        <ScreenDbConn />
+      </div>
     </footer>
 
     <!-- 设置抽屉：模块显隐配置（持久化到后端） -->
     <el-drawer v-model="settingOpen" title="大屏设置" size="320px" direction="rtl">
       <div class="setting-body">
         <div class="setting-hint">选择要展示的模块（基于已接入的数据），保存后全局生效。</div>
-        <el-checkbox v-model="cfg.modules.topology" label="中心拓扑图" />
-        <el-checkbox v-model="cfg.modules.kpiTop" label="KPI 概览卡片" />
+        <el-checkbox v-model="cfg.modules.kpiTop" label="顶部 KPI 卡片" />
+        <el-checkbox v-model="cfg.modules.topology" label="中心数据中心拓扑" />
         <el-checkbox v-model="cfg.modules.gauges" label="资源概况环图" />
         <el-checkbox v-model="cfg.modules.risk" label="风险等级分布" />
-        <el-checkbox v-model="cfg.modules.alerts" label="实时告警列表" />
+        <el-checkbox v-model="cfg.modules.alerts" label="故障告警列表" />
+        <el-checkbox v-model="cfg.modules.containers" label="容器状态" />
         <el-checkbox v-model="cfg.modules.redis" label="Redis 中间件面板" />
         <el-checkbox v-model="cfg.modules.trends" label="资源使用趋势" />
+        <el-checkbox v-model="cfg.modules.healthScore" label="服务健康评分" />
+        <el-checkbox v-model="cfg.modules.alertLevels" label="告警级别统计" />
+        <el-checkbox v-model="cfg.modules.dbConn" label="数据库连接" />
       </div>
       <template #footer>
         <el-button @click="settingOpen = false">取消</el-button>
@@ -168,6 +169,10 @@ import ScreenTrend from './ScreenTrend.vue'
 import ScreenRedis from './ScreenRedis.vue'
 import ScreenGauges from './ScreenGauges.vue'
 import ScreenRisk from './ScreenRisk.vue'
+import ScreenContainers from './ScreenContainers.vue'
+import ScreenHealthScore from './ScreenHealthScore.vue'
+import ScreenAlertLevels from './ScreenAlertLevels.vue'
+import ScreenDbConn from './ScreenDbConn.vue'
 
 const router = useRouter()
 const nodes = ref([])
@@ -175,15 +180,20 @@ const metrics = ref({})
 const alerts = ref([])
 const clock = ref('')
 const redisSummary = ref({ total: 0, up: 0, down: 0, clusterCount: 0, alertCount: 0 })
+const dockerSummary = ref({ total: 0, running: 0, stopped: 0, abnormal: 0 })
 const cpuSeries = ref([{ name: 'CPU', color: COLORS.cyan, data: [] }])
-const memSeries = ref([{ name: '内存', color: COLORS.purple, data: [] }])
-const netSeries = ref([{ name: '入流量', color: COLORS.blue, data: [] }])
+const memSeries = ref([{ name: '内存', color: COLORS.blue, data: [] }])
+const netSeries = ref([{ name: '入流量', color: COLORS.purple, data: [] }])
 
 // 大屏模块显隐配置（默认全开，后端拉取后覆盖）
 const settingOpen = ref(false)
 const savingCfg = ref(false)
 const cfg = reactive({
-  modules: { topology: true, kpiTop: true, gauges: true, risk: true, alerts: true, redis: true, trends: true },
+  modules: {
+    kpiTop: true, topology: true, gauges: true, risk: true, alerts: true,
+    containers: true, redis: true, trends: true, healthScore: true,
+    alertLevels: true, dbConn: true,
+  },
 })
 
 let dataTimer = null
@@ -196,6 +206,7 @@ const onlineCount = computed(() => nodes.value.filter((n) => n.status === 'onlin
 const offlineCount = computed(() => nodes.value.filter((n) => n.status !== 'online').length)
 const firingCount = computed(() => activeAlerts.value.length)
 const onlineRate = computed(() => (nodes.value.length ? Math.round((onlineCount.value / nodes.value.length) * 100) : 0))
+const groupCount = computed(() => new Set(nodes.value.map((n) => n.group || '默认分组')).size)
 
 // 在线节点资源均值（供资源概况环图）
 const onlineMetrics = computed(() =>
@@ -210,6 +221,42 @@ function avgOf(key) {
 const avgCpu = computed(() => avgOf('cpu'))
 const avgMem = computed(() => avgOf('mem'))
 const avgDisk = computed(() => avgOf('disk'))
+// 平均负载归一化为百分比（load1 / 8 截断到 100，无核数信息时的近似）
+const avgLoadPct = computed(() => Math.min(100, Math.round((avgOf('load1') / 8) * 100)))
+
+// 今日新增告警数（startsAt 为今天）
+const todayAlertCount = computed(() => {
+  const start = new Date(); start.setHours(0, 0, 0, 0)
+  const t0 = start.getTime()
+  return alerts.value.filter((a) => a.startsAt && new Date(a.startsAt).getTime() >= t0).length
+})
+
+// 实时入流量（在线节点 netIn 求和，格式化）
+const netInTotal = computed(() => onlineMetrics.value.reduce((s, m) => s + (m.netIn || 0), 0))
+function fmtRate(b) {
+  if (!b || b <= 0) return '0'
+  if (b >= 1 << 30) return (b / (1 << 30)).toFixed(1)
+  if (b >= 1 << 20) return (b / (1 << 20)).toFixed(1)
+  if (b >= 1 << 10) return (b / (1 << 10)).toFixed(1)
+  return b.toFixed(0)
+}
+function fmtRateUnit(b) {
+  if (!b || b <= 0) return 'B/s'
+  if (b >= 1 << 30) return 'GB/s'
+  if (b >= 1 << 20) return 'MB/s'
+  if (b >= 1 << 10) return 'KB/s'
+  return 'B/s'
+}
+
+// 顶部 6 KPI（全部真实数据；无对应数据源的项已替换为最接近真实指标）
+const kpis = computed(() => [
+  { key: 'total', label: '服务器总数', value: nodes.value.length, unit: '台', tone: 'cyan' },
+  { key: 'online', label: '在线主机', value: onlineCount.value, unit: '台', tone: 'green' },
+  { key: 'containers', label: '容器实例', value: dockerSummary.value.total || 0, unit: '个', tone: 'blue' },
+  { key: 'disk', label: '平均磁盘使用率', value: avgDisk.value, unit: '%', tone: 'purple' },
+  { key: 'net', label: '实时入流量', value: fmtRate(netInTotal.value), unit: fmtRateUnit(netInTotal.value), tone: 'cyan' },
+  { key: 'alertToday', label: '今日告警', value: todayAlertCount.value, unit: '条', tone: firingCount.value ? 'red' : 'green' },
+])
 
 // 健康度：沿用 OverviewView 算法
 const healthScore = computed(() => {
@@ -225,17 +272,20 @@ const healthLevel = computed(() => {
   if (s >= 60) return 'amber'
   return 'red'
 })
-const healthLabel = computed(() => ({ green: '健康', amber: '警告', red: '严重' }[healthLevel.value]))
-const healthTagType = computed(() => ({ green: 'success', amber: 'warning', red: 'danger' }[healthLevel.value]))
-const ringColor = computed(() => ({ green: 'var(--accent)', amber: 'var(--warn)', red: 'var(--danger)' }[healthLevel.value]))
-const ringDash = computed(() => {
-  const c = 2 * Math.PI * 52
-  return `${c * (healthScore.value / 100)} ${c}`
+// 健康评分派生维度（真实）
+const alertFreeRate = computed(() => {
+  const t = nodes.value.length || 1
+  const alertingNodes = new Set(activeAlerts.value.map((a) => a.node)).size
+  return Math.max(0, Math.round(((t - alertingNodes) / t) * 100))
 })
+const cpuHeadroom = computed(() => Math.max(0, 100 - avgCpu.value))
+const diskHeadroom = computed(() => Math.max(0, 100 - avgDisk.value))
 
-function fmt(ts) {
+function fmtShort(ts) {
   if (!ts) return '-'
-  return new Date(ts).toLocaleString('zh-CN', { hour12: false })
+  const d = new Date(ts)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 function goNode(name) {
   if (name) router.push('/node/' + name)
@@ -243,8 +293,14 @@ function goNode(name) {
 function goRedis() {
   router.push('/middleware')
 }
+function goDocker() {
+  router.push('/middleware')
+}
 function onRedisSummary(s) {
   redisSummary.value = s || redisSummary.value
+}
+function onDockerSummary(s) {
+  dockerSummary.value = s || dockerSummary.value
 }
 
 // 拉取大屏模块显隐配置（失败回退默认全开）
@@ -301,8 +357,8 @@ async function loadTrends() {
   const online = nodes.value.filter((n) => n.status === 'online').map((n) => n.hostname)
   if (!online.length) {
     cpuSeries.value = [{ name: 'CPU', color: COLORS.cyan, data: [] }]
-    memSeries.value = [{ name: '内存', color: COLORS.purple, data: [] }]
-    netSeries.value = [{ name: '入流量', color: COLORS.blue, data: [] }]
+    memSeries.value = [{ name: '内存', color: COLORS.blue, data: [] }]
+    netSeries.value = [{ name: '入流量', color: COLORS.purple, data: [] }]
     return
   }
   const end = Date.now()
@@ -321,8 +377,8 @@ async function loadTrends() {
       Promise.all(sample.map((n) => qs(n, 'network_recv_rate'))),
     ])
     cpuSeries.value = [{ name: 'CPU', color: COLORS.cyan, data: aggregate(cpuRes, 'avg') }]
-    memSeries.value = [{ name: '内存', color: COLORS.purple, data: aggregate(memRes, 'avg') }]
-    netSeries.value = [{ name: '入流量', color: COLORS.blue, data: aggregate(netRes, 'sum') }]
+    memSeries.value = [{ name: '内存', color: COLORS.blue, data: aggregate(memRes, 'avg') }]
+    netSeries.value = [{ name: '入流量', color: COLORS.purple, data: aggregate(netRes, 'sum') }]
   } catch (e) {
     /* ignore */
   }
@@ -382,373 +438,294 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 蓝色科技风：局部覆盖 accent 为亮蓝，仅作用于大屏 */
+.screen.blue-theme {
+  --accent: #1e90ff;
+  --accent-glow: rgba(56, 189, 248, 0.4);
+}
 .screen {
   position: fixed;
   inset: 0;
   overflow: hidden;
+  display: grid;
+  grid-template-columns: 264px 1fr 300px;
+  grid-template-rows: 52px auto 1fr 210px;
+  grid-template-areas:
+    'top    top     top'
+    'kpi    kpi     kpi'
+    'left   center  right'
+    'bottom bottom  bottom';
+  gap: 10px;
+  padding: 10px 14px 12px;
   background:
-    radial-gradient(1200px 800px at 50% 40%, rgba(0, 217, 163, 0.06), transparent 70%),
-    radial-gradient(900px 600px at 80% 90%, rgba(56, 189, 248, 0.05), transparent 70%),
-    var(--bg);
+    radial-gradient(1200px 700px at 50% 30%, rgba(56, 189, 248, 0.08), transparent 70%),
+    radial-gradient(900px 600px at 15% 90%, rgba(30, 144, 255, 0.06), transparent 70%),
+    radial-gradient(900px 600px at 85% 90%, rgba(56, 189, 248, 0.05), transparent 70%),
+    #060b16;
 }
+
+/* 中心拓扑铺在 center 网格区 */
 .scene-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-}
-
-/* HUD 分层：面板可交互，中间留给 3D 拖拽 */
-.hud-top,
-.hud-left,
-.hud-right,
-.hud-bottom {
-  position: absolute;
-  z-index: 10;
-  pointer-events: none;
-}
-.hud-top > *,
-.hud-left > *,
-.hud-right > *,
-.hud-bottom > * {
-  pointer-events: auto;
-}
-
-/* 顶部栏 */
-.hud-top {
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 62px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  background: linear-gradient(180deg, rgba(10, 14, 20, 0.85), transparent);
-}
-.hud-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.brand-mark {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, var(--accent), #00a37a);
-  box-shadow: 0 0 18px var(--accent-glow);
+  grid-area: center;
   position: relative;
+  min-height: 0;
 }
-.brand-mark::after {
-  content: '';
-  position: absolute;
-  inset: 8px;
-  border: 2px solid #002b22;
-  border-radius: 3px;
-  border-top-color: transparent;
-  border-right-color: transparent;
-  transform: rotate(-45deg);
+
+/* 顶部标题栏 */
+.hud-top {
+  grid-area: top;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
 }
-.brand-txt h1 {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  background: linear-gradient(90deg, #e6edf3, var(--accent));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-.brand-txt p {
-  font-size: 10px;
-  color: var(--text-dim);
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-}
-.hud-clock {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text);
-  letter-spacing: 0.05em;
-  text-shadow: 0 0 12px rgba(0, 217, 163, 0.3);
-}
-.hud-actions {
+.hud-side {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.health-badge {
-  font-weight: 600;
+.hud-right-side {
+  justify-content: flex-end;
+}
+.hud-clock {
+  font-size: 13px;
+  color: var(--info);
+  margin-right: 6px;
+  letter-spacing: 0.04em;
+}
+.hud-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.hud-title h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  background: linear-gradient(90deg, #7ed4ff, #1e90ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 22px rgba(56, 189, 248, 0.25);
+}
+.title-deco {
+  width: 60px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--info));
+}
+.title-deco.right {
+  background: linear-gradient(90deg, var(--info), transparent);
 }
 
-/* 左侧 */
-.hud-left {
-  top: 74px;
-  left: 20px;
-  width: 244px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.panel-mini {
-  padding: 12px 14px;
-}
-.kpi-col {
+/* KPI 行 */
+.kpi-row {
+  grid-area: kpi;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(6, 1fr);
   gap: 10px;
 }
-.kpi-mini {
-  text-align: center;
-  padding: 10px 8px;
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  position: relative;
+  overflow: hidden;
 }
-.km-label {
-  font-size: 11px;
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--info);
+  box-shadow: 0 0 10px var(--info);
+}
+.kpi-label {
+  font-size: 12px;
   color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
-.km-val {
+.kpi-val {
   font-size: 26px;
   font-weight: 800;
   font-family: var(--mono);
-}
-.km-val.cyan { color: var(--info); }
-.km-val.green { color: var(--accent); }
-.km-val.red { color: var(--danger); }
-.km-val.amber { color: var(--warn); }
-
-.health-mini {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.hm-title {
-  font-size: 13px;
+  line-height: 1.05;
   color: var(--text);
-  font-weight: 600;
-  margin-bottom: 8px;
-  align-self: flex-start;
 }
-.hm-ring {
-  position: relative;
-  width: 130px;
-  height: 130px;
-}
-.hm-ring svg {
-  width: 100%;
-  height: 100%;
-}
-.ring-prog {
-  transition: stroke-dasharray 0.6s ease;
-}
-.hm-center {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-}
-.hm-num {
-  font-size: 34px;
-  font-weight: 800;
-  font-family: var(--mono);
-  line-height: 1;
-}
-.hm-ring.green .hm-num { color: var(--accent); }
-.hm-ring.amber .hm-num { color: var(--warn); }
-.hm-ring.red .hm-num { color: var(--danger); }
-.hm-unit {
-  font-size: 11px;
-  color: var(--text-dim);
-  margin-top: 2px;
-}
-.hm-rows {
-  width: 100%;
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.hm-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.kpi-val.cyan { color: var(--info); }
+.kpi-val.blue { color: #60a5fa; }
+.kpi-val.green { color: var(--accent); }
+.kpi-val.purple { color: #a78bfa; }
+.kpi-val.red { color: var(--danger); }
+.kpi-unit {
   font-size: 12px;
+  font-weight: 600;
   color: var(--text-dim);
+  margin-left: 3px;
 }
-.hm-row b {
-  margin-left: auto;
-  color: var(--text);
-  font-family: var(--mono);
-}
-.hm-row .d {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-.d.green { background: var(--accent); }
-.d.red { background: var(--danger); }
-.d.amber { background: var(--warn); }
 
-/* 右侧告警 + 中间件 */
-.hud-right {
-  top: 74px;
-  right: 20px;
-  width: 300px;
-  bottom: 208px;
+/* 左右列 */
+.col-left {
+  grid-area: left;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  min-height: 0;
 }
-.alert-mini {
-  flex: 1 1 55%;
+.col-right {
+  grid-area: right;
   display: flex;
   flex-direction: column;
+  gap: 10px;
   min-height: 0;
 }
-.screen-redis {
-  flex: 1 1 45%;
+.col-left > *,
+.col-right > * {
+  flex: 1;
   min-height: 0;
 }
-.am-title {
+
+/* 故障告警表格 */
+.alert-table {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  min-height: 0;
+}
+.at-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
-.am-count {
+.at-count {
   margin-left: auto;
-  font-family: var(--mono);
+  font-size: 12px;
   color: var(--danger);
-  font-weight: 700;
+  font-family: var(--mono);
 }
 .alert-pulse {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--danger);
-  animation: pulse-red 1s infinite;
+  box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.5);
+  animation: pulse 1.5s infinite;
 }
-@keyframes pulse-red {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--danger); }
-  50% { opacity: 0.5; box-shadow: 0 0 0 6px transparent; }
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(244, 63, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
 }
-.am-list {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.am-row {
-  display: flex;
+.at-head,
+.at-row {
+  display: grid;
+  grid-template-columns: 52px 1fr 78px 46px;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 8px;
-  border-left: 3px solid var(--text-muted);
+  gap: 4px;
+}
+.at-head {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.at-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.at-row {
+  font-size: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   cursor: pointer;
   transition: background 0.15s;
 }
-.am-row:hover {
-  background: rgba(255, 255, 255, 0.05);
+.at-row:hover { background: rgba(255, 255, 255, 0.03); }
+.at-c-lv {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
 }
-.am-row.critical { border-left-color: var(--danger); }
-.am-row.warning { border-left-color: var(--warn); }
-.am-row .dot {
-  width: 8px;
-  height: 8px;
+.lv-dot {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--danger);
   flex-shrink: 0;
 }
-.am-body {
-  flex: 1;
-  min-width: 0;
-}
-.am-name {
-  font-size: 13px;
+.lv-dot.critical { background: var(--danger); }
+.lv-dot.warning { background: var(--warn); }
+.lv-dot.info { background: var(--info); }
+.at-c-dev {
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.am-meta {
+.at-c-time { color: var(--text-dim); font-size: 11px; }
+.at-c-st {
   font-size: 11px;
-  color: var(--text-dim);
-  margin-top: 2px;
+  text-align: right;
 }
-.am-empty {
+.at-c-st.critical { color: var(--danger); }
+.at-c-st.warning { color: var(--warn); }
+.at-c-st.info { color: var(--info); }
+.at-empty {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 6px;
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 12px;
 }
-.am-empty .ok {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--accent-dim);
+.at-empty .ok {
+  font-size: 24px;
   color: var(--accent);
-  font-size: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
-/* 底部趋势 */
+/* 底部四格 */
 .hud-bottom {
-  bottom: 16px;
-  left: 20px;
-  right: 20px;
-  height: 176px;
+  grid-area: bottom;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  min-height: 0;
 }
-
-/* 响应式 */
-@media (max-width: 1400px) {
-  .hud-left { width: 210px; }
-  .hud-right { width: 260px; }
+.bottom-cell {
+  min-height: 0;
+  display: flex;
 }
-@media (max-width: 1100px) {
-  .hud-clock { display: none; }
-  .hud-left { width: 180px; }
-  .hud-right {
-    width: 240px;
-    bottom: 16px;
-  }
-  .hud-bottom {
-    left: 200px;
-    right: 260px;
-    grid-template-columns: 1fr;
-    height: auto;
-    max-height: 176px;
-    overflow: hidden;
-  }
-  .hud-bottom .screen-trend:nth-child(n + 2) { display: none; }
+.bottom-cell > * {
+  flex: 1;
+  min-height: 0;
 }
-@media (max-width: 820px) {
-  .hud-left,
-  .hud-right {
-    width: 46vw;
-    max-width: 260px;
-  }
-  .hud-right { bottom: auto; height: 60vh; }
-  .hud-bottom { left: 20px; right: 20px; bottom: 8px; }
+.trend-pack {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  min-height: 0;
+}
+.tp-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.tp-body {
+  flex: 1;
+  display: grid;
+  grid-template-rows: repeat(3, 1fr);
+  gap: 4px;
+  min-height: 0;
 }
 
 /* 设置抽屉 */
@@ -762,5 +739,19 @@ onUnmounted(() => {
   color: var(--text-dim);
   line-height: 1.5;
   margin-bottom: 4px;
+}
+
+/* 响应式 */
+@media (max-width: 1400px) {
+  .screen { grid-template-columns: 234px 1fr 270px; }
+  .kpi-val { font-size: 22px; }
+}
+@media (max-width: 1100px) {
+  .hud-title h1 { font-size: 18px; letter-spacing: 0.06em; }
+  .title-deco { width: 30px; }
+  .screen {
+    grid-template-columns: 200px 1fr 230px;
+    grid-template-rows: 48px auto 1fr 190px;
+  }
 }
 </style>

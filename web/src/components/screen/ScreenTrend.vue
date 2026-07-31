@@ -1,5 +1,5 @@
 <template>
-  <div class="screen-trend glass">
+  <div class="screen-trend glass" :class="{ compact }">
     <div class="trend-head">
       <span class="trend-title">{{ title }}</span>
       <span class="trend-cur" :style="{ color: hexColor }">{{ curText }}</span>
@@ -18,6 +18,7 @@ const props = defineProps({
   series: { type: Array, default: () => [] },
   unit: { type: String, default: '%' }, // '%' | 'rate'
   color: { type: String, default: COLORS.cyan },
+  compact: { type: Boolean, default: false },
 })
 
 const chartEl = ref(null)
@@ -101,5 +102,26 @@ watch(() => props.series, render, { deep: true })
   flex: 1;
   min-height: 90px;
   width: 100%;
+}
+
+/* 紧凑模式：嵌入到资源趋势卡内，去掉嵌套背景与边框 */
+.screen-trend.compact {
+  padding: 2px 4px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.screen-trend.compact .trend-head {
+  margin-bottom: 0;
+}
+.screen-trend.compact .trend-title {
+  font-size: 11px;
+}
+.screen-trend.compact .trend-cur {
+  font-size: 13px;
+}
+.screen-trend.compact .trend-chart {
+  min-height: 30px;
 }
 </style>

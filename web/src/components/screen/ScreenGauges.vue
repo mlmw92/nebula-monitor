@@ -28,6 +28,8 @@ const props = defineProps({
   mem: { type: Number, default: 0 },
   disk: { type: Number, default: 0 },
   onlineRate: { type: Number, default: 0 },
+  loadPct: { type: Number, default: 0 },
+  groupCount: { type: Number, default: 0 },
 })
 
 const R = 34
@@ -49,6 +51,8 @@ const gauges = computed(() => [
   { key: 'cpu', label: 'CPU 使用率', value: props.cpu, text: fmt(props.cpu), color: usageColor(props.cpu) },
   { key: 'mem', label: '内存使用率', value: props.mem, text: fmt(props.mem), color: usageColor(props.mem) },
   { key: 'disk', label: '磁盘使用率', value: props.disk, text: fmt(props.disk), color: usageColor(props.disk) },
+  { key: 'load', label: '平均负载', value: props.loadPct, text: fmt(props.loadPct), color: usageColor(props.loadPct) },
+  { key: 'group', label: '主机分组', value: 100, text: String(props.groupCount), color: 'var(--info)' },
   { key: 'online', label: '在线率', value: props.onlineRate, text: fmt(props.onlineRate), color: rateColor(props.onlineRate) },
 ])
 
@@ -73,8 +77,8 @@ function dash(v) {
 }
 .sg-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px 6px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px 4px;
 }
 .sg-item {
   display: flex;
