@@ -711,8 +711,12 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 		SlotRanges []string `json:"slotRanges,omitempty"`
 	}
 
-	// 以 "node|instance" 为 key 建立实例索引
+	// 以 "node|instance" 为 key 建立实例索引。
+	// 同一 node|instance 可能在 VM 中存在多条 redis_instance_up 序列（如 agent 改过
+	// name/group 配置后旧 label 序列在 staleness 窗口内尚未消散）。去重时取“最新数据点
+	// 时间戳最大”的那条；时间戳相同再优先取 name 非空的那条，避免被旧的空 name 序列覆盖。
 	instances := map[string]*redisInstanceInfo{}
+	latestTs := map[string]int64{}
 	var keys []string
 	for _, s := range upSeries {
 		node := s.Labels["node"]
@@ -721,21 +725,32 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		key := node + "|" + instance
-		if _, exists := instances[key]; !exists {
-			ri := &redisInstanceInfo{
-				Node:      node,
-				Instance:  instance,
-				Name:      s.Labels["name"],
-				Role:      s.Labels["role"],
-				Topology:  s.Labels["topology"],
-				Version:   s.Labels["version"],
-				Group:     s.Labels["group"],
-				ReplicaOf: s.Labels["replica_of"],
-				Up:        s.Points[len(s.Points)-1].Value > 0,
+		ts := s.Points[len(s.Points)-1].Timestamp
+		name := s.Labels["name"]
+		if prev, exists := instances[key]; exists {
+			// 已存在：仅当本条更新（时间戳更大），或时间戳相同但本条 name 非空而已存为空时才覆盖
+			if ts < latestTs[key] {
+				continue
 			}
-			instances[key] = ri
+			if ts == latestTs[key] && !(name != "" && prev.Name == "") {
+				continue
+			}
+		}
+		instances[key] = &redisInstanceInfo{
+			Node:      node,
+			Instance:  instance,
+			Name:      name,
+			Role:      s.Labels["role"],
+			Topology:  s.Labels["topology"],
+			Version:   s.Labels["version"],
+			Group:     s.Labels["group"],
+			ReplicaOf: s.Labels["replica_of"],
+			Up:        s.Points[len(s.Points)-1].Value > 0,
+		}
+		if _, seen := latestTs[key]; !seen {
 			keys = append(keys, key)
 		}
+		latestTs[key] = ts
 	}
 
 	// 2. 批量查询关键指标，按 instance 标签填充到实例

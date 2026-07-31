@@ -104,10 +104,9 @@ func (c *RedisCollector) collectStandalone(cfg model.RedisInstanceConfig, addr s
 		Version:   info["redis_version"],
 		Up:        true,
 	}
-	// 实例存活指标
-	m = append(m, model.Metric{
-		Node: c.node, Name: "redis_instance_up", Labels: labels, Value: 1, Timestamp: now,
-	})
+	// 注意：redis_instance_up 指标统一由 server receiver 依据上报的 RedisInstance 生成
+	// （带完整 name/group/role 标签）。此处不再重复写入，避免与 receiver 产出的序列
+	// label 集不同而在 VM 中形成同一实例的两条 redis_instance_up 序列。
 	return m, ri
 }
 
@@ -135,9 +134,7 @@ func (c *RedisCollector) collectSentinel(cfg model.RedisInstanceConfig, now int6
 			Node: c.node, Name: k, Labels: sentLabels, Value: v, Timestamp: now,
 		})
 	}
-	metrics = append(metrics, model.Metric{
-		Node: c.node, Name: "redis_instance_up", Labels: sentLabels, Value: 1, Timestamp: now,
-	})
+	// redis_instance_up 统一由 receiver 依据下方 append 的 RedisInstance 生成，此处不重复写入。
 	instances = append(instances, model.RedisInstance{
 		Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
 		Role: "sentinel", Topology: cfg.Topology, Group: cfg.Name,
