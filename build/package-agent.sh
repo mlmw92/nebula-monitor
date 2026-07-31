@@ -32,6 +32,112 @@ collectors:
   network: true
   process: true
   load: true
+  # === 中间件监控（默认关闭，按需开启；实例配置见下方示例）===
+  redis: false
+  mysql: false
+  postgres: false
+  nginx: false
+  kafka: false
+  docker: false
+  rocketmq: false
+  # === TCP 端口存活检测（默认关闭）===
+  port: false
+
+# ==================== 中间件实例配置示例 ====================
+# 以下示例默认全部以注释形式给出，请按需取消注释、开启上方对应 collectors 开关后填写。
+# 注意：各中间件密码仅存本机，不上报 Server。
+
+# Redis：支持 standalone / replication / sentinel / cluster 四种拓扑
+# redisInstances:
+#   - name: "redis-standalone"
+#     addr: "127.0.0.1:6379"
+#     password: "yourpassword"     # 仅存本地，不上报 Server
+#     topology: "standalone"
+#   - name: "redis-sentinel"
+#     addr: "127.0.0.1:26379"
+#     password: "yourpassword"
+#     topology: "sentinel"
+#     sentinelName: "mymaster"
+#   - name: "redis-cluster"
+#     addr: "127.0.0.1:7000"
+#     password: "yourpassword"
+#     topology: "cluster"
+#   - name: "redis-exporter"
+#     addr: "127.0.0.1:6379"
+#     password: ""
+#     topology: "standalone"
+#     exporterURL: "http://127.0.0.1:9121/metrics"
+
+# MySQL：支持 standalone / replication
+# mysqlInstances:
+#   - name: "mysql-master"
+#     addr: "127.0.0.1:3306"
+#     user: "monitor"
+#     password: "yourpassword"     # 仅存本地，不上报 Server
+#     topology: "standalone"
+#   - name: "mysql-exporter"
+#     addr: "127.0.0.1:3306"
+#     user: "monitor"
+#     password: ""
+#     topology: "standalone"
+#     exporterURL: "http://127.0.0.1:9104/metrics"
+
+# PostgreSQL：支持 standalone / replication
+# postgresInstances:
+#   - name: "pg-primary"
+#     addr: "127.0.0.1:5432"
+#     database: "postgres"
+#     user: "monitor"
+#     password: "yourpassword"     # 仅存本地，不上报 Server
+#     sslMode: "disable"
+#     topology: "standalone"
+#   - name: "pg-exporter"
+#     addr: "127.0.0.1:5432"
+#     database: "postgres"
+#     user: "monitor"
+#     password: ""
+#     sslMode: "disable"
+#     topology: "standalone"
+#     exporterURL: "http://127.0.0.1:9187/metrics"
+
+# Nginx
+# nginxInstances:
+#   - name: "nginx-01"
+#     addr: "127.0.0.1:80"
+#     statusPath: "/nginx_status"
+#   - name: "nginx-vts"
+#     addr: "127.0.0.1:80"
+#     statusPath: "/nginx_status"
+#     exporterURL: "http://127.0.0.1:9913/metrics"
+
+# Kafka（addr 填任一 Broker 地址）
+# kafkaInstances:
+#   - name: "kafka-cluster"
+#     addr: "127.0.0.1:9092"
+#     version: "2.8.0"
+#   - name: "kafka-exporter"
+#     addr: "127.0.0.1:9092"
+#     version: "2.8.0"
+#     exporterURL: "http://127.0.0.1:9308/metrics"
+
+# Docker（本地用 unix socket，远程用 tcp://host:2375）
+# dockerInstances:
+#   - name: "local-docker"
+#     addr: "unix:///var/run/docker.sock"
+
+# RocketMQ（addr 填 NameServer 地址）
+# rocketmqInstances:
+#   - name: "rocketmq-cluster"
+#     addr: "127.0.0.1:9876"
+#   - name: "rocketmq-exporter"
+#     addr: "127.0.0.1:9876"
+#     exporterURL: "http://127.0.0.1:5557/metrics"
+
+# TCP 端口存活检测（开启 collectors.port 后生效）
+# portChecks:
+#   - "80"
+#   - "443"
+#   - "3306"
 YAML
 
 cat > "${PKG_DIR}/agent.service" <<'UNIT'

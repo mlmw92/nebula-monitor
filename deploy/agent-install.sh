@@ -438,7 +438,57 @@ collectors:
   network: $C_NET
   process: $C_PROC
   load: $C_LOAD
+  # === 中间件监控（默认关闭，按需开启；实例示例见 README「中间件监控」章节）===
+  redis: false
+  mysql: false
+  postgres: false
+  nginx: false
+  kafka: false
+  docker: false
+  rocketmq: false
+  # === TCP 端口存活检测（默认关闭）===
+  port: false
 $( [[ -n "$LABELS_YAML" ]] && printf 'labels:\n%s' "$LABELS_YAML" )
+
+# ==================== 中间件实例配置示例（默认注释，按需取消注释并填写）====================
+# 各中间件密码仅存本机，不上报 Server。配置后可执行子命令重新引导：
+#   bash $CONFIG_DIR/agent-install.sh redis / mysql / postgres / nginx / kafka / rocketmq
+# redisInstances:
+#   - name: "redis-standalone"
+#     addr: "127.0.0.1:6379"
+#     password: "yourpassword"
+#     topology: "standalone"
+# mysqlInstances:
+#   - name: "mysql-master"
+#     addr: "127.0.0.1:3306"
+#     user: "monitor"
+#     password: "yourpassword"
+#     topology: "standalone"
+# postgresInstances:
+#   - name: "pg-primary"
+#     addr: "127.0.0.1:5432"
+#     database: "postgres"
+#     user: "monitor"
+#     password: "yourpassword"
+#     sslMode: "disable"
+#     topology: "standalone"
+# nginxInstances:
+#   - name: "nginx-01"
+#     addr: "127.0.0.1:80"
+#     statusPath: "/nginx_status"
+# kafkaInstances:
+#   - name: "kafka-cluster"
+#     addr: "127.0.0.1:9092"
+#     version: "2.8.0"
+# dockerInstances:
+#   - name: "local-docker"
+#     addr: "unix:///var/run/docker.sock"
+# rocketmqInstances:
+#   - name: "rocketmq-cluster"
+#     addr: "127.0.0.1:9876"
+# portChecks:
+#   - "80"
+#   - "443"
 EOF
   c_ok "配置已写入: $CONFIG_DIR/agent.yaml"
 }
