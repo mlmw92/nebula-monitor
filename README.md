@@ -277,7 +277,7 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `group` | 分组 |
 | `secret` | 接入授权密钥（与 Server 一致） |
 | `interval` | 采集间隔（秒） |
-| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / kafka / docker / rocketmq） |
+| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / kafka / docker / rocketmq / port） |
 | `redisInstances` | Redis 实例连接配置列表（数组，密码仅存本地不上报） |
 | `mysqlInstances` | MySQL 实例连接配置列表（数组，密码仅存本地不上报） |
 | `postgresInstances` | PostgreSQL 实例连接配置列表（数组，密码仅存本地不上报） |
@@ -285,6 +285,7 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `kafkaInstances` | Kafka 实例连接配置列表（数组） |
 | `dockerInstances` | Docker 实例连接配置列表（数组） |
 | `rocketmqInstances` | RocketMQ 实例连接配置列表（数组） |
+| `portChecks` | TCP 端口存活检测列表（数组），如 `["80","443","3306"]`，开启 `collectors.port` 后生效 |
 
 #### 通过命令一键配置（推荐）
 
@@ -308,9 +309,9 @@ bash /etc/monitor-agent/agent-install.sh kafka
 bash /etc/monitor-agent/agent-install.sh rocketmq
 ```
 
-向导会引导你逐个填写：实例别名、地址、密码、拓扑类型（单机/哨兵/集群/exporter），完成后自动写入 `agent.yaml`、开启 `collectors.redis` 并重启 Agent。**密码仅存本机，不上报 Server。**
+向导会引导你逐个填写对应中间件的实例信息（别名、地址、账号/密码、拓扑类型等），完成后自动写入 `agent.yaml`、开启对应的 `collectors` 开关并重启 Agent。**密码仅存本机，不上报 Server。**
 
-> 该命令仅修改配置并重启 Agent，不安装/覆盖二进制。可多次执行以更新实例列表（会覆盖原有 `redisInstances` 段）。
+> 该命令仅修改配置并重启 Agent，不安装/覆盖二进制。可多次执行以更新实例列表（会覆盖对应中间件的 `xxxInstances` 段）；不同中间件子命令对应的配置段相互独立。
 
 #### 手动编辑 YAML（高级）
 
@@ -369,7 +370,7 @@ redisInstances:
     exporterURL: "http://127.0.0.1:9121/metrics"
 ```
 
-**字段说明**
+**Redis 字段说明**
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
@@ -381,21 +382,192 @@ redisInstances:
 | `sentinelName` | 哨兵必填 | sentinel 模式监控的 master 名称 |
 | `exporterURL` | exporter 必填 | Prometheus exporter 的 `/metrics` URL；**一旦填写即走 exporter 拉取模式，忽略直连** |
 
+---
+
+**MySQL 配置示例**
+
+```yaml
+collectors:
+  mysql: true                     # ← 总开关，必须开启
+
+mysqlInstances:
+  - name: "mysql-master"
+    addr: "127.0.0.1:3306"
+    user: "monitor"
+    password: "yourpassword"      # 仅存本地，不上报 Server
+    topology: "standalone"        # standalone | replication
+
+  - name: "mysql-exporter"
+    addr: "127.0.0.1:3306"
+    user: "monitor"
+    password: ""
+    topology: "standalone"
+    exporterURL: "http://127.0.0.1:9104/metrics"
+```
+
+**MySQL 字段说明**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | 是 | 实例别名 |
+| `addr` | 是 | MySQL 地址 `host:port` |
+| `user` | 是 | 采集账号（建议授予 `PROCESS`、`REPLICATION CLIENT` 权限） |
+| `password` | 否 | 密码，`json:"-"` 标记，仅存本地不上报 |
+| `topology` | 是 | `standalone` \| `replication`（replication 额外采集主从延迟/复制状态） |
+| `exporterURL` | exporter 选填 | 填写后走 mysqld_exporter 拉取模式 |
+
+---
+
+**PostgreSQL 配置示例**
+
+```yaml
+collectors:
+  postgres: true
+
+postgresInstances:
+  - name: "pg-primary"
+    addr: "127.0.0.1:5432"
+    database: "postgres"
+    user: "monitor"
+    password: "yourpassword"      # 仅存本地，不上报 Server
+    sslMode: "disable"            # disable | require | verify-ca | verify-full
+    topology: "standalone"        # standalone | replication
+
+  - name: "pg-exporter"
+    addr: "127.0.0.1:5432"
+    database: "postgres"
+    user: "monitor"
+    password: ""
+    sslMode: "disable"
+    topology: "standalone"
+    exporterURL: "http://127.0.0.1:9187/metrics"
+```
+
+**PostgreSQL 字段说明**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | 是 | 实例别名 |
+| `addr` | 是 | PostgreSQL 地址 `host:port` |
+| `database` | 是 | 连接的数据库名 |
+| `user` | 是 | 采集账号 |
+| `password` | 否 | 密码，`json:"-"` 标记，仅存本地不上报 |
+| `sslMode` | 否 | SSL 模式，默认 `disable` |
+| `topology` | 是 | `standalone` \| `replication` |
+| `exporterURL` | exporter 选填 | 填写后走 postgres_exporter 拉取模式 |
+
+---
+
+**Nginx 配置示例**
+
+```yaml
+collectors:
+  nginx: true
+
+nginxInstances:
+  - name: "nginx-01"
+    addr: "127.0.0.1:80"
+    statusPath: "/nginx_status"   # stub_status 路径，默认 /nginx_status
+
+  - name: "nginx-vts"
+    addr: "127.0.0.1:80"
+    statusPath: "/nginx_status"
+    exporterURL: "http://127.0.0.1:9913/metrics"   # VTS exporter
+```
+
+**Nginx 字段说明**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | 是 | 实例别名 |
+| `addr` | 是 | Nginx 监听地址 `host:port` |
+| `statusPath` | 否 | `stub_status` 路径，默认 `/nginx_status` |
+| `exporterURL` | exporter 选填 | 填写后走 nginx-vts-exporter 拉取模式 |
+
+---
+
+**Kafka 配置示例**
+
+```yaml
+collectors:
+  kafka: true
+
+kafkaInstances:
+  - name: "kafka-cluster"
+    addr: "127.0.0.1:9092"        # 任一 Broker 地址
+    version: "2.8.0"              # 用于展示的版本号
+    # exporterURL: "http://127.0.0.1:9308/metrics"  # 可选 JMX exporter
+```
+
+**Kafka 字段说明**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | 是 | 实例别名（集群名） |
+| `addr` | 是 | 任一 Broker 地址 `host:port` |
+| `version` | 否 | Kafka 版本号，仅展示用 |
+| `exporterURL` | exporter 选填 | 填写后走 kafka-exporter 拉取模式 |
+
+---
+
+**Docker 配置示例**
+
+```yaml
+collectors:
+  docker: true
+
+dockerInstances:
+  - name: "local-docker"
+    addr: "unix:///var/run/docker.sock"   # 本地 Unix Socket
+    # 远程 Docker 可填 tcp://10.0.0.1:2375（需开启 TCP 监听）
+```
+
+**Docker 字段说明**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | 是 | 实例别名 |
+| `addr` | 是 | Docker Daemon 地址，本地用 `unix:///var/run/docker.sock`；远程用 `tcp://host:2375` |
+
+---
+
+**RocketMQ 配置示例**
+
+```yaml
+collectors:
+  rocketmq: true
+
+rocketmqInstances:
+  - name: "rocketmq-cluster"
+    addr: "127.0.0.1:9876"        # NameServer 地址
+    # exporterURL: "http://127.0.0.1:5557/metrics"  # 可选 exporter
+```
+
+**RocketMQ 字段说明**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | 是 | 实例别名（集群名） |
+| `addr` | 是 | NameServer 地址 `host:port` |
+| `exporterURL` | exporter 选填 | 填写后走 rocketmq-exporter 拉取模式 |
+
 **部署与验证**
 
-1. 编辑 Agent 配置 `agent.yaml` 加入上述配置；
-2. 重启 Agent（必须，采集逻辑依赖 1.2.0+ 二进制）：
+> 以下以 Redis 为例，其余中间件步骤完全一致，仅替换对应的 `collectors` 开关与实例段，并在 Web 端进入对应的中间件 Tab 查看。
+
+1. 编辑 Agent 配置 `agent.yaml` 加入上述对应中间件的配置；
+2. 重启 Agent（必须，中间件采集逻辑依赖 1.2.0+ 二进制）：
    ```bash
    systemctl restart monitor-agent   # 或离线包：/etc/monitor-agent/monitor-agent restart
    ```
 3. 查看采集日志确认无报错：
    ```bash
-   journalctl -u monitor-agent -f | grep -i redis
+   journalctl -u monitor-agent -f | grep -iE 'redis|mysql|postgres|nginx|kafka|docker|rocketmq'
    ```
-4. Web 端左侧菜单「中间件监控」→「Redis」Tab 即可查看：概览卡片、拓扑/角色/状态分布环形图、内存/OPS 排行柱状图、命中率可视化、实例列表、实例详情抽屉（多趋势图）。
+4. Web 端左侧菜单「中间件监控」→ 对应中间件 Tab（Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ）查看：概览卡片、实例列表、实例详情抽屉（多趋势图）。
 
-> **版本一致性**：Redis 监控涉及 Agent（采集）与 Server（`redis_instance_up` 聚合 + API）两端改动，两端须同时升级到同一版本（≥ 1.2.0），否则 Redis Tab 无数据。
-> **密码安全**：`password` 仅在 Agent 本地用于直连，不上报、不入库、Web 不可见。
+> **版本一致性**：中间件监控涉及 Agent（采集）与 Server（实例聚合 + API）两端改动，两端须同时升级到同一版本（≥ 1.2.0），否则对应 Tab 无数据。
+> **密码安全**：各中间件 `password` 仅在 Agent 本地用于直连，`json:"-"` 标记，不上报、不入库、Web 不可见。
 
 ---
 
