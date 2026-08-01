@@ -61,6 +61,7 @@ func (m *Manager) Register(p *model.ReportPayload) {
 	now := model.NowMillis()
 	n, ok := m.nodes[p.Node]
 	if !ok {
+		// 新节点：Agent 上报的 group 仅作为默认值；若为空则归入默认分组
 		n = &model.Node{
 			Hostname:  p.Node,
 			Group:     p.Group,
@@ -72,8 +73,14 @@ func (m *Manager) Register(p *model.ReportPayload) {
 	n.IP = p.IP
 	n.OS = p.OS
 	n.Arch = p.Arch
-	if p.Group != "" {
-		n.Group = p.Group
+	// 已存在节点：分组以 Server 端（nodes.json）为准，避免 Agent 默认 group 覆盖用户自定义分组。
+	// 仅当该节点尚无有效分组时，才用 Agent 上报的 group 作为兜底。
+	if !ok || n.Group == "" {
+		if p.Group != "" {
+			n.Group = p.Group
+		} else {
+			n.Group = "default"
+		}
 	}
 	if p.Labels != nil {
 		n.Labels = p.Labels
