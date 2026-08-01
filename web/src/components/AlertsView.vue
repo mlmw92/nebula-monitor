@@ -27,11 +27,9 @@
       </div>
       <div class="stats-extra">
         <div class="stats-col">
-          <div class="mini-title">级别分布（活跃）</div>
+          <div class="mini-title">信息类（活跃）</div>
           <div class="sev-bar-wrap">
-            <span class="sev-dot danger"></span>紧急 {{ stats.bySeverity.critical }}
-            <span class="sev-dot warning"></span>警告 {{ stats.bySeverity.warning }}
-            <span class="sev-dot info"></span>信息 {{ stats.bySeverity.info }}
+            <span class="sev-dot info"></span>{{ stats.bySeverity.info }} 条
           </div>
         </div>
         <div class="stats-col">
