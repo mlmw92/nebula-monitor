@@ -68,7 +68,6 @@ const serverVersion = ref('...')
 
 const items = [
   { key: 'overview', to: '/', label: '首页概览', icon: Odometer },
-  { key: 'screen', to: '/screen', label: '数据大屏', icon: DataAnalysis },
   { key: 'hosts', to: '/hosts', label: '主机列表', icon: Monitor },
   { key: 'middleware', to: '/middleware', label: '中间件监控', icon: Connection },
   { key: 'alerts', to: '/alerts', label: '告警中心', icon: Bell },

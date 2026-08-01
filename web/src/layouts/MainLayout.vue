@@ -14,9 +14,7 @@
           </el-breadcrumb>
         </div>
         <div class="topbar-right">
-          <el-tooltip content="数据大屏" placement="bottom">
-            <el-button :icon="DataAnalysis" circle size="small" @click="$router.push('/screen')" />
-          </el-tooltip>
+          <el-button class="screen-entry" :icon="DataAnalysis" @click="$router.push('/screen')">数据大屏</el-button>
           <el-tooltip content="切换配色主题" placement="bottom">
             <el-dropdown trigger="click" @command="changeTheme">
               <el-button circle size="small">
@@ -215,6 +213,24 @@ onUnmounted(() => {
   border-radius: 50%;
   margin-right: 8px;
   vertical-align: middle;
+}
+/* 数据大屏入口：图标+文字，醒目橙色高亮 */
+.screen-entry {
+  --el-button-text-color: #fff;
+  --el-button-bg-color: #f59e0b;
+  --el-button-border-color: #f59e0b;
+  --el-button-hover-bg-color: #f7b733;
+  --el-button-hover-border-color: #f7b733;
+  --el-button-active-bg-color: #e0890a;
+  --el-button-active-border-color: #e0890a;
+  font-weight: 600;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.45);
+  transition: box-shadow 0.15s, filter 0.15s;
+}
+.screen-entry:hover,
+.screen-entry:focus {
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.7);
+  filter: brightness(1.05);
 }
 .content {
   flex: 1;

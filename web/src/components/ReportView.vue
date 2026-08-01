@@ -23,9 +23,14 @@
       <div class="section-title">历史报告</div>
       <el-table :data="history" style="width: 100%">
         <el-table-column label="类型" width="80">
-          <template #default="{ row }"><el-tag size="small">{{ typeLabel(row.type) }}</el-tag></template>
+          <template #default="{ row }">
+            <el-tag v-if="row.type" size="small">{{ typeLabel(row.type) }}</el-tag>
+            <span v-else style="color: var(--text-muted)">—</span>
+          </template>
         </el-table-column>
-        <el-table-column prop="period" label="统计周期" min-width="150" />
+        <el-table-column label="统计周期" min-width="150">
+          <template #default="{ row }">{{ row.period || '—' }}</template>
+        </el-table-column>
         <el-table-column label="生成时间" width="180">
           <template #default="{ row }">{{ formatTime(row.generatedAt) }}</template>
         </el-table-column>

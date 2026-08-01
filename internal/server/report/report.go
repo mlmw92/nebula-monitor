@@ -2,6 +2,7 @@ package report
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"os"
@@ -221,7 +222,15 @@ func (g *Generator) renderHTML(data reportData) (string, error) {
 }
 
 func (g *Generator) loadHistory() {
-	// 简化：从文件列表推断历史
+	// 优先从 history.json 恢复（含类型与统计周期），保证重启后类型/周期不丢失
+	if b, err := os.ReadFile(filepath.Join(g.dir, "history.json")); err == nil {
+		var meta []ReportMeta
+		if json.Unmarshal(b, &meta) == nil && len(meta) > 0 {
+			g.history = meta
+			return
+		}
+	}
+	// 回退：旧部署仅从 .html 文件推断（无类型/周期）
 	entries, err := os.ReadDir(g.dir)
 	if err != nil {
 		return
@@ -240,14 +249,19 @@ func (g *Generator) loadHistory() {
 			continue
 		}
 		g.history = append(g.history, ReportMeta{
-			ID:        id,
+			ID:          id,
 			GeneratedAt: info.ModTime().UnixMilli(),
 		})
 	}
 }
 
 func (g *Generator) persistHistoryLocked() {
-	// 历史记录通过文件系统推断，无需额外持久化
+	// 将历史（含类型、统计周期）持久化为 JSON，供重启后恢复
+	b, err := json.Marshal(g.history)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(g.dir, "history.json"), b, 0o644)
 }
 
 func round2(v float64) float64 {
