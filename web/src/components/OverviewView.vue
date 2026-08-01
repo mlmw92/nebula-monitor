@@ -557,7 +557,7 @@ defineExpose({ reload })
   gap: 6px;
 }
 .node-card:hover {
-  background: rgba(0, 217, 163, 0.06);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
   border-color: var(--accent);
   transform: translateY(-1px);
 }

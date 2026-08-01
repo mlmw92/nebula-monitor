@@ -108,8 +108,8 @@ async function doLogin() {
 .bg-grid {
   position: absolute;
   inset: 0;
-  background-image: linear-gradient(rgba(0, 217, 163, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 217, 163, 0.04) 1px, transparent 1px);
+  background-image: linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 48px 48px;
   mask-image: radial-gradient(circle at 50% 50%, #000 0%, transparent 70%);
 }
@@ -118,7 +118,7 @@ async function doLogin() {
   width: 600px;
   height: 600px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(0, 217, 163, 0.12) 0%, transparent 70%);
+  background: radial-gradient(circle, var(--glow-acc) 0%, transparent 70%);
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);

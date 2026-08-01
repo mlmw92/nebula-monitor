@@ -439,10 +439,6 @@ onUnmounted(() => {
 
 <style scoped>
 /* 科技风大屏：accent 跟随全局主题（默认极光蓝） */
-.screen.blue-theme {
-  --accent: var(--accent);
-  --accent-glow: var(--accent-glow);
-}
 .screen {
   position: fixed;
   inset: 0;

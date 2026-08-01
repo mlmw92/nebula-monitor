@@ -21,7 +21,7 @@
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="b"><span class="td-dot" style="background:#3b9dff"></span>极光蓝（默认）</el-dropdown-item>
+                  <el-dropdown-item command="b"><span class="td-dot" style="background:#4a9df0"></span>极光蓝（默认）</el-dropdown-item>
                   <el-dropdown-item command="a"><span class="td-dot" style="background:#00d9a3"></span>星云青绿</el-dropdown-item>
                   <el-dropdown-item command="c"><span class="td-dot" style="background:#8b5cf6"></span>星河紫</el-dropdown-item>
                 </el-dropdown-menu>
@@ -75,7 +75,7 @@ const username = ref(localStorage.getItem('nebula_user') || 'admin')
 const view = ref(null)
 
 /* ===== 换肤 ===== */
-const THEMES = { b: '#3b9dff', a: '#00d9a3', c: '#8b5cf6' }
+const THEMES = { b: '#4a9df0', a: '#00d9a3', c: '#8b5cf6' }
 const theme = ref(localStorage.getItem('nebula_theme') || 'b')
 const themeColor = computed(() => THEMES[theme.value] || THEMES.b)
 function applyTheme(t) {
