@@ -55,13 +55,13 @@ function goAlerts() {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  background: var(--bg-soft);
+  background: var(--bg-elev);
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.2s;
 }
 .recent-item:hover {
-  background: var(--bg-hover);
+  background: var(--accent-dim);
 }
 .dot {
   width: 8px;
@@ -74,7 +74,7 @@ function goAlerts() {
   box-shadow: 0 0 8px var(--danger-dim);
 }
 .sev-warning {
-  background: var(--warning);
+  background: var(--warn);
 }
 .sev-info {
   background: var(--info);
@@ -107,10 +107,10 @@ function goAlerts() {
   background: var(--danger-dim);
 }
 .recent-state.st-acked {
-  color: var(--warning);
+  color: var(--warn);
 }
 .recent-state.st-resolved {
-  color: var(--success);
+  color: var(--chart-green);
 }
 .recent-empty {
   display: flex;
@@ -118,7 +118,7 @@ function goAlerts() {
   gap: 8px;
   justify-content: center;
   padding: 30px;
-  color: var(--success);
+  color: var(--chart-green);
   font-size: 13px;
 }
 </style>

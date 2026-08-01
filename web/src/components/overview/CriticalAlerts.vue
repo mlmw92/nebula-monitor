@@ -48,13 +48,13 @@ function goAlerts() {
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  background: var(--bg-soft);
+  background: var(--bg-elev);
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.2s;
 }
 .crit-item:hover {
-  background: var(--bg-hover);
+  background: var(--accent-dim);
 }
 .dot {
   width: 8px;
@@ -67,7 +67,7 @@ function goAlerts() {
   box-shadow: 0 0 8px var(--danger-dim);
 }
 .sev-warning {
-  background: var(--warning);
+  background: var(--warn);
 }
 .sev-info {
   background: var(--info);
@@ -92,7 +92,7 @@ function goAlerts() {
   gap: 8px;
   justify-content: center;
   height: 100%;
-  color: var(--success);
+  color: var(--chart-green);
   font-size: 13px;
 }
 </style>

@@ -44,8 +44,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { RefreshRight } from '@element-plus/icons-vue'
+import { ref, computed, onMounted, onBeforeUnmount, markRaw } from 'vue'
+import { RefreshRight, Monitor, Bell, Connection, FirstAidKit } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { middlewareTypes } from './overview/middlewareConfig'
 import { formatMetric } from './overview/format'
@@ -146,14 +146,14 @@ function avg(arr) {
 function getColor(v, warnAt) {
   if (v == null || isNaN(v)) return 'var(--text-muted)'
   if (v >= warnAt + 15) return 'var(--danger)'
-  if (v >= warnAt) return 'var(--warning)'
-  return 'var(--success)'
+  if (v >= warnAt) return 'var(--warn)'
+  return 'var(--chart-green)'
 }
 
 const health = computed(() => {
   const ns = sortedNodes.value
   const total = ns.length
-  const offline = ns.filter((n) => n.status !== 'up').length
+  const offline = ns.filter((n) => n.status !== 'online').length
   const online = total - offline
   const cpus = []
   const mems = []
@@ -198,7 +198,7 @@ const health = computed(() => {
 const kpis = computed(() => {
   const ns = sortedNodes.value
   const total = ns.length
-  const offline = ns.filter((n) => n.status !== 'up').length
+  const offline = ns.filter((n) => n.status !== 'online').length
   const online = total - offline
   const a = alertsAll.value
   const crit = a.filter((x) => (x.severity || '').toLowerCase() === 'critical').length
@@ -209,24 +209,28 @@ const kpis = computed(() => {
       value: total,
       foot: `在线 ${online} · 离线 ${offline}`,
       tone: offline > 0 ? 'warn' : 'good',
+      icon: markRaw(Monitor),
     },
     {
       label: '活跃告警',
       value: a.length,
       foot: `紧急 ${crit} · 警告 ${warn}`,
       tone: crit > 0 ? 'bad' : warn > 0 ? 'warn' : 'good',
+      icon: markRaw(Bell),
     },
     {
       label: '中间件实例',
       value: Object.values(mwData.value).reduce((s, arr) => s + (arr ? arr.length : 0), 0),
       foot: `${middlewareTypes.length} 种类型`,
       tone: 'good',
+      icon: markRaw(Connection),
     },
     {
       label: '系统健康度',
       value: Math.round(health.value.score),
       foot: health.value.statusText,
       tone: health.value.rank === 'bad' ? 'bad' : health.value.rank === 'warn' ? 'warn' : 'good',
+      icon: markRaw(FirstAidKit),
     },
   ]
 })
@@ -371,7 +375,7 @@ onBeforeUnmount(() => {
   padding: 4px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: var(--bg-soft);
+  background: var(--bg-elev);
   color: var(--text-dim);
   cursor: pointer;
   transition: all 0.15s;

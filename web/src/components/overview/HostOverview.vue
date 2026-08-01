@@ -10,13 +10,13 @@
           v-for="h in g.hosts"
           :key="h.hostname"
           class="host-card"
-          :class="{ down: h.status !== 'up' }"
+          :class="{ down: h.status !== 'online' }"
           @click="goNode(h.hostname)"
         >
           <div class="hc-top">
             <OsIcon :os="h.os" />
             <span class="hc-name" :title="h.hostname">{{ displayName(h) }}</span>
-            <span class="hc-dot" :class="h.status === 'up' ? 'up' : 'down'"></span>
+            <span class="hc-dot" :class="h.status === 'online' ? 'up' : 'down'"></span>
           </div>
           <div class="hc-ip">{{ h.ip || h.hostname }}</div>
           <div class="hc-metrics">
@@ -66,9 +66,9 @@ function pct(v) {
 }
 function barStyle(v, warnAt) {
   const n = v == null || isNaN(v) ? 0 : Math.max(0, Math.min(100, v))
-  let color = 'var(--success)'
+  let color = 'var(--chart-green)'
   if (n >= warnAt + 15) color = 'var(--danger)'
-  else if (n >= warnAt) color = 'var(--warning)'
+  else if (n >= warnAt) color = 'var(--warn)'
   return { width: n + '%', background: color }
 }
 function goNode(name) {
@@ -96,7 +96,7 @@ function goNode(name) {
 .group-count {
   font-size: 11px;
   color: var(--text-dim);
-  background: var(--bg-soft);
+  background: var(--bg-elev);
   border-radius: 10px;
   padding: 1px 8px;
 }
@@ -107,7 +107,7 @@ function goNode(name) {
 }
 .host-card {
   width: 220px;
-  background: var(--bg-soft);
+  background: var(--bg-elev);
   border-radius: 10px;
   padding: 12px;
   border: 1px solid var(--border);
@@ -142,8 +142,8 @@ function goNode(name) {
   flex-shrink: 0;
 }
 .hc-dot.up {
-  background: var(--success);
-  box-shadow: 0 0 6px var(--success-dim);
+  background: var(--chart-green);
+  box-shadow: 0 0 6px var(--chart-green);
 }
 .hc-dot.down {
   background: var(--danger);

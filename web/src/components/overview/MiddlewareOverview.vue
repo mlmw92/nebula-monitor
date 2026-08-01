@@ -51,7 +51,7 @@ const router = useRouter()
 function donutStyle(s) {
   const onlinePct = s.total > 0 ? (s.online / s.total) * 100 : 0
   return {
-    background: `conic-gradient(var(--success) 0 ${onlinePct}%, var(--danger) ${onlinePct}% 100%)`,
+    background: `conic-gradient(var(--chart-green) 0 ${onlinePct}%, var(--danger) ${onlinePct}% 100%)`,
   }
 }
 function goTab(tab) {
@@ -66,7 +66,7 @@ function goTab(tab) {
   gap: 14px;
 }
 .mw-card {
-  background: var(--bg-soft);
+  background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px;
@@ -129,7 +129,7 @@ function goTab(tab) {
   content: '';
   position: absolute;
   inset: 6px;
-  background: var(--bg-soft);
+  background: var(--bg-elev);
   border-radius: 50%;
 }
 .mw-donut-inner {
@@ -163,7 +163,7 @@ function goTab(tab) {
   font-weight: 700;
 }
 .mw-stat-val.ok {
-  color: var(--success);
+  color: var(--chart-green);
 }
 .mw-stat-val.off {
   color: var(--danger);

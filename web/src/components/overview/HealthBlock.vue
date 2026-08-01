@@ -66,7 +66,7 @@ function rank(score) {
   width: 92px;
   height: 92px;
   border-radius: 50%;
-  background: conic-gradient(var(--ring-color) calc(var(--p) * 1%), var(--bg-soft) 0);
+  background: conic-gradient(var(--ring-color) calc(var(--p) * 1%), var(--bg-elev) 0);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -96,10 +96,10 @@ function rank(score) {
   color: var(--text-dim);
 }
 .ring.score-good {
-  --ring-color: var(--success);
+  --ring-color: var(--chart-green);
 }
 .ring.score-warn {
-  --ring-color: var(--warning);
+  --ring-color: var(--warn);
 }
 .ring.score-bad {
   --ring-color: var(--danger);
@@ -117,10 +117,10 @@ function rank(score) {
   font-weight: 700;
 }
 .hb-status.c-good {
-  color: var(--success);
+  color: var(--chart-green);
 }
 .hb-status.c-warn {
-  color: var(--warning);
+  color: var(--warn);
 }
 .hb-status.c-bad {
   color: var(--danger);
@@ -157,7 +157,7 @@ function rank(score) {
 .hb-bar {
   height: 5px;
   border-radius: 3px;
-  background: var(--bg-soft);
+  background: var(--bg-elev);
   overflow: hidden;
 }
 .hb-bar-fill {
