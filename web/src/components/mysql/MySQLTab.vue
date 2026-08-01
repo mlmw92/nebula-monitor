@@ -38,6 +38,153 @@
         </KpiCard>
       </div>
 
+      <!-- 实例拓扑：与 Redis 对齐的主从/集群关系视图 -->
+      <div class="chart-section glass" v-if="instances.length">
+        <div class="section-title">实例拓扑</div>
+
+        <!-- 集群组（Group Replication / InnoDB Cluster，多节点多主） -->
+        <template v-if="topologyGroups.clusters.length">
+          <div v-for="grp in topologyGroups.clusters" :key="'c-'+grp.name" class="topo-group">
+            <div class="topo-group-header">
+              <span class="topo-group-title">
+                <el-icon :size="18"><Connection /></el-icon>
+                <strong>集群 {{ grp.name || '未命名' }}</strong>
+              </span>
+              <span class="topo-meta">
+                <span class="badge" :class="clusterHealthClass(grp)">{{ clusterHealthText(grp) }}</span>
+                <span class="dim">节点 {{ (grp.masters.length + grp.slaves.length) || grp.nodes.length }}</span>
+              </span>
+            </div>
+            <div class="topo-grid">
+              <div v-for="i in grp.nodes" :key="'cn-'+i.instance"
+                   class="rel-node rel-standalone" :class="{ 'is-down': !i.up }" @click="openDetail(i)">
+                <div class="rel-node-name" :title="i.instance">
+                  <span class="role-badge role-badge-m">P</span>
+                  {{ i.name || i.instance }}
+                </div>
+                <div class="rel-node-meta">
+                  <span :class="['dot', i.up ? 'up' : 'down']"></span>
+                  <span>{{ i.up ? '在线' : '离线' }}</span>
+                  <span class="dim">·</span>
+                  <span>{{ i.role === 'master' ? 'PRIMARY' : (i.role === 'slave' ? 'SECONDARY' : i.role) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- 主从组 -->
+        <template v-if="topologyGroups.replications.length">
+          <div v-for="grp in topologyGroups.replications" :key="'r-'+grp.name" class="topo-group">
+            <div class="topo-group-header">
+              <span class="topo-group-title">
+                <el-icon :size="18"><Connection /></el-icon>
+                <strong>主从 {{ grp.name }}</strong>
+              </span>
+              <span class="topo-meta">
+                <span class="badge" :class="clusterHealthClass(grp)">{{ clusterHealthText(grp) }}</span>
+                <span class="dim">主库: {{ grp.masters.length }}</span>
+                <span class="dim">· 从库: {{ grp.slaves.length }}</span>
+              </span>
+            </div>
+            <div class="ms-tree">
+              <div v-for="(m, idx) in grp.masters" :key="'rm-'+idx" class="ms-unit">
+                <div class="rel-node rel-master ms-master" :class="{ 'is-down': !m.up }" @click="openDetail(m)">
+                  <div class="rel-node-name" :title="m.instance">
+                    <span class="role-badge role-badge-m">M</span>
+                    {{ m.name || m.instance }}
+                  </div>
+                  <div class="rel-node-meta">
+                    <span :class="['dot', m.up ? 'up' : 'down']"></span>
+                    <span>{{ m.up ? '在线' : '离线' }}</span>
+                    <span class="dim">·</span>
+                    <span>{{ formatNum(m.threadsConnected) }} 连接</span>
+                    <span class="dim">·</span>
+                    <span>{{ formatNum(m.queriesPerSec) }} QPS</span>
+                  </div>
+                </div>
+                <div v-if="grp.slavesByMaster[m.instance].length" class="ms-branch">
+                  <div class="ms-branch-rail">
+                    <span class="ms-rail-repl" title="数据复制方向：主库将 binlog 同步给从库">复制 ↓</span>
+                    <span class="ms-rail-fo" title="主库宕机时对应从库提升为新主库">故障转移 ↑</span>
+                  </div>
+                  <div class="ms-slaves">
+                    <div v-for="s in grp.slavesByMaster[m.instance]" :key="'rs-'+s.instance"
+                         class="rel-node rel-slave ms-slave-card" :class="{ 'is-down': !s.up }" @click.stop="openDetail(s)">
+                      <div class="ms-slave-head">
+                        <span class="role-badge role-badge-s">S</span>
+                        <span class="mono" :title="s.instance">{{ s.name || s.instance }}</span>
+                      </div>
+                      <div class="ms-slave-meta">
+                        <span :class="['dot', s.up ? 'up' : 'down']"></span>
+                        <span>{{ s.up ? '在线' : '离线' }}</span>
+                        <span class="dim">·</span>
+                        <span>{{ s.up ? formatNum(s.queriesPerSec) + ' QPS' : '离线' }}</span>
+                        <span v-if="s.up && s.secondsBehindMaster != null" class="dim">· 延迟 {{ s.secondsBehindMaster }}s</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="topo-legend">
+              <span class="topo-legend-item"><span class="legend-line legend-solid"></span>数据复制（master → slave）</span>
+              <span class="topo-legend-item"><span class="legend-line legend-dash"></span>故障转移（slave 升主，slave → master）</span>
+            </div>
+            <!-- 未关联主节点的从库（replicaOf 为空，常见于 agent 未升级二进制） -->
+            <div v-if="grp.unlinkedSlaves.length" class="unlinked-block">
+              <div class="unlinked-label">
+                <span class="role-badge role-badge-s">S</span>
+                未关联主节点的从库（{{ grp.unlinkedSlaves.length }} 个）— agent 升级后将自动关联
+              </div>
+              <div class="unlinked-list">
+                <div v-for="s in grp.unlinkedSlaves" :key="'ul-'+s.instance"
+                     class="rel-node rel-slave ms-slave-card" :class="{ 'is-down': !s.up }" @click.stop="openDetail(s)">
+                  <div class="ms-slave-head">
+                    <span class="role-badge role-badge-s">S</span>
+                    <span class="mono" :title="s.instance">{{ s.name || s.instance }}</span>
+                  </div>
+                  <div class="ms-slave-meta">
+                    <span :class="['dot', s.up ? 'up' : 'down']"></span>
+                    <span>{{ s.up ? '在线' : '离线' }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- 独立实例 -->
+        <template v-if="topologyGroups.standalones.length">
+          <div class="topo-group">
+            <div class="topo-group-header">
+              <span class="topo-group-title">
+                <el-icon :size="18"><Grid /></el-icon>
+                <strong>独立实例</strong>
+              </span>
+              <span class="dim">共 {{ topologyGroups.standalones.length }} 个</span>
+            </div>
+            <div class="topo-grid">
+              <div v-for="i in topologyGroups.standalones" :key="'sa-'+i.instance"
+                   class="rel-node rel-standalone" :class="{ 'is-down': !i.up }" @click="openDetail(i)">
+                <div class="rel-node-name" :title="i.instance">{{ i.name || i.instance }}</div>
+                <div class="rel-node-meta">
+                  <span :class="['dot', i.up ? 'up' : 'down']"></span>
+                  <span>{{ i.up ? '在线' : '离线' }}</span>
+                  <span class="dim">·</span>
+                  <span>{{ i.instance }}</span>
+                </div>
+                <div class="rel-node-meta">
+                  <span>{{ formatNum(i.threadsConnected) }} 连接</span>
+                  <span class="dim">·</span>
+                  <span>{{ formatNum(i.queriesPerSec) }} QPS</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
       <!-- 实例列表 -->
       <div class="chart-section glass">
         <div class="section-title">实例列表</div>
@@ -150,6 +297,57 @@ const stats = computed(() => {
 
 const detailTitle = computed(() => selected.value ? `MySQL 详情 - ${selected.value.name || selected.value.instance}` : '详情')
 
+// 按拓扑分组，对齐 Redis 的"实例拓扑"展示
+const topologyGroups = computed(() => {
+  const reps = instances.value.filter((i) => (i.topology || '').toLowerCase() === 'replication')
+  const clusters = instances.value.filter((i) => (i.topology || '').toLowerCase() === 'cluster')
+  const standalone = instances.value.filter((i) => {
+    const t = (i.topology || '').toLowerCase()
+    return t !== 'replication' && t !== 'cluster'
+  })
+
+  const groupBy = (list) => {
+    const map = {}
+    list.forEach((i) => {
+      const g = i.group || 'default'
+      ;(map[g] = map[g] || []).push(i)
+    })
+    return Object.keys(map).map((name) => {
+      const items = map[name]
+      const masters = items.filter((i) => (i.role || '').toLowerCase() === 'master')
+      const slaves = items.filter((i) => (i.role || '').toLowerCase() === 'slave')
+      const slavesByMaster = {}
+      masters.forEach((m) => {
+        slavesByMaster[m.instance] = slaves.filter((s) => s.replicaOf === m.instance)
+      })
+      const unlinkedSlaves = slaves.filter((s) => !s.replicaOf || !masters.some((m) => m.instance === s.replicaOf))
+      return { name, masters, slaves, slavesByMaster, unlinkedSlaves, nodes: items }
+    })
+  }
+
+  return {
+    replications: groupBy(reps),
+    clusters: groupBy(clusters),
+    standalones: standalone,
+  }
+})
+
+function clusterHealth(grp) {
+  const items = grp.masters.concat(grp.slaves, grp.nodes || [])
+  if (!items.length) return 'unknown'
+  if (items.some((i) => !i.up)) return 'bad'
+  if (items.some((i) => i.up && i.secondsBehindMaster != null && i.secondsBehindMaster > 30)) return 'warn'
+  return 'good'
+}
+function clusterHealthClass(grp) {
+  const h = clusterHealth(grp)
+  return h === 'good' ? 'badge-ok' : h === 'warn' ? 'badge-warn' : h === 'bad' ? 'badge-down' : 'badge-unknown'
+}
+function clusterHealthText(grp) {
+  const h = clusterHealth(grp)
+  return h === 'good' ? '运行正常' : h === 'warn' ? '延迟偏高' : h === 'bad' ? '存在离线' : '未知'
+}
+
 async function load() {
   loading.value = true
   try {
@@ -237,4 +435,49 @@ onMounted(load)
 .mc-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
 .mc-value { font-size: 18px; font-weight: 600; }
 .chart-box { width: 100%; height: 300px; }
+
+/* ===== 实例拓扑（对齐 Redis 拓扑展示） ===== */
+.topo-group { margin-bottom: 22px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.02); }
+.topo-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
+.topo-group-title { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
+.topo-group-title .el-icon { color: var(--accent); }
+.topo-meta { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; }
+.dim { color: var(--text-muted); }
+.badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.badge-ok { color: var(--accent); background: rgba(34, 197, 94, 0.12); }
+.badge-warn { color: var(--warn); background: rgba(245, 158, 11, 0.12); }
+.badge-down { color: var(--danger); background: rgba(239, 68, 68, 0.12); }
+.badge-unknown { color: var(--text-muted); background: rgba(148, 163, 184, 0.12); }
+
+.topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.rel-node { padding: 12px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--border); background: var(--bg-elev); transition: transform 0.15s, box-shadow 0.15s; }
+.rel-node:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+.rel-node.is-down { opacity: 0.6; }
+.rel-node-name { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+.rel-standalone { border-left: 4px solid var(--chart-blue); }
+
+/* 主从树 */
+.ms-tree { display: flex; flex-direction: column; gap: 18px; margin-top: 6px; }
+.ms-unit { display: flex; gap: 18px; align-items: stretch; flex-wrap: wrap; }
+.rel-master { border-left: 4px solid var(--chart-orange); min-width: 220px; }
+.ms-master { flex: 0 0 auto; }
+.ms-branch { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 10px; }
+.ms-branch-rail { display: flex; gap: 14px; font-size: 11px; color: var(--text-muted); padding-left: 4px; }
+.legend-line { display: inline-block; width: 26px; height: 0; vertical-align: middle; margin-right: 4px; }
+.legend-solid { border-top: 2px solid var(--chart-orange); }
+.legend-dash { border-top: 2px dashed var(--chart-green); }
+.ms-slaves { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; position: relative; padding-left: 16px; border-left: 2px solid var(--chart-orange); }
+.ms-slave-card { border-left: 4px solid var(--chart-green); }
+.ms-slave-head { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; }
+.ms-slave-head .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-slave-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin-top: 6px; flex-wrap: wrap; }
+.role-badge { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; font-size: 11px; font-weight: 700; color: #fff; flex: 0 0 auto; }
+.role-badge-m { background: var(--chart-orange); }
+.role-badge-s { background: var(--chart-green); }
+
+.topo-legend { display: flex; gap: 18px; margin-top: 10px; font-size: 12px; color: var(--text-muted); flex-wrap: wrap; }
+.unlinked-block { margin-top: 14px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 8px; background: rgba(245,158,11,0.04); }
+.unlinked-label { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+.unlinked-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 </style>
