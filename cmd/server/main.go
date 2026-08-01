@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/nebula/monitor/internal/server/agentdist"
@@ -68,6 +69,7 @@ func main() {
 	// 告警相关
 	rules := alert.NewRulesStore(cfg.Alert.RulesFile)
 	alertStore := alert.NewVMAlertStore(store)
+	ackStore := alert.NewAckStore(filepath.Join(filepath.Dir(cfg.Alert.RulesFile), "alert_acks.json"))
 	maintenance := alert.NewMaintenanceStore(cfg.Alert.MaintenanceFile)
 	notifiers := alert.BuildNotifiers(cfg.Notify)
 	hub := api.NewHub()
@@ -123,7 +125,7 @@ func main() {
 	}
 
 	// API
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)

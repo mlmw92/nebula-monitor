@@ -21,14 +21,37 @@ type RulesStore struct {
 	path  string
 }
 
-// NewRulesStore 创建规则存储并加载。
+// NewRulesStore 创建规则存储并加载。若规则文件不存在（全新安装），
+// 自动播种一组开箱即用的推荐规则，避免告警中心初始为空、看起来“没用起来”。
 func NewRulesStore(path string) *RulesStore {
 	s := &RulesStore{
 		rules: map[string]model.AlertRule{},
 		path:  path,
 	}
 	s.load()
+	s.SeedDefaults()
 	return s
+}
+
+// DefaultTemplates 返回可复用的规则模板（不含 ID/时间戳），供前端“从模板新建”。
+func DefaultTemplates() []model.AlertRule {
+	return []model.AlertRule{
+		{Name: "CPU 使用率过高", Metric: "cpu_usage", Operator: ">", Threshold: 85, For: "5m", Severity: model.SeverityWarning, Scope: "all", Enabled: true},
+		{Name: "内存使用率过高", Metric: "mem_used_percent", Operator: ">", Threshold: 90, For: "5m", Severity: model.SeverityWarning, Scope: "all", Enabled: true},
+		{Name: "磁盘使用率过高", Metric: "disk_used_percent", Operator: ">", Threshold: 85, For: "5m", Severity: model.SeverityCritical, Scope: "all", Enabled: true},
+		{Name: "系统负载过高", Metric: "load1", Operator: ">", Threshold: 8, For: "5m", Severity: model.SeverityWarning, Scope: "all", Enabled: true},
+	}
+}
+
+// SeedDefaults 仅当规则文件不存在（全新安装）时写入推荐规则，
+// 不覆盖用户主动清空规则后的空状态。
+func (s *RulesStore) SeedDefaults() {
+	if _, err := os.Stat(s.path); err == nil {
+		return
+	}
+	for _, t := range DefaultTemplates() {
+		s.Create(t)
+	}
 }
 
 // List 返回所有规则。

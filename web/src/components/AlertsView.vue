@@ -68,7 +68,15 @@
     <div class="glass panel" style="margin-bottom: 16px">
       <div class="panel-title-row">
         <span class="panel-title" style="margin-bottom: 0">告警规则</span>
-        <el-button type="primary" size="small" :icon="Plus" @click="newRule">新建规则</el-button>
+        <el-dropdown split-button type="primary" size="small" @command="onTemplateCmd">
+          <span @click="newRule">新建规则</span>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="__blank">空白规则</el-dropdown-item>
+              <el-dropdown-item v-for="t in templates" :key="t.name" :command="t.name">{{ t.name }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
       <el-table :data="rules" stripe style="width: 100%" empty-text="暂无规则">
         <el-table-column prop="name" label="名称" min-width="140" />
@@ -129,10 +137,19 @@
             <el-radio-button value="resolved">已恢复</el-radio-button>
             <el-radio-button value="">全部</el-radio-button>
           </el-radio-group>
+          <el-button size="small" :disabled="!selected.length" @click="batchAck">批量确认 ({{ selected.length }})</el-button>
           <el-button size="small" :loading="testing" @click="testAlert">测试事件</el-button>
         </div>
       </div>
-      <el-table :data="filteredAlerts" stripe style="width: 100%" empty-text="暂无告警事件">
+      <el-table
+        :data="filteredAlerts"
+        stripe
+        style="width: 100%"
+        empty-text="暂无告警事件"
+        @selection-change="onSelect"
+        @row-dblclick="openDetail"
+      >
+        <el-table-column type="selection" width="45" />
         <el-table-column prop="ruleName" label="规则" min-width="140" />
         <el-table-column prop="node" label="节点" min-width="130" />
         <el-table-column label="级别" width="80">
@@ -140,9 +157,10 @@
             <el-tag :type="sevType(row.severity)" size="small" effect="dark">{{ sevLabel(row.severity) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" width="120">
           <template #default="{ row }">
-            <el-tag :type="row.state === 'firing' ? 'danger' : 'success'" size="small" effect="dark">
+            <el-tag v-if="acks[ackKey(row)]" type="info" size="small" effect="plain">已确认</el-tag>
+            <el-tag v-else :type="row.state === 'firing' ? 'danger' : 'success'" size="small" effect="dark">
               {{ row.state === 'firing' ? '告警中' : '已恢复' }}
             </el-tag>
           </template>
@@ -151,26 +169,70 @@
         <el-table-column label="时间" width="160">
           <template #default="{ row }">{{ fmt(row.startsAt || row.endsAt) }}</template>
         </el-table-column>
+        <el-table-column label="操作" width="80">
+          <template #default="{ row }">
+            <el-button link size="small" @click="openDetail(row)">详情</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </div>
 
     <RuleModal v-if="editing" :rule="editing" :groups="groups" :channels="channelOptions" @close="editing = null" @saved="onSaved" />
+
+    <!-- 告警事件详情 -->
+    <el-drawer v-model="drawer" :title="detail?.ruleName || '告警详情'" size="480px" @closed="onDrawerClosed">
+      <template v-if="detail">
+        <div class="ev-field"><span>级别</span><el-tag :type="sevType(detail.severity)" effect="dark">{{ sevLabel(detail.severity) }}</el-tag></div>
+        <div class="ev-field"><span>状态</span>{{ stateLabel(detail) }}</div>
+        <div class="ev-field">
+          <span>节点</span>
+          <span>
+            <el-link type="primary" @click="gotoNode(detail)">{{ detail.node }}</el-link>
+            <span class="muted" v-if="detail.nodeIp"> ({{ detail.nodeIp }})</span>
+            <span v-if="acks[ackKey(detail)]" class="ev-acked">· 已确认</span>
+          </span>
+        </div>
+        <div class="ev-field"><span>触发条件</span><span class="mono">{{ detail.metric }} {{ detail.operator }} {{ detail.threshold }}</span></div>
+        <div class="ev-field"><span>触发值</span><span class="mono">{{ detail.value }}</span></div>
+        <div class="ev-field"><span>详情</span><span>{{ detail.message }}</span></div>
+        <div class="ev-field"><span>开始</span><span>{{ fmt(detail.startsAt) }}</span></div>
+        <div class="ev-field"><span>恢复</span><span>{{ detail.state === 'resolved' ? fmt(detail.endsAt) : '—' }}</span></div>
+        <div class="ev-chart-title" v-if="detail.metric">触发指标近 1 小时趋势</div>
+        <div class="ev-chart" ref="chartRef" v-if="detail.metric"></div>
+        <div class="ev-actions">
+          <el-button type="primary" size="small" :disabled="acks[ackKey(detail)]" @click="ackEvent(detail)">
+            {{ acks[ackKey(detail)] ? '已确认' : '确认告警' }}
+          </el-button>
+          <el-button size="small" @click="drawer = false">关闭</el-button>
+        </div>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import * as echarts from 'echarts'
 import http from '../api/http'
 import RuleModal from './RuleModal.vue'
 
+const router = useRouter()
 const rules = ref([])
 const alerts = ref([])
 const groups = ref([])
+const templates = ref([])
+const acks = ref({})
 const editing = ref(null)
 const eventFilter = ref('firing')
 const testing = ref(false)
+const selected = ref([])
+const drawer = ref(false)
+const detail = ref(null)
+const chartRef = ref(null)
+let chartInstance = null
 const maintenance = ref({ enabled: false, start: 0, end: 0, reason: '' })
 // 全部渠道及其展示名；enabled 由通知配置决定，未启用的渠道在新建规则时置灰。
 const CHANNEL_META = [
@@ -192,11 +254,18 @@ const filteredAlerts = computed(() => {
   return alerts.value.filter((a) => a.state === eventFilter.value)
 })
 
+function ackKey(e) {
+  return `${e.ruleName}|${e.node}|${e.instance || ''}`
+}
 function sevType(s) {
   return { critical: 'danger', warning: 'warning', info: 'info' }[s] || 'info'
 }
 function sevLabel(s) {
   return { critical: '紧急', warning: '警告', info: '信息' }[s] || s
+}
+function stateLabel(e) {
+  if (acks.value[ackKey(e)]) return '已确认'
+  return { firing: '告警中', resolved: '已恢复', pending: '待触发' }[e.state] || e.state
 }
 function channelLabel(v) {
   return (CHANNEL_META.find((c) => c.value === v) || {}).label || v
@@ -238,19 +307,19 @@ async function saveMaintenance() {
 async function load() {
   try {
     rules.value = (await http.get('/api/v1/rules')).rules || []
-  } catch (e) {
-    /* ignore */
-  }
+  } catch (e) { /* ignore */ }
   try {
     alerts.value = (await http.get('/api/v1/alerts')).alerts || []
-  } catch (e) {
-    /* ignore */
-  }
+  } catch (e) { /* ignore */ }
   try {
     groups.value = (await http.get('/api/v1/groups')).groups || []
-  } catch (e) {
-    /* ignore */
-  }
+  } catch (e) { /* ignore */ }
+  try {
+    templates.value = (await http.get('/api/v1/rules/templates')).templates || []
+  } catch (e) { /* ignore */ }
+  try {
+    acks.value = (await http.get('/api/v1/alerts/acks')).acks || {}
+  } catch (e) { /* ignore */ }
   try {
     const cfg = await http.get('/api/v1/notify')
     const enabled = {
@@ -261,9 +330,7 @@ async function load() {
       wecom: cfg.wecom && cfg.wecom.enabled,
     }
     channelOptions.value = CHANNEL_META.map((c) => ({ ...c, enabled: !!enabled[c.value] }))
-  } catch (e) {
-    /* ignore */
-  }
+  } catch (e) { /* ignore */ }
 }
 
 async function testAlert() {
@@ -287,6 +354,14 @@ function newRule() {
   // 设为空对象（truthy）以触发 RuleModal 渲染（v-if="editing"）
   editing.value = {}
 }
+function onTemplateCmd(cmd) {
+  if (cmd === '__blank') {
+    newRule()
+    return
+  }
+  const t = templates.value.find((x) => x.name === cmd)
+  if (t) editing.value = { ...t }
+}
 function edit(rule) {
   editing.value = { ...rule }
 }
@@ -296,9 +371,7 @@ async function del(id) {
     await http.del('/api/v1/rules/' + id)
     ElMessage.success('已删除')
     load()
-  } catch (e) {
-    /* 取消 */
-  }
+  } catch (e) { /* 取消 */ }
 }
 function onSaved() {
   editing.value = null
@@ -307,14 +380,84 @@ function onSaved() {
 async function toggleRule(rule) {
   try {
     await http.post('/api/v1/rules/' + rule.id + '/toggle')
-    // el-switch 已即时翻转 row.enabled，这里仅提示；load() 后台刷新保证与后端一致。
     ElMessage.success(rule.enabled ? '已启用' : '已停用')
     load()
   } catch (e) {
-    // 失败回滚开关状态
     rule.enabled = !rule.enabled
     ElMessage.error('操作失败')
   }
+}
+
+function onSelect(rows) {
+  selected.value = rows
+}
+function openDetail(row) {
+  detail.value = row
+  drawer.value = true
+  nextTick(() => loadTrend(row))
+}
+function gotoNode(row) {
+  router.push({ path: '/hosts', query: { node: row.node } })
+}
+async function ackEvent(row) {
+  try {
+    await http.post('/api/v1/alerts/ack', { rule: row.ruleName, host: row.node, instance: row.instance || '' })
+    ElMessage.success('已确认')
+    await load()
+  } catch (e) {
+    ElMessage.error('确认失败')
+  }
+}
+async function batchAck() {
+  if (!selected.value.length) return
+  try {
+    await Promise.all(selected.value.map((r) =>
+      http.post('/api/v1/alerts/ack', { rule: r.ruleName, host: r.node, instance: r.instance || '' }),
+    ))
+    ElMessage.success(`已确认 ${selected.value.length} 条`)
+    await load()
+  } catch (e) {
+    ElMessage.error('批量确认失败')
+  }
+}
+
+async function loadTrend(row) {
+  if (!row.metric || !chartRef.value) return
+  const end = Date.now()
+  const start = end - 3600 * 1000
+  let url = `/api/v1/query/range?node=${encodeURIComponent(row.node)}&metric=${encodeURIComponent(row.metric)}&start=${start}&end=${end}&step=60000`
+  if (row.instance) url += `&labels.instance=${encodeURIComponent(row.instance)}`
+  try {
+    const data = await http.get(url)
+    const pts = (data.series || []).map((p) => [p.time, p.value])
+    renderChart(pts, row)
+  } catch (e) { /* ignore */ }
+}
+function renderChart(points, row) {
+  if (chartInstance) { chartInstance.dispose(); chartInstance = null }
+  chartInstance = echarts.init(chartRef.value)
+  chartInstance.setOption({
+    grid: { left: 48, right: 16, top: 24, bottom: 28 },
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'time' },
+    yAxis: { type: 'value', name: row.metric },
+    series: [{
+      type: 'line',
+      data: points,
+      showSymbol: false,
+      smooth: true,
+      areaStyle: { opacity: 0.15 },
+      lineStyle: { color: '#dc382d' },
+      itemStyle: { color: '#dc382d' },
+      markLine: row.threshold
+        ? { silent: true, symbol: 'none', data: [{ yAxis: row.threshold }], lineStyle: { color: '#e6a23c', type: 'dashed' }, label: { formatter: '阈值 ' + row.threshold } }
+        : undefined,
+    }],
+  })
+}
+function onDrawerClosed() {
+  if (chartInstance) { chartInstance.dispose(); chartInstance = null }
+  detail.value = null
 }
 
 // 每 30s 自动刷新告警列表，确保实时性
@@ -326,6 +469,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  if (chartInstance) chartInstance.dispose()
 })
 </script>
 
@@ -341,6 +485,10 @@ onUnmounted(() => {
   align-items: center;
 }
 .muted {
+  color: var(--muted, #909399);
+}
+.ev-acked {
+  margin-left: 6px;
   color: var(--muted, #909399);
 }
 .maintenance-row {
@@ -372,5 +520,31 @@ onUnmounted(() => {
   margin-left: 6px;
   font-size: 12px;
   color: var(--muted, #909399);
+}
+.ev-field {
+  display: flex;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border, #2a2f3a);
+  font-size: 13px;
+}
+.ev-field > span:first-child {
+  width: 64px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.ev-chart-title {
+  margin: 16px 0 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.ev-chart {
+  width: 100%;
+  height: 240px;
+}
+.ev-actions {
+  margin-top: 16px;
+  display: flex;
+  gap: 8px;
 }
 </style>

@@ -77,11 +77,12 @@ type API struct {
 	maintenance MaintenanceProvider
 	dialtest  DialtestProvider
 	report    ReportProvider
+	acks      *alert.AckStore
 }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -112,7 +113,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/middleware/k8s/instances", a.handleK8sInstances)
 
 	mux.HandleFunc("GET /api/v1/alerts", a.handleAlerts)
+	mux.HandleFunc("GET /api/v1/alerts/acks", a.handleAlertAcks)
+	mux.HandleFunc("POST /api/v1/alerts/ack", a.handleAlertAck)
 	mux.HandleFunc("GET /api/v1/rules", a.handleRulesList)
+	mux.HandleFunc("GET /api/v1/rules/templates", a.handleRuleTemplates)
 	mux.HandleFunc("POST /api/v1/rules", a.handleRuleCreate)
 	mux.HandleFunc("PUT /api/v1/rules/{id}", a.handleRuleUpdate)
 	mux.HandleFunc("POST /api/v1/rules/{id}/toggle", a.handleRuleToggle)
@@ -612,6 +616,32 @@ func (a *API) handleRuleUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleRuleDelete(w http.ResponseWriter, r *http.Request) {
 	a.rules.Delete(r.PathValue("id"))
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+// handleRuleTemplates 返回可复用的告警规则模板（供前端“从模板新建”）。
+func (a *API) handleRuleTemplates(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{"templates": alert.DefaultTemplates()})
+}
+
+// handleAlertAcks 返回全部已确认告警的 key 映射（rule|host|instance）。
+func (a *API) handleAlertAcks(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{"acks": a.acks.Map()})
+}
+
+// handleAlertAck 确认（认领）一条告警。
+func (a *API) handleAlertAck(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Rule     string `json:"rule"`
+		Host     string `json:"host"`
+		Instance string `json:"instance"`
+		User     string `json:"user"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Rule == "" || body.Host == "" {
+		http.Error(w, "rule and host required", http.StatusBadRequest)
+		return
+	}
+	a.acks.Mark(body.Rule, body.Host, body.Instance, body.User)
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
