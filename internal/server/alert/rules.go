@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -54,7 +55,18 @@ func (s *RulesStore) SeedDefaults() {
 	}
 }
 
-// List 返回所有规则。
+// sortRulesByCreatedDesc 按创建时间倒序排列（新建在前）；
+// CreatedAt 相同时按 ID 倒序，保证顺序确定、不随 map 遍历随机抖动。
+func sortRulesByCreatedDesc(out []model.AlertRule) {
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt > out[j].CreatedAt
+		}
+		return out[i].ID > out[j].ID
+	})
+}
+
+// List 返回所有规则，按创建时间倒序。
 func (s *RulesStore) List() []model.AlertRule {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -62,6 +74,7 @@ func (s *RulesStore) List() []model.AlertRule {
 	for _, r := range s.rules {
 		out = append(out, r)
 	}
+	sortRulesByCreatedDesc(out)
 	return out
 }
 
@@ -143,6 +156,7 @@ func (s *RulesStore) persistLocked() {
 	for _, r := range s.rules {
 		list = append(list, r)
 	}
+	sortRulesByCreatedDesc(list)
 	data, err := yaml.Marshal(list)
 	if err != nil {
 		slog.Warn("序列化规则失败", "err", err)
