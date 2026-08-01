@@ -13,7 +13,7 @@
       <el-tab-pane label="Redis" name="redis">
         <template #label>
           <span class="tab-label">
-            <span class="tab-dot redis"></span>Redis
+            <img class="tab-icon" :src="redisIcon" alt="Redis" />Redis
           </span>
         </template>
         <RedisTab v-if="activeTab === 'redis'" />
@@ -21,7 +21,7 @@
       <el-tab-pane label="MySQL" name="mysql">
         <template #label>
           <span class="tab-label">
-            <span class="tab-dot mysql"></span>MySQL
+            <img class="tab-icon" :src="mysqlIcon" alt="MySQL" />MySQL
           </span>
         </template>
         <MySQLTab v-if="activeTab === 'mysql'" />
@@ -29,7 +29,7 @@
       <el-tab-pane label="PostgreSQL" name="postgres">
         <template #label>
           <span class="tab-label">
-            <span class="tab-dot postgres"></span>PostgreSQL
+            <img class="tab-icon" :src="postgresIcon" alt="PostgreSQL" />PostgreSQL
           </span>
         </template>
         <PostgresTab v-if="activeTab === 'postgres'" />
@@ -37,7 +37,7 @@
       <el-tab-pane label="Nginx" name="nginx">
         <template #label>
           <span class="tab-label">
-            <span class="tab-dot nginx"></span>Nginx
+            <img class="tab-icon" :src="nginxIcon" alt="Nginx" />Nginx
           </span>
         </template>
         <NginxTab v-if="activeTab === 'nginx'" />
@@ -45,7 +45,7 @@
       <el-tab-pane label="Kafka" name="kafka">
         <template #label>
           <span class="tab-label">
-            <span class="tab-dot kafka"></span>Kafka
+            <img class="tab-icon" :src="kafkaIcon" alt="Kafka" />Kafka
           </span>
         </template>
         <KafkaTab v-if="activeTab === 'kafka'" />
@@ -53,7 +53,7 @@
       <el-tab-pane label="Docker" name="docker">
         <template #label>
           <span class="tab-label">
-            <span class="tab-dot docker"></span>Docker
+            <img class="tab-icon" :src="dockerIcon" alt="Docker" />Docker
           </span>
         </template>
         <DockerTab v-if="activeTab === 'docker'" />
@@ -61,7 +61,7 @@
       <el-tab-pane label="RocketMQ" name="rocketmq">
         <template #label>
           <span class="tab-label">
-            <span class="tab-dot rocketmq"></span>RocketMQ
+            <img class="tab-icon" :src="rocketmqIcon" alt="RocketMQ" />RocketMQ
           </span>
         </template>
         <RocketMQTab v-if="activeTab === 'rocketmq'" />
@@ -69,7 +69,7 @@
       <el-tab-pane label="Kubernetes" name="k8s">
         <template #label>
           <span class="tab-label">
-            <span class="tab-dot k8s"></span>Kubernetes
+            <img class="tab-icon" :src="k8sIcon" alt="Kubernetes" />Kubernetes
           </span>
         </template>
         <K8sTab v-if="activeTab === 'k8s'" />
@@ -78,7 +78,7 @@
         <template #label>
           <el-tooltip content="即将支持" placement="top">
             <span class="tab-label disabled">
-              <span class="tab-dot mongo"></span>MongoDB
+              <img class="tab-icon" :src="mongodbIcon" alt="MongoDB" />MongoDB
             </span>
           </el-tooltip>
         </template>
@@ -97,6 +97,15 @@ import KafkaTab from './kafka/KafkaTab.vue'
 import DockerTab from './docker/DockerTab.vue'
 import RocketMQTab from './rocketmq/RocketMQTab.vue'
 import K8sTab from './k8s/K8sTab.vue'
+import redisIcon from '../assets/img/redis.svg'
+import mysqlIcon from '../assets/img/mysql.svg'
+import postgresIcon from '../assets/img/postgresql.svg'
+import nginxIcon from '../assets/img/nginx.svg'
+import kafkaIcon from '../assets/img/Kafka.svg'
+import dockerIcon from '../assets/img/docker.svg'
+import mongodbIcon from '../assets/img/mongoDB.svg'
+import rocketmqIcon from '../assets/img/rocketMQ.svg'
+import k8sIcon from '../assets/img/kubernetes.svg'
 
 const activeTab = ref('redis')
 </script>
@@ -135,6 +144,11 @@ const activeTab = ref('redis')
 .tab-label.disabled {
   color: var(--text-muted);
   cursor: not-allowed;
+}
+.tab-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
 }
 .tab-dot {
   width: 8px;

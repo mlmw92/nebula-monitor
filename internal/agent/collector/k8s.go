@@ -149,9 +149,17 @@ func (c *K8sCollector) collectNodes(cfg model.K8sInstanceConfig, conn *k8sConn, 
 			}
 		}
 		role := nodeRole(n.Metadata.Labels)
+		ip := ""
+		for _, addr := range n.Status.Addresses {
+			if addr.Type == "InternalIP" {
+				ip = addr.Address
+				break
+			}
+		}
 		out = append(out, c.mk("k8s_node_ready", isReady, cfg, conn, map[string]string{
-			"node_name": n.Metadata.Name,
-			"role":      role,
+			"node_name":   n.Metadata.Name,
+			"role":        role,
+			"internal_ip": ip,
 		}, now))
 	}
 	out = append(out, c.mk("k8s_nodes_total", float64(total), cfg, conn, nil, now))
@@ -574,6 +582,10 @@ type k8sNodeList struct {
 				Type   string `json:"type"`
 				Status string `json:"status"`
 			} `json:"conditions"`
+			Addresses []struct {
+				Type    string `json:"type"`
+				Address string `json:"address"`
+			} `json:"addresses"`
 		} `json:"status"`
 	} `json:"items"`
 }

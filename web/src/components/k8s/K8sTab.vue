@@ -52,6 +52,7 @@
         <div class="section-title">节点列表</div>
         <el-table :data="nodes" style="width: 100%" empty-text="暂无节点数据">
           <el-table-column prop="nodeName" label="节点名" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="ip" label="IP" min-width="140" show-overflow-tooltip />
           <el-table-column prop="cluster" label="集群" width="140" />
           <el-table-column label="角色" width="100">
             <template #default="{ row }"><el-tag size="small">{{ row.role }}</el-tag></template>

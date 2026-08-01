@@ -3,7 +3,7 @@
     <!-- 面包屑 + 状态 -->
     <div class="breadcrumb" v-if="current">
       <el-icon class="bc-home"><HomeFilled /></el-icon>
-      <span class="bc-item">主机监控</span>
+      <span class="bc-item bc-link" @click="$router.push('/hosts')">主机监控</span>
       <el-icon class="bc-sep"><ArrowRight /></el-icon>
       <span class="bc-item bc-cur">{{ current.hostname }}<em v-if="current.ip"> · {{ current.ip }}</em></span>
       <span class="status-pill" :class="currentStatus">
@@ -858,6 +858,8 @@ onUnmounted(() => {
 .breadcrumb .bc-home { color: var(--el-color-primary); }
 .breadcrumb .bc-sep { font-size: 12px; opacity: 0.6; }
 .breadcrumb .bc-item { color: var(--text-dim); }
+.breadcrumb .bc-link { cursor: pointer; transition: color 0.15s; }
+.breadcrumb .bc-link:hover { color: var(--el-color-primary); }
 .breadcrumb .bc-cur { color: var(--text-main); font-weight: 600; }
 .breadcrumb .bc-cur em { font-style: normal; color: var(--text-dim); font-weight: 400; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }

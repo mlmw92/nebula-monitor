@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/dialtest"
@@ -389,6 +390,25 @@ func (a *API) handleKafkaInstances(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"instances": out})
 }
 
+// hostFromDaemon 从 daemon 地址（如 tcp://1.2.3.4:2375 或 unix:///var/run/docker.sock）提取 host 部分作为 IP 展示。
+func hostFromDaemon(daemon string) string {
+	if daemon == "" {
+		return ""
+	}
+	if i := strings.Index(daemon, "://"); i >= 0 {
+		daemon = daemon[i+3:]
+	}
+	if i := strings.Index(daemon, "/"); i >= 0 {
+		daemon = daemon[:i]
+	}
+	if i := strings.LastIndex(daemon, ":"); i >= 0 {
+		if !strings.Contains(daemon, "[") {
+			daemon = daemon[:i]
+		}
+	}
+	return daemon
+}
+
 // ---- Docker ----
 
 func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
@@ -489,6 +509,7 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 	type dockerHostInfo struct {
 		Node              string  `json:"node"`
 		Daemon            string  `json:"daemon"`
+		IP                string  `json:"ip"`
 		Group             string  `json:"group"`
 		ContainersTotal   float64 `json:"containersTotal"`
 		ContainersRunning float64 `json:"containersRunning"`
@@ -509,6 +530,7 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 				hosts[key] = &dockerHostInfo{
 					Node:            node,
 					Daemon:          daemon,
+					IP:              hostFromDaemon(daemon),
 					Group:           s.Labels["group"],
 					ContainersTotal: s.Points[len(s.Points)-1].Value,
 				}
@@ -887,6 +909,7 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 		Instance  string  `json:"instance"`
 		NodeName  string  `json:"nodeName"`
 		Role      string  `json:"role"`
+		IP        string  `json:"ip"`
 		Ready     bool    `json:"ready"`
 		CPUCores  float64 `json:"cpuCores"`
 		MemBytes  float64 `json:"memBytes"`
@@ -902,13 +925,14 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 			}
 			key := instance + "|" + nodeName
 			if _, ok := nodes[key]; !ok {
-				nodes[key] = &k8sNodeInfo{
-					Cluster:  s.Labels["name"],
-					Instance: instance,
-					NodeName: nodeName,
-					Role:     s.Labels["role"],
-					Ready:    s.Points[len(s.Points)-1].Value > 0,
-				}
+			nodes[key] = &k8sNodeInfo{
+				Cluster:  s.Labels["name"],
+				Instance: instance,
+				NodeName: nodeName,
+				Role:     s.Labels["role"],
+				IP:       s.Labels["internal_ip"],
+				Ready:    s.Points[len(s.Points)-1].Value > 0,
+			}
 				nodeKeys = append(nodeKeys, key)
 			}
 		}
