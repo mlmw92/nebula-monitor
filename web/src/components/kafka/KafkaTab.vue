@@ -208,4 +208,21 @@ onMounted(load)
 .mc-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
 .mc-value { font-size: 18px; font-weight: 600; }
 .chart-box { width: 100%; height: 300px; }
+
+/* 实例拓扑 */
+.topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.rel-node { padding: 12px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--border); background: var(--bg-elev); transition: transform 0.15s, box-shadow 0.15s; }
+.rel-node:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+.rel-node.is-down { opacity: 0.6; }
+.rel-node-name { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+.rel-standalone { border-left: 4px solid var(--chart-blue); }
+.rel-master { border-left: 4px solid var(--chart-orange); }
+
+/* 列表状态点 */
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.status-dot.up { background: #4ade80; }
+.status-dot.down { background: #f87171; }
+.status-text { display: inline-flex; align-items: center; font-size: 13px; }
+.status-text.status-issue { color: #f87171; }
 </style>
