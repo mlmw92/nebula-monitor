@@ -776,8 +776,8 @@ defineExpose({ reload: load })
   vertical-align: middle;
 }
 .status-led.on {
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent-glow);
+  background: var(--chart-green);
+  box-shadow: 0 0 6px var(--chart-green);
 }
 .status-led.off {
   background: var(--danger);
@@ -786,7 +786,7 @@ defineExpose({ reload: load })
   font-size: 12px;
   vertical-align: middle;
 }
-.status-text.on { color: var(--accent); }
+.status-text.on { color: var(--chart-green); }
 .status-text.off { color: var(--danger); }
 
 /* 分组标签 */
