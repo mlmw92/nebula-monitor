@@ -1,10 +1,15 @@
 package api
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,10 +71,11 @@ type API struct {
 	nodeMgr   *node.Manager
 	rules     RulesProvider
 	alerts    AlertStore
-	hub       *Hub
-	agentAuth config.AgentAuthConfig
-	webDir    string
-	auth      config.AuthConfig
+	hub         *Hub
+	agentAuth   config.AgentAuthConfig
+	agentBinDir string
+	webDir      string
+	auth        config.AuthConfig
 	upgrader  *upgrade.Manager
 	notifyMgr *notify.Manager
 	screenMgr *screencfg.Manager
@@ -83,8 +89,8 @@ type API struct {
 }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -331,16 +337,40 @@ func (a *API) handleNodeDelete(w http.ResponseWriter, r *http.Request) {
 // handleNodeUpgrade 标记节点待升级，Agent 下次上报时收到 upgrade 指令并自升级。
 func (a *API) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if _, ok := a.nodeMgr.GetNode(name); !ok {
+	node, ok := a.nodeMgr.GetNode(name)
+	if !ok {
 		http.Error(w, "node not found", http.StatusNotFound)
 		return
 	}
-	a.nodeMgr.RequestUpgrade(name, version.Version)
-	slog.Info("收到 Agent 升级请求", "node", name, "targetVersion", version.Version)
+	// 目标二进制 = Server CDN 中该节点架构的 agent（由最近一次 Server 升级包放入）。
+	// 以二进制 SHA256 作为升级目标，与 server 自身版本号解耦：CDN 里是什么，节点就升级到什么。
+	binPath := filepath.Join(a.agentBinDir, "agent", "linux", node.Arch, "agent")
+	targetSHA, err := fileSHA256(binPath)
+	if err != nil {
+		slog.Warn("CDN 中缺少该架构的 agent 二进制，无法下发升级", "node", name, "arch", node.Arch, "bin", binPath, "err", err)
+		http.Error(w, "Server CDN 中没有该架构的 agent 二进制，请先在系统升级页上传并应用包含 agent 的升级包", http.StatusBadRequest)
+		return
+	}
+	a.nodeMgr.RequestUpgrade(name, targetSHA, version.Version)
+	slog.Info("收到 Agent 升级请求", "node", name, "arch", node.Arch, "targetSHA", targetSHA, "targetVersion", version.Version)
 	writeJSON(w, 200, map[string]string{
 		"status":  "ok",
 		"message": "升级任务已下发，等待 Agent 下次心跳时执行",
 	})
+}
+
+// fileSHA256 计算文件的 SHA256（十六进制小写）。
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func (a *API) handleNodeGroup(w http.ResponseWriter, r *http.Request) {

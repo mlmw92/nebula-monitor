@@ -4,6 +4,6 @@ package upgrader
 
 import "syscall"
 
-func setSysProcAttr() *syscall.SysProcAttr {
+func setSysProcAttr() any {
 	return &syscall.SysProcAttr{Setpgid: true}
 }

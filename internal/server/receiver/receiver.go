@@ -133,7 +133,7 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 
 	// 响应：若节点仍需升级（agent 版本未达标），持续下发 upgrade 指令
 	resp := map[string]interface{}{"status": "ok"}
-	if r.nodeMgr.ConsumeUpgrade(payload.Node, payload.Version) {
+	if r.nodeMgr.ConsumeUpgrade(payload.Node, payload.Version, payload.BinSHA256) {
 		resp["command"] = "upgrade"
 		slog.Info("已下发升级指令", "node", payload.Node, "agentVersion", payload.Version)
 	}

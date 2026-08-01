@@ -2,8 +2,11 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strconv"
@@ -18,6 +21,42 @@ import (
 )
 
 const pidFile = "/var/run/monitor-agent.pid"
+
+// agentBinSHA 是当前 agent 二进制的 SHA256，随上报提交给 Server，
+// 作为升级成功的确认依据（与版本号解耦：CDN 里的二进制是什么，目标就是什么）。
+var agentBinSHA = binSHA256()
+
+// binSHA256 计算当前 agent 二进制的 SHA256（十六进制小写）。
+func binSHA256() string {
+	path, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// watchUpgradeSignal 监控升级信号文件：非 systemd 环境下升级脚本下载校验完成后
+// 写入该文件，本进程检测到后退出，交由脚本替换二进制并重新拉起。
+func watchUpgradeSignal() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		if _, err := os.Stat(upgrader.ReadyFile); err == nil {
+			slog.Info("检测到升级信号文件，退出进程等待替换")
+			_ = os.Remove(pidFile)
+			os.Exit(0)
+		}
+	}
+}
 
 func main() {
 	cfgPath := flag.String("config", "agent.yaml", "配置文件路径")
@@ -42,6 +81,11 @@ func main() {
 	// 写 pid 文件，升级脚本通过它等待 agent 退出
 	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644)
 	defer os.Remove(pidFile)
+
+	// 清理可能残留的升级信号文件（上次非 systemd 升级中断遗留）
+	_ = os.Remove(upgrader.ReadyFile)
+	// 监控升级信号文件：非 systemd 环境下升级脚本写入后，本进程自行退出以便替换二进制
+	go watchUpgradeSignal()
 
 	coll := collector.New(cfg.Node, cfg.Group, cfg.Labels, cfg.Collectors,
 		cfg.RedisInstances, cfg.MySQLInstances, cfg.PostgresInstances,
@@ -93,6 +137,7 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 		Group:             cfg.Group,
 		Labels:            cfg.Labels,
 		Version:           version.Version,
+		BinSHA256:         agentBinSHA,
 		HostInfo:          collector.CollectHostInfo(),
 		Metrics:           metrics,
 		Processes:         procs,
@@ -115,11 +160,11 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 
 	// 检查 Server 下发的指令
 	if resp.Command == "upgrade" {
-		slog.Info("收到升级指令，开始自升级流程", "server", cfg.ServerURL)
+		slog.Info("收到升级指令，启动自升级流程", "server", cfg.ServerURL)
 		upgrader.Run(cfg)
-		// 不主动退出：升级脚本会用 systemctl stop 停止本进程。
-		// 阻塞等待，避免 ticker 再次触发上报导致 ConsumeUpgrade 已消费但升级未完成。
-		slog.Info("等待升级脚本执行，agent 进入阻塞状态")
-		select {}
+		// 不阻塞：升级脚本先下载并校验新二进制（期间 agent 继续正常运行与上报），
+		// 准备就绪后通过 systemctl stop 或升级信号文件停止本进程再替换。
+		// 若脚本失败，agent 保持运行，等待 Server 下次心跳重试，不会假死。
+		slog.Debug("自升级已在后台执行，agent 继续运行")
 	}
 }

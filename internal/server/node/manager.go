@@ -18,9 +18,10 @@ type metaFile struct {
 	Groups []model.Group `json:"groups"`
 }
 
-// upgradeTask 记录一个节点的升级任务（持续追踪直到 agent 版本匹配或超时）。
+// upgradeTask 记录一个节点的升级任务（持续追踪直到 agent 二进制匹配或超时）。
 type upgradeTask struct {
-	targetVersion string    // 期望 agent 升级到的版本
+	targetSHA     string    // 期望 agent 二进制的 SHA256（Server CDN 中目标二进制，与版本号解耦）
+	targetVersion string    // 目标版本号（仅用于日志与展示，不参与成功判定）
 	createdAt     time.Time // 任务创建时间（用于超时清理）
 	retries       int       // 已下发次数（用于限流与诊断）
 }
@@ -171,11 +172,14 @@ func (m *Manager) RemoveNode(name string) {
 }
 
 // RequestUpgrade 标记某节点待升级（由前端 API 触发）。
-// targetVersion 为期望 agent 升级到的版本（server 当前版本）。
-func (m *Manager) RequestUpgrade(name, targetVersion string) {
+// targetSHA 为 Server CDN 中目标 agent 二进制的 SHA256，Agent 上报的二进制
+// 校验和与之匹配即视为升级成功（避免与 server 自身版本号强耦合）。
+// targetVersion 仅用于日志与展示。
+func (m *Manager) RequestUpgrade(name, targetSHA, targetVersion string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.upgradeQueue[name] = &upgradeTask{
+		targetSHA:     targetSHA,
 		targetVersion: targetVersion,
 		createdAt:     time.Now(),
 	}
@@ -183,11 +187,11 @@ func (m *Manager) RequestUpgrade(name, targetVersion string) {
 
 // ConsumeUpgrade 检查节点是否需要升级指令。
 // 持续下发逻辑：
-//   - 节点在升级队列中且 agent 上报版本 != 目标版本 -> 下发 upgrade，保留任务
-//   - agent 上报版本 == 目标版本 -> 升级成功，移除任务
+//   - 节点在升级队列中且 agent 上报的二进制 SHA256 未达标 -> 下发 upgrade，保留任务
+//   - agent 上报二进制 SHA256 与目标一致 -> 升级成功，移除任务
 //   - 任务超时（10 分钟）-> 放弃，移除任务
 //   - 节点不在队列中 -> 不下发
-func (m *Manager) ConsumeUpgrade(name, agentVersion string) bool {
+func (m *Manager) ConsumeUpgrade(name, agentVersion, agentSHA string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	task, ok := m.upgradeQueue[name]
@@ -196,13 +200,13 @@ func (m *Manager) ConsumeUpgrade(name, agentVersion string) bool {
 	}
 	// 超时清理（10 分钟）
 	if time.Since(task.createdAt) > 10*time.Minute {
-		slog.Warn("升级任务超时，移除", "node", name, "target", task.targetVersion, "agent", agentVersion)
+		slog.Warn("升级任务超时，移除", "node", name, "target", task.targetVersion, "agentVersion", agentVersion)
 		delete(m.upgradeQueue, name)
 		return false
 	}
-	// 版本匹配 -> 升级成功
-	if agentVersion != "" && agentVersion == task.targetVersion {
-		slog.Info("agent 升级成功", "node", name, "version", agentVersion)
+	// 二进制 SHA256 匹配 -> 升级成功（CDN 里的二进制就是目标，与 server 版本号解耦）
+	if task.targetSHA != "" && agentSHA == task.targetSHA {
+		slog.Info("agent 升级成功", "node", name, "version", agentVersion, "targetSHA", task.targetSHA)
 		delete(m.upgradeQueue, name)
 		return false
 	}

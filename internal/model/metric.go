@@ -43,6 +43,7 @@ type ReportPayload struct {
 	Secret         string            `json:"secret,omitempty"`         // 接入授权密钥（启用 agentAuth 时校验）
 	Labels         map[string]string `json:"labels,omitempty"`         // 自定义标签
 	Version        string            `json:"version,omitempty"`        // Agent 版本号
+	BinSHA256      string            `json:"binSHA256,omitempty"`      // Agent 二进制自身 SHA256（升级成功判定依据，与版本号解耦）
 	HostInfo       HostInfo          `json:"hostInfo,omitempty"`       // 主机系统与硬件信息
 	Metrics        []Metric          `json:"metrics"`                  // 指标列表
 	Processes      []ProcessStat     `json:"processes,omitempty"`      // 资源占用 Top 进程
