@@ -89,7 +89,6 @@
                 />
               </div>
               <span class="hn-ip">{{ row.ip || '-' }}</span>
-              <span class="hn-host" v-if="row.displayName">原始：{{ row.hostname }}</span>
             </div>
           </template>
         </el-table-column>
@@ -724,11 +723,6 @@ defineExpose({ reload: load })
 }
 .hn-ip {
   color: var(--text-dim);
-  font-size: 11px;
-  font-family: var(--mono);
-}
-.hn-host {
-  color: var(--text-muted);
   font-size: 11px;
   font-family: var(--mono);
 }

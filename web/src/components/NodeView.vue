@@ -5,7 +5,7 @@
       <el-icon class="bc-home"><HomeFilled /></el-icon>
       <span class="bc-item bc-link" @click="$router.push('/hosts')">主机监控</span>
       <el-icon class="bc-sep"><ArrowRight /></el-icon>
-      <span class="bc-item bc-cur">{{ current.hostname }}<em v-if="current.ip"> · {{ current.ip }}</em></span>
+      <span class="bc-item bc-cur">{{ hostTitle(current) }}<em v-if="current.ip"> · {{ current.ip }}</em></span>
       <span class="status-pill" :class="currentStatus">
         <i class="dot"></i>{{ currentStatus === 'online' ? '在线' : '离线' }}
       </span>
@@ -47,7 +47,7 @@
         <!-- 设备信息 -->
         <div class="section-title">设备信息</div>
         <div class="device-grid">
-          <div class="dev-item"><span>主机名</span><strong class="with-copy">{{ current?.hostname || '-' }}<el-icon class="copy-btn" title="复制" @click="copyText(current?.hostname)"><DocumentCopy /></el-icon></strong></div>
+          <div class="dev-item"><span>主机名</span><strong class="with-copy">{{ hostTitle(current) }}<el-icon class="copy-btn" title="复制" @click="copyText(current?.hostname)"><DocumentCopy /></el-icon></strong></div>
           <div class="dev-item"><span>IP 地址</span><strong class="with-copy mono">{{ current?.ip || '-' }}<el-icon class="copy-btn" title="复制" @click="copyText(current?.ip)"><DocumentCopy /></el-icon></strong></div>
           <div class="dev-item"><span>操作系统</span><strong>{{ current?.os || '-' }}</strong></div>
           <div class="dev-item"><span>运行天数</span><strong class="mono">{{ uptimeDays }} 天（{{ bootTimeText }}）</strong></div>
@@ -361,6 +361,13 @@ const setMonitorRef = (el, key) => {
     delete monitorEls[key]
     if (monitorCharts[key]) { monitorCharts[key].dispose(); delete monitorCharts[key] }
   }
+}
+
+// 主机名展示：有别名时显示 原始名（别名：别名）
+function hostTitle(n) {
+  if (!n) return '-'
+  const dn = n.displayName && n.displayName.trim() ? n.displayName.trim() : ''
+  return dn ? `${n.hostname}（别名：${dn}）` : n.hostname
 }
 
 const current = computed(() => nodes.value.find((n) => n.hostname === selected.value) || null)
