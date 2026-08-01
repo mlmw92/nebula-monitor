@@ -158,27 +158,44 @@ const health = computed(() => {
   const total = ns.length
   const offline = ns.filter((n) => n.status !== 'online').length
   const online = total - offline
-  const cpus = []
-  const mems = []
-  const disks = []
-  ns.forEach((n) => {
-    const m = latestMap.value[n.hostname] || {}
-    if (m.cpu != null) cpus.push(m.cpu)
-    if (m.mem != null) mems.push(m.mem)
-    if (m.disk != null) disks.push(m.disk)
+
+  // 资源压力统计：仅对“超过告警阈值”的部分扣分，避免正常负载拉低分数
+  const pressureConfig = [
+    { key: 'cpu', label: 'CPU', warnAt: 70, weight: 15 },
+    { key: 'mem', label: '内存', warnAt: 80, weight: 12 },
+    { key: 'disk', label: '磁盘', warnAt: 85, weight: 12 },
+  ]
+  const pressure = pressureConfig.map((p) => {
+    const values = []
+    ns.forEach((n) => {
+      const v = (latestMap.value[n.hostname] || {})[p.key]
+      if (typeof v === 'number' && !isNaN(v)) values.push(v)
+    })
+    const avgVal = avg(values)
+    // 平均超阈值幅度（只统计超过 warnAt 的部分，未超过为 0）
+    const avgOver = avg(values.map((v) => Math.max(0, v - p.warnAt)))
+    const warnCount = values.filter((v) => v >= p.warnAt).length
+    const badCount = values.filter((v) => v >= p.warnAt + 15).length
+    return { ...p, rate: avgVal, avgOver, warnCount, badCount, count: values.length }
   })
-  const cpuA = avg(cpus)
-  const memA = avg(mems)
-  const diskA = avg(disks)
-  // 与 HealthBlock 中的扣分原因保持一致：同时使用告警离线 + 阈值压力 + 告警数量
+
   const crit = alertsAll.value.filter((x) => (x.severity || '').toLowerCase() === 'critical').length
   const warn = alertsAll.value.filter((x) => (x.severity || '').toLowerCase() === 'warning').length
+
   let score = 100
   if (total > 0) {
-    const offlinePenalty = (offline / total) * 100 * 0.6
-    const loadPenalty = ((cpuA + memA + diskA) / 3) * 0.4
-    score = Math.max(0, Math.round(100 - offlinePenalty - loadPenalty))
+    // 离线扣分（权重最大）
+    score -= (offline / total) * 60
+    // 资源超阈值扣分（只有实际超过阈值才扣）
+    pressure.forEach((p) => {
+      score -= (p.avgOver / 100) * p.weight
+    })
+    // 活跃告警扣分
+    score -= crit * 5
+    score -= warn * 2
+    score = Math.max(0, Math.round(score))
   }
+
   let statusText = '未知'
   let rank = 'unknown'
   if (total === 0) {
@@ -202,12 +219,7 @@ const health = computed(() => {
     offline,
     criticalAlerts: crit,
     warningAlerts: warn,
-    // 供 HealthBlock 渲染扣分原因：每个指标携带其告警阈值
-    pressure: [
-      { key: 'cpu', label: 'CPU', rate: cpuA, warnAt: 70 },
-      { key: 'mem', label: '内存', rate: memA, warnAt: 80 },
-      { key: 'disk', label: '磁盘', rate: diskA, warnAt: 85 },
-    ],
+    pressure,
   }
 })
 

@@ -40,7 +40,7 @@ const props = defineProps({
   health: { type: Object, required: true },
 })
 
-// 派生"扣分原因"列表：按严重度降序，最多展示 4 条
+// 派生"扣分原因"列表：与 OverviewView 的 score 计算口径严格一致
 const reasons = computed(() => {
   const list = []
   const h = props.health
@@ -56,17 +56,21 @@ const reasons = computed(() => {
     })
   }
 
-  // 2. 资源压力
+  // 2. 资源压力：只有超过告警阈值才展示（与 score 扣分条件一致）
   const pressure = h.pressure || []
   pressure.forEach((p) => {
-    if (!p || typeof p.rate !== 'number' || isNaN(p.rate)) return
-    if (p.rate < p.warnAt) return
-    const severity = p.rate >= p.warnAt + 15 ? 'bad' : 'warn'
+    if (!p || typeof p.avgOver !== 'number' || isNaN(p.avgOver) || p.avgOver <= 0) return
+    const isBad = p.badCount > 0
+    const severity = isBad ? 'bad' : 'warn'
+    let valueText = Math.round(p.avgOver) + '% 平均超阈值'
+    if (p.count > 1) {
+      valueText = `${p.warnCount}/${p.count} 台偏高`
+    }
     list.push({
       key: p.key,
       severity,
-      label: p.label + ' 平均偏高',
-      value: Math.round(p.rate) + '%',
+      label: p.label + (isBad ? ' 严重偏高' : ' 平均偏高'),
+      value: valueText,
     })
   })
 
@@ -78,7 +82,8 @@ const reasons = computed(() => {
       label: '紧急告警',
       value: h.criticalAlerts + ' 条',
     })
-  } else if (h.warningAlerts > 0) {
+  }
+  if (h.warningAlerts > 0) {
     list.push({
       key: 'warn',
       severity: 'warn',
