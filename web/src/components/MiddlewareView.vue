@@ -90,6 +90,7 @@
 <script setup>
 import { ref, watch, defineAsyncComponent, h } from 'vue'
 import { useRoute } from 'vue-router'
+import './mw/mw.css'
 
 // 各中间件 Tab 改为异步组件，拆分为独立 chunk，避免进入中间件页面时
 // 一次性下载全部 Tab 代码导致首屏卡顿（仅激活的 Tab 才按需加载）

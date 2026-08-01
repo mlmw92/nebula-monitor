@@ -48,17 +48,17 @@
       </div>
 
       <!-- 节点列表 -->
-      <div class="chart-section glass">
-        <div class="section-title">节点列表</div>
+      <div class="mw-list glass">
+        <div class="mw-list-title">节点列表</div>
         <el-table :data="nodes" style="width: 100%" empty-text="暂无节点数据">
           <el-table-column prop="nodeName" label="节点名" min-width="180" show-overflow-tooltip />
           <el-table-column prop="ip" label="IP" min-width="140" show-overflow-tooltip />
           <el-table-column prop="cluster" label="集群" width="140" />
           <el-table-column label="角色" width="100">
-            <template #default="{ row }"><el-tag size="small">{{ row.role }}</el-tag></template>
+            <template #default="{ row }"><MwRoleTag :role="row.role" /></template>
           </el-table-column>
           <el-table-column label="状态" width="90">
-            <template #default="{ row }"><span :class="['dot', row.ready ? 'up' : 'down']"></span>{{ row.ready ? 'Ready' : 'NotReady' }}</template>
+            <template #default="{ row }"><MwStatusDot :status="row.ready ? 'normal' : 'abnormal'" :label="row.ready ? 'Ready' : 'NotReady'" /></template>
           </el-table-column>
           <el-table-column label="CPU 用量" width="110" sortable :sort-by="'cpuCores'">
             <template #default="{ row }">{{ row.cpuCores ? row.cpuCores.toFixed(2) + ' 核' : '-' }}</template>
@@ -70,14 +70,14 @@
       </div>
 
       <!-- 异常 Pod -->
-      <div v-if="pods.length > 0" class="chart-section glass">
-        <div class="section-title">异常 Pod（非 Running/Succeeded）</div>
+      <div v-if="pods.length > 0" class="mw-list glass">
+        <div class="mw-list-title">异常 Pod（非 Running/Succeeded）</div>
         <el-table :data="pods" style="width: 100%">
           <el-table-column prop="pod" label="Pod" min-width="220" show-overflow-tooltip />
           <el-table-column prop="namespace" label="命名空间" width="160" />
           <el-table-column prop="cluster" label="集群" width="140" />
           <el-table-column label="状态" width="120">
-            <template #default="{ row }"><el-tag type="danger" size="small">{{ row.phase }}</el-tag></template>
+            <template #default="{ row }"><MwStatusDot :status="['Running', 'Succeeded'].includes(row.phase) ? 'normal' : 'abnormal'" :label="row.phase" /></template>
           </el-table-column>
         </el-table>
       </div>
@@ -90,6 +90,8 @@ import { ref, onMounted, computed } from 'vue'
 import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
+import MwStatusDot from '../mw/MwStatusDot.vue'
+import MwRoleTag from '../mw/MwRoleTag.vue'
 
 const loading = ref(true)
 const clusters = ref([])

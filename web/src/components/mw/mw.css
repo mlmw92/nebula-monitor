@@ -1,0 +1,21 @@
+/* 中间件各 Tab 列表/表格统一风格（被 MiddlewareView 引入，作用于整个中间件模块） */
+.mw-list {
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.mw-list-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+.mw-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.mw-toolbar .spacer {
+  flex: 1;
+}

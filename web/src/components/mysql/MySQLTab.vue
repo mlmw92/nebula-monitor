@@ -186,8 +186,8 @@
       </div>
 
       <!-- 实例列表 -->
-      <div class="chart-section glass">
-        <div class="section-title">实例列表</div>
+      <div class="mw-list glass">
+        <div class="mw-list-title">实例列表</div>
         <el-table :data="pagedInstances" class="mysql-table" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
           <el-table-column prop="instance" label="实例地址" min-width="180" show-overflow-tooltip />
           <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip>
@@ -202,14 +202,13 @@
           </el-table-column>
           <el-table-column prop="role" label="角色" min-width="90">
             <template #default="{ row }">
-              <el-tag :type="row.role === 'master' ? 'warning' : 'info'" size="small">{{ row.role }}</el-tag>
+              <MwRoleTag :role="row.role" />
             </template>
           </el-table-column>
           <el-table-column prop="version" label="版本" min-width="140" show-overflow-tooltip />
           <el-table-column label="状态" min-width="100">
             <template #default="{ row }">
-              <span :class="['dot', row.up ? 'up' : 'down']"></span>
-              {{ row.up ? '在线' : '离线' }}
+              <MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="row.up ? '正常' : '离线'" />
             </template>
           </el-table-column>
           <el-table-column prop="threadsConnected" label="连接数" min-width="110" sortable />
@@ -269,6 +268,8 @@ import * as echarts from 'echarts'
 import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
+import MwStatusDot from '../mw/MwStatusDot.vue'
+import MwRoleTag from '../mw/MwRoleTag.vue'
 import {
   Grid,
   CircleCheck,

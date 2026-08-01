@@ -321,7 +321,7 @@
     </div>
 
     <!-- ===== 区块2：实例列表 ===== -->
-    <div class="table-section glass">
+    <div class="mw-list glass">
       <div class="table-toolbar">
         <div>
           <div class="section-title no-bar">实例列表</div>
@@ -352,7 +352,7 @@
         </el-table-column>
         <el-table-column label="角色" width="100">
           <template #default="{ row }">
-            <span class="role-tag" :class="row.role">{{ roleLabel(row.role) }}</span>
+            <MwRoleTag :role="row.role" />
           </template>
         </el-table-column>
         <el-table-column label="拓扑" width="90">
@@ -361,14 +361,14 @@
           </template>
         </el-table-column>
         <el-table-column label="版本" prop="version" width="90" />
-        <el-table-column label="状态" width="110">
-          <template #default="{ row }">
-            <el-tooltip v-if="isAlert(row)" :content="issueReasons(row).join('；')" placement="top">
-              <span class="status-text status-issue"><span class="status-dot" :class="statusClass(row)"></span>异常</span>
-            </el-tooltip>
-            <span v-else class="status-text"><span class="status-dot" :class="statusClass(row)"></span>{{ row.up ? '在线' : '离线' }}</span>
-          </template>
-        </el-table-column>
+          <el-table-column label="状态" width="120">
+            <template #default="{ row }">
+              <el-tooltip v-if="isAlert(row)" :content="issueReasons(row).join('；')" placement="top">
+                <MwStatusDot :status="instStatus(row).status" :label="instStatus(row).label" :tooltip="issueReasons(row).join('；')" />
+              </el-tooltip>
+              <MwStatusDot v-else :status="instStatus(row).status" :label="instStatus(row).label" />
+            </template>
+          </el-table-column>
         <el-table-column label="异常原因" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="isAlert(row)" class="issue-reasons">{{ issueReasons(row).join('；') }}</span>
@@ -455,7 +455,7 @@
         <div class="detail-header">
           <div class="dh-left">
             <div class="dh-title">
-              <span class="status-dot lg" :class="statusClass(selected)"></span>
+              <MwStatusDot large :status="instStatus(selected).status" :label="instStatus(selected).label" />
               <span class="mono">{{ selected.instance }}</span>
             </div>
             <div class="dh-meta">
@@ -584,7 +584,15 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch, h } f
 import { Search } from '@element-plus/icons-vue'
 import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
+import MwStatusDot from '../mw/MwStatusDot.vue'
+import MwRoleTag from '../mw/MwRoleTag.vue'
 import { ElMessage } from 'element-plus'
+
+function instStatus(i) {
+  if (!i.up) return { status: 'abnormal', label: '离线' }
+  if (isAlert(i)) return { status: 'abnormal', label: '异常' }
+  return { status: 'normal', label: '正常' }
+}
 import http from '../../api/http'
 import { echarts, initChart, COLORS } from '../../charts/echarts'
 

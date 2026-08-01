@@ -39,14 +39,14 @@
         </div>
       </div>
 
-      <div class="chart-section glass">
-        <div class="section-title">实例列表</div>
+      <div class="mw-list glass">
+        <div class="mw-list-title">实例列表</div>
         <el-table :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
           <el-table-column prop="instance" label="实例地址" min-width="160" show-overflow-tooltip />
           <el-table-column prop="name" label="名称" min-width="100" show-overflow-tooltip />
           <el-table-column prop="version" label="版本" width="100" />
           <el-table-column label="状态" width="90">
-            <template #default="{ row }"><span class="status-text"><span class="status-dot" :class="row.up ? 'up' : 'down'"></span>{{ row.up ? '在线' : '离线' }}</span></template>
+            <template #default="{ row }"><MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="row.up ? '正常' : '离线'" /></template>
           </el-table-column>
           <el-table-column prop="activeConnections" label="活动连接" width="100" sortable />
           <el-table-column prop="requestsPerSec" label="请求速率(req/s)" width="120" sortable />
@@ -93,6 +93,8 @@ import * as echarts from 'echarts'
 import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
+import MwStatusDot from '../mw/MwStatusDot.vue'
+import MwRoleTag from '../mw/MwRoleTag.vue'
 
 const loading = ref(true)
 const instances = ref([])

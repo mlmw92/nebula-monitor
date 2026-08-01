@@ -43,15 +43,15 @@
         </div>
       </div>
 
-      <div class="chart-section glass">
-        <div class="section-title">容器列表</div>
+      <div class="mw-list glass">
+        <div class="mw-list-title">容器列表</div>
         <el-table :data="pagedContainers" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
           <el-table-column prop="name" label="名称" min-width="150" show-overflow-tooltip />
           <el-table-column prop="image" label="镜像" min-width="200" show-overflow-tooltip />
           <el-table-column prop="host" label="所在主机" min-width="120" />
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
-              <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
+              <MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="row.status" />
             </template>
           </el-table-column>
           <el-table-column prop="cpuPercent" label="CPU%" width="90" sortable />
@@ -95,6 +95,7 @@ import * as echarts from 'echarts'
 import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
+import MwStatusDot from '../mw/MwStatusDot.vue'
 
 const loading = ref(true)
 const stats = ref({ hosts: [] })
