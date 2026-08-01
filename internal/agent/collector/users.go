@@ -16,16 +16,31 @@ func CollectUsers() []model.OnlineUser {
 		return nil
 	}
 	out := make([]model.OnlineUser, 0, len(us))
+	// utmp 可能针对同一终端(tty/pts)写入多条 USER_PROCESS 记录
+	// （如 SSH 连接 + PAM 会话 + 未清理的残留记录），导致同一登录会话被重复计数。
+	// 按 终端 去重：一个终端同时只能有一个会话，保留该终端上登录时间最新的一条。
+	termIdx := make(map[string]int)     // terminal -> 在 out 中的下标
+	termStart := make(map[string]int) // terminal -> 对应记录的 Start 时间
 	for _, u := range us {
-		if u.User == "" {
+		if u.User == "" || u.Terminal == "" {
 			continue
 		}
-		out = append(out, model.OnlineUser{
+		ou := model.OnlineUser{
 			User:     u.User,
 			Terminal: u.Terminal,
 			From:     u.Host,
 			LoginAt:  time.Unix(int64(u.Started), 0).Format("2006-01-02 15:04:05"),
-		})
+		}
+		if idx, ok := termIdx[u.Terminal]; ok {
+			if u.Started > termStart[u.Terminal] {
+				termStart[u.Terminal] = u.Started
+				out[idx] = ou
+			}
+			continue
+		}
+		termIdx[u.Terminal] = len(out)
+		termStart[u.Terminal] = u.Started
+		out = append(out, ou)
 	}
 	return out
 }

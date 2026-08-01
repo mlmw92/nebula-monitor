@@ -72,6 +72,14 @@ func (c *NginxCollector) collectStubStatus(cfg model.NginxInstanceConfig, now in
 		return nil, c.downInstance(cfg)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		// 非 200 通常是 stub_status 未在该路径启用（如返回 404/403），
+		// 属被监控机 Nginx 配置问题，给出明确提示而非打印整段响应体。
+		slog.Warn("Nginx stub_status 返回非 200",
+			"url", url, "status", resp.StatusCode,
+			"hint", "请在目标 Nginx 配置中启用 stub_status：location "+statusPath+" { stub_status; allow 127.0.0.1; } 然后 nginx -s reload")
+		return nil, c.downInstance(cfg)
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		slog.Warn("Nginx stub_status 读取失败", "url", url, "err", err)
@@ -80,7 +88,8 @@ func (c *NginxCollector) collectStubStatus(cfg model.NginxInstanceConfig, now in
 
 	parsed := parseNginxStubStatus(string(body))
 	if parsed == nil {
-		slog.Warn("Nginx stub_status 解析失败", "url", url, "body", string(body))
+		slog.Warn("Nginx stub_status 解析失败", "url", url,
+			"hint", "响应内容非标准 stub_status 格式，请确认该 location 指向 stub_status 而非静态页/反向代理")
 		return nil, c.downInstance(cfg)
 	}
 
