@@ -88,16 +88,24 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, defineAsyncComponent, h } from 'vue'
 import { useRoute } from 'vue-router'
-import RedisTab from './redis/RedisTab.vue'
-import MySQLTab from './mysql/MySQLTab.vue'
-import PostgresTab from './postgres/PostgresTab.vue'
-import NginxTab from './nginx/NginxTab.vue'
-import KafkaTab from './kafka/KafkaTab.vue'
-import DockerTab from './docker/DockerTab.vue'
-import RocketMQTab from './rocketmq/RocketMQTab.vue'
-import K8sTab from './k8s/K8sTab.vue'
+
+// 各中间件 Tab 改为异步组件，拆分为独立 chunk，避免进入中间件页面时
+// 一次性下载全部 Tab 代码导致首屏卡顿（仅激活的 Tab 才按需加载）
+const tabLoader = (loader) => defineAsyncComponent({
+  loader,
+  delay: 120,
+  loadingComponent: { render: () => h('div', { class: 'tab-loading' }, '加载中…') },
+})
+const RedisTab = tabLoader(() => import('./redis/RedisTab.vue'))
+const MySQLTab = tabLoader(() => import('./mysql/MySQLTab.vue'))
+const PostgresTab = tabLoader(() => import('./postgres/PostgresTab.vue'))
+const NginxTab = tabLoader(() => import('./nginx/NginxTab.vue'))
+const KafkaTab = tabLoader(() => import('./kafka/KafkaTab.vue'))
+const DockerTab = tabLoader(() => import('./docker/DockerTab.vue'))
+const RocketMQTab = tabLoader(() => import('./rocketmq/RocketMQTab.vue'))
+const K8sTab = tabLoader(() => import('./k8s/K8sTab.vue'))
 import redisIcon from '../assets/img/redis.svg'
 import mysqlIcon from '../assets/img/mysql.svg'
 import postgresIcon from '../assets/img/postgresql.svg'
@@ -160,6 +168,12 @@ watch(
   width: 18px;
   height: 18px;
   object-fit: contain;
+}
+.tab-loading {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 14px;
 }
 .tab-dot {
   width: 8px;
