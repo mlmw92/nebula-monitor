@@ -41,7 +41,10 @@
           <div v-for="h in stats.hosts" :key="h.node" class="host-block" :class="{'is-down': !h.up}">
             <div class="host-header">
               <span class="host-dot" :class="h.up ? 'up' : 'down'"></span>
-              <span class="host-name">{{ h.nodeIp || h.ip || h.node }}</span>
+              <div class="host-id">
+                <span class="host-name">{{ h.nodeIp || h.ip || h.node }}</span>
+                <span v-if="h.node && h.node !== (h.nodeIp || h.ip)" class="host-name-sub">{{ h.node }}</span>
+              </div>
               <span class="host-count">{{ h.containers.length }} 容器</span>
             </div>
 
@@ -268,7 +271,9 @@ onMounted(load)
 .host-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .host-dot.up { background: #4ade80; }
 .host-dot.down { background: #f87171; }
+.host-id { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
 .host-name { font-size: 13px; font-family: var(--mono); }
+.host-name-sub { font-size: 11px; color: var(--text-muted); font-family: var(--mono); font-weight: 400; }
 .host-count { margin-left: auto; font-size: 12px; color: var(--text-muted); font-weight: 400; }
 .host-body { padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 8px; }
 .container-chip { display: flex; flex-direction: column; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; background: rgba(255,255,255,0.03); font-size: 12px; min-width: 110px; }
