@@ -296,6 +296,19 @@ function refreshRealtime() {
   }
 }
 
+// 渲染调度：WS 每秒推送多条指标，把 4 个趋势图 + 4 个仪表盘的
+// setOption 合并到同一帧内执行（rAF），避免主线程被高频重绘拖慢
+let renderRaf = 0
+function scheduleRender() {
+  if (renderRaf) return
+  renderRaf = requestAnimationFrame(() => {
+    renderRaf = 0
+    if (document.hidden) return // 页面不可见时不渲染（数据继续缓冲）
+    refreshRealtime()
+    updateGauges()
+  })
+}
+
 const monitorPanels = [
   { key: 'cpu', title: 'CPU 使用率', type: 'percent', metrics: [{ name: 'cpu_usage', label: 'CPU' }], desc: 'CPU 占用百分比；今日/昨天为当天真实曲线，近7/30天为每日平均值。' },
   { key: 'mem', title: '内存使用率', type: 'percent', metrics: [{ name: 'mem_used_percent', label: '内存' }], desc: '物理内存占用百分比；横轴与时间维度同 CPU。' },
@@ -457,8 +470,7 @@ function connectWS(name) {
           if (buffers[key].length > 60) buffers[key].shift()
         }
       })
-      refreshRealtime()
-      updateGauges()
+      scheduleRender()
     } catch (e) { /* ignore */ }
   }
   socket.onclose = () => {
@@ -784,6 +796,8 @@ onUnmounted(() => {
   if (reconnectTimer) clearTimeout(reconnectTimer)
   if (nodeTimer) clearInterval(nodeTimer)
   if (alertTimer) clearInterval(alertTimer)
+  if (renderRaf) cancelAnimationFrame(renderRaf)
+  renderRaf = 0
   Object.values(charts).forEach((c) => c.dispose && c.dispose())
   Object.values(monitorCharts).forEach((c) => c.dispose && c.dispose())
 })

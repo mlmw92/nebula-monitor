@@ -13,6 +13,21 @@ export const COLORS = {
 const AXIS = '#9fb3c8'
 const SPLIT = 'rgba(34,211,238,0.08)'
 
+// 渐变对象缓存：同色系渐变复用同一个 LinearGradient 实例，
+// 避免实时图每秒多次 setOption 反复构造对象造成 GC 压力
+const gradientCache = new Map()
+function cachedGradient(color) {
+  let g = gradientCache.get(color)
+  if (!g) {
+    g = new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+      { offset: 0, color: color + '55' },
+      { offset: 1, color: color + '03' },
+    ])
+    gradientCache.set(color, g)
+  }
+  return g
+}
+
 function baseGrid(extra) {
   // containLabel: 自动按坐标轴标签宽度预留边距，避免长标签（如 "102.3 MB/s"）被裁剪
   return Object.assign({ left: 48, right: 18, top: 24, bottom: 30, containLabel: true }, extra || {})
@@ -26,10 +41,7 @@ function gradientSeries(name, color, data) {
     showSymbol: false,
     lineStyle: { color, width: 2, shadowColor: color, shadowBlur: 10 },
     areaStyle: {
-      color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-        { offset: 0, color: color + '55' },
-        { offset: 1, color: color + '03' },
-      ]),
+      color: cachedGradient(color),
     },
     data: data || [],
   }

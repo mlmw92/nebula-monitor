@@ -98,6 +98,8 @@ const pageTitle = computed(() => {
 let ws = null
 let timer = null
 let visible = true
+// 告警广播可能连续推送，防抖合并 HTTP 请求，避免连锁刷新
+let alertDebounceTimer = null
 
 async function refreshAlertCount() {
   if (!visible) return
@@ -107,6 +109,14 @@ async function refreshAlertCount() {
   } catch (e) {
     /* ignore */
   }
+}
+
+function onAlertPushed() {
+  if (alertDebounceTimer) return
+  alertDebounceTimer = setTimeout(() => {
+    alertDebounceTimer = null
+    refreshAlertCount()
+  }, 3000)
 }
 
 function refresh() {
@@ -136,13 +146,14 @@ function onVisibility() {
 
 onMounted(() => {
   refreshAlertCount()
-  ws = connectWS('alerts', null, { onMessage: () => refreshAlertCount() })
+  ws = connectWS('alerts', null, { onMessage: onAlertPushed })
   timer = setInterval(refreshAlertCount, 30000)
   document.addEventListener('visibilitychange', onVisibility)
 })
 onUnmounted(() => {
   ws && ws.close()
   timer && clearInterval(timer)
+  if (alertDebounceTimer) clearTimeout(alertDebounceTimer)
   document.removeEventListener('visibilitychange', onVisibility)
 })
 </script>
