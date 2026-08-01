@@ -56,7 +56,7 @@
                 <span class="hp-m-val">{{ pct(h.metrics.disk) }}</span>
               </div>
             </div>
-            <div class="hp-foot">点击查看主机详情 →</div>
+            <div class="hp-foot">点击主机查看详情 →</div>
           </div>
         </el-popover>
       </div>
