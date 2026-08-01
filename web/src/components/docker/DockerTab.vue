@@ -15,24 +15,35 @@
 
     <template v-if="stats.hosts.length > 0">
       <div class="kpi-row">
-        <KpiCard label="主机总数" :value="stats.hosts.length" tone="total" />
-        <KpiCard label="在线主机" :value="stats.upHosts" tone="up" />
-        <KpiCard label="容器总数" :value="stats.total" tone="cluster" />
-        <KpiCard label="运行中" :value="stats.running" tone="ok" />
-        <KpiCard label="已停止" :value="stats.stopped" tone="down" />
-        <KpiCard label="总镜像数" :value="stats.totalImages" tone="mem" />
+        <KpiCard label="主机总数" :value="stats.hosts.length" tone="total">
+          <template #icon><ServerIcon /></template>
+        </KpiCard>
+        <KpiCard label="在线主机" :value="stats.upHosts" tone="up">
+          <template #icon><CheckCircleIcon /></template>
+        </KpiCard>
+        <KpiCard label="容器总数" :value="stats.total" tone="cluster">
+          <template #icon><BoxIcon /></template>
+        </KpiCard>
+        <KpiCard label="运行中" :value="stats.running" tone="ok">
+          <template #icon><PlayIcon /></template>
+        </KpiCard>
+        <KpiCard label="已停止" :value="stats.stopped" tone="down">
+          <template #icon><StopIcon /></template>
+        </KpiCard>
+        <KpiCard label="总镜像数" :value="stats.totalImages" tone="mem">
+          <template #icon><LayersIcon /></template>
+        </KpiCard>
       </div>
 
       <div class="chart-section glass">
         <div class="section-title">实例拓扑</div>
         <div class="host-grid">
-          <div v-for="h in stats.hosts" :key="h.node" class="host-block">
-            <div class="host-header" :class="{'is-down': !h.up}">
+          <div v-for="h in stats.hosts" :key="h.node" class="host-block" :class="{'is-down': !h.up}">
+            <div class="host-header">
               <span class="host-dot" :class="h.up ? 'up' : 'down'"></span>
-              <span class="host-name">{{ h.node }}</span>
+              <span class="host-name">{{ h.ip || h.node }}</span>
               <span class="host-count">{{ h.containers.length }} 容器</span>
             </div>
-            <div class="host-daemon mono">{{ h.daemon }}<span v-if="h.ip" class="host-ip"> · {{ h.ip }}</span></div>
             <div class="host-body">
               <div v-for="c in h.containers" :key="c.id" class="container-chip" :class="['st-' + c.state, {'is-down': c.state !== 'running'}]" @click="openDetail(c)">
                 <span class="container-name">{{ c.name }}</span>
@@ -98,12 +109,24 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick, watch } from 'vue'
+import { ref, onMounted, computed, nextTick, watch, h } from 'vue'
 import * as echarts from 'echarts'
 import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
 import MwStatusDot from '../mw/MwStatusDot.vue'
+
+// ---- 图标组件（内联 SVG 渲染函数） ----
+function svgIcon(s) {
+  const inner = s.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '')
+  return () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, innerHTML: inner })
+}
+const ServerIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>')
+const CheckCircleIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="9 12 12 15 16 10"/></svg>')
+const BoxIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>')
+const PlayIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>')
+const StopIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>')
+const LayersIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>')
 
 const loading = ref(true)
 const stats = ref({ hosts: [] })
@@ -231,15 +254,13 @@ onMounted(load)
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
 .host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .host-block { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg-elev); }
+.host-block.is-down { opacity: 0.6; }
 .host-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-weight: 600; }
-.host-header.is-down { opacity: 0.6; }
-.host-dot { width: 8px; height: 8px; border-radius: 50%; }
+.host-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .host-dot.up { background: #4ade80; }
 .host-dot.down { background: #f87171; }
-.host-name { font-size: 13px; }
+.host-name { font-size: 13px; font-family: var(--mono); }
 .host-count { margin-left: auto; font-size: 12px; color: var(--text-muted); font-weight: 400; }
-.host-daemon { padding: 6px 12px; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
-.host-ip { color: var(--text-muted); }
 .host-body { padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 8px; }
 .container-chip { display: flex; flex-direction: column; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; background: rgba(255,255,255,0.03); font-size: 12px; min-width: 110px; }
 .container-chip.is-down { opacity: 0.6; }

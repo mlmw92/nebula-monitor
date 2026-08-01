@@ -15,26 +15,42 @@
 
     <template v-if="instances.length > 0">
       <div class="kpi-row">
-        <KpiCard label="实例总数" :value="stats.total" tone="total" />
-        <KpiCard label="在线实例" :value="stats.up" tone="up" />
-        <KpiCard label="离线实例" :value="stats.down" tone="down" />
-        <KpiCard label="总活动连接" :value="stats.totalActive" tone="conn" />
-        <KpiCard label="总请求" :value="stats.totalRequests" tone="ops" />
-        <KpiCard label="总等待连接" :value="stats.totalWaiting" tone="mem" />
+        <KpiCard label="实例总数" :value="stats.total" tone="total">
+          <template #icon><ServerIcon /></template>
+        </KpiCard>
+        <KpiCard label="在线实例" :value="stats.up" tone="up">
+          <template #icon><CheckCircleIcon /></template>
+        </KpiCard>
+        <KpiCard label="离线实例" :value="stats.down" tone="down">
+          <template #icon><XCircleIcon /></template>
+        </KpiCard>
+        <KpiCard label="总活动连接" :value="stats.totalActive" tone="conn">
+          <template #icon><ConnectionIcon /></template>
+        </KpiCard>
+        <KpiCard label="总请求" :value="formatNum(stats.totalRequests)" tone="ops">
+          <template #icon><ActivityIcon /></template>
+        </KpiCard>
+        <KpiCard label="总等待连接" :value="stats.totalWaiting" tone="mem">
+          <template #icon><ClockIcon /></template>
+        </KpiCard>
       </div>
 
       <div class="chart-section glass">
         <div class="section-title">实例拓扑</div>
         <div class="topo-group">
           <div class="topo-group-header">
-            <span class="topo-group-title"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg><strong>独立实例</strong></span>
+            <span class="topo-group-title"><ServerIcon /><strong>独立实例</strong></span>
             <span class="dim">共 {{ instances.length }} 个</span>
           </div>
           <div class="topo-grid">
             <div v-for="i in instances" :key="i.instance" class="rel-node rel-standalone" :class="{'is-down': !i.up}" @click="openDetail(i)">
-              <div class="rel-node-name" :title="i.nodeIp || i.instance">{{ i.name || i.node || i.instance }}</div>
-              <div class="rel-node-meta"><span :class="['dot', i.up ? 'up' : 'down']"></span>{{ i.up ? '在线' : '离线' }}<span class="dim">·</span>{{ i.node }}</div>
-              <div class="rel-node-instance mono dim">{{ nginxDisplayAddr(i) }}</div>
+              <div class="rel-node-name" :title="i.name || i.instance">{{ i.name || i.instance }}</div>
+              <div class="rel-node-meta">
+                <span :class="['dot', i.up ? 'up' : 'down']"></span>
+                <span>{{ i.up ? '在线' : '离线' }}</span>
+                <span class="dim">·</span>
+                <span class="mono">{{ i.nodeIp || nginxDisplayAddr(i) }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -43,21 +59,32 @@
       <div class="mw-list glass">
         <div class="mw-list-title">实例列表</div>
         <el-table :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
-          <el-table-column label="实例地址" width="150" show-overflow-tooltip>
-            <template #default="{ row }"><span class="mono">{{ nginxDisplayAddr(row) }}</span></template>
+          <el-table-column label="实例地址" min-width="140" show-overflow-tooltip>
+            <template #default="{ row }"><span class="mono">{{ row.nodeIp || nginxDisplayAddr(row) }}</span></template>
           </el-table-column>
-          <el-table-column prop="name" label="名称" min-width="100" show-overflow-tooltip />
-          <el-table-column prop="version" label="版本" width="90" />
+          <el-table-column prop="name" label="名称" min-width="90" show-overflow-tooltip />
           <el-table-column label="状态" width="80">
             <template #default="{ row }"><MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="row.up ? '正常' : '离线'" /></template>
           </el-table-column>
-          <el-table-column prop="activeConnections" label="活动连接" width="90" sortable />
-          <el-table-column prop="accepts" label="已接收" width="90" sortable />
-          <el-table-column prop="handled" label="已处理" width="90" sortable />
-          <el-table-column prop="requests" label="总请求" width="90" sortable />
-          <el-table-column prop="waiting" label="等待" width="70" sortable />
-          <el-table-column prop="reading" label="读取" width="70" sortable />
-          <el-table-column prop="writing" label="写入" width="70" sortable />
+          <el-table-column prop="activeConnections" label="活动连接" min-width="85" sortable />
+          <el-table-column label="已接收" min-width="85" sortable :sort-by="'accepts'">
+            <template #default="{ row }"><span class="mono">{{ formatNum(row.accepts) }}</span></template>
+          </el-table-column>
+          <el-table-column label="已处理" min-width="85" sortable :sort-by="'handled'">
+            <template #default="{ row }"><span class="mono">{{ formatNum(row.handled) }}</span></template>
+          </el-table-column>
+          <el-table-column label="总请求" min-width="85" sortable :sort-by="'requests'">
+            <template #default="{ row }"><span class="mono">{{ formatNum(row.requests) }}</span></template>
+          </el-table-column>
+          <el-table-column label="读取" width="65" sortable :sort-by="'reading'">
+            <template #default="{ row }"><span class="mono">{{ row.reading }}</span></template>
+          </el-table-column>
+          <el-table-column label="写入" width="65" sortable :sort-by="'writing'">
+            <template #default="{ row }"><span class="mono">{{ row.writing }}</span></template>
+          </el-table-column>
+          <el-table-column label="等待" width="65" sortable :sort-by="'waiting'">
+            <template #default="{ row }"><span class="mono">{{ row.waiting }}</span></template>
+          </el-table-column>
         </el-table>
         <div class="pager">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="sortedInstances.length" :page-size="pageSize" :current-page="currentPage" :page-sizes="[10,20,50,100]" @current-change="v => currentPage = v" @size-change="v => { pageSize = v; currentPage = 1 }" />
@@ -68,9 +95,8 @@
     <el-drawer v-model="drawerVisible" :title="detailTitle" size="50%" :destroy-on-close="true">
       <div v-if="selected" class="detail-content">
         <div class="detail-meta">
-          <div class="meta-item"><span class="meta-label">实例地址</span><span class="mono">{{ nginxDisplayAddr(selected) }}</span></div>
-          <div class="meta-item"><span class="meta-label">节点</span>{{ selected.node }}</div>
-          <div class="meta-item"><span class="meta-label">版本</span>{{ selected.version }}</div>
+          <div class="meta-item"><span class="meta-label">实例地址</span><span class="mono">{{ selected.nodeIp || nginxDisplayAddr(selected) }}</span></div>
+          <div class="meta-item" v-if="selected.version"><span class="meta-label">版本</span>{{ selected.version }}</div>
         </div>
         <div class="metric-grid">
           <div class="metric-cell"><div class="mc-label">活动连接</div><div class="mc-value">{{ selected.activeConnections }}</div></div>
@@ -89,13 +115,25 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick, watch } from 'vue'
+import { ref, onMounted, computed, nextTick, watch, h } from 'vue'
 import * as echarts from 'echarts'
 import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
 import MwStatusDot from '../mw/MwStatusDot.vue'
 import MwRoleTag from '../mw/MwRoleTag.vue'
+
+// ---- 图标组件（内联 SVG 渲染函数） ----
+function svgIcon(s) {
+  const inner = s.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '')
+  return () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, innerHTML: inner })
+}
+const ServerIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>')
+const CheckCircleIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="9 12 12 15 16 10"/></svg>')
+const XCircleIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>')
+const ConnectionIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13.144 10.144a4 4 0 1 0-5.742 0"/><path d="M11 14.48V17"/><circle cx="11" cy="19" r="2"/><path d="M16 9a5 5 0 0 1 4.516 2.861"/><path d="M19.922 12.633a5 5 0 0 1-.39 4.155"/><circle cx="21" cy="18" r="2"/></svg>')
+const ActivityIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>')
+const ClockIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>')
 
 const loading = ref(true)
 const instances = ref([])
@@ -156,6 +194,7 @@ async function loadTrendChart(row) {
 }
 
 function formatUptime(s) { if (!s) return '-'; const d = Math.floor(s / 86400); const h = Math.floor((s % 86400) / 3600); return d > 0 ? `${d}天${h}小时` : `${h}小时` }
+function formatNum(n) { if (!n) return '0'; if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'; if (n >= 1000) return (n / 1000).toFixed(1) + 'K'; return n.toFixed(0) }
 function nginxDisplayAddr(i) { if (!i) return '-'; return i.nodeIp || i.instance || '-' }
 function rowClass({ row }) { return row.up ? '' : 'row-down' }
 
@@ -209,15 +248,17 @@ onMounted(load)
 .chart-box { width: 100%; height: 300px; }
 
 /* 实例拓扑 */
-.topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.topo-group { margin-bottom: 0; }
+.topo-group-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.topo-group-title { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
+.topo-group-title svg { width: 18px; height: 18px; color: #93c5fd; }
+.topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
 .rel-node { padding: 12px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--border); background: var(--bg-elev); transition: transform 0.15s, box-shadow 0.15s; }
 .rel-node:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
 .rel-node.is-down { opacity: 0.6; }
 .rel-node-name { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin-top: 6px; }
-.rel-node-instance { font-size: 11px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rel-standalone { border-left: 4px solid var(--chart-blue); }
-.rel-master { border-left: 4px solid var(--chart-orange); }
 
 /* 列表状态点 */
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }

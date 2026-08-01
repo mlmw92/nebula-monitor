@@ -18,30 +18,53 @@
     <template v-if="clusters.length > 0">
       <!-- KPI -->
       <div class="kpi-row">
-        <KpiCard :value="stats.clusters" label="集群数" tone="cluster" />
-        <KpiCard :value="stats.nodesReady + '/' + stats.nodesTotal" label="节点就绪/总数" tone="host" />
-        <KpiCard :value="stats.podsRunning" label="运行 Pod" tone="up" />
-        <KpiCard :value="stats.podsTotal" label="Pod 总数" tone="total" />
-        <KpiCard :value="stats.podsAbnormal" label="异常 Pod" tone="down" />
-        <KpiCard :value="stats.workloadsUnhealthy" label="不健康工作负载" tone="alert" />
+        <KpiCard :value="stats.clusters" label="集群数" tone="cluster">
+          <template #icon><ClusterIcon /></template>
+        </KpiCard>
+        <KpiCard :value="stats.nodesReady + '/' + stats.nodesTotal" label="节点就绪/总数" tone="host">
+          <template #icon><ServerIcon /></template>
+        </KpiCard>
+        <KpiCard :value="stats.podsRunning" label="运行 Pod" tone="up">
+          <template #icon><PodIcon /></template>
+        </KpiCard>
+        <KpiCard :value="stats.podsTotal" label="Pod 总数" tone="total">
+          <template #icon><BoxIcon /></template>
+        </KpiCard>
+        <KpiCard :value="stats.podsAbnormal" label="异常 Pod" tone="down">
+          <template #icon><AlertIcon /></template>
+        </KpiCard>
+        <KpiCard :value="stats.workloadsUnhealthy" label="不健康工作负载" tone="alert">
+          <template #icon><ActivityIcon /></template>
+        </KpiCard>
       </div>
 
       <!-- 集群卡片 -->
       <div class="chart-section glass">
         <div class="section-title">集群</div>
         <div class="host-grid">
-          <div v-for="c in clusters" :key="c.node + '|' + c.instance" class="host-card">
+          <div v-for="c in clusters" :key="c.node + '|' + c.instance" class="host-card" :class="{'is-down': !c.up}">
             <div class="host-head">
               <span class="host-dot" :class="c.up ? 'up' : 'down'"></span>
               <span class="host-node">{{ c.name || c.instance }}</span>
-              <span class="host-group">{{ c.version || '-' }}</span>
+              <span class="host-version" v-if="c.version">{{ c.version }}</span>
             </div>
-            <div class="host-daemon mono">{{ c.instance }}</div>
             <div class="host-stats">
-              <span>节点 <b>{{ c.nodesReady }}/{{ c.nodesTotal }}</b></span>
-              <span>Pod <b>{{ c.podsRunning }}</b>/{{ c.podsTotal }}（异常 {{ c.podsPending + c.podsFailed }}）</span>
-              <span>工作负载不健康 <b :class="{ 'metric-bad': workloadUnhealthy(c) > 0 }">{{ workloadUnhealthy(c) }}</b></span>
-              <span>采集节点 {{ c.node }}</span>
+              <div class="stat-item">
+                <span class="stat-label">节点</span>
+                <span class="stat-val" :class="c.nodesReady < c.nodesTotal ? 'warn' : 'ok'">{{ c.nodesReady }}/{{ c.nodesTotal }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Pod</span>
+                <span class="stat-val">{{ c.podsRunning }}/{{ c.podsTotal }}</span>
+              </div>
+              <div class="stat-item" v-if="(c.podsPending + c.podsFailed) > 0">
+                <span class="stat-label">异常</span>
+                <span class="stat-val warn">{{ c.podsPending + c.podsFailed }}</span>
+              </div>
+              <div class="stat-item" v-if="workloadUnhealthy(c) > 0">
+                <span class="stat-label">负载异常</span>
+                <span class="stat-val warn">{{ workloadUnhealthy(c) }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -86,12 +109,24 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, h } from 'vue'
 import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
 import MwStatusDot from '../mw/MwStatusDot.vue'
 import MwRoleTag from '../mw/MwRoleTag.vue'
+
+// ---- 图标组件（内联 SVG 渲染函数） ----
+function svgIcon(s) {
+  const inner = s.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '')
+  return () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, innerHTML: inner })
+}
+const ClusterIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="6.5" y1="6.5" x2="9.5" y2="9.5"/><line x1="14.5" y1="9.5" x2="17.5" y2="6.5"/><line x1="6.5" y1="17.5" x2="9.5" y2="14.5"/><line x1="14.5" y1="14.5" x2="17.5" y2="17.5"/></svg>')
+const ServerIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>')
+const PodIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M12 22V12M3 7l9 5 9-5"/></svg>')
+const BoxIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>')
+const AlertIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>')
+const ActivityIcon = svgIcon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>')
 
 const loading = ref(true)
 const clusters = ref([])
@@ -148,15 +183,20 @@ onMounted(load)
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
 .host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-.host-card { padding: 14px; background: rgba(255,255,255,0.03); border-radius: 8px; }
-.host-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.host-card { padding: 14px; background: rgba(255,255,255,0.03); border-radius: 10px; border: 1px solid var(--border); }
+.host-card.is-down { opacity: 0.6; }
+.host-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .host-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.host-dot.up { background: var(--accent); }
-.host-dot.down { background: var(--danger); }
+.host-dot.up { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.5); }
+.host-dot.down { background: #f87171; }
 .host-node { font-weight: 600; font-size: 14px; }
-.host-group { font-size: 12px; color: var(--text-muted); margin-left: auto; }
-.host-daemon { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; word-break: break-all; }
-.host-stats { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
+.host-version { font-size: 11px; color: var(--text-muted); margin-left: auto; padding: 2px 8px; background: rgba(255,255,255,0.05); border-radius: 4px; }
+.host-stats { display: flex; flex-wrap: wrap; gap: 12px; }
+.stat-item { display: flex; flex-direction: column; gap: 2px; }
+.stat-label { font-size: 11px; color: var(--text-muted); }
+.stat-val { font-size: 14px; font-weight: 600; font-family: var(--mono); }
+.stat-val.ok { color: #4ade80; }
+.stat-val.warn { color: #fbbf24; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
 .dot.up { background: var(--accent); }
 .dot.down { background: var(--danger); }
