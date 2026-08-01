@@ -75,34 +75,34 @@ defineProps({
   white-space: nowrap;
 }
 
-/* 色调：顶栏渐变 + 图标底色 */
-.tone-total::before { background: linear-gradient(90deg, #22d3ee, #3b82f6); }
-.tone-total .kpi-icon { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
+/* 色调：顶栏渐变 + 图标底色（跟随主题 chart 色板） */
+.tone-total::before { background: linear-gradient(90deg, var(--chart-cyan), var(--chart-blue)); }
+.tone-total .kpi-icon { background: color-mix(in srgb, var(--chart-cyan) 14%, transparent); color: var(--chart-cyan); }
 
-.tone-host::before { background: linear-gradient(90deg, #0ea5e9, #0284c7); }
-.tone-host .kpi-icon { background: rgba(14, 165, 233, 0.15); color: #38bdf8; }
+.tone-host::before { background: linear-gradient(90deg, var(--chart-cyan), color-mix(in srgb, var(--chart-blue) 70%, #000)); }
+.tone-host .kpi-icon { background: color-mix(in srgb, var(--chart-cyan) 16%, transparent); color: var(--chart-cyan); }
 
-.tone-up::before { background: linear-gradient(90deg, #22c55e, #16a34a); }
-.tone-up .kpi-icon { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+.tone-up::before { background: linear-gradient(90deg, var(--chart-green), color-mix(in srgb, var(--chart-green) 65%, #000)); }
+.tone-up .kpi-icon { background: color-mix(in srgb, var(--chart-green) 16%, transparent); color: var(--chart-green); }
 
-.tone-down::before { background: linear-gradient(90deg, #ef4444, #dc2626); }
-.tone-down .kpi-icon { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.tone-down::before { background: linear-gradient(90deg, var(--chart-red), color-mix(in srgb, var(--chart-red) 65%, #000)); }
+.tone-down .kpi-icon { background: color-mix(in srgb, var(--chart-red) 16%, transparent); color: var(--chart-red); }
 
-.tone-mem::before { background: linear-gradient(90deg, #a855f7, #7c3aed); }
-.tone-mem .kpi-icon { background: rgba(100, 116, 139, 0.15); color: #94a3b8; }
+.tone-mem::before { background: linear-gradient(90deg, var(--chart-purple), color-mix(in srgb, var(--chart-purple) 65%, #000)); }
+.tone-mem .kpi-icon { background: color-mix(in srgb, var(--chart-purple) 15%, transparent); color: var(--chart-purple); }
 
-.tone-conn::before { background: linear-gradient(90deg, #3b82f6, #2563eb); }
-.tone-conn .kpi-icon { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
+.tone-conn::before { background: linear-gradient(90deg, var(--chart-blue), color-mix(in srgb, var(--chart-blue) 70%, #000)); }
+.tone-conn .kpi-icon { background: color-mix(in srgb, var(--chart-cyan) 14%, transparent); color: var(--chart-cyan); }
 
-.tone-ops::before { background: linear-gradient(90deg, #f59e0b, #d97706); }
-.tone-ops .kpi-icon { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
+.tone-ops::before { background: linear-gradient(90deg, var(--chart-orange), color-mix(in srgb, var(--chart-orange) 65%, #000)); }
+.tone-ops .kpi-icon { background: color-mix(in srgb, var(--chart-orange) 14%, transparent); color: var(--chart-orange); }
 
-.tone-cluster::before { background: linear-gradient(90deg, #6366f1, #8b5cf6); }
-.tone-cluster .kpi-icon { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
+.tone-cluster::before { background: linear-gradient(90deg, var(--chart-indigo), var(--chart-purple)); }
+.tone-cluster .kpi-icon { background: color-mix(in srgb, var(--chart-indigo) 16%, transparent); color: var(--chart-indigo); }
 
-.tone-alert::before { background: linear-gradient(90deg, #ef4444, #dc2626); }
-.tone-alert .kpi-icon { background: rgba(239, 68, 68, 0.18); color: #f87171; }
+.tone-alert::before { background: linear-gradient(90deg, var(--chart-red), color-mix(in srgb, var(--chart-red) 65%, #000)); }
+.tone-alert .kpi-icon { background: color-mix(in srgb, var(--chart-red) 18%, transparent); color: color-mix(in srgb, var(--chart-red) 85%, #fff); }
 
-.tone-ok::before { background: linear-gradient(90deg, #22c55e, #16a34a); }
-.tone-ok .kpi-icon { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+.tone-ok::before { background: linear-gradient(90deg, var(--chart-green), color-mix(in srgb, var(--chart-green) 65%, #000)); }
+.tone-ok .kpi-icon { background: color-mix(in srgb, var(--chart-green) 16%, transparent); color: var(--chart-green); }
 </style>

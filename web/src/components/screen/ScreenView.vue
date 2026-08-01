@@ -438,10 +438,10 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 蓝色科技风：局部覆盖 accent 为亮蓝，仅作用于大屏 */
+/* 科技风大屏：accent 跟随全局主题（默认极光蓝） */
 .screen.blue-theme {
-  --accent: #1e90ff;
-  --accent-glow: rgba(56, 189, 248, 0.4);
+  --accent: var(--accent);
+  --accent-glow: var(--accent-glow);
 }
 .screen {
   position: fixed;
@@ -502,11 +502,11 @@ onUnmounted(() => {
   font-size: 24px;
   font-weight: 800;
   letter-spacing: 0.12em;
-  background: linear-gradient(90deg, #7ed4ff, #1e90ff);
+  background: var(--brand-grad);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  text-shadow: 0 0 22px rgba(56, 189, 248, 0.25);
+  text-shadow: 0 0 22px var(--accent-glow);
 }
 .title-deco {
   width: 60px;
@@ -555,9 +555,9 @@ onUnmounted(() => {
   color: var(--text);
 }
 .kpi-val.cyan { color: var(--info); }
-.kpi-val.blue { color: #60a5fa; }
+.kpi-val.blue { color: var(--info); }
 .kpi-val.green { color: var(--accent); }
-.kpi-val.purple { color: #a78bfa; }
+.kpi-val.purple { color: var(--violet); }
 .kpi-val.red { color: var(--danger); }
 .kpi-unit {
   font-size: 12px;

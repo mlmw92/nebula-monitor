@@ -76,7 +76,7 @@ onMounted(loadHistory)
 <style scoped>
 .report-view { padding: 4px 0 16px; }
 .page-header { margin-bottom: 16px; }
-.page-title { font-size: 22px; font-weight: 700; margin: 0; background: linear-gradient(135deg, #e5edf7 0%, #9fb3c8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.page-title { font-size: 22px; font-weight: 700; margin: 0; background: linear-gradient(135deg, var(--text) 0%, var(--text-dim) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .page-desc { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }

@@ -218,20 +218,20 @@ onMounted(load)
 .kpi-card { border-radius: var(--radius); padding: 16px; display: flex; align-items: center; gap: 12px; }
 .kpi-num { font-size: 24px; font-weight: 700; }
 .kpi-text { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-.gradient-total { background: linear-gradient(135deg, #1c2129, #2d3548); }
-.gradient-up { background: linear-gradient(135deg, #1a3a2a, #2d5a3d); }
-.gradient-down { background: linear-gradient(135deg, #3a1a1a, #5a2d2d); }
-.gradient-conn { background: linear-gradient(135deg, #1a2a3a, #2d4a5d); }
-.gradient-ops { background: linear-gradient(135deg, #2a1a3a, #4a2d5d); }
-.gradient-mem { background: linear-gradient(135deg, #3a2a1a, #5d4a2d); }
+.gradient-total { background: linear-gradient(135deg, var(--bg-elev), var(--chart-blue)); }
+.gradient-up { background: linear-gradient(135deg, var(--bg-elev), var(--chart-green)); }
+.gradient-down { background: linear-gradient(135deg, var(--bg-elev), var(--chart-red)); }
+.gradient-conn { background: linear-gradient(135deg, var(--bg-elev), var(--chart-cyan)); }
+.gradient-ops { background: linear-gradient(135deg, var(--bg-elev), var(--chart-orange)); }
+.gradient-mem { background: linear-gradient(135deg, var(--bg-elev), var(--chart-purple)); }
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-.dot.up { background: #3fb950; box-shadow: 0 0 6px rgba(63, 185, 80, 0.5); }
-.dot.down { background: #dc382d; }
-.metric-good { color: #3fb950; }
-.metric-warn { color: #f0883e; }
-.metric-bad { color: #dc382d; }
+.dot.up { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+.dot.down { background: var(--danger); }
+.metric-good { color: var(--accent); }
+.metric-warn { color: var(--warn); }
+.metric-bad { color: var(--danger); }
 :deep(.row-down) { opacity: 0.6; }
 .detail-content { padding: 0 20px; }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; }

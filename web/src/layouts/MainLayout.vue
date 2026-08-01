@@ -14,6 +14,20 @@
           </el-breadcrumb>
         </div>
         <div class="topbar-right">
+          <el-tooltip content="切换配色主题" placement="bottom">
+            <el-dropdown trigger="click" @command="changeTheme">
+              <el-button circle size="small">
+                <span class="theme-dot" :style="{ background: themeColor }"></span>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="b"><span class="td-dot" style="background:#3b9dff"></span>极光蓝（默认）</el-dropdown-item>
+                  <el-dropdown-item command="a"><span class="td-dot" style="background:#00d9a3"></span>星云青绿</el-dropdown-item>
+                  <el-dropdown-item command="c"><span class="td-dot" style="background:#8b5cf6"></span>星河紫</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </el-tooltip>
           <el-tooltip content="刷新数据" placement="bottom">
             <el-button :icon="Refresh" circle size="small" @click="refresh" />
           </el-tooltip>
@@ -59,6 +73,22 @@ const collapsed = ref(false)
 const alertCount = ref(0)
 const username = ref(localStorage.getItem('nebula_user') || 'admin')
 const view = ref(null)
+
+/* ===== 换肤 ===== */
+const THEMES = { b: '#3b9dff', a: '#00d9a3', c: '#8b5cf6' }
+const theme = ref(localStorage.getItem('nebula_theme') || 'b')
+const themeColor = computed(() => THEMES[theme.value] || THEMES.b)
+function applyTheme(t) {
+  theme.value = t
+  document.body.dataset.theme = t
+  localStorage.setItem('nebula_theme', t)
+}
+function changeTheme(t) {
+  applyTheme(t)
+  // 触发图表组件重新取色
+  window.dispatchEvent(new CustomEvent('nebula:theme-changed', { detail: t }))
+}
+applyTheme(theme.value)
 
 const pageTitle = computed(() => {
   const m = { overview: '首页概览', hosts: '主机列表', node: '主机详情', alerts: '告警中心' }
@@ -156,6 +186,21 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.theme-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+.td-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
 }
 .content {
   flex: 1;

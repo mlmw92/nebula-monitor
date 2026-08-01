@@ -180,7 +180,7 @@ onUnmounted(() => {
   border-radius: 2px;
 }
 .db-bd .d.mysql { background: var(--info); }
-.db-bd .d.pg { background: #a78bfa; }
+.db-bd .d.pg { background: var(--violet); }
 .db-bd b {
   color: var(--text);
   margin-left: 2px;

@@ -1,4 +1,50 @@
-:root {
+/* =========================================================
+ * 主题系统：默认「极光蓝」(b)，可切换「星云青绿」(a) / 「星河紫」(c)
+ * 通过 body[data-theme] 切换；默认(未设置)即极光蓝
+ * ========================================================= */
+:root,
+body[data-theme="b"] {
+  /* 极光蓝 · 深蓝权威指挥中心风 */
+  --bg: #070d1a;
+  --bg-elev: #0d1526;
+  --bg-card: rgba(15, 24, 43, 0.74);
+  --border: rgba(120, 170, 255, 0.10);
+  --border-strong: rgba(120, 170, 255, 0.20);
+  --text: #e8eefb;
+  --text-main: #e8eefb;
+  --text-dim: #7e8fb0;
+  --label: #93a4c8;
+  --text-muted: #4a5870;
+  --accent: #3b9dff;
+  --accent-dim: rgba(59, 157, 255, 0.14);
+  --accent-glow: rgba(59, 157, 255, 0.38);
+  --warn: #ffb454;
+  --warn-dim: rgba(255, 180, 84, 0.14);
+  --danger: #ff5d6c;
+  --danger-dim: rgba(255, 93, 108, 0.14);
+  --info: #22d3ee;
+  --info-dim: rgba(34, 211, 238, 0.14);
+  --violet: #a78bfa;
+  --brand-grad: linear-gradient(135deg, #3b9dff 0%, #22d3ee 100%);
+  --brand-ink: #04233f;
+  --grid-line: rgba(59, 157, 255, 0.05);
+  --glow-acc: rgba(59, 157, 255, 0.12);
+  --radius: 12px;
+  --sidebar-w: 220px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --mono: 'JetBrains Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+  /* KPI / 图表类别色板（保持区分度，随主题微调） */
+  --chart-cyan: #22d3ee;
+  --chart-blue: #3b82f6;
+  --chart-green: #22c55e;
+  --chart-red: #ef4444;
+  --chart-orange: #f59e0b;
+  --chart-purple: #a855f7;
+  --chart-indigo: #6366f1;
+}
+
+/* 星云青绿（经典品牌色） */
+body[data-theme="a"] {
   --bg: #0a0e14;
   --bg-elev: #13181f;
   --bg-card: rgba(22, 28, 38, 0.72);
@@ -18,10 +64,39 @@
   --danger-dim: rgba(244, 63, 94, 0.14);
   --info: #38bdf8;
   --info-dim: rgba(56, 189, 248, 0.14);
-  --radius: 12px;
-  --sidebar-w: 220px;
-  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --mono: 'JetBrains Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+  --violet: #a78bfa;
+  --brand-grad: linear-gradient(135deg, #00d9a3 0%, #38bdf8 100%);
+  --brand-ink: #002b22;
+  --grid-line: rgba(0, 217, 163, 0.04);
+  --glow-acc: rgba(0, 217, 163, 0.12);
+}
+
+/* 星河紫（高端科技差异化） */
+body[data-theme="c"] {
+  --bg: #0b0916;
+  --bg-elev: #141026;
+  --bg-card: rgba(22, 17, 43, 0.74);
+  --border: rgba(170, 130, 255, 0.10);
+  --border-strong: rgba(170, 130, 255, 0.20);
+  --text: #ece9fb;
+  --text-main: #ece9fb;
+  --text-dim: #8d83b5;
+  --label: #a49bc9;
+  --text-muted: #514a72;
+  --accent: #8b5cf6;
+  --accent-dim: rgba(139, 92, 246, 0.14);
+  --accent-glow: rgba(139, 92, 246, 0.38);
+  --warn: #fbbf24;
+  --warn-dim: rgba(251, 191, 36, 0.14);
+  --danger: #fb7185;
+  --danger-dim: rgba(251, 113, 133, 0.14);
+  --info: #38bdf8;
+  --info-dim: rgba(56, 189, 248, 0.14);
+  --violet: #c4b5fd;
+  --brand-grad: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 55%, #38bdf8 100%);
+  --brand-ink: #1d0f4d;
+  --grid-line: rgba(139, 92, 246, 0.05);
+  --glow-acc: rgba(139, 92, 246, 0.14);
 }
 
 * {
@@ -264,7 +339,7 @@ textarea:focus {
 .kpi-value.green { color: var(--accent); }
 .kpi-value.red { color: var(--danger); }
 .kpi-value.amber { color: var(--warn); }
-.kpi-value.purple { color: #a78bfa; }
+.kpi-value.purple { color: var(--violet); }
 
 /* 面板网格 */
 .panel-grid {
@@ -427,39 +502,39 @@ textarea:focus {
   }
 }
 
-/* ============ Element Plus 暗色主题覆盖（对齐青绿强调色） ============ */
+/* ============ Element Plus 暗色主题覆盖（跟随主题变量，换肤联动） ============ */
 html.dark {
-  --el-color-primary: #00d9a3;
-  --el-color-primary-light-3: #33e0b9;
-  --el-color-primary-light-5: #66e6c9;
-  --el-color-primary-light-7: #99ecda;
-  --el-color-primary-light-8: #ccf3ea;
-  --el-color-primary-light-9: rgba(0, 217, 163, 0.12);
-  --el-color-primary-dark-2: #00a37a;
+  --el-color-primary: var(--accent);
+  --el-color-primary-light-3: color-mix(in srgb, var(--accent) 72%, #fff);
+  --el-color-primary-light-5: color-mix(in srgb, var(--accent) 55%, #fff);
+  --el-color-primary-light-7: color-mix(in srgb, var(--accent) 35%, #fff);
+  --el-color-primary-light-8: color-mix(in srgb, var(--accent) 25%, #fff);
+  --el-color-primary-light-9: var(--accent-dim);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--accent) 72%, #000);
 
-  --el-color-success: #00d9a3;
-  --el-color-warning: #f59e0b;
-  --el-color-danger: #f43f5e;
-  --el-color-info: #38bdf8;
+  --el-color-success: var(--accent);
+  --el-color-warning: var(--warn);
+  --el-color-danger: var(--danger);
+  --el-color-info: var(--info);
 
-  --el-bg-color: #13181f;
-  --el-bg-color-page: #0a0e14;
-  --el-bg-color-overlay: #1a2029;
+  --el-bg-color: var(--bg-elev);
+  --el-bg-color-page: var(--bg);
+  --el-bg-color-overlay: var(--bg-elev);
 
-  --el-text-color-primary: #e6edf3;
-  --el-text-color-regular: #c9d1d9;
-  --el-text-color-secondary: #7d8590;
-  --el-text-color-placeholder: #4a5360;
+  --el-text-color-primary: var(--text-main);
+  --el-text-color-regular: var(--text);
+  --el-text-color-secondary: var(--text-dim);
+  --el-text-color-placeholder: var(--text-muted);
 
-  --el-border-color: rgba(255, 255, 255, 0.1);
-  --el-border-color-light: rgba(255, 255, 255, 0.08);
-  --el-border-color-lighter: rgba(255, 255, 255, 0.06);
-  --el-border-color-extra-light: rgba(255, 255, 255, 0.04);
+  --el-border-color: var(--border);
+  --el-border-color-light: var(--border);
+  --el-border-color-lighter: var(--border);
+  --el-border-color-extra-light: var(--border);
 
   --el-fill-color: rgba(255, 255, 255, 0.04);
   --el-fill-color-light: rgba(255, 255, 255, 0.03);
   --el-fill-color-lighter: rgba(255, 255, 255, 0.02);
-  --el-fill-color-blank: #13181f;
+  --el-fill-color-blank: var(--bg-elev);
   --el-fill-color-dark: rgba(0, 0, 0, 0.2);
 
   --el-mask-color: rgba(0, 0, 0, 0.6);
@@ -473,17 +548,17 @@ html.dark .el-table {
   --el-table-bg-color: transparent;
   --el-table-tr-bg-color: transparent;
   --el-table-header-bg-color: rgba(255, 255, 255, 0.02);
-  --el-table-border-color: rgba(255, 255, 255, 0.08);
-  --el-table-row-hover-bg-color: rgba(0, 217, 163, 0.06);
-  --el-table-text-color: #e6edf3;
-  --el-table-header-text-color: #7d8590;
+  --el-table-border-color: var(--border);
+  --el-table-row-hover-bg-color: var(--accent-dim);
+  --el-table-text-color: var(--text);
+  --el-table-header-text-color: var(--text-dim);
 }
 
 /* el-dialog 暗色 */
 html.dark .el-dialog {
-  --el-dialog-bg-color: #13181f;
+  --el-dialog-bg-color: var(--bg-elev);
   --el-dialog-title-font-size: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   border-radius: 14px;
 }
 

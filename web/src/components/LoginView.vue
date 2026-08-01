@@ -142,7 +142,7 @@ async function doLogin() {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--accent), #00a37a);
+  background: var(--brand-grad);
   position: relative;
   box-shadow: 0 0 24px var(--accent-glow);
 }
@@ -150,7 +150,7 @@ async function doLogin() {
   content: '';
   position: absolute;
   inset: 10px;
-  border: 2px solid #002b22;
+  border: 2px solid var(--brand-ink);
   border-radius: 4px;
   border-top-color: transparent;
   border-right-color: transparent;

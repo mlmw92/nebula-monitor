@@ -284,21 +284,21 @@ async function submit() {
   font-weight: 500;
 }
 .metric-name {
-  color: var(--muted, #909399);
+  color: var(--text-dim);
   font-size: 12px;
 }
 .metric-unit {
   margin-left: auto;
   padding: 0 6px;
   font-size: 12px;
-  color: var(--el-color-primary, #409eff);
-  background: var(--el-color-primary-light-9, #ecf5ff);
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
   border-radius: 4px;
 }
 .form-hint {
   margin-top: 4px;
   font-size: 12px;
-  color: var(--muted, #909399);
+  color: var(--text-dim);
   line-height: 1.5;
 }
 </style>

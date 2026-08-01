@@ -149,15 +149,15 @@ onMounted(load)
 .host-card { padding: 14px; background: rgba(255,255,255,0.03); border-radius: 8px; }
 .host-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .host-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.host-dot.up { background: #3fb950; }
-.host-dot.down { background: #dc382d; }
+.host-dot.up { background: var(--accent); }
+.host-dot.down { background: var(--danger); }
 .host-node { font-weight: 600; font-size: 14px; }
 .host-group { font-size: 12px; color: var(--text-muted); margin-left: auto; }
 .host-daemon { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; word-break: break-all; }
 .host-stats { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-.dot.up { background: #3fb950; }
-.dot.down { background: #dc382d; }
-.metric-bad { color: #dc382d; }
+.dot.up { background: var(--accent); }
+.dot.down { background: var(--danger); }
+.metric-bad { color: var(--danger); }
 .mono { font-family: var(--mono); }
 </style>

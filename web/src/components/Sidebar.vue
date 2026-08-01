@@ -131,7 +131,7 @@ onMounted(loadVersion)
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--accent), #00a37a);
+  background: var(--brand-grad);
   box-shadow: 0 0 16px var(--accent-glow);
   position: relative;
 }
@@ -139,7 +139,7 @@ onMounted(loadVersion)
   content: '';
   position: absolute;
   inset: 9px;
-  border: 2px solid #002b22;
+  border: 2px solid var(--brand-ink);
   border-radius: 3px;
   border-top-color: transparent;
   border-right-color: transparent;

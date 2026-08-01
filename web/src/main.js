@@ -38,6 +38,10 @@ use([
 // 启用暗色模式
 document.documentElement.classList.add('dark')
 
+// 启动时还原主题（登录页也生效），默认极光蓝 'b'
+const savedTheme = localStorage.getItem('nebula_theme') || 'b'
+document.body.dataset.theme = savedTheme
+
 const app = createApp(App)
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)

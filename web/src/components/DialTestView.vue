@@ -172,17 +172,17 @@ onMounted(load)
 <style scoped>
 .dialtest-view { padding: 4px 0 16px; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
-.page-title { font-size: 22px; font-weight: 700; margin: 0; background: linear-gradient(135deg, #e5edf7 0%, #9fb3c8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.page-title { font-size: 22px; font-weight: 700; margin: 0; background: linear-gradient(135deg, var(--text) 0%, var(--text-dim) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .page-desc { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-.dot.up { background: #3fb950; }
-.dot.down { background: #dc382d; }
-.dial-err { color: #dc382d; font-size: 12px; word-break: break-all; }
+.dot.up { background: var(--accent); }
+.dot.down { background: var(--danger); }
+.dial-err { color: var(--danger); font-size: 12px; word-break: break-all; }
 .muted { color: var(--text-dim); }
-.metric-good { color: #3fb950; }
-.metric-warn { color: #f0883e; }
-.metric-bad { color: #dc382d; }
+.metric-good { color: var(--accent); }
+.metric-warn { color: var(--warn); }
+.metric-bad { color: var(--danger); }
 .ch-tag { margin-right: 4px; }
 </style>

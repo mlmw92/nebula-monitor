@@ -121,7 +121,7 @@ const activeTab = ref('redis')
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.01em;
-  background: linear-gradient(135deg, #e5edf7 0%, #9fb3c8 100%);
+  background: linear-gradient(135deg, var(--text) 0%, var(--text-dim) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -156,7 +156,7 @@ const activeTab = ref('redis')
   border-radius: 50%;
   flex-shrink: 0;
 }
-.tab-dot.redis { background: #dc382d; box-shadow: 0 0 8px rgba(220, 56, 45, 0.5); }
+.tab-dot.redis { background: var(--danger); box-shadow: 0 0 8px var(--danger-dim); }
 .tab-dot.mysql { background: #4479a1; }
 .tab-dot.postgres { background: #336791; }
 .tab-dot.nginx { background: #009639; }

@@ -149,8 +149,8 @@ onMounted(load)
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-.dot.up { background: #3fb950; }
-.dot.down { background: #dc382d; }
+.dot.up { background: var(--accent); }
+.dot.down { background: var(--danger); }
 :deep(.row-down) { opacity: 0.6; }
 .detail-content { padding: 0 20px; }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; }

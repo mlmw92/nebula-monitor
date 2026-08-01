@@ -217,7 +217,7 @@ onUnmounted(() => {
   width: 10px;
   height: 10px;
   border-radius: 3px;
-  background: linear-gradient(135deg, var(--danger), #b91c1c);
+  background: linear-gradient(135deg, var(--danger), color-mix(in srgb, var(--danger) 65%, #000));
   box-shadow: 0 0 8px rgba(244, 63, 94, 0.5);
 }
 .sr-sub {
@@ -255,7 +255,7 @@ onUnmounted(() => {
 .srk-v.green { color: var(--accent); }
 .srk-v.red { color: var(--danger); }
 .srk-v.cyan { color: var(--info); }
-.srk-v.purple { color: #a78bfa; }
+.srk-v.purple { color: var(--violet); }
 .srk-v.amber { color: var(--warn); }
 .srk-v.dim { color: var(--text-dim); }
 .srk-l {

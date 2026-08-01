@@ -116,8 +116,8 @@
             <div class="mc-head">
               <span class="mc-label">磁盘 IO</span>
               <div class="mc-stats">
-                <span class="mc-stat"><i class="dot" style="background:#3b82f6"></i>读取 <b style="color:#3b82f6">{{ rt.diskRead }}</b></span>
-                <span class="mc-stat"><i class="dot" style="background:#f59e0b"></i>写入 <b style="color:#f59e0b">{{ rt.diskWrite }}</b></span>
+                <span class="mc-stat"><i class="dot" style="background:var(--chart-blue)"></i>读取 <b style="color:var(--chart-blue)">{{ rt.diskRead }}</b></span>
+                <span class="mc-stat"><i class="dot" style="background:var(--warn)"></i>写入 <b style="color:var(--warn)">{{ rt.diskWrite }}</b></span>
               </div>
             </div>
             <div :ref="(el) => setRef(el, 'diskio')" class="mc-chart"></div>
@@ -127,8 +127,8 @@
             <div class="mc-head">
               <span class="mc-label">网络 IO</span>
               <div class="mc-stats">
-                <span class="mc-stat"><i class="dot" style="background:#22c55e"></i>接收 <b style="color:#22c55e">{{ rt.net }}</b></span>
-                <span class="mc-stat"><i class="dot" style="background:#a78bfa"></i>发送 <b style="color:#a78bfa">{{ rt.netSent }}</b></span>
+                <span class="mc-stat"><i class="dot" style="background:var(--accent)"></i>接收 <b style="color:var(--accent)">{{ rt.net }}</b></span>
+                <span class="mc-stat"><i class="dot" style="background:var(--violet)"></i>发送 <b style="color:var(--violet)">{{ rt.netSent }}</b></span>
               </div>
             </div>
             <div :ref="(el) => setRef(el, 'netio')" class="mc-chart"></div>
@@ -811,11 +811,11 @@ onUnmounted(() => {
 .port-section { margin-top: 16px; }
 .port-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .port-item { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; font-size: 13px; background: rgba(255,255,255,0.04); }
-.port-item.up { border-left: 3px solid #3fb950; }
-.port-item.down { border-left: 3px solid #dc382d; opacity: 0.7; }
+.port-item.up { border-left: 3px solid var(--accent); }
+.port-item.down { border-left: 3px solid var(--danger); opacity: 0.7; }
 .port-dot { width: 6px; height: 6px; border-radius: 50%; }
-.port-item.up .port-dot { background: #3fb950; box-shadow: 0 0 4px rgba(63,185,80,0.5); }
-.port-item.down .port-dot { background: #dc382d; }
+.port-item.up .port-dot { background: var(--accent); box-shadow: 0 0 4px var(--accent-glow); }
+.port-item.down .port-dot { background: var(--danger); }
 .port-num { font-family: var(--mono); font-weight: 600; }
 .port-state { color: var(--text-dim); font-size: 12px; }
 .port-latency { color: var(--text-muted); font-size: 11px; }
@@ -826,7 +826,7 @@ onUnmounted(() => {
   font-weight: 600;
   color: var(--text-main);
   padding-left: 10px;
-  border-left: 3px solid var(--el-color-primary, #409eff);
+  border-left: 3px solid var(--el-color-primary);
 }
 .section-head { display: flex; align-items: center; justify-content: space-between; }
 .proc-search { width: 220px; }
@@ -864,7 +864,7 @@ onUnmounted(() => {
 .breadcrumb .bc-cur em { font-style: normal; color: var(--text-dim); font-weight: 400; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
-.status-pill.online { color: var(--accent); background: rgba(34,197,94,0.12); }
+.status-pill.online { color: var(--accent); background: var(--accent-dim); }
 .status-pill.offline { color: var(--text-dim); background: rgba(255,255,255,0.06); }
 .status-pill.offline .dot { background: var(--text-dim); }
 

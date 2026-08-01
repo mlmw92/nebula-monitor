@@ -346,6 +346,7 @@ import * as echarts from 'echarts'
 import http from '../api/http'
 import RuleModal from './RuleModal.vue'
 
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 const router = useRouter()
 const rules = ref([])
 const alerts = ref([])
@@ -569,6 +570,7 @@ async function batchAck() {
   }
 }
 
+let lastTrendPoints = []
 async function loadTrend(row) {
   if (!row.metric || !chartRef.value) return
   const end = Date.now()
@@ -578,6 +580,7 @@ async function loadTrend(row) {
   try {
     const data = await http.get(url)
     const pts = (data.series || []).map((p) => [p.time, p.value])
+    lastTrendPoints = pts
     renderChart(pts, row)
   } catch (e) { /* ignore */ }
 }
@@ -595,10 +598,10 @@ function renderChart(points, row) {
       showSymbol: false,
       smooth: true,
       areaStyle: { opacity: 0.15 },
-      lineStyle: { color: '#dc382d' },
-      itemStyle: { color: '#dc382d' },
+      lineStyle: { color: cssVar('--danger') },
+      itemStyle: { color: cssVar('--danger') },
       markLine: row.threshold
-        ? { silent: true, symbol: 'none', data: [{ yAxis: row.threshold }], lineStyle: { color: '#e6a23c', type: 'dashed' }, label: { formatter: '阈值 ' + row.threshold } }
+        ? { silent: true, symbol: 'none', data: [{ yAxis: row.threshold }], lineStyle: { color: cssVar('--warn'), type: 'dashed' }, label: { formatter: '阈值 ' + row.threshold } }
         : undefined,
     }],
   })
@@ -704,10 +707,19 @@ onMounted(() => {
   load()
   loadMaintenance()
   timer = setInterval(load, 30000)
+  // 换肤后重绘趋势图（ECharts 颜色来自 CSS 变量）
+  window.addEventListener('nebula:theme-changed', onThemeChanged)
 })
+
+function onThemeChanged() {
+  if (detail.value && chartRef.value) {
+    renderChart(lastTrendPoints, detail.value)
+  }
+}
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  window.removeEventListener('nebula:theme-changed', onThemeChanged)
   if (chartInstance) chartInstance.dispose()
 })
 </script>
@@ -724,11 +736,11 @@ onUnmounted(() => {
   align-items: center;
 }
 .muted {
-  color: var(--muted, #909399);
+  color: var(--text-dim);
 }
 .ev-acked {
   margin-left: 6px;
-  color: var(--muted, #909399);
+  color: var(--text-dim);
 }
 .maintenance-row {
   display: flex;
@@ -750,7 +762,7 @@ onUnmounted(() => {
 .maintenance-hint {
   margin-top: 10px;
   font-size: 12px;
-  color: var(--amber, #e6a23c);
+  color: var(--warn);
   background: rgba(230, 162, 60, 0.08);
   padding: 6px 12px;
   border-radius: 4px;
@@ -758,13 +770,13 @@ onUnmounted(() => {
 .scope-count {
   margin-left: 6px;
   font-size: 12px;
-  color: var(--muted, #909399);
+  color: var(--text-dim);
 }
 .ev-field {
   display: flex;
   gap: 12px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--border, #2a2f3a);
+  border-bottom: 1px solid var(--border);
   font-size: 13px;
 }
 .ev-field > span:first-child {
@@ -787,7 +799,7 @@ onUnmounted(() => {
   gap: 8px;
 }
 .kpi-value.gray {
-  color: var(--muted, #909399);
+  color: var(--text-dim);
 }
 .stats-extra {
   display: flex;
@@ -818,22 +830,22 @@ onUnmounted(() => {
   border-radius: 50%;
   margin-right: 4px;
 }
-.sev-dot.danger { background: #f56c6c; }
-.sev-dot.warning { background: #e6a23c; }
-.sev-dot.info { background: #909399; }
+.sev-dot.danger { background: var(--danger); }
+.sev-dot.warning { background: var(--warn); }
+.sev-dot.info { background: var(--text-dim); }
 .top-rule {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 4px 0;
   font-size: 13px;
-  border-bottom: 1px dashed var(--border, #2a2f3a);
+  border-bottom: 1px dashed var(--border);
 }
 .top-name {
   color: var(--text);
 }
 .top-badge {
-  color: var(--muted, #909399);
+  color: var(--text-dim);
   font-size: 12px;
 }
 .adv-section {
@@ -864,7 +876,7 @@ onUnmounted(() => {
 }
 .inh-block {
   background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border, #2a2f3a);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px;
   margin-bottom: 12px;

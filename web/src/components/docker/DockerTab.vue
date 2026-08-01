@@ -245,18 +245,18 @@ onMounted(load)
 .host-card { padding: 14px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); }
 .host-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .host-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
-.dot-up { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
-.dot-warn { background: #f0883e; }
-.dot-idle { background: #6e7681; }
+.dot-up { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+.dot-warn { background: var(--warn); }
+.dot-idle { background: var(--text-muted); }
 .host-node { font-size: 14px; font-weight: 600; }
 .host-group { font-size: 11px; color: var(--text-muted); background: rgba(255,255,255,0.06); padding: 1px 8px; border-radius: 10px; }
 .host-daemon { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; word-break: break-all; }
 .host-stats { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
 .host-stats b { color: var(--text); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-.metric-good { color: #3fb950; }
-.metric-warn { color: #f0883e; }
-.metric-bad { color: #dc382d; }
+.metric-good { color: var(--accent); }
+.metric-warn { color: var(--warn); }
+.metric-bad { color: var(--danger); }
 :deep(.row-down) { opacity: 0.6; }
 .detail-content { padding: 0 20px; }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; }

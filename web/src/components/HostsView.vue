@@ -659,7 +659,7 @@ defineExpose({ reload: load })
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #f56c6c;
+  background: var(--danger);
   margin-right: 5px;
   vertical-align: middle;
   box-shadow: 0 0 0 2px rgba(245, 108, 108, 0.25);
