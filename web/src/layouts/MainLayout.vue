@@ -14,6 +14,9 @@
           </el-breadcrumb>
         </div>
         <div class="topbar-right">
+          <el-tooltip content="数据大屏" placement="bottom">
+            <el-button :icon="DataAnalysis" circle size="small" @click="$router.push('/screen')" />
+          </el-tooltip>
           <el-tooltip content="切换配色主题" placement="bottom">
             <el-dropdown trigger="click" @command="changeTheme">
               <el-button circle size="small">
@@ -62,7 +65,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Expand, Fold, Refresh, Bell, User } from '@element-plus/icons-vue'
+import { Expand, Fold, Refresh, Bell, User, DataAnalysis } from '@element-plus/icons-vue'
 import Sidebar from '../components/Sidebar.vue'
 import http, { setToken } from '../api/http'
 import { connectWS } from '../api/ws'
