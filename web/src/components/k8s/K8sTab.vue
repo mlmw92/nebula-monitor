@@ -18,12 +18,12 @@
     <template v-if="clusters.length > 0">
       <!-- KPI -->
       <div class="kpi-row">
-        <div class="kpi-card gradient-total"><div class="kpi-body"><div class="kpi-num">{{ stats.clusters }}</div><div class="kpi-text">集群数</div></div></div>
-        <div class="kpi-card gradient-host"><div class="kpi-body"><div class="kpi-num">{{ stats.nodesReady }}/{{ stats.nodesTotal }}</div><div class="kpi-text">节点就绪/总数</div></div></div>
-        <div class="kpi-card gradient-up"><div class="kpi-body"><div class="kpi-num">{{ stats.podsRunning }}</div><div class="kpi-text">运行 Pod</div></div></div>
-        <div class="kpi-card gradient-ops"><div class="kpi-body"><div class="kpi-num">{{ stats.podsTotal }}</div><div class="kpi-text">Pod 总数</div></div></div>
-        <div class="kpi-card gradient-down"><div class="kpi-body"><div class="kpi-num">{{ stats.podsAbnormal }}</div><div class="kpi-text">异常 Pod</div></div></div>
-        <div class="kpi-card gradient-mem"><div class="kpi-body"><div class="kpi-num">{{ stats.workloadsUnhealthy }}</div><div class="kpi-text">不健康工作负载</div></div></div>
+        <KpiCard :value="stats.clusters" label="集群数" tone="cluster" />
+        <KpiCard :value="stats.nodesReady + '/' + stats.nodesTotal" label="节点就绪/总数" tone="host" />
+        <KpiCard :value="stats.podsRunning" label="运行 Pod" tone="up" />
+        <KpiCard :value="stats.podsTotal" label="Pod 总数" tone="total" />
+        <KpiCard :value="stats.podsAbnormal" label="异常 Pod" tone="down" />
+        <KpiCard :value="stats.workloadsUnhealthy" label="不健康工作负载" tone="alert" />
       </div>
 
       <!-- 集群卡片 -->
@@ -89,6 +89,7 @@
 import { ref, onMounted, computed } from 'vue'
 import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
+import KpiCard from '../KpiCard.vue'
 
 const loading = ref(true)
 const clusters = ref([])
@@ -141,16 +142,7 @@ onMounted(load)
 .empty-title { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
 .empty-desc { color: var(--text-dim); margin: 0 0 8px; font-size: 13px; }
 .empty-hint { color: var(--text-muted); font-size: 12px; }
-.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.kpi-card { border-radius: var(--radius); padding: 16px; }
-.kpi-num { font-size: 24px; font-weight: 700; }
-.kpi-text { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-.gradient-total { background: linear-gradient(135deg, #1c2129, #2d3548); }
-.gradient-host { background: linear-gradient(135deg, #1a2a3a, #326ce5); }
-.gradient-up { background: linear-gradient(135deg, #1a3a2a, #2d5a3d); }
-.gradient-down { background: linear-gradient(135deg, #3a1a1a, #5a2d2d); }
-.gradient-ops { background: linear-gradient(135deg, #2a1a3a, #4a2d5d); }
-.gradient-mem { background: linear-gradient(135deg, #3a2a1a, #5d4a2d); }
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
 .host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }

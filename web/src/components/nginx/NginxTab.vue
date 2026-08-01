@@ -16,12 +16,12 @@
 
     <template v-if="instances.length > 0">
       <div class="kpi-row">
-        <div class="kpi-card gradient-total"><div class="kpi-body"><div class="kpi-num">{{ stats.total }}</div><div class="kpi-text">实例总数</div></div></div>
-        <div class="kpi-card gradient-up"><div class="kpi-body"><div class="kpi-num">{{ stats.up }}</div><div class="kpi-text">在线实例</div></div></div>
-        <div class="kpi-card gradient-down"><div class="kpi-body"><div class="kpi-num">{{ stats.down }}</div><div class="kpi-text">离线实例</div></div></div>
-        <div class="kpi-card gradient-conn"><div class="kpi-body"><div class="kpi-num">{{ formatNum(stats.totalActive) }}</div><div class="kpi-text">总活跃连接</div></div></div>
-        <div class="kpi-card gradient-ops"><div class="kpi-body"><div class="kpi-num">{{ formatNum(stats.totalRequests) }}</div><div class="kpi-text">总请求数</div></div></div>
-        <div class="kpi-card gradient-mem"><div class="kpi-body"><div class="kpi-num">{{ stats.totalWaiting }}</div><div class="kpi-text">等待连接</div></div></div>
+        <KpiCard :value="stats.total" label="实例总数" tone="total" />
+        <KpiCard :value="stats.up" label="在线实例" tone="up" />
+        <KpiCard :value="stats.down" label="离线实例" tone="down" />
+        <KpiCard :value="formatNum(stats.totalActive)" label="总活跃连接" tone="conn" />
+        <KpiCard :value="formatNum(stats.totalRequests)" label="总请求数" tone="ops" />
+        <KpiCard :value="stats.totalWaiting" label="等待连接" tone="mem" />
       </div>
 
       <div class="chart-section glass">
@@ -72,6 +72,7 @@ import { ref, onMounted, computed, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
+import KpiCard from '../KpiCard.vue'
 
 const loading = ref(true)
 const instances = ref([])
@@ -144,16 +145,7 @@ onMounted(load)
 .empty-title { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
 .empty-desc { color: var(--text-dim); margin: 0 0 8px; font-size: 13px; }
 .empty-hint { color: var(--text-muted); font-size: 12px; }
-.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.kpi-card { border-radius: var(--radius); padding: 16px; }
-.kpi-num { font-size: 24px; font-weight: 700; }
-.kpi-text { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-.gradient-total { background: linear-gradient(135deg, #1c2129, #2d3548); }
-.gradient-up { background: linear-gradient(135deg, #1a3a2a, #2d5a3d); }
-.gradient-down { background: linear-gradient(135deg, #3a1a1a, #5a2d2d); }
-.gradient-conn { background: linear-gradient(135deg, #1a2a3a, #2d4a5d); }
-.gradient-ops { background: linear-gradient(135deg, #2a1a3a, #4a2d5d); }
-.gradient-mem { background: linear-gradient(135deg, #3a2a1a, #5d4a2d); }
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
