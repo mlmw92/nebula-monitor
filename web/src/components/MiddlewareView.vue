@@ -88,7 +88,8 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import RedisTab from './redis/RedisTab.vue'
 import MySQLTab from './mysql/MySQLTab.vue'
 import PostgresTab from './postgres/PostgresTab.vue'
@@ -107,7 +108,17 @@ import mongodbIcon from '../assets/img/mongoDB.svg'
 import rocketmqIcon from '../assets/img/rocketMQ.svg'
 import k8sIcon from '../assets/img/kubernetes.svg'
 
-const activeTab = ref('redis')
+const route = useRoute()
+const validTabs = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s']
+const activeTab = ref(validTabs.includes(route.query.tab) ? route.query.tab : 'redis')
+
+// 支持从首页等外部链接通过 ?tab= 深链跳转到指定中间件
+watch(
+  () => route.query.tab,
+  (t) => {
+    if (validTabs.includes(t)) activeTab.value = t
+  }
+)
 </script>
 
 <style scoped>
