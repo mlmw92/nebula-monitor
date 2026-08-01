@@ -15,23 +15,79 @@
         </div>
       </div>
     </div>
+
     <div class="hb-right">
-      <div v-for="p in health.parts" :key="p.label" class="hb-metric">
-        <div class="hb-metric-top">
-          <span class="hb-label">{{ p.label }}</span>
-          <span class="hb-val" :style="{ color: p.color }">{{ p.rate }}%</span>
-        </div>
-        <div class="hb-bar">
-          <div class="hb-bar-fill" :style="{ width: clamp(p.rate) + '%', background: p.color }"></div>
-        </div>
+      <div v-if="!reasons || reasons.length === 0" class="hb-ok">
+        <el-icon :size="14"><CircleCheckFilled /></el-icon>
+        <span>所有指标运行正常</span>
       </div>
+      <ul v-else class="hb-reasons">
+        <li v-for="r in reasons" :key="r.key" :class="'r-' + r.severity">
+          <span class="r-dot"></span>
+          <span class="r-label">{{ r.label }}</span>
+          <span class="r-value">{{ r.value }}</span>
+        </li>
+      </ul>
     </div>
   </div>
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { CircleCheckFilled } from '@element-plus/icons-vue'
+
 const props = defineProps({
   health: { type: Object, required: true },
+})
+
+// 派生"扣分原因"列表：按严重度降序，最多展示 4 条
+const reasons = computed(() => {
+  const list = []
+  const h = props.health
+  if (!h) return list
+
+  // 1. 离线主机（最关键）
+  if (h.offline > 0) {
+    list.push({
+      key: 'offline',
+      severity: h.offline / Math.max(1, h.total) >= 0.3 ? 'bad' : 'warn',
+      label: '主机离线',
+      value: h.offline + ' 台未上报',
+    })
+  }
+
+  // 2. 资源压力
+  const pressure = h.pressure || []
+  pressure.forEach((p) => {
+    if (!p || typeof p.rate !== 'number' || isNaN(p.rate)) return
+    if (p.rate < p.warnAt) return
+    const severity = p.rate >= p.warnAt + 15 ? 'bad' : 'warn'
+    list.push({
+      key: p.key,
+      severity,
+      label: p.label + ' 平均偏高',
+      value: Math.round(p.rate) + '%',
+    })
+  })
+
+  // 3. 告警联动
+  if (h.criticalAlerts > 0) {
+    list.push({
+      key: 'crit',
+      severity: 'bad',
+      label: '紧急告警',
+      value: h.criticalAlerts + ' 条',
+    })
+  } else if (h.warningAlerts > 0) {
+    list.push({
+      key: 'warn',
+      severity: 'warn',
+      label: '警告告警',
+      value: h.warningAlerts + ' 条',
+    })
+  }
+
+  return list.slice(0, 4)
 })
 
 function clamp(v) {
@@ -52,8 +108,9 @@ function rank(score) {
 .health-block {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 18px;
   height: 100%;
+  min-height: 120px;
 }
 .hb-left {
   display: flex;
@@ -137,32 +194,74 @@ function rank(score) {
 }
 .hb-right {
   flex: 1;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px 18px;
   min-width: 0;
-}
-.hb-metric-top {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+}
+.hb-ok {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--chart-green);
+  font-size: 13px;
+  font-weight: 600;
+}
+.hb-reasons {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.hb-reasons li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
-  margin-bottom: 4px;
-}
-.hb-label {
-  color: var(--text-dim);
-}
-.hb-val {
-  font-weight: 700;
-}
-.hb-bar {
-  height: 5px;
-  border-radius: 3px;
+  padding: 5px 8px;
   background: var(--bg-elev);
-  overflow: hidden;
+  border-radius: 6px;
+  border-left: 2px solid var(--text-muted);
 }
-.hb-bar-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.4s ease;
+.hb-reasons li.r-warn {
+  border-left-color: var(--warn);
+}
+.hb-reasons li.r-bad {
+  border-left-color: var(--danger);
+}
+.r-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+.hb-reasons li.r-warn .r-dot {
+  background: var(--warn);
+  box-shadow: 0 0 6px var(--warn);
+}
+.hb-reasons li.r-bad .r-dot {
+  background: var(--danger);
+  box-shadow: 0 0 6px var(--danger);
+}
+.r-label {
+  color: var(--text);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.r-value {
+  color: var(--text-dim);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.hb-reasons li.r-warn .r-value {
+  color: var(--warn);
+}
+.hb-reasons li.r-bad .r-value {
+  color: var(--danger);
 }
 </style>

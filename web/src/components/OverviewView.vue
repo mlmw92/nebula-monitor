@@ -95,7 +95,16 @@ async function loadAll() {
     const map = {}
     middlewareTypes.forEach((t, i) => {
       const r = mw[i] || {}
-      map[t.key] = Array.isArray(r.instances) ? r.instances : (Array.isArray(r) ? r : [])
+      // 不同端点返回结构不统一，做兼容：
+      //   - 大多数：{ instances: [...] }
+      //   - Docker：  { containers: [...], hosts: [...] }
+      //   - K8s：    { clusters: [...], nodes: [...], pods: [...] }
+      let arr = []
+      if (Array.isArray(r.instances)) arr = r.instances
+      else if (Array.isArray(r.containers)) arr = r.containers
+      else if (Array.isArray(r.clusters)) arr = r.clusters
+      else if (Array.isArray(r)) arr = r
+      map[t.key] = arr
     })
     mwData.value = map
   } finally {
@@ -143,12 +152,6 @@ function avg(arr) {
   if (!arr.length) return 0
   return arr.reduce((a, b) => a + b, 0) / arr.length
 }
-function getColor(v, warnAt) {
-  if (v == null || isNaN(v)) return 'var(--text-muted)'
-  if (v >= warnAt + 15) return 'var(--danger)'
-  if (v >= warnAt) return 'var(--warn)'
-  return 'var(--chart-green)'
-}
 
 const health = computed(() => {
   const ns = sortedNodes.value
@@ -167,6 +170,9 @@ const health = computed(() => {
   const cpuA = avg(cpus)
   const memA = avg(mems)
   const diskA = avg(disks)
+  // 与 HealthBlock 中的扣分原因保持一致：同时使用告警离线 + 阈值压力 + 告警数量
+  const crit = alertsAll.value.filter((x) => (x.severity || '').toLowerCase() === 'critical').length
+  const warn = alertsAll.value.filter((x) => (x.severity || '').toLowerCase() === 'warning').length
   let score = 100
   if (total > 0) {
     const offlinePenalty = (offline / total) * 100 * 0.6
@@ -187,12 +193,22 @@ const health = computed(() => {
     statusText = '风险较高'
     rank = 'bad'
   }
-  const parts = [
-    { label: 'CPU', rate: Math.round(cpuA), color: getColor(cpuA, 70) },
-    { label: '内存', rate: Math.round(memA), color: getColor(memA, 80) },
-    { label: '磁盘', rate: Math.round(diskA), color: getColor(diskA, 85) },
-  ]
-  return { score, statusText, rank, total, online, offline, parts }
+  return {
+    score,
+    statusText,
+    rank,
+    total,
+    online,
+    offline,
+    criticalAlerts: crit,
+    warningAlerts: warn,
+    // 供 HealthBlock 渲染扣分原因：每个指标携带其告警阈值
+    pressure: [
+      { key: 'cpu', label: 'CPU', rate: cpuA, warnAt: 70 },
+      { key: 'mem', label: '内存', rate: memA, warnAt: 80 },
+      { key: 'disk', label: '磁盘', rate: diskA, warnAt: 85 },
+    ],
+  }
 })
 
 const kpis = computed(() => {

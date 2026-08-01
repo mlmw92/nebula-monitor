@@ -10,10 +10,11 @@
       <div class="mw-head">
         <img class="mw-icon" :src="s.icon" :alt="s.label" />
         <span class="mw-name">{{ s.label }}</span>
-        <span class="mw-total">{{ s.total }}</span>
+        <span v-if="s.total > 0" class="mw-total">{{ s.total }}</span>
+        <span v-else class="mw-badge">未配置</span>
       </div>
 
-      <div class="mw-body">
+      <div v-if="s.total > 0" class="mw-body">
         <div class="mw-donut" :style="donutStyle(s)">
           <div class="mw-donut-inner">
             <span class="mw-online">{{ s.online }}</span>
@@ -32,15 +33,21 @@
               <span class="mw-top-label" :title="t.label">{{ t.label }}</span>
               <span class="mw-top-val">{{ t.valueText }}</span>
             </div>
-            <div v-if="s.topN.length === 0" class="mw-top-empty">暂无实例</div>
           </div>
         </div>
+      </div>
+
+      <div v-else class="mw-empty">
+        <el-icon :size="20"><InfoFilled /></el-icon>
+        <div class="mw-empty-title">尚未配置监控</div>
+        <div class="mw-empty-sub">点击前往 {{ s.label }} 页面了解接入方式</div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
+import { InfoFilled } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 
 const props = defineProps({
@@ -72,6 +79,8 @@ function goTab(tab) {
   padding: 14px;
   cursor: pointer;
   transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  display: flex;
+  flex-direction: column;
 }
 .mw-card:hover {
   transform: translateY(-2px);
@@ -79,8 +88,7 @@ function goTab(tab) {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
 }
 .mw-card.disabled {
-  opacity: 0.55;
-  cursor: default;
+  opacity: 0.78;
 }
 .mw-card.disabled:hover {
   transform: none;
@@ -109,6 +117,16 @@ function goTab(tab) {
   background: var(--bg-card);
   border-radius: 10px;
   padding: 1px 8px;
+}
+.mw-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-card);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 1px 7px;
+  letter-spacing: 0.04em;
 }
 .mw-body {
   display: flex;
@@ -195,8 +213,24 @@ function goTab(tab) {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.mw-top-empty {
-  font-size: 11px;
+.mw-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 18px 0 8px;
   color: var(--text-muted);
+  text-align: center;
+}
+.mw-empty-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.mw-empty-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 </style>
