@@ -16,73 +16,64 @@
     </div>
 
     <template v-if="instances.length > 0">
-      <!-- KPI 概览卡片 -->
+      <!-- KPI 概览卡片：与 Redis 统一使用 KpiCard 组件 -->
       <div class="kpi-row">
-        <div class="kpi-card gradient-total">
-          <div class="kpi-body">
-            <div class="kpi-num">{{ stats.total }}</div>
-            <div class="kpi-text">实例总数</div>
-          </div>
-        </div>
-        <div class="kpi-card gradient-up">
-          <div class="kpi-body">
-            <div class="kpi-num">{{ stats.up }}</div>
-            <div class="kpi-text">在线实例</div>
-          </div>
-        </div>
-        <div class="kpi-card gradient-down">
-          <div class="kpi-body">
-            <div class="kpi-num">{{ stats.down }}</div>
-            <div class="kpi-text">离线实例</div>
-          </div>
-        </div>
-        <div class="kpi-card gradient-conn">
-          <div class="kpi-body">
-            <div class="kpi-num">{{ formatNum(stats.totalConnections) }}</div>
-            <div class="kpi-text">总连接数</div>
-          </div>
-        </div>
-        <div class="kpi-card gradient-ops">
-          <div class="kpi-body">
-            <div class="kpi-num">{{ formatNum(stats.totalQPS) }}</div>
-            <div class="kpi-text">总 QPS</div>
-          </div>
-        </div>
-        <div class="kpi-card gradient-mem">
-          <div class="kpi-body">
-            <div class="kpi-num">{{ stats.totalSlowQueries }}</div>
-            <div class="kpi-text">慢查询累计</div>
-          </div>
-        </div>
+        <KpiCard :value="stats.total" label="实例总数" tone="total">
+          <template #icon><el-icon :size="20"><Grid /></el-icon></template>
+        </KpiCard>
+        <KpiCard :value="stats.up" label="在线实例" tone="up">
+          <template #icon><el-icon :size="20"><CircleCheck /></el-icon></template>
+        </KpiCard>
+        <KpiCard :value="stats.down" label="离线实例" tone="down">
+          <template #icon><el-icon :size="20"><CircleClose /></el-icon></template>
+        </KpiCard>
+        <KpiCard :value="formatNum(stats.totalConnections)" label="总连接数" tone="conn">
+          <template #icon><el-icon :size="20"><Connection /></el-icon></template>
+        </KpiCard>
+        <KpiCard :value="formatNum(stats.totalQPS)" label="总 QPS" tone="ops">
+          <template #icon><el-icon :size="20"><DataLine /></el-icon></template>
+        </KpiCard>
+        <KpiCard :value="stats.totalSlowQueries" label="慢查询累计" tone="alert">
+          <template #icon><el-icon :size="20"><Bell /></el-icon></template>
+        </KpiCard>
       </div>
 
       <!-- 实例列表 -->
       <div class="chart-section glass">
         <div class="section-title">实例列表</div>
-        <el-table :data="instances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass">
-          <el-table-column prop="instance" label="实例地址" min-width="160" />
-          <el-table-column prop="name" label="名称" min-width="100" />
-          <el-table-column prop="role" label="角色" width="80">
+        <el-table :data="instances" class="mysql-table" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass">
+          <el-table-column prop="instance" label="实例地址" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip>
+            <template #header>
+              <el-tooltip content="Agent 配置中指定的实例别名/名称；未配置时为空" placement="top">
+                <span>名称 <el-icon :size="12" style="vertical-align: middle; margin-left: 2px;"><QuestionFilled /></el-icon></span>
+              </el-tooltip>
+            </template>
+            <template #default="{ row }">
+              <span class="text-muted">{{ row.name || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="role" label="角色" min-width="90">
             <template #default="{ row }">
               <el-tag :type="row.role === 'master' ? 'warning' : 'info'" size="small">{{ row.role }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="version" label="版本" width="100" />
-          <el-table-column label="状态" width="80">
+          <el-table-column prop="version" label="版本" min-width="140" show-overflow-tooltip />
+          <el-table-column label="状态" min-width="100">
             <template #default="{ row }">
               <span :class="['dot', row.up ? 'up' : 'down']"></span>
               {{ row.up ? '在线' : '离线' }}
             </template>
           </el-table-column>
-          <el-table-column prop="threadsConnected" label="连接数" width="90" sortable />
-          <el-table-column prop="queriesPerSec" label="QPS" width="80" sortable />
-          <el-table-column label="缓冲命中率" width="110" sortable :sort-by="'bufferPoolHitRate'">
+          <el-table-column prop="threadsConnected" label="连接数" min-width="110" sortable />
+          <el-table-column prop="queriesPerSec" label="QPS" min-width="100" sortable />
+          <el-table-column label="缓冲命中率" min-width="150" sortable :sort-by="'bufferPoolHitRate'">
             <template #default="{ row }">
               <span :class="hitRateClass(row.bufferPoolHitRate)">{{ row.bufferPoolHitRate ? row.bufferPoolHitRate.toFixed(1) + '%' : '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="secondsBehindMaster" label="复制延迟(s)" width="110" sortable />
-          <el-table-column prop="uptime" label="运行时长" width="100">
+          <el-table-column prop="secondsBehindMaster" label="复制延迟(s)" min-width="150" sortable />
+          <el-table-column prop="uptime" label="运行时长" min-width="120">
             <template #default="{ row }">{{ formatUptime(row.uptime) }}</template>
           </el-table-column>
         </el-table>
@@ -127,6 +118,16 @@ import { ref, onMounted, computed, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
+import KpiCard from '../KpiCard.vue'
+import {
+  Grid,
+  CircleCheck,
+  CircleClose,
+  Connection,
+  DataLine,
+  Bell,
+  QuestionFilled,
+} from '@element-plus/icons-vue'
 
 const loading = ref(true)
 const instances = ref([])
@@ -215,17 +216,10 @@ onMounted(load)
 .empty-desc { color: var(--text-dim); margin: 0 0 8px; font-size: 13px; }
 .empty-hint { color: var(--text-muted); font-size: 12px; }
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.kpi-card { border-radius: var(--radius); padding: 16px; display: flex; align-items: center; gap: 12px; }
-.kpi-num { font-size: 24px; font-weight: 700; }
-.kpi-text { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-.gradient-total { background: linear-gradient(135deg, var(--bg-elev), var(--chart-blue)); }
-.gradient-up { background: linear-gradient(135deg, var(--bg-elev), var(--chart-green)); }
-.gradient-down { background: linear-gradient(135deg, var(--bg-elev), var(--chart-red)); }
-.gradient-conn { background: linear-gradient(135deg, var(--bg-elev), var(--chart-cyan)); }
-.gradient-ops { background: linear-gradient(135deg, var(--bg-elev), var(--chart-orange)); }
-.gradient-mem { background: linear-gradient(135deg, var(--bg-elev), var(--chart-purple)); }
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
+.mysql-table :deep(th) { white-space: nowrap; }
+.text-muted { color: var(--text-muted); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
 .dot.up { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
 .dot.down { background: var(--danger); }
