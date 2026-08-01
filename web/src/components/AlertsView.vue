@@ -17,6 +17,10 @@
           <div class="kpi-value amber">{{ stats.bySeverity.warning }}</div>
         </div>
         <div class="glass panel kpi">
+          <div class="kpi-label">信息</div>
+          <div class="kpi-value cyan">{{ stats.bySeverity.info }}</div>
+        </div>
+        <div class="glass panel kpi">
           <div class="kpi-label">已抑制</div>
           <div class="kpi-value gray">{{ stats.suppressed }}</div>
         </div>
@@ -26,12 +30,6 @@
         </div>
       </div>
       <div class="stats-extra">
-        <div class="stats-col">
-          <div class="mini-title">信息类（活跃）</div>
-          <div class="sev-bar-wrap">
-            <span class="sev-dot info"></span>{{ stats.bySeverity.info }} 条
-          </div>
-        </div>
         <div class="stats-col">
           <div class="mini-title">Top 规则</div>
           <div v-if="!stats.topRules.length" class="muted">暂无数据</div>
