@@ -24,6 +24,17 @@
         >
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
+        <el-popover placement="bottom-end" :width="220" trigger="click">
+          <template #reference>
+            <el-button :icon="Operation" size="small" plain>列设置</el-button>
+          </template>
+          <div class="col-set">
+            <div class="col-set-title">显示列</div>
+            <el-checkbox-group v-model="selectedCols" class="col-set-group">
+              <el-checkbox v-for="c in colOptions" :key="c.key" :value="c.key" :label="c.label" />
+            </el-checkbox-group>
+          </div>
+        </el-popover>
         <el-button type="primary" :icon="Plus" size="small" @click="openAddNode">添加主机</el-button>
       </div>
     </div>
@@ -58,10 +69,11 @@
         style="width: 100%"
         empty-text="暂无主机"
         @row-click="(r) => goDetail(r)"
+        @sort-change="onSortChange"
         class="host-table"
         :row-class-name="rowClass"
       >
-        <el-table-column label="主机名称 / IP" min-width="220">
+        <el-table-column v-if="colVisible('host')" label="主机名称 / IP" prop="hostname" sortable="custom" min-width="200">
           <template #default="{ row }">
             <div class="host-name">
               <div class="hn-top">
@@ -82,7 +94,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="状态" width="90">
+        <el-table-column v-if="colVisible('status')" label="状态" prop="status" sortable="custom" min-width="80">
           <template #default="{ row }">
             <span class="status-led" :class="row.status === 'online' ? 'on' : 'off'"></span>
             <span :class="['status-text', row.status === 'online' ? 'on' : 'off']">
@@ -91,7 +103,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="分组" min-width="120">
+        <el-table-column v-if="colVisible('group')" label="分组" prop="group" sortable="custom" min-width="100">
           <template #default="{ row }">
             <el-dropdown trigger="click" @command="(cmd) => changeGroup(row, cmd)" @click.stop>
               <span class="group-tag clickable" @click.stop>
@@ -114,7 +126,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="Agent 版本" min-width="110">
+        <el-table-column v-if="colVisible('version')" label="Agent 版本" prop="version" sortable="custom" min-width="90">
           <template #default="{ row }">
             <span class="ver-cell" :class="verClass(row.version)">
               <span v-if="needUpgrade(row)" class="ver-dot"></span>{{ row.version || '-' }}
@@ -122,7 +134,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="CPU" min-width="110">
+        <el-table-column v-if="colVisible('cpu')" label="CPU" prop="cpu" sortable="custom" min-width="90">
           <template #default="{ row }">
             <div class="usage-cell" v-if="hasMetric(row)">
               <div class="mini-bar">
@@ -134,7 +146,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="内存" min-width="110">
+        <el-table-column v-if="colVisible('mem')" label="内存" prop="mem" sortable="custom" min-width="90">
           <template #default="{ row }">
             <div class="usage-cell" v-if="hasMetric(row)">
               <div class="mini-bar">
@@ -146,7 +158,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="磁盘使用" min-width="120">
+        <el-table-column v-if="colVisible('disk')" label="磁盘使用" prop="disk" sortable="custom" min-width="100">
           <template #default="{ row }">
             <div class="usage-cell" v-if="hasMetric(row)">
               <div class="mini-bar">
@@ -158,19 +170,19 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="流量↓" min-width="100">
+        <el-table-column v-if="colVisible('netIn')" label="流量↓" prop="netIn" sortable="custom" min-width="90">
           <template #default="{ row }">
             <span class="rate mono">{{ fmtRate(m(row).netIn) }}/s</span>
           </template>
         </el-table-column>
 
-        <el-table-column label="负载" min-width="80">
+        <el-table-column v-if="colVisible('load1')" label="负载" prop="load1" sortable="custom" min-width="70">
           <template #default="{ row }">
             <span :class="['rate-sm', loadClass(row)]">{{ fmtNum(m(row).load1, 2) }}</span>
           </template>
         </el-table-column>
 
-        <el-table-column label="磁盘读写" min-width="130">
+        <el-table-column v-if="colVisible('diskRW')" label="磁盘读写" prop="diskRead" sortable="custom" min-width="120">
           <template #default="{ row }">
             <span class="rate mono sm">
               R{{ fmtRate(m(row).diskRead) }}
@@ -180,7 +192,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" min-width="170" fixed="right">
           <template #default="{ row }">
             <el-button link size="small" @click.stop="goDetail(row)">详情</el-button>
             <el-button link size="small" type="warning" @click.stop="upgrade(row)">升级</el-button>
@@ -253,7 +265,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, CopyDocument, Setting, ArrowDown, Refresh, Edit } from '@element-plus/icons-vue'
+import { Plus, Search, CopyDocument, Setting, ArrowDown, Refresh, Edit, Operation } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
 import OsIcon from './OsIcon.vue'
@@ -291,7 +303,67 @@ const onlineCount = computed(() => nodes.value.filter((n) => n.status === 'onlin
 const offlineCount = computed(() => nodes.value.filter((n) => n.status !== 'online').length)
 const warningCount = computed(() => nodes.value.filter((n) => nodeSeverity(n) >= 50 && n.status === 'online').length)
 
-// 过滤 + 排序（异常置顶）
+// 列设置：可勾选展示哪些列
+const colOptions = [
+  { key: 'host', label: '主机名称/IP' },
+  { key: 'status', label: '状态' },
+  { key: 'group', label: '分组' },
+  { key: 'version', label: 'Agent 版本' },
+  { key: 'cpu', label: 'CPU' },
+  { key: 'mem', label: '内存' },
+  { key: 'disk', label: '磁盘使用' },
+  { key: 'netIn', label: '流量↓' },
+  { key: 'load1', label: '负载' },
+  { key: 'diskRW', label: '磁盘读写' },
+]
+const selectedCols = ref(colOptions.map((c) => c.key))
+function colVisible(k) {
+  return selectedCols.value.includes(k)
+}
+
+// 排序状态：默认按严重度（异常置顶）；点击表头切换到按列排序
+const sortProp = ref('')
+const sortOrder = ref('')
+function onSortChange({ prop, order }) {
+  sortProp.value = order ? prop : ''
+  sortOrder.value = order || ''
+}
+
+// IP 升序比较：点分十进制按四段数值比较，非标准 IP 退化为字符串比较
+function ipCompare(a, b) {
+  const pa = String(a || '').split('.')
+  const pb = String(b || '').split('.')
+  const isNum = (p) => p.length === 4 && p.every((x) => /^\d+$/.test(x))
+  if (isNum(pa) && isNum(pb)) {
+    for (let i = 0; i < 4; i++) {
+      const x = +pa[i]
+      const y = +pb[i]
+      if (x !== y) return x - y
+    }
+    return 0
+  }
+  return String(a || '').localeCompare(String(b || ''))
+}
+
+// 取某列的排序值
+function sortValue(n, prop) {
+  switch (prop) {
+    case 'hostname': return n.hostname
+    case 'status': return n.status
+    case 'group': return n.group || 'default'
+    case 'version': return n.version || ''
+    case 'cpu': return m(n).cpu
+    case 'mem': return m(n).mem
+    case 'disk': return m(n).disk
+    case 'netIn': return m(n).netIn
+    case 'load1': return m(n).load1
+    case 'diskRead': return m(n).diskRead
+    case 'severity': return nodeSeverity(n)
+    default: return ''
+  }
+}
+
+// 仅过滤（不含排序）
 const filteredNodes = computed(() => {
   let arr = nodes.value
   if (statusFilter.value === 'online') arr = arr.filter((n) => n.status === 'online')
@@ -307,12 +379,35 @@ const filteredNodes = computed(() => {
         (n.ip || '').toLowerCase().includes(k)
     )
   }
-  return arr.sort((a, b) => nodeSeverity(b) - nodeSeverity(a))
+  return arr
+})
+
+// 排序：默认严重度降序 + 同分值按 IP 升序；手动排序时按列（同值仍按 IP 升序稳定）
+const sortedNodes = computed(() => {
+  const arr = filteredNodes.value.slice()
+  if (!sortProp.value) {
+    arr.sort((a, b) => {
+      const d = nodeSeverity(b) - nodeSeverity(a)
+      return d !== 0 ? d : ipCompare(a.ip, b.ip)
+    })
+    return arr
+  }
+  const dir = sortOrder.value === 'ascending' ? 1 : -1
+  arr.sort((a, b) => {
+    const va = sortValue(a, sortProp.value)
+    const vb = sortValue(b, sortProp.value)
+    if (va === vb) return ipCompare(a.ip, b.ip)
+    if (va == null || va === '') return 1
+    if (vb == null || vb === '') return -1
+    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir
+    return String(va).localeCompare(String(vb)) * dir
+  })
+  return arr
 })
 
 const pagedNodes = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return filteredNodes.value.slice(start, start + pageSize.value)
+  return sortedNodes.value.slice(start, start + pageSize.value)
 })
 
 // 过滤条件变化时回到第一页
@@ -481,11 +576,17 @@ async function copyCmd() {
 
 async function remove(row) {
   try {
-    await ElMessageBox.confirm('确认删除主机 ' + row.hostname + '？', '提示', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-    })
+    await ElMessageBox.confirm(
+      `确认删除主机「${row.displayName || row.hostname}」？删除后该主机的监控数据将一并清除，且不可恢复。`,
+      '删除主机',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+        closeOnClickModal: false,
+      }
+    )
     await http.del('/api/v1/nodes/' + row.hostname)
     ElMessage.success('已删除')
     load()
@@ -788,5 +889,22 @@ defineExpose({ reload: load })
   font-size: 12px;
   color: var(--accent);
   background: rgba(0, 0, 0, 0.35) !important;
+}
+
+/* 列设置弹窗 */
+.col-set {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.col-set-title {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+.col-set-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 </style>
