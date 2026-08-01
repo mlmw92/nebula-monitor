@@ -1585,7 +1585,7 @@ function handleResize() {
 .rel-center::after { content: ''; }
 .rel-master { border-color: rgba(59,130,246,0.35); }
 .rel-sentinel { border-color: rgba(234,179,8,0.35); background: rgba(234,179,8,0.06); }
-.rel-standalone { border-color: rgba(148,163,184,0.3); }
+.rel-standalone { border-color: rgba(148,163,184,0.3); border-left: 3px solid rgba(148,163,184,0.55); }
 .rel-edges { display: flex; gap: 12px; flex-wrap: wrap; flex: 1; }
 .rel-edges-left, .rel-edges-right { flex: 1; min-width: 200px; }
 .rel-edge { position: relative; }

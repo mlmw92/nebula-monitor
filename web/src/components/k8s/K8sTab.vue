@@ -54,11 +54,11 @@
           <el-table-column prop="nodeName" label="节点名" min-width="180" show-overflow-tooltip />
           <el-table-column prop="ip" label="IP" min-width="140" show-overflow-tooltip />
           <el-table-column prop="cluster" label="集群" width="140" />
-          <el-table-column label="角色" width="100">
+          <el-table-column label="角色" width="120">
             <template #default="{ row }"><MwRoleTag :role="row.role" /></template>
           </el-table-column>
-          <el-table-column label="状态" width="90">
-            <template #default="{ row }"><MwStatusDot :status="row.ready ? 'normal' : 'abnormal'" :label="row.ready ? 'Ready' : 'NotReady'" /></template>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }"><MwStatusDot :status="row.ready ? 'normal' : 'abnormal'" :label="row.ready ? '就绪' : '未就绪'" /></template>
           </el-table-column>
           <el-table-column label="CPU 用量" width="110" sortable :sort-by="'cpuCores'">
             <template #default="{ row }">{{ row.cpuCores ? row.cpuCores.toFixed(2) + ' 核' : '-' }}</template>

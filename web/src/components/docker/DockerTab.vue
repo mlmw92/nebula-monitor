@@ -26,16 +26,17 @@
       <div class="chart-section glass">
         <div class="section-title">实例拓扑</div>
         <div class="host-grid">
-          <div v-for="h in stats.hosts" :key="h.host" class="host-block">
+          <div v-for="h in stats.hosts" :key="h.node" class="host-block">
             <div class="host-header" :class="{'is-down': !h.up}">
               <span class="host-dot" :class="h.up ? 'up' : 'down'"></span>
-              <span class="host-name">{{ h.host }}</span>
+              <span class="host-name">{{ h.node }}</span>
               <span class="host-count">{{ h.containers.length }} 容器</span>
             </div>
+            <div class="host-daemon mono">{{ h.daemon }}<span v-if="h.ip" class="host-ip"> · {{ h.ip }}</span></div>
             <div class="host-body">
               <div v-for="c in h.containers" :key="c.id" class="container-chip" :class="['st-' + c.state, {'is-down': c.state !== 'running'}]" @click="openDetail(c)">
                 <span class="container-name">{{ c.name }}</span>
-                <span class="container-state">{{ c.state }}</span>
+                <span class="container-state">{{ dockerStatusText(c.state) }}</span>
               </div>
               <div v-if="h.containers.length === 0" class="host-empty">无容器</div>
             </div>
@@ -48,10 +49,17 @@
         <el-table :data="pagedContainers" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
           <el-table-column prop="name" label="名称" min-width="150" show-overflow-tooltip />
           <el-table-column prop="image" label="镜像" min-width="200" show-overflow-tooltip />
-          <el-table-column prop="host" label="所在主机" min-width="120" />
+          <el-table-column label="所在主机" min-width="160">
+            <template #default="{ row }">
+              <div class="host-cell">
+                <span class="host-cell-name">{{ row.host }}</span>
+                <span v-if="row.hostIp" class="host-cell-ip">{{ row.hostIp }}</span>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
-              <MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="row.status" />
+              <MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="dockerStatusText(row.status || row.state)" />
             </template>
           </el-table-column>
           <el-table-column prop="cpuPercent" label="CPU%" width="90" sortable />
@@ -104,9 +112,19 @@ const selected = ref(null)
 const chartRef = ref(null)
 let chartInstance = null
 
+const statusTextMap = {
+  running: '运行中',
+  paused: '已暂停',
+  exited: '已停止',
+  restarting: '重启中',
+  dead: '异常',
+  created: '已创建',
+}
+function dockerStatusText(state) { return statusTextMap[state] || state || '-' }
+
 const containers = computed(() => {
   const arr = []
-  for (const h of (stats.value.hosts || [])) for (const c of (h.containers || [])) arr.push({ ...c, host: h.node })
+  for (const h of (stats.value.hosts || [])) for (const c of (h.containers || [])) arr.push({ ...c, host: h.node, hostIp: h.ip })
   return arr
 })
 
@@ -220,6 +238,8 @@ onMounted(load)
 .host-dot.down { background: #f87171; }
 .host-name { font-size: 13px; }
 .host-count { margin-left: auto; font-size: 12px; color: var(--text-muted); font-weight: 400; }
+.host-daemon { padding: 6px 12px; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.host-ip { color: var(--text-muted); }
 .host-body { padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 8px; }
 .container-chip { display: flex; flex-direction: column; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; background: rgba(255,255,255,0.03); font-size: 12px; min-width: 110px; }
 .container-chip.is-down { opacity: 0.6; }
@@ -229,6 +249,9 @@ onMounted(load)
 .container-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .container-state { font-size: 11px; color: var(--text-muted); }
 .host-empty { font-size: 12px; color: var(--text-muted); padding: 4px 0; }
+.host-cell { display: flex; flex-direction: column; }
+.host-cell-name { font-size: 13px; }
+.host-cell-ip { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
 .pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 :deep(.row-down) { opacity: 0.6; }
 .detail-content { padding: 0 20px; }
