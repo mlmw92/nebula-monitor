@@ -21,6 +21,17 @@
         <el-table-column label="启用" width="80">
           <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '是' : '否' }}</el-tag></template>
         </el-table-column>
+        <el-table-column label="告警级别" width="100">
+          <template #default="{ row }">
+            <el-tag :type="sevType(row.severity)" size="small" effect="dark">{{ sevLabel(row.severity) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="通知" width="120">
+          <template #default="{ row }">
+            <span v-if="!row.notify || row.notify.length === 0" class="muted">全部渠道</span>
+            <el-tag v-for="c in (row.notify || [])" :key="c" size="small" class="ch-tag">{{ chLabel(c) }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-button link @click="editTask(row)">编辑</el-button>
@@ -71,6 +82,22 @@
         <el-form-item label="间隔(s)"><el-input-number v-model="form.interval" :min="10" :max="3600" /></el-form-item>
         <el-form-item label="超时(s)"><el-input-number v-model="form.timeout" :min="1" :max="60" /></el-form-item>
         <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
+        <el-form-item label="告警级别">
+          <el-select v-model="form.severity" placeholder="选择严重级别">
+            <el-option label="紧急" value="critical" />
+            <el-option label="警告" value="warning" />
+            <el-option label="信息" value="info" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="通知渠道">
+          <el-select v-model="form.notify" multiple collapse-tags placeholder="留空=全部已启用渠道">
+            <el-option label="邮件" value="email" />
+            <el-option label="Webhook" value="webhook" />
+            <el-option label="钉钉" value="dingtalk" />
+            <el-option label="飞书" value="feishu" />
+            <el-option label="企业微信" value="wecom" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showDialog = false">取消</el-button>
@@ -89,7 +116,7 @@ const tasks = ref([])
 const results = ref([])
 const showDialog = ref(false)
 const editing = ref(false)
-const form = ref({ name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true })
+const form = ref({ name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true, severity: 'warning', notify: [] })
 
 async function load() {
   loading.value = true
@@ -118,7 +145,7 @@ async function saveTask() {
     }
     showDialog.value = false
     editing.value = false
-    form.value = { name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true }
+    form.value = { name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true, severity: 'warning', notify: [] }
     await load()
   } catch (e) { console.error(e) }
 }
@@ -132,6 +159,12 @@ async function deleteTask(row) {
 }
 
 function certClass(days) { if (days <= 7) return 'metric-bad'; if (days <= 30) return 'metric-warn'; return 'metric-good' }
+
+function sevLabel(s) { return s === 'critical' ? '紧急' : s === 'info' ? '信息' : '警告' }
+function sevType(s) { return s === 'critical' ? 'danger' : s === 'info' ? 'info' : 'warning' }
+function chLabel(c) {
+  return { email: '邮件', webhook: 'Webhook', dingtalk: '钉钉', feishu: '飞书', wecom: '企业微信' }[c] || c
+}
 
 onMounted(load)
 </script>
@@ -151,4 +184,5 @@ onMounted(load)
 .metric-good { color: #3fb950; }
 .metric-warn { color: #f0883e; }
 .metric-bad { color: #dc382d; }
+.ch-tag { margin-right: 4px; }
 </style>

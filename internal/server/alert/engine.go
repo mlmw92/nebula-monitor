@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/storage"
 )
@@ -33,6 +34,7 @@ type Engine struct {
 	evalInterval int
 	mu           sync.Mutex
 	states       map[string]*ruleState
+	dialActive   map[string]bool // 拨测任务是否有未恢复故障事件，按 "dialtest:<taskID>" 记录
 }
 
 type ruleState struct {
@@ -56,6 +58,7 @@ func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
 		maintenance:  maintenance,
 		evalInterval: evalInterval,
 		states:       map[string]*ruleState{},
+		dialActive:   map[string]bool{},
 	}
 }
 
@@ -185,6 +188,105 @@ func (e *Engine) resolve(r model.AlertRule, node, instance string, value float64
 		e.broadcaster.BroadcastAlert(ev)
 	}
 	slog.Info("告警恢复", "rule", r.Name, "node", node, "metric", r.Metric, "value", value)
+}
+
+// EmitDialtestAlert 由拨测调度器在状态跃迁时调用，产生拨测类告警事件并联动通知。
+// up=false 表示拨测故障触发，up=true 表示恢复。事件进入统一告警中心（与阈值告警共用存储与广播）。
+func (e *Engine) EmitDialtestAlert(task dialtest.Task, result dialtest.Result, up bool) {
+	sev := model.Severity(task.Severity)
+	if sev != model.SeverityCritical && sev != model.SeverityWarning && sev != model.SeverityInfo {
+		sev = model.SeverityWarning
+	}
+	key := "dialtest:" + task.ID
+	now := model.NowMillis()
+
+	e.mu.Lock()
+	active, wasActive := e.dialActive[key]
+	var ev model.AlertEvent
+	switch {
+	case !up:
+		// 已有未恢复事件则忽略重复故障，避免刷屏。
+		if wasActive && active {
+			e.mu.Unlock()
+			return
+		}
+		e.dialActive[key] = true
+		ev = model.AlertEvent{
+			ID:        "dial-" + task.ID + "-" + strconv.FormatInt(now, 36),
+			RuleID:    "dialtest-" + task.ID,
+			RuleName:  "拨测 - " + task.Name,
+			Node:      task.Target,
+			Metric:    "dial_test_up",
+			Value:     0,
+			Operator:  "==",
+			Threshold: 1,
+			Severity:  sev,
+			State:     model.AlertStateFiring,
+			Message:   dialMessage(task, result),
+			StartsAt:  now,
+		}
+	default: // up == true
+		// 没有未恢复事件（如启动后首次检测即正常）则忽略恢复。
+		if !wasActive || !active {
+			e.mu.Unlock()
+			return
+		}
+		delete(e.dialActive, key)
+		ev = model.AlertEvent{
+			ID:        "dialr-" + task.ID + "-" + strconv.FormatInt(now, 36),
+			RuleID:    "dialtest-" + task.ID,
+			RuleName:  "拨测 - " + task.Name,
+			Node:      task.Target,
+			Metric:    "dial_test_up",
+			Value:     1,
+			Operator:  "==",
+			Threshold: 1,
+			Severity:  sev,
+			State:     model.AlertStateResolved,
+			Message:   fmt.Sprintf("拨测恢复：%s (%s %s) 已恢复正常", task.Name, task.Type, task.Target),
+			EndsAt:    now,
+		}
+	}
+	e.mu.Unlock()
+
+	e.alerts.Add(ev)
+	e.notifyDialtest(task, ev)
+	if e.broadcaster != nil {
+		e.broadcaster.BroadcastAlert(ev)
+	}
+	state := "恢复"
+	if !up {
+		state = "触发"
+	}
+	slog.Info("拨测告警"+state, "task", task.Name, "target", task.Target, "severity", sev, "event", ev.ID)
+}
+
+// notifyDialtest 发送拨测告警通知：维护窗口活跃时跳过；task.Notify 为空表示全部已启用渠道。
+func (e *Engine) notifyDialtest(task dialtest.Task, ev model.AlertEvent) {
+	if e.maintenance != nil && e.maintenance.IsActive(model.NowMillis()) {
+		slog.Info("维护窗口活跃，跳过拨测告警通知", "task", task.Name, "event", ev.ID)
+		return
+	}
+	e.mu.Lock()
+	ns := append([]Notifier(nil), e.notifiers...)
+	e.mu.Unlock()
+	for _, n := range ns {
+		if len(task.Notify) > 0 && !contains(task.Notify, n.Channel()) {
+			continue
+		}
+		if err := n.Notify(ev); err != nil {
+			slog.Warn("拨测告警通知失败", "channel", n.Channel(), "err", err)
+		}
+	}
+}
+
+// dialMessage 构造拨测故障的描述信息。
+func dialMessage(task dialtest.Task, result dialtest.Result) string {
+	base := fmt.Sprintf("拨测失败：%s (%s %s)", task.Name, task.Type, task.Target)
+	if result.Error != "" {
+		return base + " - " + result.Error
+	}
+	return base
 }
 
 // nodeIP 查询节点 IP（通知渠道在邮件等中展示）；找不到返回空串。

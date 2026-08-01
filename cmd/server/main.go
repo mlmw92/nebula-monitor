@@ -93,6 +93,8 @@ func main() {
 	// 拨测模块
 	dialtestStore := dialtest.NewStore(cfg.DialtestFile)
 	dialtestSched := dialtest.NewScheduler(dialtestStore, store)
+	// 拨测状态跃迁联动告警事件（P2）：故障/恢复统一进入告警中心并通知。
+	dialtestSched.SetSink(engine)
 	dialtestSched.Start(ctx)
 
 	// 报告生成模块
