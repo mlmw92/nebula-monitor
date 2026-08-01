@@ -7,7 +7,7 @@ body[data-theme="b"] {
   /* 极光蓝 · 深蓝权威指挥中心风 */
   --bg: #070d1a;
   --bg-elev: #0d1526;
-  --bg-card: rgba(15, 24, 43, 0.74);
+  --bg-card: rgba(15, 24, 43, 0.92);
   --border: rgba(120, 170, 255, 0.10);
   --border-strong: rgba(120, 170, 255, 0.20);
   --text: #e8eefb;
@@ -47,7 +47,7 @@ body[data-theme="b"] {
 body[data-theme="a"] {
   --bg: #0a0e14;
   --bg-elev: #13181f;
-  --bg-card: rgba(22, 28, 38, 0.72);
+  --bg-card: rgba(22, 28, 38, 0.92);
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
   --text: #e6edf3;
@@ -75,7 +75,7 @@ body[data-theme="a"] {
 body[data-theme="c"] {
   --bg: #0b0916;
   --bg-elev: #141026;
-  --bg-card: rgba(22, 17, 43, 0.74);
+  --bg-card: rgba(22, 17, 43, 0.92);
   --border: rgba(170, 130, 255, 0.10);
   --border-strong: rgba(170, 130, 255, 0.20);
   --text: #ece9fb;
@@ -141,9 +141,12 @@ a {
 }
 
 /* 玻璃态面板 */
+/* 注意：背景为纯色实底，backdrop-filter: blur 实际无可见毛玻璃效果，
+   却会在滚动时强制浏览器对每个面板下方内容重算模糊，是导致滚动卡顿的主因。
+   改为纯不透明背景，视觉一致且滚动流畅。 */
 .glass {
   background: var(--bg-card);
-  backdrop-filter: blur(12px);
+  backdrop-filter: none;
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
@@ -317,7 +320,7 @@ textarea:focus {
 }
 .kpi {
   background: var(--bg-card);
-  backdrop-filter: blur(12px);
+  backdrop-filter: none;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px 18px;
