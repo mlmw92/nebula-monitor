@@ -51,17 +51,14 @@
           <el-table-column prop="host" label="所在主机" min-width="120" />
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
-              <el-tag :type="statusType(row.state)" size="small">{{ row.state }}</el-tag>
+              <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="cpuPercent" label="CPU%" width="90" sortable />
-          <el-table-column prop="memoryUsage" label="内存" width="100" sortable>
-            <template #default="{ row }">{{ formatBytes(row.memoryUsage) }}</template>
+          <el-table-column prop="memUsage" label="内存" width="100" sortable>
+            <template #default="{ row }">{{ formatBytes(row.memUsage) }}</template>
           </el-table-column>
-          <el-table-column prop="restartCount" label="重启次数" width="90" sortable />
-          <el-table-column prop="uptime" label="运行时长" min-width="100" sortable>
-            <template #default="{ row }">{{ formatUptime(row.uptime) }}</template>
-          </el-table-column>
+          <el-table-column prop="memPercent" label="内存%" width="90" sortable />
         </el-table>
         <div class="pager">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="sortedContainers.length" :page-size="pageSize" :current-page="currentPage" :page-sizes="[10,20,50,100]" @current-change="v => currentPage = v" @size-change="v => { pageSize = v; currentPage = 1 }" />
@@ -108,7 +105,7 @@ let chartInstance = null
 
 const containers = computed(() => {
   const arr = []
-  for (const h of (stats.value.hosts || [])) for (const c of (h.containers || [])) arr.push({ ...c, host: h.host })
+  for (const h of (stats.value.hosts || [])) for (const c of (h.containers || [])) arr.push({ ...c, host: h.node })
   return arr
 })
 
@@ -117,19 +114,27 @@ const detailTitle = computed(() => selected.value ? `容器详情 - ${selected.v
 async function load() {
   loading.value = true
   try {
-    const data = await http.get('/api/v1/middleware/docker/instances')
+    const data = await http.get('/api/v1/middleware/docker/containers')
+    const rawHosts = data.hosts || []
+    const rawContainers = data.containers || []
+    // 后端 containers 为按 node 的扁平列表，归并到对应主机以渲染容器列表
+    const byNode = {}
+    for (const h of rawHosts) { h.containers = []; byNode[h.node] = h }
+    for (const c of rawContainers) {
+      const h = byNode[c.node]
+      if (h) h.containers.push(c)
+    }
     stats.value = {
-      hosts: data.hosts || [],
+      hosts: rawHosts,
       total: 0, running: 0, stopped: 0, totalImages: 0, upHosts: 0,
     }
     let total = 0, running = 0, stopped = 0, images = 0, up = 0
     for (const h of stats.value.hosts) {
-      if (h.up) up++
-      images += h.imageCount || 0
-      for (const c of (h.containers || [])) {
-        total++
-        if (c.state === 'running') running++; else stopped++
-      }
+      up++
+      images += h.imagesTotal || 0
+      total += h.containersTotal || 0
+      running += h.containersRunning || 0
+      stopped += h.containersStopped || 0
     }
     stats.value.total = total
     stats.value.running = running
@@ -169,7 +174,6 @@ async function loadTrendChart(row) {
 }
 
 function formatBytes(b) { if (!b && b !== 0) return '-'; const u = ['B','KB','MB','GB','TB']; let i = 0; let v = b; while (v >= 1024 && i < u.length-1) { v /= 1024; i++ } return v.toFixed(1) + ' ' + u[i] }
-function formatUptime(s) { if (!s) return '-'; const d = Math.floor(s / 86400); const h = Math.floor((s % 86400) / 3600); return d > 0 ? `${d}天${h}小时` : `${h}小时` }
 function statusType(state) { if (state === 'running') return 'success'; if (state === 'paused') return 'warning'; if (state === 'exited') return 'info'; return 'danger' }
 function rowClass({ row }) { return row.up ? '' : 'row-down' }
 
