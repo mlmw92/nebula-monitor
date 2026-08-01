@@ -50,6 +50,7 @@ type DialtestProvider interface {
 	Create(t dialtest.Task) dialtest.Task
 	Update(t dialtest.Task) error
 	Delete(id string) error
+	LastResults() map[string]dialtest.Result
 }
 
 // ReportProvider 提供报告生成与查询（由 report 包实现）。

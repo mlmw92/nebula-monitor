@@ -68,7 +68,8 @@ func (s *Scheduler) runOnce() {
 		result := s.dialer.Run(task)
 		metrics := ResultToMetrics(result, task, now)
 		allMetrics = append(allMetrics, metrics...)
-		slog.Debug("拨测完成", "task", task.Name, "up", result.Up, "latency", result.Latency)
+		s.store.RecordResult(result)
+		slog.Debug("拨测完成", "task", task.Name, "up", result.Up, "latency", result.Latency, "err", result.Error)
 	}
 	if len(allMetrics) > 0 {
 		if err := s.storage.Write(allMetrics); err != nil {

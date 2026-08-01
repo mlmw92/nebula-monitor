@@ -39,6 +39,12 @@
         <el-table-column label="状态" width="80">
           <template #default="{ row }"><span :class="['dot', row.up ? 'up' : 'down']"></span>{{ row.up ? '正常' : '异常' }}</template>
         </el-table-column>
+        <el-table-column label="原因" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="!row.up" class="dial-err">{{ row.error || '未知错误' }}</span>
+            <span v-else class="muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="latency" label="延迟(ms)" width="100" sortable />
         <el-table-column label="证书到期(天)" width="120">
           <template #default="{ row }">
@@ -140,6 +146,8 @@ onMounted(load)
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
 .dot.up { background: #3fb950; }
 .dot.down { background: #dc382d; }
+.dial-err { color: #dc382d; font-size: 12px; word-break: break-all; }
+.muted { color: var(--text-dim); }
 .metric-good { color: #3fb950; }
 .metric-warn { color: #f0883e; }
 .metric-bad { color: #dc382d; }

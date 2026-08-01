@@ -33,11 +33,12 @@ type Task struct {
 
 // Result 拨测结果。
 type Result struct {
-	TaskID    string
-	Up        bool
-	Latency   float64 // 毫秒
+	TaskID     string
+	Up         bool
+	Latency    float64 // 毫秒
 	CertExpiry float64 // SSL 证书剩余天数（仅 HTTPS）
-	StatusCode int    // HTTP 状态码（仅 HTTP/HTTPS）
+	StatusCode int     // HTTP 状态码（仅 HTTP/HTTPS）
+	Error      string  // 异常原因（仅 Up=false 时有效，如连接拒绝/超时/DNS失败/HTTP状态文本）
 }
 
 // Dialer 执行拨测。
@@ -84,7 +85,7 @@ func (d *Dialer) dialHTTP(task Task) Result {
 	resp, err := client.Get(url)
 	latency := float64(time.Since(start).Microseconds()) / 1000.0
 	if err != nil {
-		return Result{TaskID: task.ID, Up: false, Latency: round2(latency)}
+		return Result{TaskID: task.ID, Up: false, Latency: round2(latency), Error: err.Error()}
 	}
 	defer resp.Body.Close()
 
@@ -93,6 +94,13 @@ func (d *Dialer) dialHTTP(task Task) Result {
 		Up:        resp.StatusCode >= 200 && resp.StatusCode < 400,
 		Latency:   round2(latency),
 		StatusCode: resp.StatusCode,
+	}
+	// 非 2xx/3xx 视为异常，记录 HTTP 状态文本作为原因
+	if !result.Up {
+		result.Error = http.StatusText(resp.StatusCode)
+		if result.Error == "" {
+			result.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		}
 	}
 	// HTTPS 证书到期检测
 	if task.Type == TaskTypeHTTPS && resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
@@ -113,7 +121,7 @@ func (d *Dialer) dialTCP(task Task) Result {
 	conn, err := net.DialTimeout("tcp", task.Target, timeout)
 	latency := float64(time.Since(start).Microseconds()) / 1000.0
 	if err != nil {
-		return Result{TaskID: task.ID, Up: false, Latency: round2(latency)}
+		return Result{TaskID: task.ID, Up: false, Latency: round2(latency), Error: err.Error()}
 	}
 	conn.Close()
 	return Result{TaskID: task.ID, Up: true, Latency: round2(latency)}
@@ -134,7 +142,7 @@ func (d *Dialer) dialICMP(task Task) Result {
 		// echo 端口未开放不代表主机不可达，尝试连接 80 端口
 		conn2, err2 := net.DialTimeout("tcp", task.Target+":80", timeout)
 		if err2 != nil {
-			return Result{TaskID: task.ID, Up: false, Latency: round2(latency)}
+			return Result{TaskID: task.ID, Up: false, Latency: round2(latency), Error: err2.Error()}
 		}
 		conn2.Close()
 		return Result{TaskID: task.ID, Up: true, Latency: round2(latency)}

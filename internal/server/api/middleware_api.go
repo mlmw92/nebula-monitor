@@ -731,6 +731,23 @@ func (a *API) handleDialtestLatest(w http.ResponseWriter, r *http.Request) {
 		Up         bool    `json:"up"`
 		Latency    float64 `json:"latency"`
 		CertExpiry float64 `json:"certExpiry,omitempty"`
+		Error      string  `json:"error,omitempty"`
+	}
+
+	// 任务名 -> 最近异常原因（由 Scheduler 记录到 Store 的内存结果）
+	errByTask := map[string]string{}
+	if last := a.dialtest.LastResults(); len(last) > 0 {
+		nameByID := map[string]string{}
+		for _, t := range a.dialtest.List() {
+			nameByID[t.ID] = t.Name
+		}
+		for id, r := range last {
+			if !r.Up && r.Error != "" {
+				if n, ok := nameByID[id]; ok {
+					errByTask[n] = r.Error
+				}
+			}
+		}
 	}
 
 	results := map[string]*dialtestResult{}
@@ -744,6 +761,7 @@ func (a *API) handleDialtestLatest(w http.ResponseWriter, r *http.Request) {
 			Type:   s.Labels["type"],
 			Target: s.Labels["target"],
 			Up:     s.Points[len(s.Points)-1].Value > 0,
+			Error:  errByTask[name],
 		}
 	}
 	for _, s := range latencySeries {

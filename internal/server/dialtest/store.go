@@ -12,16 +12,18 @@ import (
 
 // Store 管理拨测任务配置，持久化到 YAML 文件。
 type Store struct {
-	mu    sync.RWMutex
-	tasks map[string]Task
-	path  string
+	mu          sync.RWMutex
+	tasks       map[string]Task
+	lastResults map[string]Result // 最近一次拨测结果（按 TaskID），含异常原因，供前端展示
+	path        string
 }
 
 // NewStore 创建拨测任务存储并加载。
 func NewStore(path string) *Store {
 	s := &Store{
-		tasks: map[string]Task{},
-		path:  path,
+		tasks:       map[string]Task{},
+		lastResults: map[string]Result{},
+		path:        path,
 	}
 	s.load()
 	return s
@@ -130,4 +132,22 @@ func dirOf(path string) string {
 // Errorf 格式化错误。
 func Errorf(format string, args ...interface{}) error {
 	return fmt.Errorf(format, args...)
+}
+
+// RecordResult 记录某任务最近一次拨测结果（含异常原因），供 API 拼接到 latest 响应。
+func (s *Store) RecordResult(r Result) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastResults[r.TaskID] = r
+}
+
+// LastResults 返回所有任务最近一次拨测结果快照（只读副本）。
+func (s *Store) LastResults() map[string]Result {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]Result, len(s.lastResults))
+	for k, v := range s.lastResults {
+		out[k] = v
+	}
+	return out
 }
