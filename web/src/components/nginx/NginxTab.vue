@@ -32,7 +32,7 @@
           </div>
           <div class="topo-grid">
             <div v-for="i in instances" :key="i.instance" class="rel-node rel-standalone" :class="{'is-down': !i.up}" @click="openDetail(i)">
-              <div class="rel-node-name" :title="i.instance">{{ i.name || i.node || i.instance }}</div>
+              <div class="rel-node-name" :title="i.nodeIp || i.instance">{{ i.name || i.node || i.instance }}</div>
               <div class="rel-node-meta"><span :class="['dot', i.up ? 'up' : 'down']"></span>{{ i.up ? '在线' : '离线' }}<span class="dim">·</span>{{ i.node }}</div>
               <div class="rel-node-instance mono dim">{{ nginxDisplayAddr(i) }}</div>
             </div>
@@ -43,7 +43,9 @@
       <div class="mw-list glass">
         <div class="mw-list-title">实例列表</div>
         <el-table :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
-          <el-table-column prop="instance" label="实例地址" width="150" show-overflow-tooltip />
+          <el-table-column label="实例地址" width="150" show-overflow-tooltip>
+            <template #default="{ row }"><span class="mono">{{ nginxDisplayAddr(row) }}</span></template>
+          </el-table-column>
           <el-table-column prop="name" label="名称" min-width="100" show-overflow-tooltip />
           <el-table-column prop="version" label="版本" width="90" />
           <el-table-column label="状态" width="80">
@@ -66,7 +68,7 @@
     <el-drawer v-model="drawerVisible" :title="detailTitle" size="50%" :destroy-on-close="true">
       <div v-if="selected" class="detail-content">
         <div class="detail-meta">
-          <div class="meta-item"><span class="meta-label">实例</span><span class="mono">{{ selected.instance }}</span></div>
+          <div class="meta-item"><span class="meta-label">实例地址</span><span class="mono">{{ nginxDisplayAddr(selected) }}</span></div>
           <div class="meta-item"><span class="meta-label">节点</span>{{ selected.node }}</div>
           <div class="meta-item"><span class="meta-label">版本</span>{{ selected.version }}</div>
         </div>
@@ -154,7 +156,7 @@ async function loadTrendChart(row) {
 }
 
 function formatUptime(s) { if (!s) return '-'; const d = Math.floor(s / 86400); const h = Math.floor((s % 86400) / 3600); return d > 0 ? `${d}天${h}小时` : `${h}小时` }
-function nginxDisplayAddr(i) { if (!i || !i.instance) return '-'; const a = i.instance; const node = i.node || ''; if (a === node || a === node+':80') return a; const clean = a.replace(/^https?:\/\//, ''); if (/^(127\.0\.0\.1|localhost|\[::1\]):/.test(clean)) return clean; return clean }
+function nginxDisplayAddr(i) { if (!i) return '-'; return i.nodeIp || i.instance || '-' }
 function rowClass({ row }) { return row.up ? '' : 'row-down' }
 
 const currentPage = ref(1)

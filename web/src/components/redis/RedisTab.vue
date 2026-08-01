@@ -108,9 +108,9 @@
                   :style="{ borderLeftColor: slotColor(grp, idx) }"
                   @click="openDetail(m)"
                 >
-                  <div class="rel-node-name" :title="m.instance">
+                  <div class="rel-node-name" :title="m.nodeIp || m.instance">
                     <span class="role-badge role-badge-m">M</span>
-                    {{ m.instance }}
+                    {{ m.nodeIp || m.instance }}
                   </div>
                   <div class="rel-node-meta">
                     <span :class="['dot', m.up ? 'up' : 'down']"></span>
@@ -121,7 +121,7 @@
                     <span>{{ formatBytes(m.usedMemory) }}</span>
                   </div>
                   <div class="rel-node-meta" v-if="m.up">
-                    <span class="mono">{{ m.instance }}</span>
+                    <span class="mono">{{ m.nodeIp || m.instance }}</span>
                   </div>
                 </div>
                 <!-- 复制链路 + failover 路径（按预聚合映射直接取，避免匹配失败） -->
@@ -207,7 +207,7 @@
           <div class="topo-relation topo-relation-sentinel">
             <div class="rel-edges rel-edges-left">
               <div v-for="(s, idx) in grp.sentinels" :key="'sn-'+idx" class="rel-node rel-sentinel" :class="{ 'is-down': !s.up }" @click="openDetail(s)">
-                <div class="rel-node-name" :title="s.instance">{{ s.instance }}</div>
+                <div class="rel-node-name" :title="s.nodeIp || s.instance">{{ s.nodeIp || s.instance }}</div>
                 <div class="rel-node-meta">
                   <span :class="['dot', s.up ? 'up' : 'down']"></span>
                   <span>{{ s.up ? '在线' : '离线' }}</span>
@@ -220,7 +220,7 @@
             <div class="rel-arrow">→ 监控 →</div>
             <div class="rel-edges rel-edges-right">
               <div v-for="(m, idx) in grp.masters" :key="'sm-'+idx" class="rel-node rel-master" :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }" @click="openDetail(m)">
-                <div class="rel-node-name" :title="m.instance">{{ m.instance }}</div>
+                <div class="rel-node-name" :title="m.nodeIp || m.instance">{{ m.nodeIp || m.instance }}</div>
                 <div class="rel-node-meta">
                   <span :class="['dot', m.up ? 'up' : 'down']"></span>
                   <span>{{ m.up ? '在线' : '离线' }}</span>
@@ -252,9 +252,9 @@
           <div class="ms-tree">
             <div v-for="(m, idx) in grp.masters" :key="'rm-'+idx" class="ms-unit">
               <div class="rel-node rel-master ms-master" :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }" @click="openDetail(m)">
-                <div class="rel-node-name" :title="m.instance">
+                <div class="rel-node-name" :title="m.nodeIp || m.instance">
                   <span class="role-badge role-badge-m">M</span>
-                  {{ m.instance }}
+                  {{ m.nodeIp || m.instance }}
                 </div>
                 <div class="rel-node-meta">
                   <span :class="['dot', m.up ? 'up' : 'down']"></span>
@@ -301,12 +301,12 @@
           </div>
           <div class="topo-grid">
             <div v-for="(i, idx) in topologyGroups.standalones" :key="'sa-'+idx" class="rel-node rel-standalone" :class="{ 'is-down': !i.up, 'is-alert': isAlert(i) }" @click="openDetail(i)">
-              <div class="rel-node-name" :title="i.instance">{{ i.name || i.instance }}</div>
+              <div class="rel-node-name" :title="i.nodeIp || i.instance">{{ i.name || i.nodeIp || i.instance }}</div>
               <div class="rel-node-meta">
                 <span :class="['dot', i.up ? 'up' : 'down']"></span>
                 <span>{{ i.up ? '在线' : '离线' }}</span>
                 <span class="dim">·</span>
-                <span>{{ i.node }}</span>
+                <span>{{ i.nodeIp || i.node }}</span>
               </div>
               <div class="rel-node-meta">
                 <span>{{ formatNum(i.ops) }} ops/s</span>
@@ -344,7 +344,9 @@
         </div>
       </div>
       <el-table :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe>
-        <el-table-column label="节点" prop="node" width="140" show-overflow-tooltip />
+        <el-table-column label="节点" width="140" show-overflow-tooltip>
+          <template #default="{ row }"><span class="mono">{{ row.nodeIp || row.node }}</span></template>
+        </el-table-column>
         <el-table-column label="实例地址" prop="instance" width="200" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="mono">{{ row.instance }}</span>
@@ -456,12 +458,12 @@
           <div class="dh-left">
             <div class="dh-title">
               <MwStatusDot large :status="instStatus(selected).status" :label="instStatus(selected).label" />
-              <span class="mono">{{ selected.instance }}</span>
+              <span class="mono">{{ selected.nodeIp || selected.instance }}</span>
             </div>
             <div class="dh-meta">
               <span class="role-tag" :class="selected.role">{{ roleLabel(selected.role) }}</span>
               <span class="topo-tag">{{ topoLabel(selected.topology) }}</span>
-              <span class="meta-item">节点：{{ selected.node }}</span>
+              <span class="meta-item">节点：{{ selected.nodeIp || selected.node }}</span>
               <span class="meta-item" v-if="selected.version">版本：{{ selected.version }}</span>
               <span class="meta-item" v-if="selected.uptime > 0">运行：{{ formatUptime(selected.uptime) }}</span>
             </div>

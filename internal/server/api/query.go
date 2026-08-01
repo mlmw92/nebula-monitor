@@ -747,6 +747,7 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 
 	type redisInstanceInfo struct {
 		Node              string  `json:"node"`
+		NodeIP            string  `json:"nodeIp"`
 		Instance          string  `json:"instance"`
 		Name              string  `json:"name"`
 		Role              string  `json:"role"`
@@ -817,6 +818,7 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 		}
 		instances[key] = &redisInstanceInfo{
 			Node:      node,
+			NodeIP:    a.nodeIP(node),
 			Instance:  instance,
 			Name:      name,
 			Role:      s.Labels["role"],

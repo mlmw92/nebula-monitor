@@ -224,6 +224,7 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 
 	type nginxInstanceInfo struct {
 		Node              string  `json:"node"`
+		NodeIP            string  `json:"nodeIp"`
 		Instance          string  `json:"instance"`
 		Name              string  `json:"name"`
 		Version           string  `json:"version"`
@@ -250,7 +251,8 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 		key := node + "|" + instance
 		if _, exists := instances[key]; !exists {
 			ri := &nginxInstanceInfo{
-				Node:    node,
+				Node:     node,
+				NodeIP:   a.nodeIP(node),
 				Instance: instance,
 				Name:    s.Labels["name"],
 				Version: s.Labels["version"],
@@ -297,6 +299,18 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 		out = append(out, *instances[k])
 	}
 	writeJSON(w, 200, map[string]interface{}{"instances": out})
+}
+
+// nodeIP 返回指定节点上报的主机 IP（primaryIP，首个非回环 IPv4）；节点未在线或查不到时返回空串。
+func (a *API) nodeIP(node string) string {
+	if node == "" {
+		return ""
+	}
+	n, ok := a.nodeMgr.GetNode(node)
+	if !ok {
+		return ""
+	}
+	return n.IP
 }
 
 // ---- Kafka ----
