@@ -50,7 +50,10 @@
         <el-table-column prop="type" label="类型" width="80" />
         <el-table-column prop="target" label="目标" min-width="200" show-overflow-tooltip />
         <el-table-column label="状态" width="80">
-          <template #default="{ row }"><span :class="['dot', row.up ? 'up' : 'down']"></span>{{ row.up ? '正常' : '异常' }}</template>
+          <template #default="{ row }">
+            <span class="status-led" :class="row.up ? 'on' : 'off'"></span>
+            <span class="status-text" :class="row.up ? 'on' : 'off'">{{ row.up ? '正常' : '异常' }}</span>
+          </template>
         </el-table-column>
         <el-table-column label="原因" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
@@ -191,8 +194,14 @@ onMounted(load)
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-.dot.up { background: var(--success); }
-.dot.down { background: var(--danger); }
+.dot.up { background: var(--chart-green); box-shadow: 0 0 6px var(--chart-green); }
+.dot.down { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+/* 状态指示灯（与主机在线状态同效） */
+.status-led { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.status-led.on { background: var(--chart-green); box-shadow: 0 0 6px var(--chart-green); }
+.status-led.off { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+.status-text.on { color: var(--chart-green); }
+.status-text.off { color: var(--danger); }
 /* 表头不换行，避免“延迟(ms)”等列头被挤压换行 */
 .dialtest-view :deep(th .cell) { white-space: nowrap; }
 .dial-err { color: var(--danger); font-size: 12px; word-break: break-all; }
