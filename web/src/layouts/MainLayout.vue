@@ -14,7 +14,11 @@
           </el-breadcrumb>
         </div>
         <div class="topbar-right">
-          <el-button class="screen-entry" :icon="DataAnalysis" @click="$router.push('/screen')">数据大屏</el-button>
+          <div class="screen-entry" @click="$router.push('/screen')">
+            <span class="screen-icon"><el-icon :size="16"><DataAnalysis /></el-icon></span>
+            <span class="screen-text">数据大屏</span>
+            <span class="screen-badge">LIVE</span>
+          </div>
           <el-tooltip content="切换配色主题" placement="bottom">
             <el-dropdown trigger="click" @command="changeTheme">
               <el-button circle size="small">
@@ -214,23 +218,86 @@ onUnmounted(() => {
   margin-right: 8px;
   vertical-align: middle;
 }
-/* 数据大屏入口：图标+文字，醒目橙色高亮 */
+/* 数据大屏入口：带呼吸光效的芯片按钮 */
 .screen-entry {
-  --el-button-text-color: #fff;
-  --el-button-bg-color: #f59e0b;
-  --el-button-border-color: #f59e0b;
-  --el-button-hover-bg-color: #f7b733;
-  --el-button-hover-border-color: #f7b733;
-  --el-button-active-bg-color: #e0890a;
-  --el-button-active-border-color: #e0890a;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 13px;
   font-weight: 600;
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.45);
-  transition: box-shadow 0.15s, filter 0.15s;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
+  border: 1px solid rgba(124, 58, 237, 0.5);
+  box-shadow: 0 0 16px rgba(124, 58, 237, 0.35), inset 0 1px 0 rgba(255,255,255,0.1);
+  user-select: none;
+  transition: transform 0.2s, box-shadow 0.2s;
+  overflow: hidden;
 }
-.screen-entry:hover,
-.screen-entry:focus {
-  box-shadow: 0 0 14px rgba(245, 158, 11, 0.7);
-  filter: brightness(1.05);
+.screen-entry::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0) 100%);
+  animation: screen-shimmer 2.4s ease-in-out infinite;
+}
+.screen-entry::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #7c3aed, #06b6d4, #8b5cf6);
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.screen-entry:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 24px rgba(124, 58, 237, 0.55), 0 4px 12px rgba(0,0,0,0.25);
+}
+.screen-entry:hover::after {
+  opacity: 0.5;
+  animation: screen-pulse 1.5s ease-in-out infinite;
+}
+.screen-entry:active {
+  transform: translateY(0);
+}
+.screen-icon {
+  display: flex;
+  align-items: center;
+  opacity: 0.9;
+}
+.screen-text {
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.screen-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #7c3aed;
+  background: #fff;
+  border-radius: 4px;
+  padding: 1px 5px;
+  line-height: 1;
+  animation: screen-badge-blink 2s step-end infinite;
+}
+@keyframes screen-shimmer {
+  0%, 100% { transform: translateX(-100%); }
+  50% { transform: translateX(100%); }
+}
+@keyframes screen-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.7; }
+}
+@keyframes screen-badge-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 .content {
   flex: 1;
