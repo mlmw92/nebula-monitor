@@ -1,0 +1,58 @@
+/* 中间件实例拓扑公共样式：统一 Redis / MySQL 风格的实例拓扑视图
+   供 Kafka / Postgres / Nginx / RocketMQ 等页面复用（独立实例网格）。
+   Redis / MySQL 自身仍使用其组件内 scoped 的同名类，互不影响。 */
+
+.topo-group { margin-bottom: 22px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.02); }
+.topo-group:first-child { margin-top: 0; }
+.topo-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
+.topo-group-title { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
+.topo-group-title .el-icon,
+.topo-group-title svg { color: var(--accent); }
+.topo-meta { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; }
+.dim { color: var(--text-muted); }
+.badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.badge-ok { color: #4ade80; background: rgba(34, 197, 94, 0.15); }
+.badge-warn { color: #fbbf24; background: rgba(234, 179, 8, 0.15); }
+.badge-down { color: #f87171; background: rgba(239, 68, 68, 0.18); }
+.badge-unknown { color: var(--text-muted); background: rgba(148, 163, 184, 0.12); }
+
+.topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.rel-node { padding: 12px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--border); background: var(--bg-elev); transition: transform 0.15s, box-shadow 0.15s; }
+.rel-node:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+.rel-node.is-down { opacity: 0.6; }
+.rel-node-name { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+.rel-standalone { border-left: 4px solid var(--chart-blue); }
+.rel-master { border-left: 4px solid var(--chart-orange); }
+
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+.dot.up { background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.5); }
+.dot.down { background: #f87171; }
+
+/* 主从树（如需展示主从关系可复用） */
+.ms-tree { display: flex; flex-direction: column; gap: 18px; margin-top: 6px; }
+.ms-unit { display: flex; gap: 18px; align-items: stretch; flex-wrap: wrap; }
+.ms-master { flex: 0 0 auto; }
+.ms-branch { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 10px; }
+.ms-branch-rail { display: flex; gap: 14px; font-size: 11px; color: var(--text-muted); padding-left: 4px; }
+.legend-line { display: inline-block; width: 26px; height: 0; vertical-align: middle; margin-right: 4px; }
+.legend-solid { border-top: 2px solid var(--chart-orange); }
+.legend-dash { border-top: 2px dashed var(--chart-green); }
+.ms-slaves { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; position: relative; padding-left: 16px; border-left: 2px solid var(--chart-orange); }
+.ms-slave-card { border-left: 4px solid var(--chart-green); padding: 12px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--border); background: var(--bg-elev); }
+.ms-slave-head { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; }
+.ms-slave-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin-top: 6px; flex-wrap: wrap; }
+.role-badge { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; font-size: 11px; font-weight: 700; color: #fff; flex: 0 0 auto; }
+.role-badge-m { background: var(--chart-orange); }
+.role-badge-s { background: var(--chart-green); }
+.topo-legend { display: flex; gap: 18px; margin-top: 10px; font-size: 12px; color: var(--text-muted); flex-wrap: wrap; }
+.unlinked-block { margin-top: 14px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 8px; background: rgba(245,158,11,0.04); }
+.unlinked-label { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+.unlinked-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+
+/* 实例列表统一状态点（与 MySQL 列表风格一致） */
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.status-dot.up { background: #4ade80; }
+.status-dot.down { background: #f87171; }
+.status-text { display: inline-flex; align-items: center; font-size: 13px; }
+.status-text.status-issue { color: #f87171; }

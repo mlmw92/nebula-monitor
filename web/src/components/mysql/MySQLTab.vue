@@ -188,7 +188,7 @@
       <!-- 实例列表 -->
       <div class="chart-section glass">
         <div class="section-title">实例列表</div>
-        <el-table :data="instances" class="mysql-table" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass">
+        <el-table :data="pagedInstances" class="mysql-table" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
           <el-table-column prop="instance" label="实例地址" min-width="180" show-overflow-tooltip />
           <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip>
             <template #header>
@@ -214,7 +214,7 @@
           </el-table-column>
           <el-table-column prop="threadsConnected" label="连接数" min-width="110" sortable />
           <el-table-column prop="queriesPerSec" label="QPS" min-width="100" sortable />
-          <el-table-column label="缓冲命中率" min-width="150" sortable :sort-by="'bufferPoolHitRate'">
+          <el-table-column prop="bufferPoolHitRate" label="缓冲命中率" min-width="150" sortable>
             <template #default="{ row }">
               <span :class="hitRateClass(row.bufferPoolHitRate)">{{ row.bufferPoolHitRate ? row.bufferPoolHitRate.toFixed(1) + '%' : '-' }}</span>
             </template>
@@ -224,6 +224,9 @@
             <template #default="{ row }">{{ formatUptime(row.uptime) }}</template>
           </el-table-column>
         </el-table>
+        <div class="pager">
+          <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="sortedInstances.length" :page-size="pageSize" :current-page="currentPage" :page-sizes="[10,20,50,100]" @current-change="v => currentPage = v" @size-change="v => { pageSize = v; currentPage = 1 }" />
+        </div>
       </div>
     </template>
 
@@ -261,7 +264,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, computed, nextTick, watch } from 'vue'
 import * as echarts from 'echarts'
 import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
@@ -402,6 +405,26 @@ function formatNum(n) { return n != null ? Number(n).toLocaleString() : '-' }
 function formatUptime(s) { if (!s) return '-'; const d = Math.floor(s / 86400); const h = Math.floor((s % 86400) / 3600); return d > 0 ? `${d}天${h}小时` : `${h}小时` }
 function hitRateClass(v) { if (!v) return ''; if (v >= 99) return 'metric-good'; if (v >= 90) return 'metric-warn'; return 'metric-bad' }
 function rowClass({ row }) { return row.up ? '' : 'row-down' }
+
+const currentPage = ref(1)
+const pageSize = ref(10)
+const sortState = ref({ prop: '', order: '' })
+function onSortChange({ prop, order }) { sortState.value = { prop, order }; currentPage.value = 1 }
+const sortedInstances = computed(() => {
+  const arr = [...instances.value]
+  const { prop, order } = sortState.value
+  if (prop && order) {
+    arr.sort((a, b) => {
+      let av = a[prop], bv = b[prop]
+      if (typeof av === 'string') return order === 'ascending' ? av.localeCompare(bv) : bv.localeCompare(av)
+      av = av ?? 0; bv = bv ?? 0
+      return order === 'ascending' ? av - bv : bv - av
+    })
+  }
+  return arr
+})
+const pagedInstances = computed(() => sortedInstances.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
+watch(instances, () => { currentPage.value = 1 })
 
 onMounted(load)
 </script>

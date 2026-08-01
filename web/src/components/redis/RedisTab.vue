@@ -343,7 +343,7 @@
           <el-input v-model="searchText" placeholder="搜索实例/节点" clearable size="small" style="width: 200px" :prefix-icon="SearchIcon" />
         </div>
       </div>
-      <el-table :data="filteredInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe>
+      <el-table :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe>
         <el-table-column label="节点" prop="node" width="140" show-overflow-tooltip />
         <el-table-column label="实例地址" prop="instance" width="200" show-overflow-tooltip>
           <template #default="{ row }">
@@ -416,9 +416,12 @@
           <template #default="{ row }">
             <span class="mono">{{ formatUptime(row.uptime) }}</span>
           </template>
-        </el-table-column>
-      </el-table>
-    </div>
+          </el-table-column>
+        </el-table>
+        <div class="pager">
+          <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="filteredInstances.length" :page-size="pageSize" :current-page="currentPage" :page-sizes="[10,20,50,100]" @current-change="v => currentPage = v" @size-change="v => { pageSize = v; currentPage = 1 }" />
+        </div>
+      </div>
 
     <!-- ===== 区块3：性能排行（横向柱状图）===== -->
     <div class="chart-section glass">
@@ -702,6 +705,10 @@ const filteredInstances = computed(() => {
     return true
   })
 })
+const currentPage = ref(1)
+const pageSize = ref(10)
+const pagedInstances = computed(() => filteredInstances.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
+watch(filteredInstances, () => { currentPage.value = 1 })
 
 // 拓扑分组：用于关系视图（基于后端 group 字段，不再正则猜测）
 const topologyGroups = computed(() => {
