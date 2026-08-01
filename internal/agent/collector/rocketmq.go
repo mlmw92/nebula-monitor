@@ -55,6 +55,7 @@ func (c *RocketMQCollector) collectHTTP(cfg model.RocketMQInstanceConfig, now in
 		"node":     c.node,
 		"instance": cfg.Addr,
 		"group":    cfg.Name,
+		"name":     cfg.Name,
 		"role":     "nameserver",
 	}
 	mk := func(name string, val float64) model.Metric {

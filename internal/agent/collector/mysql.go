@@ -82,6 +82,7 @@ func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64)
 		"instance":  cfg.Addr,
 		"topology":  cfg.Topology,
 		"group":     cfg.Name,
+		"name":      cfg.Name,
 		"version":   vars["version"],
 	}
 	role := "master"

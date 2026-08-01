@@ -89,6 +89,7 @@ func (c *PostgresCollector) collectDirect(cfg model.PostgresInstanceConfig, now 
 		"role":     role,
 		"topology": cfg.Topology,
 		"group":    cfg.Name,
+		"name":     cfg.Name,
 		"version":  settings["server_version"],
 		"database": cfg.Database,
 	}

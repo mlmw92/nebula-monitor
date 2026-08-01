@@ -97,6 +97,7 @@ func (c *NginxCollector) collectStubStatus(cfg model.NginxInstanceConfig, now in
 		"node":     c.node,
 		"instance": cfg.Addr,
 		"group":    cfg.Name,
+		"name":     cfg.Name,
 		"version":  resp.Header.Get("Server"),
 	}
 	mk := func(name string, val float64) model.Metric {
