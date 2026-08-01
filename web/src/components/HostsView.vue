@@ -324,9 +324,9 @@ function colVisible(k) {
   return selectedCols.value.includes(k)
 }
 
-// 排序状态：默认按严重度（异常置顶）；点击表头切换到按列排序
-const sortProp = ref('')
-const sortOrder = ref('')
+// 排序状态：默认按分组聚合（同组异常优先）；点击表头切换到按列排序
+const sortProp = ref('group')
+const sortOrder = ref('ascending')
 function onSortChange({ prop, order }) {
   sortProp.value = order ? prop : ''
   sortOrder.value = order || ''
@@ -385,7 +385,7 @@ const filteredNodes = computed(() => {
   return arr
 })
 
-// 排序：默认严重度降序 + 同分值按 IP 升序；手动排序时按列（同值仍按 IP 升序稳定）
+// 排序：默认按分组聚合（同组异常优先、再按 IP）；手动排序时按列（同值按分组、IP 稳定）
 const sortedNodes = computed(() => {
   const arr = filteredNodes.value.slice()
   if (!sortProp.value) {
@@ -399,7 +399,13 @@ const sortedNodes = computed(() => {
   arr.sort((a, b) => {
     const va = sortValue(a, sortProp.value)
     const vb = sortValue(b, sortProp.value)
-    if (va === vb) return ipCompare(a.ip, b.ip)
+    if (va === vb) {
+      // 同值：先按分组聚合，再按 IP 稳定
+      const ga = a.group || 'default'
+      const gb = b.group || 'default'
+      if (ga !== gb) return ga.localeCompare(gb)
+      return ipCompare(a.ip, b.ip)
+    }
     if (va == null || va === '') return 1
     if (vb == null || vb === '') return -1
     if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir
