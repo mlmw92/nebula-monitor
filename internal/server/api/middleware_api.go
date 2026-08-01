@@ -527,6 +527,7 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 		Node              string  `json:"node"`
 		Daemon            string  `json:"daemon"`
 		IP                string  `json:"ip"`
+		NodeIP            string  `json:"nodeIp"`
 		Group             string  `json:"group"`
 		Up                bool    `json:"up"`
 		ContainersTotal   float64 `json:"containersTotal"`
@@ -549,6 +550,7 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 						Node:            node,
 						Daemon:          daemon,
 						IP:              hostFromDaemon(daemon),
+						NodeIP:          a.nodeIP(node),
 						Group:           s.Labels["group"],
 						Up:              true,
 						ContainersTotal: s.Points[len(s.Points)-1].Value,

@@ -41,16 +41,10 @@
           <div v-for="h in stats.hosts" :key="h.node" class="host-block" :class="{'is-down': !h.up}">
             <div class="host-header">
               <span class="host-dot" :class="h.up ? 'up' : 'down'"></span>
-              <span class="host-name">{{ h.ip || h.node }}</span>
+              <span class="host-name">{{ h.nodeIp || h.ip || h.node }}</span>
               <span class="host-count">{{ h.containers.length }} 容器</span>
             </div>
-            <div class="host-body">
-              <div v-for="c in h.containers" :key="c.id" class="container-chip" :class="['st-' + c.state, {'is-down': c.state !== 'running'}]" @click="openDetail(c)">
-                <span class="container-name">{{ c.name }}</span>
-                <span class="container-state">{{ dockerStatusText(c.state) }}</span>
-              </div>
-              <div v-if="h.containers.length === 0" class="host-empty">无容器</div>
-            </div>
+
           </div>
         </div>
       </div>
@@ -251,7 +245,22 @@ onMounted(load)
 .empty-hint { color: var(--text-muted); font-size: 12px; }
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .chart-section { padding: 16px; margin-bottom: 16px; }
-.section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-title::before {
+  content: '';
+  width: 3px;
+  height: 14px;
+  background: var(--accent);
+  border-radius: 2px;
+}
 .host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .host-block { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg-elev); }
 .host-block.is-down { opacity: 0.6; }

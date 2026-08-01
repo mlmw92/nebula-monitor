@@ -63,7 +63,7 @@
       <div class="alert-summary-desc">在线实例仍可连接；异常实例表示触发了页面健康检查规则，请优先查看下方实例列表的“异常原因”。</div>
       <div class="alert-summary-list">
         <span v-for="item in alertInstances.slice(0, 6)" :key="item.node + item.instance" class="issue-chip" @click="openDetail(item)">
-          <span class="mono">{{ item.instance }}</span>
+          <span class="mono">{{ displayInstance(item) }}</span>
           <span class="issue-chip-reason">{{ issueReasons(item).join('；') }}</span>
         </span>
         <span v-if="alertInstances.length > 6" class="issue-chip muted">+{{ alertInstances.length - 6 }} 个</span>
@@ -108,9 +108,9 @@
                   :style="{ borderLeftColor: slotColor(grp, idx) }"
                   @click="openDetail(m)"
                 >
-                <div class="rel-node-name" :title="m.instance">
+                <div class="rel-node-name" :title="displayInstance(m)">
                   <span class="role-badge role-badge-m">M</span>
-                  {{ m.instance }}
+                  {{ displayInstance(m) }}
                 </div>
                 <div class="rel-node-meta">
                   <span :class="['dot', m.up ? 'up' : 'down']"></span>
@@ -137,7 +137,7 @@
                     >
                       <div class="ms-slave-head">
                         <span class="role-badge role-badge-s">S</span>
-                        <span class="mono" :title="s.instance">{{ s.instance }}</span>
+                        <span class="mono" :title="displayInstance(s)">{{ displayInstance(s) }}</span>
                       </div>
                       <div class="ms-slave-meta">
                         <span :class="['dot', s.up ? 'up' : 'down']"></span>
@@ -171,7 +171,7 @@
                    @click.stop="openDetail(s)">
                 <div class="ms-slave-head">
                   <span class="role-badge role-badge-s">S</span>
-                  <span class="mono" :title="s.instance">{{ s.instance }}</span>
+                  <span class="mono" :title="displayInstance(s)">{{ displayInstance(s) }}</span>
                 </div>
                 <div class="ms-slave-meta">
                   <span :class="['dot', s.up ? 'up' : 'down']"></span>
@@ -204,7 +204,7 @@
           <div class="topo-relation topo-relation-sentinel">
             <div class="rel-edges rel-edges-left">
               <div v-for="(s, idx) in grp.sentinels" :key="'sn-'+idx" class="rel-node rel-sentinel" :class="{ 'is-down': !s.up }" @click="openDetail(s)">
-                <div class="rel-node-name" :title="s.instance">{{ s.instance }}</div>
+                <div class="rel-node-name" :title="displayInstance(s)">{{ displayInstance(s) }}</div>
                 <div class="rel-node-meta">
                   <span :class="['dot', s.up ? 'up' : 'down']"></span>
                   <span>{{ s.up ? '在线' : '离线' }}</span>
@@ -217,7 +217,7 @@
             <div class="rel-arrow">→ 监控 →</div>
             <div class="rel-edges rel-edges-right">
               <div v-for="(m, idx) in grp.masters" :key="'sm-'+idx" class="rel-node rel-master" :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }" @click="openDetail(m)">
-                <div class="rel-node-name" :title="m.instance">{{ m.instance }}</div>
+                <div class="rel-node-name" :title="displayInstance(m)">{{ displayInstance(m) }}</div>
                 <div class="rel-node-meta">
                   <span :class="['dot', m.up ? 'up' : 'down']"></span>
                   <span>{{ m.up ? '在线' : '离线' }}</span>
@@ -249,9 +249,9 @@
           <div class="ms-tree">
             <div v-for="(m, idx) in grp.masters" :key="'rm-'+idx" class="ms-unit">
               <div class="rel-node rel-master ms-master" :class="{ 'is-down': !m.up, 'is-alert': isAlert(m) }" @click="openDetail(m)">
-                <div class="rel-node-name" :title="m.instance">
+                <div class="rel-node-name" :title="displayInstance(m)">
                   <span class="role-badge role-badge-m">M</span>
-                  {{ m.instance }}
+                  {{ displayInstance(m) }}
                 </div>
                 <div class="rel-node-meta">
                   <span :class="['dot', m.up ? 'up' : 'down']"></span>
@@ -270,7 +270,7 @@
                 <div class="ms-slaves">
                   <div v-for="s in grp.slaves.filter(ss => ss.replicaOf === m.instance)" :key="s.instance" class="rel-slave ms-slave" :class="{ 'is-down': !s.up }" @click.stop="openDetail(s)">
                     <span class="role-badge role-badge-s">S</span>
-                    <span :title="s.instance">{{ s.instance }}</span>
+                    <span :title="displayInstance(s)">{{ displayInstance(s) }}</span>
                     <span :class="['dot', s.up ? 'up' : 'down']"></span>
                     <span class="dim">{{ s.up ? formatNum(s.ops) + ' ops/s' : '离线' }}</span>
                     <span v-if="s.up && s.replicationLag !== undefined && s.replicationLag !== null" class="dim">· lag {{ s.replicationLag }}s</span>
@@ -298,7 +298,7 @@
           </div>
           <div class="topo-grid">
             <div v-for="(i, idx) in topologyGroups.standalones" :key="'sa-'+idx" class="rel-node rel-standalone" :class="{ 'is-down': !i.up, 'is-alert': isAlert(i) }" @click="openDetail(i)">
-              <div class="rel-node-name" :title="i.instance">{{ i.instance }}</div>
+              <div class="rel-node-name" :title="displayInstance(i)">{{ displayInstance(i) }}</div>
               <div class="rel-node-meta">
                 <span :class="['dot', i.up ? 'up' : 'down']"></span>
                 <span>{{ i.up ? '在线' : '离线' }}</span>
@@ -340,7 +340,7 @@
       <el-table :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe>
         <el-table-column label="实例地址" prop="instance" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
-            <span class="mono">{{ row.instance }}</span>
+            <span class="mono">{{ displayInstance(row) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="角色" width="80">
@@ -449,7 +449,7 @@
           <div class="dh-left">
             <div class="dh-title">
               <MwStatusDot large :status="instStatus(selected).status" :label="instStatus(selected).label" />
-              <span class="mono">{{ selected.instance }}</span>
+              <span class="mono">{{ displayInstance(selected) }}</span>
             </div>
             <div class="dh-meta">
               <span class="role-tag" :class="selected.role">{{ roleLabel(selected.role) }}</span>
@@ -676,6 +676,18 @@ const alertInstances = computed(() => instances.value.filter(isAlert))
 
 function metricText(value) {
   return value === undefined || value === null ? '-' : value
+}
+
+// 展示用实例地址：Redis 实际监听地址常为回环(127.0.0.1)，用节点真实 IP 还原为「服务器 IP:端口」
+function displayInstance(i) {
+  if (!i) return ''
+  const inst = i.instance || ''
+  const nodeIp = i.nodeIp || ''
+  const m = inst.match(/^(127\.0\.0\.1|localhost|\[::1\]|::1)(?::(\d+))?$/i)
+  if (m && nodeIp) {
+    return nodeIp + (m[2] ? ':' + m[2] : '')
+  }
+  return inst
 }
 
 function clusterStateText(instance) {

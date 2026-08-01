@@ -230,7 +230,22 @@ onMounted(load)
 .empty-hint { color: var(--text-muted); font-size: 12px; }
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .chart-section { padding: 16px; margin-bottom: 16px; }
-.section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-title::before {
+  content: '';
+  width: 3px;
+  height: 14px;
+  background: var(--accent);
+  border-radius: 2px;
+}
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
 .dot.up { background: var(--accent); }
 .dot.down { background: var(--danger); }
