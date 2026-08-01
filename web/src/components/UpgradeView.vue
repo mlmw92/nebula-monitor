@@ -115,7 +115,7 @@
         <span class="panel-title">升级历史</span>
         <el-button size="small" link @click="loadHistory">刷新</el-button>
       </div>
-      <el-table :data="history" v-loading="loadingHistory" empty-text="暂无升级记录">
+      <el-table :data="pagedHistory" v-loading="loadingHistory" empty-text="暂无升级记录">
         <el-table-column label="时间" width="180">
           <template #default="{ row }">{{ fmtTime(row.at) }}</template>
         </el-table-column>
@@ -132,6 +132,18 @@
         </el-table-column>
         <el-table-column prop="detail" label="详情" />
       </el-table>
+      <el-pagination
+        v-if="history.length"
+        class="hist-pager"
+        layout="total, sizes, prev, pager, next"
+        :total="history.length"
+        :page-size="historyPageSize"
+        :current-page="historyPage"
+        :page-sizes="[10, 20, 50]"
+        background
+        @current-change="(p) => (historyPage = p)"
+        @size-change="(s) => { historyPageSize = s; historyPage = 1 }"
+      />
       <div class="rollback-row" v-if="history.length">
         <el-button type="warning" plain :disabled="applying" @click="doRollback">
           回滚到上一次备份
@@ -142,7 +154,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import http from '../api/http'
@@ -155,6 +167,12 @@ const applying = ref(false)
 const applyError = ref('')
 const history = ref([])
 const loadingHistory = ref(false)
+const historyPage = ref(1)
+const historyPageSize = ref(10)
+const pagedHistory = computed(() => {
+  const start = (historyPage.value - 1) * historyPageSize.value
+  return history.value.slice(start, start + historyPageSize.value)
+})
 const uploading = ref(false)
 const uploadProgress = ref(0)
 const cooldown = ref(0)
@@ -393,6 +411,11 @@ onUnmounted(() => {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+.hist-pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 .rollback-row {
   display: flex;
