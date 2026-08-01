@@ -52,8 +52,8 @@
           <el-table-column label="所在主机" min-width="160">
             <template #default="{ row }">
               <div class="host-cell">
-                <span class="host-cell-name">{{ row.host }}</span>
-                <span v-if="row.hostIp" class="host-cell-ip">{{ row.hostIp }}</span>
+                <span class="host-cell-name">{{ row.hostIp || row.host }}</span>
+                <span v-if="row.hostIp && row.hostIp !== row.host" class="host-cell-ip">{{ row.host }}</span>
               </div>
             </template>
           </el-table-column>

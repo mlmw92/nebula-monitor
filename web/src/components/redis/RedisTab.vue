@@ -306,7 +306,7 @@
                 <span :class="['dot', i.up ? 'up' : 'down']"></span>
                 <span>{{ i.up ? '在线' : '离线' }}</span>
                 <span class="dim">·</span>
-                <span>{{ i.instance }}</span>
+                <span>{{ i.node }}</span>
               </div>
               <div class="rel-node-meta">
                 <span>{{ formatNum(i.ops) }} ops/s</span>

@@ -21,12 +21,12 @@ const MAP = {
   follower: { label: 'Follower', cls: 'slave' },
   sentinel: { label: 'Sentinel', cls: 'sentinel' },
   controller: { label: 'Controller', cls: 'sentinel' },
-  'control-plane': { label: '控制面', cls: 'sentinel' },
+  'control-plane': { label: 'Control-Plane', cls: 'sentinel' },
   broker: { label: 'Broker', cls: 'broker' },
   nameserver: { label: 'NameServer', cls: 'broker' },
   standalone: { label: '单机', cls: 'standalone' },
-  node: { label: '节点', cls: 'standalone' },
-  worker: { label: '工作节点', cls: 'standalone' },
+  node: { label: 'Node', cls: 'standalone' },
+  worker: { label: 'Worker', cls: 'standalone' },
   unknown: { label: '未知', cls: 'unknown' },
 }
 

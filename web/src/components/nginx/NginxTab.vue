@@ -19,7 +19,7 @@
         <KpiCard label="在线实例" :value="stats.up" tone="up" />
         <KpiCard label="离线实例" :value="stats.down" tone="down" />
         <KpiCard label="总活动连接" :value="stats.totalActive" tone="conn" />
-        <KpiCard label="总请求速率" :value="stats.totalReqRate + '/s'" tone="ops" />
+        <KpiCard label="总请求" :value="stats.totalRequests" tone="ops" />
         <KpiCard label="总等待连接" :value="stats.totalWaiting" tone="mem" />
       </div>
 
@@ -43,20 +43,19 @@
       <div class="mw-list glass">
         <div class="mw-list-title">实例列表</div>
         <el-table :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
-          <el-table-column prop="instance" label="实例地址" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="instance" label="实例地址" width="150" show-overflow-tooltip />
           <el-table-column prop="name" label="名称" min-width="100" show-overflow-tooltip />
-          <el-table-column prop="version" label="版本" width="100" />
-          <el-table-column label="状态" width="90">
+          <el-table-column prop="version" label="版本" width="90" />
+          <el-table-column label="状态" width="80">
             <template #default="{ row }"><MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="row.up ? '正常' : '离线'" /></template>
           </el-table-column>
-          <el-table-column prop="activeConnections" label="活动连接" width="100" sortable />
-          <el-table-column prop="requestsPerSec" label="请求速率(req/s)" width="120" sortable />
-          <el-table-column prop="waitingConnections" label="等待连接" width="100" sortable />
-          <el-table-column prop="reading" label="读取中" width="80" sortable />
-          <el-table-column prop="writing" label="写入中" width="80" sortable />
-          <el-table-column prop="handled" label="已处理" width="100" sortable />
-          <el-table-column prop="received" label="已接收" width="100" sortable />
-          <el-table-column prop="sent" label="已发送" width="100" sortable />
+          <el-table-column prop="activeConnections" label="活动连接" width="90" sortable />
+          <el-table-column prop="accepts" label="已接收" width="90" sortable />
+          <el-table-column prop="handled" label="已处理" width="90" sortable />
+          <el-table-column prop="requests" label="总请求" width="90" sortable />
+          <el-table-column prop="waiting" label="等待" width="70" sortable />
+          <el-table-column prop="reading" label="读取" width="70" sortable />
+          <el-table-column prop="writing" label="写入" width="70" sortable />
         </el-table>
         <div class="pager">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="sortedInstances.length" :page-size="pageSize" :current-page="currentPage" :page-sizes="[10,20,50,100]" @current-change="v => currentPage = v" @size-change="v => { pageSize = v; currentPage = 1 }" />
@@ -73,13 +72,12 @@
         </div>
         <div class="metric-grid">
           <div class="metric-cell"><div class="mc-label">活动连接</div><div class="mc-value">{{ selected.activeConnections }}</div></div>
-          <div class="metric-cell"><div class="mc-label">请求速率</div><div class="mc-value">{{ selected.requestsPerSec }}/s</div></div>
-          <div class="metric-cell"><div class="mc-label">等待连接</div><div class="mc-value">{{ selected.waitingConnections }}</div></div>
+          <div class="metric-cell"><div class="mc-label">已接收</div><div class="mc-value">{{ selected.accepts }}</div></div>
+          <div class="metric-cell"><div class="mc-label">等待连接</div><div class="mc-value">{{ selected.waiting }}</div></div>
           <div class="metric-cell"><div class="mc-label">读取中</div><div class="mc-value">{{ selected.reading }}</div></div>
           <div class="metric-cell"><div class="mc-label">写入中</div><div class="mc-value">{{ selected.writing }}</div></div>
           <div class="metric-cell"><div class="mc-label">已处理</div><div class="mc-value">{{ selected.handled }}</div></div>
-          <div class="metric-cell"><div class="mc-label">已接收</div><div class="mc-value">{{ selected.received }}</div></div>
-          <div class="metric-cell"><div class="mc-label">已发送</div><div class="mc-value">{{ selected.sent }}</div></div>
+          <div class="metric-cell"><div class="mc-label">总请求</div><div class="mc-value">{{ selected.requests }}</div></div>
           <div class="metric-cell"><div class="mc-label">运行时长</div><div class="mc-value">{{ formatUptime(selected.uptime) }}</div></div>
         </div>
         <div class="chart-box" ref="chartRef"></div>
@@ -105,13 +103,13 @@ const chartRef = ref(null)
 let chartInstance = null
 
 const stats = computed(() => {
-  const s = { total: 0, up: 0, down: 0, totalActive: 0, totalReqRate: 0, totalWaiting: 0 }
+  const s = { total: 0, up: 0, down: 0, totalActive: 0, totalRequests: 0, totalWaiting: 0 }
   for (const i of instances.value) {
     s.total++
     if (i.up) s.up++; else s.down++
     s.totalActive += i.activeConnections || 0
-    s.totalReqRate += i.requestsPerSec || 0
-    s.totalWaiting += i.waitingConnections || 0
+    s.totalRequests += i.requests || 0
+    s.totalWaiting += i.waiting || 0
   }
   return s
 })
@@ -156,7 +154,7 @@ async function loadTrendChart(row) {
 }
 
 function formatUptime(s) { if (!s) return '-'; const d = Math.floor(s / 86400); const h = Math.floor((s % 86400) / 3600); return d > 0 ? `${d}天${h}小时` : `${h}小时` }
-function nginxDisplayAddr(i) { if (!i || !i.instance) return '-'; const a = i.instance; const node = i.node || ''; if (a === node || a === node+':80') return a; const stripLocalhost = a.replace(/^(https?:\/\/)?(127\.0\.0\.1|localhost|\[::1\]):/, ''); return stripLocalhost }
+function nginxDisplayAddr(i) { if (!i || !i.instance) return '-'; const a = i.instance; const node = i.node || ''; if (a === node || a === node+':80') return a; const clean = a.replace(/^https?:\/\//, ''); if (/^(127\.0\.0\.1|localhost|\[::1\]):/.test(clean)) return clean; return clean }
 function rowClass({ row }) { return row.up ? '' : 'row-down' }
 
 const currentPage = ref(1)
