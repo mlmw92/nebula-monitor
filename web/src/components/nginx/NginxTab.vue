@@ -32,8 +32,9 @@
           </div>
           <div class="topo-grid">
             <div v-for="i in instances" :key="i.instance" class="rel-node rel-standalone" :class="{'is-down': !i.up}" @click="openDetail(i)">
-              <div class="rel-node-name" :title="i.instance">{{ i.name || i.instance }}</div>
-              <div class="rel-node-meta"><span :class="['dot', i.up ? 'up' : 'down']"></span>{{ i.up ? '在线' : '离线' }}<span class="dim">·</span>{{ i.instance }}</div>
+              <div class="rel-node-name" :title="i.instance">{{ i.name || i.node || i.instance }}</div>
+              <div class="rel-node-meta"><span :class="['dot', i.up ? 'up' : 'down']"></span>{{ i.up ? '在线' : '离线' }}<span class="dim">·</span>{{ i.node }}</div>
+              <div class="rel-node-instance mono dim">{{ nginxDisplayAddr(i) }}</div>
             </div>
           </div>
         </div>
@@ -155,6 +156,7 @@ async function loadTrendChart(row) {
 }
 
 function formatUptime(s) { if (!s) return '-'; const d = Math.floor(s / 86400); const h = Math.floor((s % 86400) / 3600); return d > 0 ? `${d}天${h}小时` : `${h}小时` }
+function nginxDisplayAddr(i) { if (!i || !i.instance) return '-'; const a = i.instance; const node = i.node || ''; if (a === node || a === node+':80') return a; const stripLocalhost = a.replace(/^(https?:\/\/)?(127\.0\.0\.1|localhost|\[::1\]):/, ''); return stripLocalhost }
 function rowClass({ row }) { return row.up ? '' : 'row-down' }
 
 const currentPage = ref(1)
@@ -213,6 +215,7 @@ onMounted(load)
 .rel-node.is-down { opacity: 0.6; }
 .rel-node-name { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+.rel-node-instance { font-size: 11px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rel-standalone { border-left: 4px solid var(--chart-blue); }
 .rel-master { border-left: 4px solid var(--chart-orange); }
 

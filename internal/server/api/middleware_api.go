@@ -395,6 +395,9 @@ func hostFromDaemon(daemon string) string {
 	if daemon == "" {
 		return ""
 	}
+	if strings.HasPrefix(daemon, "unix://") {
+		return "" // 本地 socket 无 IP
+	}
 	if i := strings.Index(daemon, "://"); i >= 0 {
 		daemon = daemon[i+3:]
 	}
@@ -511,6 +514,7 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 		Daemon            string  `json:"daemon"`
 		IP                string  `json:"ip"`
 		Group             string  `json:"group"`
+		Up                bool    `json:"up"`
 		ContainersTotal   float64 `json:"containersTotal"`
 		ContainersRunning float64 `json:"containersRunning"`
 		ContainersStopped float64 `json:"containersStopped"`
@@ -518,26 +522,27 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 	}
 	hosts := map[string]*dockerHostInfo{}
 	var hostKeys []string
-	if totalSeries, err := a.store.QueryAllLatest("docker_containers_total", nil); err == nil {
-		for _, s := range totalSeries {
-			node := s.Labels["node"]
-			daemon := s.Labels["instance"]
-			if node == "" || daemon == "" || len(s.Points) == 0 {
-				continue
-			}
-			key := node + "|" + daemon
-			if _, ok := hosts[key]; !ok {
-				hosts[key] = &dockerHostInfo{
-					Node:            node,
-					Daemon:          daemon,
-					IP:              hostFromDaemon(daemon),
-					Group:           s.Labels["group"],
-					ContainersTotal: s.Points[len(s.Points)-1].Value,
+		if totalSeries, err := a.store.QueryAllLatest("docker_containers_total", nil); err == nil {
+			for _, s := range totalSeries {
+				node := s.Labels["node"]
+				daemon := s.Labels["instance"]
+				if node == "" || daemon == "" || len(s.Points) == 0 {
+					continue
 				}
-				hostKeys = append(hostKeys, key)
+				key := node + "|" + daemon
+				if _, ok := hosts[key]; !ok {
+					hosts[key] = &dockerHostInfo{
+						Node:            node,
+						Daemon:          daemon,
+						IP:              hostFromDaemon(daemon),
+						Group:           s.Labels["group"],
+						Up:              true,
+						ContainersTotal: s.Points[len(s.Points)-1].Value,
+					}
+					hostKeys = append(hostKeys, key)
+				}
 			}
 		}
-	}
 	for metric, setter := range map[string]func(*dockerHostInfo, float64){
 		"docker_containers_running":  func(h *dockerHostInfo, v float64) { h.ContainersRunning = v },
 		"docker_containers_stopped":  func(h *dockerHostInfo, v float64) { h.ContainersStopped = v },
