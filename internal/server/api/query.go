@@ -78,11 +78,13 @@ type API struct {
 	dialtest  DialtestProvider
 	report    ReportProvider
 	acks      *alert.AckStore
+	inhibit   *alert.InhibitStore
+	grouping  *alert.GroupingStore
 }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -146,6 +148,17 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/maintenance", a.handleMaintenanceGet)
 	mux.HandleFunc("PUT /api/v1/maintenance", a.handleMaintenanceSet)
+
+	// 告警抑制规则（P4）
+	mux.HandleFunc("GET /api/v1/inhibit", a.handleInhibitGet)
+	mux.HandleFunc("PUT /api/v1/inhibit", a.handleInhibitPut)
+
+	// 告警分组配置（P4）
+	mux.HandleFunc("GET /api/v1/grouping", a.handleGroupingGet)
+	mux.HandleFunc("PUT /api/v1/grouping", a.handleGroupingPut)
+
+	// 告警统计看板（P4）
+	mux.HandleFunc("GET /api/v1/alerts/stats", a.handleAlertStats)
 
 	mux.HandleFunc("GET /api/v1/dialtest/tasks", a.handleDialtestList)
 	mux.HandleFunc("POST /api/v1/dialtest/tasks", a.handleDialtestCreate)

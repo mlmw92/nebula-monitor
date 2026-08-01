@@ -1,22 +1,47 @@
 <template>
   <div>
-    <!-- 告警统计 -->
-    <div class="alert-stats">
-      <div class="glass panel kpi">
-        <div class="kpi-label">活跃告警</div>
-        <div class="kpi-value red">{{ activeCount }}</div>
+    <!-- 告警统计看板 -->
+    <div class="glass panel" style="margin-bottom: 16px">
+      <div class="panel-title" style="margin-bottom: 12px">告警概览</div>
+      <div class="alert-stats">
+        <div class="glass panel kpi">
+          <div class="kpi-label">活跃告警</div>
+          <div class="kpi-value red">{{ stats.firing }}</div>
+        </div>
+        <div class="glass panel kpi">
+          <div class="kpi-label">紧急</div>
+          <div class="kpi-value red">{{ stats.bySeverity.critical }}</div>
+        </div>
+        <div class="glass panel kpi">
+          <div class="kpi-label">警告</div>
+          <div class="kpi-value amber">{{ stats.bySeverity.warning }}</div>
+        </div>
+        <div class="glass panel kpi">
+          <div class="kpi-label">已抑制</div>
+          <div class="kpi-value gray">{{ stats.suppressed }}</div>
+        </div>
+        <div class="glass panel kpi">
+          <div class="kpi-label">24h 事件</div>
+          <div class="kpi-value cyan">{{ stats.total }}</div>
+        </div>
       </div>
-      <div class="glass panel kpi">
-        <div class="kpi-label">紧急</div>
-        <div class="kpi-value red">{{ criticalCount }}</div>
-      </div>
-      <div class="glass panel kpi">
-        <div class="kpi-label">警告</div>
-        <div class="kpi-value amber">{{ warningCount }}</div>
-      </div>
-      <div class="glass panel kpi">
-        <div class="kpi-label">规则总数</div>
-        <div class="kpi-value cyan">{{ rules.length }}</div>
+      <div class="stats-extra">
+        <div class="stats-col">
+          <div class="mini-title">级别分布（活跃）</div>
+          <div class="sev-bar-wrap">
+            <span class="sev-dot danger"></span>紧急 {{ stats.bySeverity.critical }}
+            <span class="sev-dot warning"></span>警告 {{ stats.bySeverity.warning }}
+            <span class="sev-dot info"></span>信息 {{ stats.bySeverity.info }}
+          </div>
+        </div>
+        <div class="stats-col">
+          <div class="mini-title">Top 规则</div>
+          <div v-if="!stats.topRules.length" class="muted">暂无数据</div>
+          <div v-for="r in stats.topRules" :key="r.ruleId" class="top-rule">
+            <span class="top-name">{{ r.name }}</span>
+            <span class="top-badge">共 {{ r.total }} / 活跃 {{ r.firing }}</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -127,6 +152,70 @@
       </el-table>
     </div>
 
+    <!-- 高级：抑制与分组（P4） -->
+    <div class="glass panel" style="margin-bottom: 16px">
+      <div class="panel-title" style="margin-bottom: 12px">高级设置 · 抑制与分组</div>
+
+      <div class="adv-section">
+        <div class="adv-title">告警分组</div>
+        <div class="adv-row">
+          <el-switch v-model="grouping.enabled" active-text="已开启" inactive-text="已关闭" />
+          <span class="muted">将相同标签的告警合并为一组，按等待/间隔汇总发送，减少通知风暴</span>
+        </div>
+        <div class="adv-row" v-if="grouping.enabled">
+          <div class="adv-item">
+            <span class="adv-label">分组标签</span>
+            <el-select v-model="grouping.groupBy" multiple collapse-tags placeholder="分组标签">
+              <el-option label="规则名" value="name" />
+              <el-option label="规则ID" value="rule" />
+              <el-option label="节点" value="node" />
+              <el-option label="实例" value="instance" />
+              <el-option label="级别" value="severity" />
+              <el-option label="指标" value="metric" />
+            </el-select>
+          </div>
+          <div class="adv-item">
+            <span class="adv-label">首次等待</span>
+            <el-input v-model="grouping.groupWait" placeholder="30s" style="width: 110px" />
+          </div>
+          <div class="adv-item">
+            <span class="adv-label">汇总间隔</span>
+            <el-input v-model="grouping.groupInterval" placeholder="5m" style="width: 110px" />
+          </div>
+          <el-button type="primary" size="small" @click="saveGrouping">保存</el-button>
+        </div>
+      </div>
+
+      <el-divider />
+
+      <div class="adv-section">
+        <div class="panel-title-row">
+          <span class="adv-title" style="margin: 0">抑制规则</span>
+          <el-button size="small" type="primary" @click="newInhibit">新增规则</el-button>
+        </div>
+        <el-table :data="inhibits" stripe style="width: 100%; margin-top: 8px" empty-text="暂无抑制规则">
+          <el-table-column label="源匹配（触发时）" min-width="200">
+            <template #default="{ row }">{{ inhibitText(row.source) }}</template>
+          </el-table-column>
+          <el-table-column label="目标匹配（被抑制）" min-width="200">
+            <template #default="{ row }">{{ inhibitText(row.target) }}</template>
+          </el-table-column>
+          <el-table-column label="Equal" min-width="150">
+            <template #default="{ row }">
+              <el-tag v-for="k in (row.equal || [])" :key="k" size="small" style="margin: 0 4px 4px 0">{{ k }}</el-tag>
+              <span v-if="!row.equal || !row.equal.length" class="muted">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="130">
+            <template #default="{ row, $index }">
+              <el-button link size="small" @click="editInhibit(row, $index)">编辑</el-button>
+              <el-button link type="danger" size="small" @click="delInhibit($index)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </div>
+
     <!-- 告警事件 -->
     <div class="glass panel">
       <div class="panel-title-row">
@@ -165,6 +254,12 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="抑制" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="row.suppressed" type="info" size="small" effect="plain">已抑制</el-tag>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="message" label="详情" min-width="200" show-overflow-tooltip />
         <el-table-column label="时间" width="160">
           <template #default="{ row }">{{ fmt(row.startsAt || row.endsAt) }}</template>
@@ -178,6 +273,38 @@
     </div>
 
     <RuleModal v-if="editing" :rule="editing" :groups="groups" :channels="channelOptions" @close="editing = null" @saved="onSaved" />
+
+    <!-- 抑制规则编辑 -->
+    <el-dialog v-model="inhibitDialog" :title="inhibitEditIndex < 0 ? '新增抑制规则' : '编辑抑制规则'" width="620px">
+      <div class="inh-block">
+        <div class="inh-title">源匹配（当该告警处于告警中时）</div>
+        <div class="inh-row"><span class="inh-label">规则ID 包含</span><el-input v-model="inhibitForm.sourceRule" placeholder="如 host-offline，留空不限" /></div>
+        <div class="inh-row"><span class="inh-label">级别</span>
+          <el-select v-model="inhibitForm.sourceSeverity" clearable placeholder="不限">
+            <el-option label="紧急" value="critical" /><el-option label="警告" value="warning" /><el-option label="信息" value="info" />
+          </el-select>
+        </div>
+        <div class="inh-row"><span class="inh-label">指标正则</span><el-input v-model="inhibitForm.sourceMetricRegex" placeholder="如 .* 或 cpu.*，留空不限" /></div>
+      </div>
+      <div class="inh-block">
+        <div class="inh-title">目标匹配（将被抑制的告警）</div>
+        <div class="inh-row"><span class="inh-label">级别</span>
+          <el-select v-model="inhibitForm.targetSeverity" clearable placeholder="不限">
+            <el-option label="紧急" value="critical" /><el-option label="警告" value="warning" /><el-option label="信息" value="info" />
+          </el-select>
+        </div>
+        <div class="inh-row"><span class="inh-label">指标正则</span><el-input v-model="inhibitForm.targetMetricRegex" placeholder="如 .* 或 mem.*，留空不限" /></div>
+      </div>
+      <div class="inh-row"><span class="inh-label">Equal 标签</span>
+        <el-select v-model="inhibitForm.equal" multiple collapse-tags placeholder="需相同的标签">
+          <el-option label="节点" value="node" /><el-option label="实例" value="instance" /><el-option label="级别" value="severity" /><el-option label="规则ID" value="rule" />
+        </el-select>
+      </div>
+      <template #footer>
+        <el-button @click="inhibitDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveInhibit">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 告警事件详情 -->
     <el-drawer v-model="drawer" :title="detail?.ruleName || '告警详情'" size="480px" @closed="onDrawerClosed">
@@ -244,6 +371,17 @@ const CHANNEL_META = [
 ]
 const channelOptions = ref(CHANNEL_META.map((c) => ({ ...c, enabled: true })))
 let timer = null
+
+// P4：统计看板 / 抑制规则 / 分组配置
+const stats = ref({ firing: 0, suppressed: 0, total: 0, bySeverity: { critical: 0, warning: 0, info: 0 }, topRules: [] })
+const inhibits = ref([])
+const grouping = ref({ enabled: false, groupBy: ['name'], groupWait: '30s', groupInterval: '5m' })
+const inhibitDialog = ref(false)
+const inhibitEditIndex = ref(-1)
+const inhibitForm = ref(emptyInhibitForm())
+function emptyInhibitForm() {
+  return { sourceRule: '', sourceSeverity: '', sourceMetricRegex: '', targetSeverity: '', targetMetricRegex: '', equal: [] }
+}
 
 const activeCount = computed(() => alerts.value.filter((a) => a.state === 'firing').length)
 const criticalCount = computed(() => alerts.value.filter((a) => a.state === 'firing' && a.severity === 'critical').length)
@@ -319,6 +457,16 @@ async function load() {
   } catch (e) { /* ignore */ }
   try {
     acks.value = (await http.get('/api/v1/alerts/acks')).acks || {}
+  } catch (e) { /* ignore */ }
+  try {
+    stats.value = await http.get('/api/v1/alerts/stats')
+  } catch (e) { /* ignore */ }
+  try {
+    inhibits.value = (await http.get('/api/v1/inhibit')).rules || []
+  } catch (e) { /* ignore */ }
+  try {
+    const g = await http.get('/api/v1/grouping')
+    if (g && typeof g === 'object') grouping.value = g
   } catch (e) { /* ignore */ }
   try {
     const cfg = await http.get('/api/v1/notify')
@@ -460,6 +608,97 @@ function onDrawerClosed() {
   detail.value = null
 }
 
+// ---- P4：分组配置 ----
+async function saveGrouping() {
+  try {
+    await http.put('/api/v1/grouping', {
+      enabled: grouping.value.enabled,
+      groupBy: grouping.value.groupBy || ['name'],
+      groupWait: grouping.value.groupWait || '30s',
+      groupInterval: grouping.value.groupInterval || '5m',
+    })
+    ElMessage.success('分组配置已保存（热生效）')
+  } catch (e) {
+    ElMessage.error('保存分组配置失败')
+  }
+}
+
+// ---- P4：抑制规则 ----
+function inhibitText(ms) {
+  if (!ms) return '—'
+  const parts = []
+  if (ms.match) for (const [k, v] of Object.entries(ms.match)) parts.push(`${k}=${v}`)
+  if (ms.matchRegex) for (const [k, v] of Object.entries(ms.matchRegex)) parts.push(`${k}~${v}`)
+  return parts.length ? parts.join('  &  ') : '—'
+}
+
+function buildInhibitRule() {
+  const f = inhibitForm.value
+  const src = { match: {}, matchRegex: {} }
+  if (f.sourceSeverity) src.match.severity = f.sourceSeverity
+  if (f.sourceRule) src.matchRegex.rule = f.sourceRule
+  if (f.sourceMetricRegex) src.matchRegex.metric = f.sourceMetricRegex
+  const tgt = { match: {}, matchRegex: {} }
+  if (f.targetSeverity) tgt.match.severity = f.targetSeverity
+  if (f.targetMetricRegex) tgt.matchRegex.metric = f.targetMetricRegex
+  return { source: src, target: tgt, equal: f.equal || [] }
+}
+
+function formFromRule(r) {
+  const f = emptyInhibitForm()
+  if (r.source) {
+    f.sourceSeverity = r.source.match?.severity || ''
+    f.sourceRule = r.source.matchRegex?.rule || r.source.match?.rule || ''
+    f.sourceMetricRegex = r.source.matchRegex?.metric || ''
+  }
+  if (r.target) {
+    f.targetSeverity = r.target.match?.severity || ''
+    f.targetMetricRegex = r.target.matchRegex?.metric || ''
+  }
+  f.equal = r.equal || []
+  return f
+}
+
+function newInhibit() {
+  inhibitEditIndex.value = -1
+  inhibitForm.value = emptyInhibitForm()
+  inhibitDialog.value = true
+}
+function editInhibit(row, idx) {
+  inhibitEditIndex.value = idx
+  inhibitForm.value = formFromRule(row)
+  inhibitDialog.value = true
+}
+async function persistInhibits() {
+  try {
+    await http.put('/api/v1/inhibit', inhibits.value)
+    ElMessage.success('抑制规则已保存（热生效）')
+  } catch (e) {
+    ElMessage.error('保存抑制规则失败')
+  }
+}
+function saveInhibit() {
+  const rule = buildInhibitRule()
+  ;['source', 'target'].forEach((k) => {
+    const ms = rule[k]
+    if (Object.keys(ms.match).length === 0) delete ms.match
+    if (Object.keys(ms.matchRegex).length === 0) delete ms.matchRegex
+  })
+  const list = [...inhibits.value]
+  if (inhibitEditIndex.value >= 0) list[inhibitEditIndex.value] = rule
+  else list.push(rule)
+  inhibits.value = list
+  inhibitDialog.value = false
+  persistInhibits()
+}
+async function delInhibit(idx) {
+  try {
+    await ElMessageBox.confirm('确认删除该抑制规则？', '提示', { type: 'warning' })
+    inhibits.value.splice(idx, 1)
+    persistInhibits()
+  } catch (e) { /* 取消 */ }
+}
+
 // 每 30s 自动刷新告警列表，确保实时性
 onMounted(() => {
   load()
@@ -546,5 +785,105 @@ onUnmounted(() => {
   margin-top: 16px;
   display: flex;
   gap: 8px;
+}
+.kpi-value.gray {
+  color: var(--muted, #909399);
+}
+.stats-extra {
+  display: flex;
+  gap: 24px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.stats-col {
+  flex: 1;
+  min-width: 240px;
+}
+.mini-title {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.sev-bar-wrap {
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+.sev-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.sev-dot.danger { background: #f56c6c; }
+.sev-dot.warning { background: #e6a23c; }
+.sev-dot.info { background: #909399; }
+.top-rule {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 13px;
+  border-bottom: 1px dashed var(--border, #2a2f3a);
+}
+.top-name {
+  color: var(--text);
+}
+.top-badge {
+  color: var(--muted, #909399);
+  font-size: 12px;
+}
+.adv-section {
+  padding: 6px 0;
+}
+.adv-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--text);
+}
+.adv-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.adv-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.adv-label {
+  font-size: 13px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.inh-block {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border, #2a2f3a);
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.inh-title {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.inh-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.inh-label {
+  width: 92px;
+  font-size: 13px;
+  color: var(--text-dim);
+  flex-shrink: 0;
 }
 </style>

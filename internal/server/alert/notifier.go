@@ -24,6 +24,7 @@ import (
 // Notifier 通知渠道接口。
 type Notifier interface {
 	Notify(e model.AlertEvent) error
+	NotifyGroup(events []model.AlertEvent) error
 	Channel() string
 }
 
@@ -91,6 +92,59 @@ func (n *EmailNotifier) Notify(e model.AlertEvent) error {
 	}
 	if err != nil {
 		slog.Error("发送告警邮件失败", "err", err)
+		return err
+	}
+	return nil
+}
+
+// NotifyGroup 将一组告警汇总为单封邮件发送（告警分组场景）。
+func (n *EmailNotifier) NotifyGroup(events []model.AlertEvent) error {
+	if !n.cfg.Enabled || len(n.cfg.To) == 0 || len(events) == 0 {
+		return nil
+	}
+	subject := fmt.Sprintf("[监控告警汇总] %d 条告警（%s）", len(events), groupTopSeverity(events))
+	plain := groupPlainText(events)
+	html := groupEmailHTML(events)
+
+	msg := bytes.Buffer{}
+	msg.WriteString("From: " + n.cfg.From + "\r\n")
+	msg.WriteString("To: ")
+	for i, t := range n.cfg.To {
+		if i > 0 {
+			msg.WriteString(", ")
+		}
+		msg.WriteString(t)
+	}
+	msg.WriteString("\r\n")
+	msg.WriteString("Subject: " + subject + "\r\n")
+	msg.WriteString("MIME-Version: 1.0\r\n")
+	msg.WriteString("Content-Type: multipart/alternative; boundary=\"__nebula_alert__\"\r\n\r\n")
+	msg.WriteString("--__nebula_alert__\r\n")
+	msg.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
+	msg.WriteString(plain)
+	msg.WriteString("\r\n--__nebula_alert__\r\n")
+	msg.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
+	msg.WriteString(html)
+	msg.WriteString("\r\n--__nebula_alert__--\r\n")
+
+	addr := fmt.Sprintf("%s:%d", n.cfg.SMTPHost, n.cfg.SMTPPort)
+	var auth smtp.Auth
+	if n.cfg.Username != "" {
+		auth = smtp.PlainAuth("", n.cfg.Username, n.cfg.Password, n.cfg.SMTPHost)
+	}
+	useStartTLS := n.cfg.UseStartTLS || (n.cfg.UseTLS && n.cfg.SMTPPort == 587)
+	useImplicitTLS := n.cfg.UseTLS && !useStartTLS
+	var err error
+	switch {
+	case useImplicitTLS:
+		err = sendTLS(addr, n.cfg.SMTPHost, auth, n.cfg.From, n.cfg.To, msg.Bytes())
+	case useStartTLS:
+		err = sendStartTLS(addr, n.cfg.SMTPHost, auth, n.cfg.From, n.cfg.To, msg.Bytes())
+	default:
+		err = smtp.SendMail(addr, auth, n.cfg.From, n.cfg.To, msg.Bytes())
+	}
+	if err != nil {
+		slog.Error("发送告警汇总邮件失败", "err", err)
 		return err
 	}
 	return nil
@@ -318,6 +372,31 @@ func (n *WebhookNotifier) Notify(e model.AlertEvent) error {
 	return nil
 }
 
+// NotifyGroup 将一组告警汇总为单条 webhook 消息发送。
+func (n *WebhookNotifier) NotifyGroup(events []model.AlertEvent) error {
+	if !n.cfg.Enabled || len(n.cfg.URLs) == 0 || len(events) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(map[string]any{
+		"group":  true,
+		"count":  len(events),
+		"events": events,
+	})
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	for _, u := range n.cfg.URLs {
+		resp, err := client.Post(u, "application/json", bytes.NewReader(payload))
+		if err != nil {
+			slog.Error("Webhook 汇总通知失败", "url", u, "err", err)
+			continue
+		}
+		resp.Body.Close()
+	}
+	return nil
+}
+
 // BuildNotifiers 根据配置构建通知器列表。
 func BuildNotifiers(cfg config.NotifyConfig) []Notifier {
 	var ns []Notifier
@@ -358,6 +437,92 @@ func alertText(e model.AlertEvent) string {
 func alertMarkdown(e model.AlertEvent) string {
 	return fmt.Sprintf("### 监控告警\n> **级别**: %s  **状态**: %s\n> **节点**: %s\n> **规则**: %s\n> **指标**: %s\n> **触发值**: %.2f %s 阈值 %.2f\n> **时间**: %s\n> **描述**: %s",
 		e.Severity, e.State, e.Node, e.RuleName, e.Metric, e.Value, e.Operator, e.Threshold, timeStr(e.StartsAt), e.Message)
+}
+
+// groupTopSeverity 返回一组告警中最高的严重级别。
+func groupTopSeverity(events []model.AlertEvent) string {
+	rank := map[model.Severity]int{model.SeverityInfo: 1, model.SeverityWarning: 2, model.SeverityCritical: 3}
+	top := model.SeverityInfo
+	for _, e := range events {
+		if rank[e.Severity] > rank[top] {
+			top = e.Severity
+		}
+	}
+	return sevLabel(top)
+}
+
+// groupText 生成一组告警的纯文本汇总（飞书 / 企业微信）。
+func groupText(events []model.AlertEvent) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[监控告警汇总] 共 %d 条（最高级别 %s）\n", len(events), groupTopSeverity(events))
+	for i, e := range events {
+		fmt.Fprintf(&b, "\n%d. [%s][%s] %s\n节点: %s\n描述: %s\n时间: %s\n",
+			i+1, sevLabel(e.Severity), stateLabel(e.State), e.RuleName, e.Node, e.Message, timeStr(e.StartsAt))
+	}
+	return b.String()
+}
+
+// groupMarkdown 生成一组告警的钉钉 markdown 汇总。
+func groupMarkdown(events []model.AlertEvent) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "### 监控告警汇总\n> 共 **%d** 条，最高级别 **%s**\n\n", len(events), groupTopSeverity(events))
+	for i, e := range events {
+		fmt.Fprintf(&b, "> **%d. [%s] %s**\n> 节点: %s  状态: %s\n> %s\n\n",
+			i+1, sevLabel(e.Severity), e.RuleName, e.Node, stateLabel(e.State), e.Message)
+	}
+	return b.String()
+}
+
+// groupPlainText 生成一组告警的纯文本汇总（邮件正文）。
+func groupPlainText(events []model.AlertEvent) string {
+	return groupText(events)
+}
+
+// groupEmailHTML 生成一组告警的 HTML 汇总（邮件正文）。
+func groupEmailHTML(events []model.AlertEvent) string {
+	var rows strings.Builder
+	for _, e := range events {
+		sev := sevLabel(e.Severity)
+		sevColor := "#909399"
+		if e.Severity == model.SeverityWarning {
+			sevColor = "#e6a23c"
+		} else if e.Severity == model.SeverityCritical {
+			sevColor = "#f56c6c"
+		}
+		sup := ""
+		if e.Suppressed {
+			sup = `<span style="color:#909399;">（已抑制）</span>`
+		}
+		fmt.Fprintf(&rows, `<tr>
+  <td style="border:1px solid #ebeef5;padding:8px 10px;">%s</td>
+  <td style="border:1px solid #ebeef5;padding:8px 10px;color:%s;font-weight:600;">%s</td>
+  <td style="border:1px solid #ebeef5;padding:8px 10px;">%s</td>
+  <td style="border:1px solid #ebeef5;padding:8px 10px;">%s</td>
+  <td style="border:1px solid #ebeef5;padding:8px 10px;">%s</td>
+</tr>`, stateLabel(e.State), sevColor, sev, e.RuleName, e.Node, sup+e.Message)
+	}
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f5f7fa;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">
+<div style="max-width:720px;margin:24px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+  <div style="background:#303133;color:#fff;padding:18px 24px;">
+    <div style="font-size:13px;opacity:.9;">Nebula Monitor 监控告警汇总</div>
+    <div style="font-size:20px;font-weight:600;margin-top:6px;">共 %d 条告警（最高级别 %s）</div>
+  </div>
+  <div style="padding:18px 24px;">
+    <table style="width:100%%;border-collapse:collapse;font-size:14px;color:#303133;">
+      <thead><tr style="background:#f5f7fa;">
+        <th style="border:1px solid #ebeef5;padding:8px 10px;text-align:left;">状态</th>
+        <th style="border:1px solid #ebeef5;padding:8px 10px;text-align:left;">级别</th>
+        <th style="border:1px solid #ebeef5;padding:8px 10px;text-align:left;">规则</th>
+        <th style="border:1px solid #ebeef5;padding:8px 10px;text-align:left;">节点</th>
+        <th style="border:1px solid #ebeef5;padding:8px 10px;text-align:left;">描述</th>
+      </tr></thead>
+      <tbody>%s</tbody>
+    </table>
+  </div>
+</div>
+</body></html>`, len(events), groupTopSeverity(events), rows.String())
 }
 
 // postJSON 向指定 URL POST JSON，并校验响应状态。
@@ -431,6 +596,46 @@ func (n *DingTalkNotifier) Notify(e model.AlertEvent) error {
 	return nil
 }
 
+// NotifyGroup 将一组告警汇总为单条钉钉 markdown 消息发送。
+func (n *DingTalkNotifier) NotifyGroup(events []model.AlertEvent) error {
+	if !n.cfg.Enabled || len(n.cfg.URLs) == 0 || len(events) == 0 {
+		return nil
+	}
+	var ts int64
+	var sign string
+	if n.cfg.Secret != "" {
+		var err error
+		ts, sign, err = dingSign(n.cfg.Secret)
+		if err != nil {
+			return err
+		}
+	}
+	at := map[string]interface{}{}
+	if len(n.cfg.AtMobiles) > 0 {
+		at["atMobiles"] = n.cfg.AtMobiles
+	}
+	for _, base := range n.cfg.URLs {
+		u := base
+		if n.cfg.Secret != "" {
+			u = fmt.Sprintf("%s&timestamp=%d&sign=%s", u, ts, url.QueryEscape(sign))
+		}
+		payload := map[string]interface{}{
+			"msgtype": "markdown",
+			"markdown": map[string]string{
+				"title": "监控告警汇总",
+				"text":  groupMarkdown(events),
+			},
+		}
+		if len(at) > 0 {
+			payload["at"] = at
+		}
+		if err := postJSON(u, payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // dingSign 钉钉加签：HMAC-SHA256 → base64，timestamp 为毫秒。
 func dingSign(secret string) (int64, string, error) {
 	ts := time.Now().UnixMilli()
@@ -475,6 +680,32 @@ func (n *FeishuNotifier) Notify(e model.AlertEvent) error {
 	return nil
 }
 
+// NotifyGroup 将一组告警汇总为单条飞书 text 消息发送。
+func (n *FeishuNotifier) NotifyGroup(events []model.AlertEvent) error {
+	if !n.cfg.Enabled || len(n.cfg.URLs) == 0 || len(events) == 0 {
+		return nil
+	}
+	var ts int64
+	var sign string
+	if n.cfg.Secret != "" {
+		ts, sign = feishuSign(n.cfg.Secret)
+	}
+	for _, u := range n.cfg.URLs {
+		body := map[string]interface{}{
+			"msg_type": "text",
+			"content":  map[string]string{"text": groupText(events)},
+		}
+		if n.cfg.Secret != "" {
+			body["timestamp"] = ts
+			body["sign"] = sign
+		}
+		if err := postJSON(u, body); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // feishuSign 飞书签名：HMAC-SHA256 → base64，timestamp 为秒。
 func feishuSign(secret string) (int64, string) {
 	ts := time.Now().Unix()
@@ -499,6 +730,27 @@ func (n *WeComNotifier) Notify(e model.AlertEvent) error {
 		return nil
 	}
 	content := map[string]interface{}{"content": alertText(e)}
+	if len(n.cfg.MentionedList) > 0 {
+		content["mentioned_list"] = n.cfg.MentionedList
+	}
+	for _, u := range n.cfg.URLs {
+		body := map[string]interface{}{
+			"msgtype": "text",
+			"content": content,
+		}
+		if err := postJSON(u, body); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// NotifyGroup 将一组告警汇总为单条企业微信 text 消息发送。
+func (n *WeComNotifier) NotifyGroup(events []model.AlertEvent) error {
+	if !n.cfg.Enabled || len(n.cfg.URLs) == 0 || len(events) == 0 {
+		return nil
+	}
+	content := map[string]interface{}{"content": groupText(events)}
 	if len(n.cfg.MentionedList) > 0 {
 		content["mentioned_list"] = n.cfg.MentionedList
 	}

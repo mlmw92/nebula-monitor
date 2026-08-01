@@ -71,9 +71,12 @@ func main() {
 	alertStore := alert.NewVMAlertStore(store)
 	ackStore := alert.NewAckStore(filepath.Join(filepath.Dir(cfg.Alert.RulesFile), "alert_acks.json"))
 	maintenance := alert.NewMaintenanceStore(cfg.Alert.MaintenanceFile)
+	// 抑制规则与分组配置（P4）：热加载 YAML，可经 Web 端增删改。
+	inhibitStore := alert.NewInhibitStore(filepath.Join(filepath.Dir(cfg.Alert.RulesFile), "alert_inhibit.yaml"))
+	groupingStore := alert.NewGroupingStore(filepath.Join(filepath.Dir(cfg.Alert.RulesFile), "alert_grouping.yaml"))
 	notifiers := alert.BuildNotifiers(cfg.Notify)
 	hub := api.NewHub()
-	engine := alert.NewEngine(store, nodeMgr, rules, alertStore, notifiers, hub, maintenance, cfg.Alert.EvalInterval)
+	engine := alert.NewEngine(store, nodeMgr, rules, alertStore, notifiers, hub, maintenance, cfg.Alert.EvalInterval, inhibitStore, groupingStore)
 
 	// 通知配置管理：独立文件（Web 端可配置），启动时优先加载该文件，不存在则
 	// 用 server.yaml 的 notify 段初始化并落盘；保存时通过 SetNotifiers 热加载。
@@ -127,7 +130,7 @@ func main() {
 	}
 
 	// API
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)

@@ -25,18 +25,25 @@ func NewVMAlertStore(store storage.Storage) *VMAlertStore {
 // Add 写入一条告警事件到 VM（仅在状态切换时调用，避免刷屏）。
 // 注意：node 标签固定为 "system"，被监控节点名放在 host 标签，避免与 writer 的 node 标签冲突。
 func (s *VMAlertStore) Add(e model.AlertEvent) {
+	labels := map[string]string{
+		"rule":     e.RuleID,
+		"name":     e.RuleName,
+		"host":     e.Node,
+		"instance": e.Instance,
+		"severity": string(e.Severity),
+		"state":    string(e.State),
+	}
+	if e.Suppressed {
+		labels["suppressed"] = "true"
+	}
+	if e.GroupKey != "" {
+		labels["group"] = e.GroupKey
+	}
 	if err := s.store.Write([]model.Metric{
 		{
-			Node: "system",
-			Name: alertMetric,
-			Labels: map[string]string{
-				"rule":     e.RuleID,
-				"name":     e.RuleName,
-				"host":     e.Node,
-				"instance": e.Instance,
-				"severity": string(e.Severity),
-				"state":    string(e.State),
-			},
+			Node:      "system",
+			Name:      alertMetric,
+			Labels:    labels,
 			Value:     e.Value,
 			Timestamp: e.StartsAt,
 		},
@@ -141,6 +148,12 @@ func buildEvent(labels map[string]string, ts int64, value float64) model.AlertEv
 		ev.EndsAt = ts
 	} else {
 		ev.StartsAt = ts
+	}
+	if labels["suppressed"] == "true" {
+		ev.Suppressed = true
+	}
+	if labels["group"] != "" {
+		ev.GroupKey = labels["group"]
 	}
 	return ev
 }

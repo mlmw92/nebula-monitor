@@ -352,10 +352,13 @@ type AlertEvent struct {
 	Operator  string     `json:"operator"`           // 运算符
 	Threshold float64    `json:"threshold"`          // 阈值
 	Severity  Severity   `json:"severity"`           // 严重级别
-	State     AlertState `json:"state"`              // 状态 firing/resolved
-	Message   string     `json:"message"`            // 描述
-	StartsAt  int64      `json:"startsAt"`           // 触发时间（毫秒）
-	EndsAt    int64      `json:"endsAt"`             // 恢复时间（毫秒）
+	State       AlertState `json:"state"`                  // 状态 firing/resolved
+	Message     string     `json:"message"`                // 描述
+	StartsAt    int64      `json:"startsAt"`               // 触发时间（毫秒）
+	EndsAt      int64      `json:"endsAt"`                 // 恢复时间（毫秒）
+	Suppressed  bool       `json:"suppressed,omitempty"`   // 是否被抑制（被更高优先级告警压制）
+	SuppressedBy string   `json:"suppressedBy,omitempty"`  // 抑制来源规则名/标识
+	GroupKey    string     `json:"groupKey,omitempty"`     // 分组键（相同键的告警合并为一组通知）
 }
 
 // NowMillis 返回当前毫秒时间戳。

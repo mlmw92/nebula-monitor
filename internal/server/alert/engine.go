@@ -34,7 +34,11 @@ type Engine struct {
 	evalInterval int
 	mu           sync.Mutex
 	states       map[string]*ruleState
-	dialActive   map[string]bool // 拨测任务是否有未恢复故障事件，按 "dialtest:<taskID>" 记录
+	dialActive   map[string]bool           // 拨测任务是否有未恢复故障事件，按 "dialtest:<taskID>" 记录
+	firing       map[string]*firingEntry   // 活跃 firing 事件（用于抑制匹配），按 rule|node|instance 记录
+	inhibit      *InhibitStore             // 抑制规则（可选）
+	grouping     *GroupingStore            // 分组配置（可选）
+	grouper      *Grouper                  // 分组器（分组启用时非空）
 }
 
 type ruleState struct {
@@ -42,13 +46,20 @@ type ruleState struct {
 	firing     bool
 }
 
-// NewEngine 创建引擎。
+// firingEntry 记录一个活跃 firing 事件及其是否已被抑制。
+type firingEntry struct {
+	event     model.AlertEvent
+	suppressed bool
+}
+
+// NewEngine 创建引擎。inhibit/grouping 为可选的高级能力（抑制/分组），为空则关闭。
 func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
-	alerts *VMAlertStore, notifiers []Notifier, broadcaster Broadcaster, maintenance *MaintenanceStore, evalInterval int) *Engine {
+	alerts *VMAlertStore, notifiers []Notifier, broadcaster Broadcaster, maintenance *MaintenanceStore,
+	evalInterval int, inhibit *InhibitStore, grouping *GroupingStore) *Engine {
 	if evalInterval <= 0 {
 		evalInterval = 15
 	}
-	return &Engine{
+	e := &Engine{
 		store:        store,
 		nodeMgr:      mgr,
 		rules:        rules,
@@ -59,7 +70,24 @@ func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
 		evalInterval: evalInterval,
 		states:       map[string]*ruleState{},
 		dialActive:   map[string]bool{},
+		firing:       map[string]*firingEntry{},
+		inhibit:      inhibit,
+		grouping:     grouping,
 	}
+	// 分组启用时构建分组器：相同 groupBy 的告警合并为一组，按 groupWait/groupInterval 汇总发送。
+	if grouping != nil && grouping.Get().Enabled {
+		cfg := grouping.Get()
+		wait, err1 := time.ParseDuration(cfg.GroupWait)
+		interval, err2 := time.ParseDuration(cfg.GroupInterval)
+		if err1 != nil || err2 != nil {
+			slog.Warn("分组配置时间解析失败，使用默认", "groupWait", cfg.GroupWait, "groupInterval", cfg.GroupInterval)
+			wait, interval = 30*time.Second, 5*time.Minute
+		}
+		g := NewGrouper(cfg.GroupBy, wait, interval, nil)
+		g.flush = func(events []model.AlertEvent) { e.flushGroup(events) }
+		e.grouper = g
+	}
+	return e
 }
 
 // Start 启动评估循环。
@@ -156,13 +184,24 @@ func (e *Engine) fire(r model.AlertRule, node, instance string, value float64, n
 		StartsAt:  now,
 	}
 	e.alerts.Add(ev)
-	e.notify(ev)
 	if e.broadcaster != nil {
 		e.broadcaster.BroadcastAlert(ev)
 	}
+	// 抑制：被更高优先级活跃告警压制时不发送通知（事件仍记录并在前端标记）。
+	suppressed, by := e.computeSuppressedLocked(ev)
+	ev.Suppressed = suppressed
+	ev.SuppressedBy = by
+	e.trackFiringLocked(ev, suppressed)
+	if !suppressed {
+		if e.grouper != nil {
+			e.grouper.Add(ev)
+		} else {
+			e.notify(ev)
+		}
+	}
 	slog.Info("告警触发", "rule", r.Name, "node", node, "metric", r.Metric,
 		"value", value, "operator", r.Operator, "threshold", r.Threshold,
-		"severity", r.Severity, "channels", r.Notify)
+		"severity", r.Severity, "suppressed", suppressed, "channels", r.Notify)
 }
 
 func (e *Engine) resolve(r model.AlertRule, node, instance string, value float64, now int64) {
@@ -183,10 +222,19 @@ func (e *Engine) resolve(r model.AlertRule, node, instance string, value float64
 		EndsAt:    now,
 	}
 	e.alerts.Add(ev)
-	e.notify(ev)
 	if e.broadcaster != nil {
 		e.broadcaster.BroadcastAlert(ev)
 	}
+	// 仅当原 firing 未被抑制时才发送恢复通知；随后重新评估被其抑制的其它告警。
+	wasSuppressed := e.untrackFiringLocked(ev)
+	if !wasSuppressed {
+		if e.grouper != nil {
+			e.grouper.Add(ev)
+		} else {
+			e.notify(ev)
+		}
+	}
+	e.recheckSuppressedLocked()
 	slog.Info("告警恢复", "rule", r.Name, "node", node, "metric", r.Metric, "value", value)
 }
 
@@ -200,18 +248,17 @@ func (e *Engine) EmitDialtestAlert(task dialtest.Task, result dialtest.Result, u
 	key := "dialtest:" + task.ID
 	now := model.NowMillis()
 
-	e.mu.Lock()
-	active, wasActive := e.dialActive[key]
-	var ev model.AlertEvent
-	switch {
-	case !up:
+	if !up {
+		// 故障触发
+		e.mu.Lock()
+		active, wasActive := e.dialActive[key]
 		// 已有未恢复事件则忽略重复故障，避免刷屏。
 		if wasActive && active {
 			e.mu.Unlock()
 			return
 		}
 		e.dialActive[key] = true
-		ev = model.AlertEvent{
+		ev := model.AlertEvent{
 			ID:        "dial-" + task.ID + "-" + strconv.FormatInt(now, 36),
 			RuleID:    "dialtest-" + task.ID,
 			RuleName:  "拨测 - " + task.Name,
@@ -225,40 +272,59 @@ func (e *Engine) EmitDialtestAlert(task dialtest.Task, result dialtest.Result, u
 			Message:   dialMessage(task, result),
 			StartsAt:  now,
 		}
-	default: // up == true
-		// 没有未恢复事件（如启动后首次检测即正常）则忽略恢复。
-		if !wasActive || !active {
-			e.mu.Unlock()
-			return
+		// 抑制：被更高优先级活跃告警压制时不发送通知。
+		suppressed, by := e.computeSuppressedLocked(ev)
+		ev.Suppressed = suppressed
+		ev.SuppressedBy = by
+		e.trackFiringLocked(ev, suppressed)
+		e.mu.Unlock()
+
+		e.alerts.Add(ev)
+		if e.broadcaster != nil {
+			e.broadcaster.BroadcastAlert(ev)
 		}
-		delete(e.dialActive, key)
-		ev = model.AlertEvent{
-			ID:        "dialr-" + task.ID + "-" + strconv.FormatInt(now, 36),
-			RuleID:    "dialtest-" + task.ID,
-			RuleName:  "拨测 - " + task.Name,
-			Node:      task.Target,
-			Metric:    "dial_test_up",
-			Value:     1,
-			Operator:  "==",
-			Threshold: 1,
-			Severity:  sev,
-			State:     model.AlertStateResolved,
-			Message:   fmt.Sprintf("拨测恢复：%s (%s %s) 已恢复正常", task.Name, task.Type, task.Target),
-			EndsAt:    now,
+		if !ev.Suppressed {
+			e.notifyDialtest(task, ev)
 		}
+		slog.Info("拨测告警触发", "task", task.Name, "target", task.Target, "severity", sev, "suppressed", ev.Suppressed, "event", ev.ID)
+		return
 	}
+
+	// 恢复
+	e.mu.Lock()
+	_, wasActive := e.dialActive[key]
+	// 没有未恢复事件（如启动后首次检测即正常）则忽略恢复。
+	if !wasActive {
+		e.mu.Unlock()
+		return
+	}
+	delete(e.dialActive, key)
+	ev := model.AlertEvent{
+		ID:        "dialr-" + task.ID + "-" + strconv.FormatInt(now, 36),
+		RuleID:    "dialtest-" + task.ID,
+		RuleName:  "拨测 - " + task.Name,
+		Node:      task.Target,
+		Metric:    "dial_test_up",
+		Value:     1,
+		Operator:  "==",
+		Threshold: 1,
+		Severity:  sev,
+		State:     model.AlertStateResolved,
+		Message:   fmt.Sprintf("拨测恢复：%s (%s %s) 已恢复正常", task.Name, task.Type, task.Target),
+		EndsAt:    now,
+	}
+	wasSuppressed := e.untrackFiringLocked(ev)
 	e.mu.Unlock()
 
 	e.alerts.Add(ev)
-	e.notifyDialtest(task, ev)
 	if e.broadcaster != nil {
 		e.broadcaster.BroadcastAlert(ev)
 	}
-	state := "恢复"
-	if !up {
-		state = "触发"
+	if !wasSuppressed {
+		e.notifyDialtest(task, ev)
 	}
-	slog.Info("拨测告警"+state, "task", task.Name, "target", task.Target, "severity", sev, "event", ev.ID)
+	e.recheckSuppressed()
+	slog.Info("拨测告警恢复", "task", task.Name, "target", task.Target, "severity", sev, "event", ev.ID)
 }
 
 // notifyDialtest 发送拨测告警通知：维护窗口活跃时跳过；task.Notify 为空表示全部已启用渠道。
@@ -365,6 +431,7 @@ func (e *Engine) TestEmail() error {
 }
 
 // notify 按规则配置的渠道发送通知。维护窗口活跃时跳过通知（事件仍记录）。
+// 规则未指定渠道（Notify 为空）时发给全部已启用渠道（与 model 文档语义一致）。
 func (e *Engine) notify(ev model.AlertEvent) {
 	// 维护窗口检查：活跃时跳过通知发送
 	if e.maintenance != nil && e.maintenance.IsActive(model.NowMillis()) {
@@ -372,9 +439,9 @@ func (e *Engine) notify(ev model.AlertEvent) {
 		return
 	}
 	chs := e.ruleNotifyChannels(ev.RuleID)
-	// 规则未指定渠道时不发送任何通知
 	if len(chs) == 0 {
-		return
+		// 规则未指定渠道：发给全部已启用渠道
+		chs = e.allChannels()
 	}
 	for _, n := range e.notifiers {
 		if !contains(chs, n.Channel()) {
@@ -384,6 +451,15 @@ func (e *Engine) notify(ev model.AlertEvent) {
 			slog.Warn("通知发送失败", "channel", n.Channel(), "err", err)
 		}
 	}
+}
+
+// allChannels 返回当前所有已启用渠道名。
+func (e *Engine) allChannels() []string {
+	chs := make([]string, 0, len(e.notifiers))
+	for _, n := range e.notifiers {
+		chs = append(chs, n.Channel())
+	}
+	return chs
 }
 
 // SetNotifiers 热加载通知器列表。在 e.mu 锁内替换，与 evaluate/notify 共用同一把锁，
@@ -477,4 +553,150 @@ func aggregatedDiskUsage(store storage.Storage, node string) (float64, bool) {
 
 func round2(v float64) float64 {
 	return math.Round(v*100) / 100
+}
+
+// firingKey 活跃告警的标识键（规则 + 节点 + 实例），用于抑制跟踪与去重。
+func firingKey(ev model.AlertEvent) string {
+	return ev.RuleID + "|" + ev.Node + "|" + ev.Instance
+}
+
+// alertLabels 提取用于抑制匹配的标签集合。
+func alertLabels(ev model.AlertEvent) map[string]string {
+	return map[string]string{
+		"name":     ev.RuleName,
+		"rule":     ev.RuleID,
+		"host":     ev.Node,
+		"node":     ev.Node,
+		"instance": ev.Instance,
+		"severity": string(ev.Severity),
+		"metric":   ev.Metric,
+	}
+}
+
+// equalLabels 校验两标签集在 keys 指定的键上取值相等；keys 为空则视为满足。
+func equalLabels(a map[string]string, keys []string, b map[string]string) bool {
+	for _, k := range keys {
+		if a[k] != b[k] {
+			return false
+		}
+	}
+	return true
+}
+
+// computeSuppressedLocked 在持有 e.mu 时判断 ev 是否被某条活跃 source 告警抑制。调用方须持有锁。
+func (e *Engine) computeSuppressedLocked(ev model.AlertEvent) (bool, string) {
+	if e.inhibit == nil {
+		return false, ""
+	}
+	rules := e.inhibit.List()
+	if len(rules) == 0 {
+		return false, ""
+	}
+	evLabels := alertLabels(ev)
+	selfKey := firingKey(ev)
+	for _, r := range rules {
+		if !r.Target.matches(evLabels) {
+			continue
+		}
+		for key, fe := range e.firing {
+			if key == selfKey {
+				continue
+			}
+			if fe.event.State != model.AlertStateFiring {
+				continue
+			}
+			srcLabels := alertLabels(fe.event)
+			if !r.Source.matches(srcLabels) {
+				continue
+			}
+			if !equalLabels(evLabels, r.Equal, srcLabels) {
+				continue
+			}
+			return true, fe.event.RuleName
+		}
+	}
+	return false, ""
+}
+
+func (e *Engine) trackFiringLocked(ev model.AlertEvent, suppressed bool) {
+	e.firing[firingKey(ev)] = &firingEntry{event: ev, suppressed: suppressed}
+}
+
+func (e *Engine) untrackFiringLocked(ev model.AlertEvent) bool {
+	key := firingKey(ev)
+	fe, ok := e.firing[key]
+	if !ok {
+		return false
+	}
+	delete(e.firing, key)
+	return fe.suppressed
+}
+
+// recheckSuppressed 在 source 告警离开后，重新评估此前被其抑制的告警；若不再被抑制则补发通知。
+// 本函数自行加锁，适用于已释放 e.mu 的调用方（如拨测恢复路径）。
+func (e *Engine) recheckSuppressed() {
+	e.mu.Lock()
+	e.recheckSuppressedLocked()
+	e.mu.Unlock()
+}
+
+// recheckSuppressedLocked 与 recheckSuppressed 同义，但要求调用方已持有 e.mu（evaluate 评估循环内调用）。
+func (e *Engine) recheckSuppressedLocked() {
+	var toSend []model.AlertEvent
+	for _, fe := range e.firing {
+		if fe.event.State != model.AlertStateFiring || !fe.suppressed {
+			continue
+		}
+		supp, _ := e.computeSuppressedLocked(fe.event)
+		if !supp {
+			fe.suppressed = false
+			toSend = append(toSend, fe.event)
+		}
+	}
+	for _, ev := range toSend {
+		if e.grouper != nil {
+			e.grouper.Add(ev)
+		} else {
+			e.notify(ev)
+		}
+	}
+}
+
+// flushGroup 分组器回调：将一组告警汇总发送给所有已启用渠道。维护窗口活跃时跳过。
+func (e *Engine) flushGroup(events []model.AlertEvent) {
+	if e.maintenance != nil && e.maintenance.IsActive(model.NowMillis()) {
+		slog.Info("维护窗口活跃，跳过分组告警通知", "count", len(events))
+		return
+	}
+	e.mu.Lock()
+	ns := append([]Notifier(nil), e.notifiers...)
+	e.mu.Unlock()
+	for _, n := range ns {
+		if err := n.NotifyGroup(events); err != nil {
+			slog.Warn("分组告警通知失败", "channel", n.Channel(), "err", err)
+		}
+	}
+}
+
+// SetGrouping 热更新分组配置并重建分组器（无需重启 Server）。
+func (e *Engine) SetGrouping(cfg GroupingConfig) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.grouper != nil {
+		e.grouper.Stop()
+		e.grouper = nil
+	}
+	e.grouping = &GroupingStore{cfg: cfg}
+	if cfg.Enabled {
+		wait, err1 := time.ParseDuration(cfg.GroupWait)
+		interval, err2 := time.ParseDuration(cfg.GroupInterval)
+		if err1 != nil || err2 != nil {
+			slog.Warn("分组配置时间解析失败，使用默认", "groupWait", cfg.GroupWait, "groupInterval", cfg.GroupInterval)
+			wait, interval = 30*time.Second, 5*time.Minute
+		}
+		g := NewGrouper(cfg.GroupBy, wait, interval, nil)
+		g.flush = func(events []model.AlertEvent) { e.flushGroup(events) }
+		e.grouper = g
+	}
+	slog.Info("分组配置已更新", "enabled", cfg.Enabled, "groupBy", cfg.GroupBy)
 }
