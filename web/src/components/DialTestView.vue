@@ -18,8 +18,10 @@
         <el-table-column prop="target" label="目标" min-width="200" show-overflow-tooltip />
         <el-table-column prop="interval" label="间隔(s)" width="90" />
         <el-table-column prop="timeout" label="超时(s)" width="90" />
-        <el-table-column label="启用" width="80">
-          <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '是' : '否' }}</el-tag></template>
+        <el-table-column label="启用" width="80" align="center">
+          <template #default="{ row }">
+            <el-switch :model-value="row.enabled" @change="(v) => toggleEnabled(row, v)" />
+          </template>
         </el-table-column>
         <el-table-column label="告警级别" width="100">
           <template #default="{ row }">
@@ -28,7 +30,7 @@
         </el-table-column>
         <el-table-column label="通知" width="120">
           <template #default="{ row }">
-            <span v-if="!row.notify || row.notify.length === 0" class="muted">全部渠道</span>
+            <span v-if="!row.notify || row.notify.length === 0" class="muted">仅平台</span>
             <el-tag v-for="c in (row.notify || [])" :key="c" size="small" class="ch-tag">{{ chLabel(c) }}</el-tag>
           </template>
         </el-table-column>
@@ -56,7 +58,7 @@
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="latency" label="延迟(ms)" width="100" sortable />
+        <el-table-column prop="latency" label="延迟(ms)" width="120" sortable />
         <el-table-column label="证书到期(天)" width="120">
           <template #default="{ row }">
             <span v-if="row.certExpiry" :class="certClass(row.certExpiry)">{{ row.certExpiry.toFixed(0) }} 天</span>
@@ -90,7 +92,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="通知渠道">
-          <el-select v-model="form.notify" multiple collapse-tags placeholder="留空=全部已启用渠道">
+          <el-select v-model="form.notify" multiple collapse-tags placeholder="留空=仅平台展示，不推送">
             <el-option label="邮件" value="email" />
             <el-option label="Webhook" value="webhook" />
             <el-option label="钉钉" value="dingtalk" />
@@ -158,6 +160,18 @@ async function deleteTask(row) {
   } catch (e) { console.error(e) }
 }
 
+// 列表内直接开关启用状态：乐观更新，失败回滚
+async function toggleEnabled(row, val) {
+  const prev = row.enabled
+  row.enabled = val
+  try {
+    await http.put(`/api/v1/dialtest/tasks/${row.id}`, { ...row })
+  } catch (e) {
+    row.enabled = prev
+    console.error(e)
+  }
+}
+
 function certClass(days) { if (days <= 7) return 'metric-bad'; if (days <= 30) return 'metric-warn'; return 'metric-good' }
 
 function sevLabel(s) { return s === 'critical' ? '紧急' : s === 'info' ? '信息' : '警告' }
@@ -177,8 +191,10 @@ onMounted(load)
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-.dot.up { background: var(--accent); }
+.dot.up { background: var(--success); }
 .dot.down { background: var(--danger); }
+/* 表头不换行，避免“延迟(ms)”等列头被挤压换行 */
+.dialtest-view :deep(th .cell) { white-space: nowrap; }
 .dial-err { color: var(--danger); font-size: 12px; word-break: break-all; }
 .muted { color: var(--text-dim); }
 .metric-good { color: var(--accent); }

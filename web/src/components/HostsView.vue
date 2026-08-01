@@ -73,7 +73,7 @@
         class="host-table"
         :row-class-name="rowClass"
       >
-        <el-table-column v-if="colVisible('host')" label="主机名称 / IP" prop="hostname" sortable="custom" min-width="200">
+        <el-table-column v-if="colVisible('host')" label="主机名称 / IP" prop="hostname" sortable="custom" min-width="160">
           <template #default="{ row }">
             <div class="host-name">
               <div class="hn-top">
@@ -125,7 +125,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column v-if="colVisible('version')" label="Agent 版本" prop="version" sortable="custom" min-width="90">
+        <el-table-column v-if="colVisible('version')" label="Agent 版本" prop="version" sortable="custom" min-width="110">
           <template #default="{ row }">
             <span class="ver-cell" :class="verClass(row.version)">
               <span v-if="needUpgrade(row)" class="ver-dot"></span>{{ row.version || '-' }}
@@ -169,9 +169,13 @@
           </template>
         </el-table-column>
 
-        <el-table-column v-if="colVisible('netIn')" label="流量↓" prop="netIn" sortable="custom" min-width="90">
+        <el-table-column v-if="colVisible('netIn')" label="流量↓/↑" prop="netIn" sortable="custom" min-width="120" align="right">
           <template #default="{ row }">
-            <span class="rate mono">{{ fmtRate(m(row).netIn) }}/s</span>
+            <div class="net-traffic" v-if="hasMetric(row)">
+              <div>↓ {{ fmtRate(m(row).netIn) }}/s</div>
+              <div class="net-up">↑ {{ fmtRate(m(row).netOut) }}/s</div>
+            </div>
+            <span v-else class="dim">--</span>
           </template>
         </el-table-column>
 
@@ -311,7 +315,7 @@ const colOptions = [
   { key: 'cpu', label: 'CPU' },
   { key: 'mem', label: '内存' },
   { key: 'disk', label: '磁盘使用' },
-  { key: 'netIn', label: '流量↓' },
+  { key: 'netIn', label: '流量↓/↑' },
   { key: 'load1', label: '负载' },
   { key: 'diskRW', label: '磁盘读写' },
 ]
@@ -863,6 +867,18 @@ defineExpose({ reload: load })
 /* 行状态高亮 */
 .host-table :deep(.el-table__row) {
   cursor: pointer;
+}
+/* 表头不换行，避免“Agent 版本”等列头被挤压换行 */
+.host-table :deep(th .cell) {
+  white-space: nowrap;
+}
+.net-traffic {
+  line-height: 1.5;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.net-traffic .net-up {
+  color: var(--text-muted);
 }
 .host-table :deep(.row-offline) {
   background: var(--danger-dim) !important;

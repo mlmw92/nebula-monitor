@@ -327,17 +327,22 @@ func (e *Engine) EmitDialtestAlert(task dialtest.Task, result dialtest.Result, u
 	slog.Info("拨测告警恢复", "task", task.Name, "target", task.Target, "severity", sev, "event", ev.ID)
 }
 
-// notifyDialtest 发送拨测告警通知：维护窗口活跃时跳过；task.Notify 为空表示全部已启用渠道。
+// notifyDialtest 发送拨测告警通知：维护窗口活跃时跳过；task.Notify 为空表示仅平台展示，不推送任何外部渠道。
 func (e *Engine) notifyDialtest(task dialtest.Task, ev model.AlertEvent) {
 	if e.maintenance != nil && e.maintenance.IsActive(model.NowMillis()) {
 		slog.Info("维护窗口活跃，跳过拨测告警通知", "task", task.Name, "event", ev.ID)
+		return
+	}
+	// 未选择任何通知渠道：事件仅记录在平台，不推送。
+	if len(task.Notify) == 0 {
+		slog.Info("拨测未配置通知渠道，仅平台展示", "task", task.Name, "event", ev.ID)
 		return
 	}
 	e.mu.Lock()
 	ns := append([]Notifier(nil), e.notifiers...)
 	e.mu.Unlock()
 	for _, n := range ns {
-		if len(task.Notify) > 0 && !contains(task.Notify, n.Channel()) {
+		if !contains(task.Notify, n.Channel()) {
 			continue
 		}
 		if err := n.Notify(ev); err != nil {

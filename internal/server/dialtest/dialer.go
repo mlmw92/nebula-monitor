@@ -30,7 +30,7 @@ type Task struct {
 	Timeout  int      `json:"timeout" yaml:"timeout"`   // 超时（秒）
 	Enabled  bool     `json:"enabled" yaml:"enabled"`
 	Severity string   `json:"severity" yaml:"severity"` // 告警严重级别: critical/warning/info，默认 warning
-	Notify   []string `json:"notify" yaml:"notify"`     // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示全部已启用渠道
+	Notify   []string `json:"notify" yaml:"notify"`     // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示仅平台展示、不推送外部渠道
 }
 
 // Result 拨测结果。
