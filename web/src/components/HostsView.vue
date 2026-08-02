@@ -737,7 +737,6 @@ function restartTimers() {
 
 function openAddNode() {
   showAddModal.value = true
-  checkResult.value = null
   http
     .get('/api/v1/install-info')
     .then((info) => {
