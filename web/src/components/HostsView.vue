@@ -238,10 +238,6 @@
               <div class="cmd-header"><span class="cmd-label">bash</span><el-button size="small" @click="copy(installInfo.command)">复制</el-button></div>
               <pre class="cmd-text">{{ installInfo.command }}</pre>
             </div>
-            <div class="actions">
-              <el-button :loading="checking" @click="checkConn">连通性自检</el-button>
-              <el-alert v-if="checkResult" :title="checkResult.msg" :type="checkResult.type" show-icon :closable="false" class="check-alert" />
-            </div>
           </div>
         </div>
 
@@ -392,10 +388,6 @@ const edgeForm = reactive({
   bufferSize: 1000,
   poolSize: 2,
 })
-
-// 连通性自检
-const checking = ref(false)
-const checkResult = ref(null)
 
 // 服务端密钥（安装 Server 时确定）：直连命令已由后端拼接；网闸命令/YAML 复用此值
 const serverSecret = computed(() => (installInfo.value.secret || '').replace(/^ --secret /, '').trim())
@@ -747,20 +739,6 @@ function copy(text) {
     document.body.removeChild(ta)
     ElMessage.success('已复制到剪贴板')
   })
-}
-
-async function checkConn() {
-  checking.value = true
-  checkResult.value = null
-  const srv = installInfo.value.serverURL || ''
-  try {
-    await http.get('/api/v1/ping', { params: { server: srv } })
-    checkResult.value = { type: 'success', msg: 'Server 可达：' + srv }
-  } catch (e) {
-    checkResult.value = { type: 'error', msg: 'Server 不可达：' + (e.message || srv) }
-  } finally {
-    checking.value = false
-  }
 }
 
 async function remove(row) {
@@ -1167,15 +1145,6 @@ defineExpose({ reload: load })
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-}
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.check-alert {
-  flex: 1;
-  margin: 0;
 }
 .block-desc {
   font-size: 12px;
