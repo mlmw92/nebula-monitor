@@ -217,22 +217,113 @@
       </div>
     </div>
 
-    <!-- 添加主机弹窗 -->
-    <el-dialog v-model="showAddModal" title="添加主机" width="680px">
-      <p style="color: var(--text-dim); margin-bottom: 14px; font-size: 13px">
-        在目标机器上执行以下命令，Agent 会自动注册并上报：
-      </p>
-      <el-input
-        v-model="installCommand"
-        type="textarea"
-        :rows="4"
-        readonly
-        resize="none"
-        class="cmd-box"
-      />
+    <!-- 添加主机 / 部署 Agent 弹窗 -->
+    <el-dialog v-model="showAddModal" title="添加主机 / 部署 Agent" width="820px">
+      <el-alert type="info" :closable="false" show-icon class="add-tip">
+        按部署场景选择安装方式：常规直连直接执行安装命令；跨网闸隔离场景使用 Edge/Hub 代理隧道。
+      </el-alert>
+
+      <el-radio-group v-model="deployScene" size="small" class="scene-tabs">
+        <el-radio-button value="direct">直连场景（采集 Agent → Server）</el-radio-button>
+        <el-radio-button value="proxy">网闸代理（Edge / Hub 隧道）</el-radio-button>
+      </el-radio-group>
+
+      <!-- 直连场景 -->
+      <div v-if="deployScene === 'direct'" class="scene-pane">
+        <div class="form-grid">
+          <div class="form-item">
+            <label>节点名</label>
+            <el-input v-model="form.node" placeholder="留空则用 hostname" />
+          </div>
+          <div class="form-item">
+            <label>分组</label>
+            <el-input v-model="form.group" placeholder="default" />
+          </div>
+          <div class="form-item">
+            <label>接入密钥</label>
+            <el-input v-model="form.secret" type="password" show-password placeholder="Server 启用 agentAuth 时必填" />
+          </div>
+          <div class="form-item">
+            <label>采集间隔(秒)</label>
+            <el-input-number v-model="form.interval" :min="5" :max="300" controls-position="right" />
+          </div>
+        </div>
+        <div class="cmd-box">
+          <div class="cmd-header">
+            <span class="cmd-label">bash</span>
+            <el-button size="small" @click="copy(directCommand)">复制</el-button>
+          </div>
+          <pre class="cmd-text">{{ directCommand }}</pre>
+        </div>
+        <div class="actions">
+          <el-button :loading="checking" @click="checkConn">连通性自检</el-button>
+          <el-alert v-if="checkResult" :title="checkResult.msg" :type="checkResult.type" show-icon :closable="false" class="check-alert" />
+        </div>
+      </div>
+
+      <!-- 网闸代理场景 -->
+      <div v-else class="scene-pane">
+        <p class="block-desc">
+          适用于两个网区经网闸隔离、仅有 1 个开放端口的场景。区 B 部署 Hub、区 A 部署 Edge 构成隧道，
+          采集 Agent 的 serverURL 指向 Edge 本地口。网闸仅需开放 TCP 8443（Edge → Hub）。
+        </p>
+        <div class="proxy-grid">
+          <div class="proxy-col">
+            <div class="proxy-col-head hub"><span class="dot"></span><span>Hub Proxy（区 B · 监控中心侧）</span></div>
+            <div class="form-item"><label>TLS 监听地址</label><el-input v-model="hubForm.listen" placeholder=":8443" /></div>
+            <div class="form-item"><label>真实 Server 地址</label><el-input v-model="hubForm.server" placeholder="http://127.0.0.1:8080" /></div>
+            <div class="form-item"><label>TLS 证书路径</label><el-input v-model="hubForm.tlsCert" placeholder="/etc/monitor-agent/certs/hub.crt" /></div>
+            <div class="form-item"><label>TLS 私钥路径</label><el-input v-model="hubForm.tlsKey" placeholder="/etc/monitor-agent/certs/hub.key" /></div>
+            <div class="form-item"><label>CA 证书路径</label><el-input v-model="hubForm.tlsCa" placeholder="/etc/monitor-agent/certs/ca.crt" /></div>
+          </div>
+          <div class="proxy-col">
+            <div class="proxy-col-head edge"><span class="dot"></span><span>Edge Proxy（区 A · 被监控侧）</span></div>
+            <div class="form-item"><label>本地监听地址</label><el-input v-model="edgeForm.listen" placeholder=":18080" /></div>
+            <div class="form-item"><label>Hub 地址 host:port</label><el-input v-model="edgeForm.hubAddr" placeholder="10.0.0.2:8443" /></div>
+            <div class="form-item"><label>TLS 证书路径</label><el-input v-model="edgeForm.tlsCert" placeholder="/etc/monitor-agent/certs/edge.crt" /></div>
+            <div class="form-item"><label>TLS 私钥路径</label><el-input v-model="edgeForm.tlsKey" placeholder="/etc/monitor-agent/certs/edge.key" /></div>
+            <div class="form-item"><label>CA 证书路径</label><el-input v-model="edgeForm.tlsCa" placeholder="/etc/monitor-agent/certs/ca.crt" /></div>
+            <div class="form-item"><label>断连缓冲条数</label><el-input-number v-model="edgeForm.bufferSize" :min="100" :max="100000" :step="100" controls-position="right" /></div>
+            <div class="form-item"><label>并发隧道连接数</label><el-input-number v-model="edgeForm.poolSize" :min="1" :max="10" controls-position="right" /></div>
+          </div>
+        </div>
+
+        <div class="gen-section">
+          <h4 class="gen-title">Hub 安装命令（区 B 执行）</h4>
+          <div class="cmd-box">
+            <div class="cmd-header"><span class="cmd-label">bash</span><el-button size="small" @click="copy(hubCommand)">复制</el-button></div>
+            <pre class="cmd-text">{{ hubCommand }}</pre>
+          </div>
+          <h4 class="gen-title">Hub agent.yaml 模板</h4>
+          <div class="cmd-box">
+            <div class="cmd-header"><span class="cmd-label">yaml</span><el-button size="small" @click="copy(hubYaml)">复制</el-button></div>
+            <pre class="cmd-text">{{ hubYaml }}</pre>
+          </div>
+          <h4 class="gen-title">Edge 安装命令（区 A 执行）</h4>
+          <div class="cmd-box">
+            <div class="cmd-header"><span class="cmd-label">bash</span><el-button size="small" @click="copy(edgeCommand)">复制</el-button></div>
+            <pre class="cmd-text">{{ edgeCommand }}</pre>
+          </div>
+          <h4 class="gen-title">Edge agent.yaml 模板</h4>
+          <div class="cmd-box">
+            <div class="cmd-header"><span class="cmd-label">yaml</span><el-button size="small" @click="copy(edgeYaml)">复制</el-button></div>
+            <pre class="cmd-text">{{ edgeYaml }}</pre>
+          </div>
+        </div>
+
+        <div class="deploy-steps">
+          <h4 class="gen-title">部署步骤</h4>
+          <ol class="steps-list">
+            <li><b>区 B 部署 Hub</b>：在监控中心侧主机执行 Hub 安装命令，监听 8443 接收隧道连接并转发至真实 Server。</li>
+            <li><b>网闸开放端口</b>：开放 TCP 8443，源 IP = 区 A 的 Edge 主机 IP，目的 IP = 区 B 的 Hub 主机 IP。</li>
+            <li><b>区 A 部署 Edge</b>：在被监控区主机执行 Edge 安装命令，监听本地 18080 并通过隧道连到 Hub。</li>
+            <li><b>部署采集 Agent</b>：区 A 的采集 Agent 安装时 <code>--server</code> 指向 Edge 本地口（如 <code>http://&lt;EDGE_IP&gt;:18080</code>）。</li>
+          </ol>
+        </div>
+      </div>
+
       <template #footer>
         <el-button @click="showAddModal = false">关闭</el-button>
-        <el-button type="primary" :icon="CopyDocument" @click="copyCmd">一键复制</el-button>
       </template>
     </el-dialog>
 
@@ -266,9 +357,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, CopyDocument, Setting, ArrowDown, Refresh, Edit, Operation } from '@element-plus/icons-vue'
+import { Plus, Search, Setting, ArrowDown, Refresh, Edit, Operation } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
 import OsIcon from './OsIcon.vue'
@@ -293,10 +384,113 @@ const loadError = ref('')
 
 const showAddModal = ref(false)
 const showGroupManage = ref(false)
-const installCommand = ref('')
 const showNameModal = ref(false)
 const nameInput = ref('')
 const nameTarget = ref('')
+
+// ===== 添加主机：部署场景与安装信息 =====
+const installInfo = ref({ serverURL: '', authEnabled: false, secret: '' })
+const deployScene = ref('direct') // direct | proxy
+
+// 直连场景表单
+const form = reactive({
+  node: '',
+  group: 'default',
+  secret: '',
+  interval: 15,
+})
+
+// 网闸代理：Hub / Edge 表单
+const hubForm = reactive({
+  listen: ':8443',
+  server: 'http://127.0.0.1:8080',
+  tlsCert: '/etc/monitor-agent/certs/hub.crt',
+  tlsKey: '/etc/monitor-agent/certs/hub.key',
+  tlsCa: '/etc/monitor-agent/certs/ca.crt',
+})
+const edgeForm = reactive({
+  listen: ':18080',
+  hubAddr: '10.0.0.2:8443',
+  tlsCert: '/etc/monitor-agent/certs/edge.crt',
+  tlsKey: '/etc/monitor-agent/certs/edge.key',
+  tlsCa: '/etc/monitor-agent/certs/ca.crt',
+  bufferSize: 1000,
+  poolSize: 2,
+})
+
+// 连通性自检
+const checking = ref(false)
+const checkResult = ref(null)
+
+// 直连安装命令
+const directCommand = computed(() => {
+  const srv = installInfo.value.serverURL || 'http://<SERVER>:8080'
+  let cmd = `curl -fsSL ${srv}/install/agent-install.sh | bash -s -- --server ${srv}`
+  if (form.node) cmd += ` --node ${form.node}`
+  if (form.group) cmd += ` --group ${form.group}`
+  if (form.interval && form.interval !== 15) cmd += ` --interval ${form.interval}`
+  if (installInfo.value.authEnabled && form.secret) cmd += ` --secret ${form.secret}`
+  return cmd
+})
+
+// Hub 安装命令
+const hubCommand = computed(() => {
+  const srv = installInfo.value.serverURL || 'http://<SERVER>:8080'
+  let cmd = `curl -fsSL ${srv}/install/agent-install.sh | bash -s -- --mode hub --listen ${hubForm.listen} --server ${hubForm.server}`
+  cmd += ` --tls-cert ${hubForm.tlsCert} --tls-key ${hubForm.tlsKey} --tls-ca ${hubForm.tlsCa}`
+  cmd += ' --yes'
+  if (installInfo.value.authEnabled && form.secret) cmd += ` --secret ${form.secret}`
+  return cmd
+})
+
+// Hub agent.yaml 模板
+const hubYaml = computed(() => {
+  return `mode: "hub"
+node: "hub-proxy"
+group: "proxy"
+secret: "${form.secret}"
+interval: 15
+serverURL: "${hubForm.server}"
+
+proxy:
+  listen: "${hubForm.listen}"
+  tlsCert: "${hubForm.tlsCert}"
+  tlsKey: "${hubForm.tlsKey}"
+  tlsCa: "${hubForm.tlsCa}"
+  serverURL: "${hubForm.server}"
+`
+})
+
+// Edge 安装命令
+const edgeCommand = computed(() => {
+  const srv = installInfo.value.serverURL || 'http://<SERVER>:8080'
+  let cmd = `curl -fsSL ${srv}/install/agent-install.sh | bash -s -- --mode edge --listen ${edgeForm.listen} --hub-addr ${edgeForm.hubAddr}`
+  cmd += ` --tls-cert ${edgeForm.tlsCert} --tls-key ${edgeForm.tlsKey} --tls-ca ${edgeForm.tlsCa}`
+  cmd += ` --buffer-size ${edgeForm.bufferSize} --pool-size ${edgeForm.poolSize}`
+  cmd += ' --yes'
+  if (installInfo.value.authEnabled && form.secret) cmd += ` --secret ${form.secret}`
+  return cmd
+})
+
+// Edge agent.yaml 模板
+const edgeYaml = computed(() => {
+  return `mode: "edge"
+node: "edge-proxy"
+group: "proxy"
+secret: "${form.secret}"
+interval: 15
+serverURL: "https://${edgeForm.hubAddr}"
+
+proxy:
+  listen: "${edgeForm.listen}"
+  hubAddr: "${edgeForm.hubAddr}"
+  tlsCert: "${edgeForm.tlsCert}"
+  tlsKey: "${edgeForm.tlsKey}"
+  tlsCa: "${edgeForm.tlsCa}"
+  bufferSize: ${edgeForm.bufferSize}
+  poolSize: ${edgeForm.poolSize}
+`
+})
 
 let loadTimer = null
 let countdownTimer = null
@@ -532,10 +726,17 @@ function restartTimers() {
 
 function openAddNode() {
   showAddModal.value = true
+  checkResult.value = null
   http
     .get('/api/v1/install-info')
-    .then((info) => (installCommand.value = info.command || '获取安装命令失败'))
-    .catch(() => (installCommand.value = '获取安装命令失败，请检查 Server 是否正常'))
+    .then((info) => {
+      installInfo.value = info
+      if (info.serverURL) hubForm.server = info.serverURL
+    })
+    .catch(() => {
+      installInfo.value = { serverURL: '', authEnabled: false, secret: '' }
+      ElMessage.error('获取安装信息失败，请检查 Server 是否正常')
+    })
 }
 
 async function changeGroup(row, group) {
@@ -567,19 +768,31 @@ async function saveName() {
   }
 }
 
-async function copyCmd() {
-  if (!installCommand.value) return
-  try {
-    await navigator.clipboard.writeText(installCommand.value)
+function copy(text) {
+  navigator.clipboard.writeText(text).then(() => {
     ElMessage.success('已复制到剪贴板')
-  } catch (e) {
+  }).catch(() => {
     const ta = document.createElement('textarea')
-    ta.value = installCommand.value
+    ta.value = text
     document.body.appendChild(ta)
     ta.select()
     document.execCommand('copy')
     document.body.removeChild(ta)
     ElMessage.success('已复制到剪贴板')
+  })
+}
+
+async function checkConn() {
+  checking.value = true
+  checkResult.value = null
+  const srv = installInfo.value.serverURL || ''
+  try {
+    await http.get('/api/v1/ping', { params: { server: srv } })
+    checkResult.value = { type: 'success', msg: 'Server 可达：' + srv }
+  } catch (e) {
+    checkResult.value = { type: 'error', msg: 'Server 不可达：' + (e.message || srv) }
+  } finally {
+    checking.value = false
   }
 }
 
@@ -922,5 +1135,151 @@ defineExpose({ reload: load })
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 添加主机：场景化弹窗 */
+.add-tip {
+  margin-bottom: 14px;
+}
+.scene-tabs {
+  margin-bottom: 14px;
+  display: flex;
+  gap: 8px;
+}
+.scene-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+}
+.form-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.form-item label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.check-alert {
+  flex: 1;
+  margin: 0;
+}
+.block-desc {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 0;
+}
+.proxy-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.proxy-col {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.proxy-col-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+.proxy-col-head .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.proxy-col-head.hub .dot {
+  background: #22c55e;
+}
+.proxy-col-head.edge .dot {
+  background: #38bdf8;
+}
+.gen-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gen-title {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.deploy-steps {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+.steps-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.steps-list code {
+  font-family: var(--mono);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--accent);
+}
+.cmd-box {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.35);
+}
+.cmd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+.cmd-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.cmd-text {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--accent);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 240px;
+  overflow: auto;
 }
 </style>

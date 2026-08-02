@@ -26,7 +26,6 @@ const routes = [
       { path: 'report', name: 'report', component: () => import('../components/ReportView.vue') },
       { path: 'system/upgrade', name: 'system-upgrade', component: () => import('../components/UpgradeView.vue') },
       { path: 'notify', name: 'notify', component: () => import('../components/NotifyView.vue') },
-      { path: 'setup', name: 'setup', component: () => import('../components/SetupView.vue') },
     ],
   },
 ]
