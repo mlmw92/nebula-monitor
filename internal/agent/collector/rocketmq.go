@@ -68,7 +68,12 @@ func (c *RocketMQCollector) collectHTTP(cfg model.RocketMQInstanceConfig, now in
 	// 1. 集群信息
 	clusterInfo, err := c.getRocketMQJSON(client, baseURL+"/rocketmq/httpapi/cluster/list.query")
 	if err != nil {
-		slog.Warn("RocketMQ 集群信息获取失败", "addr", cfg.Addr, "err", err)
+		hint := "请确认 NameServer 已开启 HTTP API（RocketMQ 5.x 需启动参数 -Drocketmq.httpapi.enabled=true 或环境变量 ROCKETMQ_HTTPAPI_ENABLED=true；RocketMQ 4.x 无此 HTTP API，请改用 exporterURL 走 rocketmq-exporter 模式）"
+		if strings.Contains(err.Error(), "EOF") {
+			slog.Warn("RocketMQ 集群信息获取失败(连接被关闭, HTTP API 可能未开启)", "addr", cfg.Addr, "err", err, "hint", hint)
+		} else {
+			slog.Warn("RocketMQ 集群信息获取失败", "addr", cfg.Addr, "err", err, "hint", hint)
+		}
 		up = 0
 	}
 	out = append(out, mk("rocketmq_instance_up", up))

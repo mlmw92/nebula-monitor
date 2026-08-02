@@ -75,7 +75,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 | Nginx | HTTP GET `stub_status` 页面解析 + VTS exporter 双模式；10 项指标（活跃连接/接受/处理/请求数/读写等待） |
 | Kafka | `sarama` AdminClient 直连（Broker/Topic/ConsumerGroup）+ JMX exporter 双模式；22 项指标（Broker 吞吐/ISR 收缩/Topic 分区/Consumer Lag/请求队列等） |
 | Docker | Docker Engine API（`/var/run/docker.sock` Unix Socket）自动发现容器 + stats 资源采集；16 项指标（容器 CPU/内存/网络/磁盘 IO/运行状态/重启次数/镜像数） |
-| RocketMQ | HTTP API 直连 NameServer/Broker 统计端点 + exporter 双模式；18 项指标（Broker TPS/消息积压量/消费延迟/生产者消费者 TPS/今日生产消费总数等） |
+| RocketMQ | 推荐 **exporter 模式**（RocketMQ Prometheus Exporter 拉取 `/metrics`，4.x/5.x 通用）；内置 HTTP API 直连模式仅在你环境将 `/rocketmq/httpapi/` 以标准 HTTP 暴露时可用（标准 5.x 的 NameServer/Proxy 为二进制协议，直连会 EOF）；18 项指标（Broker TPS/消息积压量/消费延迟/生产者消费者 TPS/今日生产消费总数等） |
 | Kubernetes | 标准库 net/http 直连 apiserver REST（kubeconfig/token 认证，不引入 client-go）+ kube-state-metrics/metrics-server exporter 双模式；基于标准 K8s API，兼容标准 K8s 与 k3s；采集单元为整个集群；集群健康/Node 状态与资源/Deployment・StatefulSet・DaemonSet 副本就绪/Pod 总数与异常统计；凭据仅存 Agent 本地不上报 |
 
 **服务拨测**
@@ -562,7 +562,16 @@ dockerInstances:
 
 ---
 
-**RocketMQ 配置示例**
+**RocketMQ 采集模式说明**
+
+Agent 支持两种采集模式，但**强烈建议使用 exporter 模式（路线 A）**：
+
+- **exporter 模式（推荐，必选用于 RocketMQ 5.x）**：Agent 通过 `exporterURL` 拉取一个 RocketMQ Prometheus Exporter 暴露的 `/metrics`，兼容 RocketMQ 4.x / 5.x，无需 NameServer 开启任何 HTTP 接口。
+- **HTTP API 直连模式（不推荐，5.x 不可用）**：Agent 直接向 `addr`（NameServer）发起 HTTP GET 到 `/rocketmq/httpapi/...` 端点。但标准 RocketMQ 的 NameServer（9876）与 Proxy（默认 8080）均只跑二进制 `Remoting` 协议、**不提供标准 HTTP 管理 API**，直连会得到 `EOF` 报错且拿不到数据。该模式仅在你的环境通过反向代理/定制把 `/rocketmq/httpapi/` 以真正 HTTP 形式暴露时才可用。
+
+> 一句话：**RocketMQ 5.x 请务必配置 `exporterURL` 走 exporter 模式**；只填 `addr` 不填 `exporterURL` 在 5.x 上必然失败（日志报 `RocketMQ 集群信息获取失败 ... EOF`）。
+
+**RocketMQ 配置示例（exporter 模式，推荐）**
 
 ```yaml
 collectors:
@@ -570,17 +579,37 @@ collectors:
 
 rocketmqInstances:
   - name: "rocketmq-cluster"
-    addr: "127.0.0.1:9876"        # NameServer 地址
-    # exporterURL: "http://127.0.0.1:5557/metrics"  # 可选 exporter
+    addr: "127.0.0.1:9876"                       # NameServer 地址（仍必填，用于标识）
+    exporterURL: "http://127.0.0.1:5557/metrics" # 指向 RocketMQ exporter 的 /metrics
 ```
+
+**用户侧操作步骤（路线 A）**
+
+1. 部署一个 RocketMQ Prometheus Exporter（与 Agent 同机或网络可达），把 NameServer 地址指过去：
+   ```bash
+   docker run -d --name rocketmq-exporter -p 5557:5557 \
+     -e ROCKETMQ_NAMESRV_ADDR=127.0.0.1:9876 \
+     masteryourtech/rocketmq-exporter   # 或 apache/rocketmq-exporter
+   ```
+   > 若使用独立部署的 NameServer 集群，把 `ROCKETMQ_NAMESRV_ADDR` 改为 `ns1:9876;ns2:9876`。
+2. 在 Agent 的 `agent.yaml` 中按上面的示例填好 `exporterURL`（同时保留 `addr`）。
+3. 重启 Agent（必须）：
+   ```bash
+   systemctl restart monitor-agent   # 或离线包：/etc/monitor-agent/monitor-agent restart
+   ```
+4. 查看采集日志确认无报错、且不再出现 `EOF`：
+   ```bash
+   journalctl -u monitor-agent -f | grep -i rocketmq
+   ```
+5. Web 端「中间件监控 → RocketMQ」Tab 查看概览卡片、实例列表与详情抽屉趋势图。
 
 **RocketMQ 字段说明**
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | `name` | 是 | 实例别名（集群名） |
-| `addr` | 是 | NameServer 地址 `host:port` |
-| `exporterURL` | exporter 选填 | 填写后走 rocketmq-exporter 拉取模式 |
+| `addr` | 是 | NameServer 地址 `host:port`（用于实例标识；5.x 下不用于 HTTP 直连） |
+| `exporterURL` | **5.x 必填** | 指向 RocketMQ exporter 的 `/metrics` 地址，填写后走 exporter 拉取模式 |
 
 ---
 
