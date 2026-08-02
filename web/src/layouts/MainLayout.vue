@@ -17,7 +17,6 @@
           <div class="screen-entry" @click="$router.push('/screen')">
             <span class="screen-icon"><el-icon :size="16"><DataAnalysis /></el-icon></span>
             <span class="screen-text">数据大屏</span>
-            <span class="screen-badge">LIVE</span>
           </div>
           <el-tooltip content="切换配色主题" placement="bottom">
             <el-dropdown trigger="click" @command="changeTheme">
