@@ -67,6 +67,7 @@
     <!-- 主机列表 -->
     <div class="glass panel">
       <el-table
+        ref="hostTable"
         :data="pagedNodes"
         stripe
         style="width: 100%"
@@ -837,6 +838,7 @@ async function remove(row) {
 }
 
 const selectedRows = ref([])
+const hostTable = ref(null)
 function handleSelectionChange(val) {
   selectedRows.value = val
 }
@@ -865,6 +867,9 @@ async function batchUpgrade() {
     let msg = '已下发升级 ' + queued + ' 台'
     if (skipped > 0) msg += '，跳过 ' + skipped + ' 台（缺二进制/节点不存在）'
     ElMessage.success(msg + '，Agent 将在下次心跳时执行（约 15-30s 内生效）')
+    // 清空选中状态，方便用户继续多选
+    selectedRows.value = []
+    hostTable.value?.clearSelection()
   } catch (e) {
     if (e && e.message && !e.message.includes('cancel')) {
       ElMessage.error('批量升级失败：' + e.message)

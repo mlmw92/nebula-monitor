@@ -66,7 +66,11 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		if m.Labels == nil {
 			m.Labels = map[string]string{}
 		}
-		m.Labels["group"] = payload.Group
+		// 中间件实例指标（mysql/kafka/postgres 等）已自带 group 标签（实例名/集群名），
+		// 仅当缺失时才回退到节点分组，避免把实例分组覆盖成默认的 "default"。
+		if m.Labels["group"] == "" {
+			m.Labels["group"] = payload.Group
+		}
 		metrics = append(metrics, m)
 	}
 	// 进程 TOP 榜写入 VM（带 pid/comm 标签），便于跨副本查询
