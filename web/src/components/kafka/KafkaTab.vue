@@ -54,22 +54,22 @@
 
       <div class="mw-list glass">
         <div class="mw-list-title">实例列表</div>
-        <el-table :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
-          <el-table-column prop="instance" label="Broker 地址" width="140" show-overflow-tooltip />
-          <el-table-column prop="name" label="名称" width="90" show-overflow-tooltip />
-          <el-table-column prop="role" label="角色" width="65">
+        <el-table class="kafka-table" :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
+          <el-table-column prop="instance" label="Broker 地址" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="name" label="名称" min-width="110" show-overflow-tooltip />
+          <el-table-column prop="role" label="角色" min-width="75">
             <template #default="{ row }"><MwRoleTag :role="row.role" /></template>
           </el-table-column>
-          <el-table-column prop="version" label="版本" width="110" show-overflow-tooltip />
-          <el-table-column label="状态" width="75">
+          <el-table-column prop="version" label="版本" min-width="120" show-overflow-tooltip />
+          <el-table-column label="状态" min-width="80">
             <template #default="{ row }"><MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="row.up ? '正常' : '离线'" /></template>
           </el-table-column>
-          <el-table-column prop="brokerCount" label="Broker 数" width="80" sortable />
-          <el-table-column prop="topicCount" label="Topic 数" width="80" sortable />
-          <el-table-column prop="partitionCount" label="分区数" width="75" sortable />
-          <el-table-column prop="underReplicatedPartitions" label="未复制分区" width="100" sortable />
-          <el-table-column prop="consumerGroupCount" label="消费组" width="75" sortable />
-          <el-table-column prop="consumerLag" label="消费延迟" width="90" sortable />
+          <el-table-column prop="brokerCount" label="Broker 数" min-width="95" sortable />
+          <el-table-column prop="topicCount" label="Topic 数" min-width="95" sortable />
+          <el-table-column prop="partitionCount" label="分区数" min-width="90" sortable />
+          <el-table-column prop="underReplicatedPartitions" label="未复制分区" min-width="110" sortable />
+          <el-table-column prop="consumerGroupCount" label="消费组" min-width="90" sortable />
+          <el-table-column prop="consumerLag" label="消费延迟" min-width="100" sortable />
         </el-table>
         <div class="pager">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="sortedInstances.length" :page-size="pageSize" :current-page="currentPage" :page-sizes="[10,20,50,100]" @current-change="v => currentPage = v" @size-change="v => { pageSize = v; currentPage = 1 }" />
@@ -211,6 +211,8 @@ onMounted(load)
 .dot.down { background: var(--danger); }
 .metric-bad { color: var(--danger); }
 .pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+.kafka-table :deep(th) { white-space: nowrap; }
+.kafka-table :deep(td) { white-space: nowrap; }
 :deep(.row-down) { opacity: 0.6; }
 .detail-content { padding: 0 20px; }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; }
