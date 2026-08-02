@@ -95,7 +95,7 @@ func (c *NginxCollector) collectStubStatus(cfg model.NginxInstanceConfig, now in
 
 	labels := map[string]string{
 		"node":     c.node,
-		"instance": cfg.Addr,
+		"instance": normalizeRemoteAddr(cfg.Addr, ""),
 		"group":    cfg.Name,
 		"name":     cfg.Name,
 		"version":  resp.Header.Get("Server"),
@@ -123,7 +123,7 @@ func (c *NginxCollector) collectStubStatus(cfg model.NginxInstanceConfig, now in
 	}
 
 	ni := model.NginxInstance{
-		Instance: cfg.Addr,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""),
 		Name:     cfg.Name,
 		Node:     c.node,
 		Group:    cfg.Name,
@@ -135,7 +135,7 @@ func (c *NginxCollector) collectStubStatus(cfg model.NginxInstanceConfig, now in
 
 func (c *NginxCollector) downInstance(cfg model.NginxInstanceConfig) model.NginxInstance {
 	return model.NginxInstance{
-		Instance: cfg.Addr, Name: cfg.Name, Node: c.node, Group: cfg.Name, Up: false,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node, Group: cfg.Name, Up: false,
 	}
 }
 
@@ -152,9 +152,9 @@ func (c *NginxCollector) collectExporter(cfg model.NginxInstanceConfig, now int6
 		slog.Warn("Nginx exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, c.downInstance(cfg)
 	}
-	metrics := parsePrometheusTextWithPrefix(string(body), c.node, cfg.Addr, "nginx_", now)
+	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), "nginx_", now)
 	ni := model.NginxInstance{
-		Instance: cfg.Addr, Name: cfg.Name, Node: c.node, Group: cfg.Name, Up: true,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node, Group: cfg.Name, Up: true,
 	}
 	for _, m := range metrics {
 		if m.Name == "nginx_instance_up" && m.Labels != nil {

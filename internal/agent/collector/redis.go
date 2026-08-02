@@ -70,7 +70,7 @@ func (c *RedisCollector) collectStandalone(cfg model.RedisInstanceConfig, addr s
 	if err != nil {
 		slog.Warn("Redis 采集失败", "addr", addr, "err", err)
 		return nil, model.RedisInstance{
-			Instance: addr, Name: cfg.Name, Node: c.node,
+			Instance: normalizeRemoteAddr(addr, ""), Name: cfg.Name, Node: c.node,
 			Role: "unknown", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		}
 	}
@@ -88,13 +88,13 @@ func (c *RedisCollector) collectStandalone(cfg model.RedisInstanceConfig, addr s
 		masterHost := info["master_host"]
 		masterPort := info["master_port"]
 		if masterHost != "" && masterPort != "" {
-			replicaOf = masterHost + ":" + masterPort
+			replicaOf = normalizeRemoteAddr(masterHost+":"+masterPort, "")
 			labels["replica_of"] = replicaOf
 		}
 	}
 	m := mapInfoToMetrics(info, labels, now)
 	ri := model.RedisInstance{
-		Instance:  addr,
+		Instance:  normalizeRemoteAddr(addr, ""),
 		Name:      cfg.Name,
 		Node:      c.node,
 		Role:      role,
@@ -120,7 +120,7 @@ func (c *RedisCollector) collectSentinel(cfg model.RedisInstanceConfig, now int6
 	if err != nil {
 		slog.Warn("Sentinel 采集失败", "addr", cfg.Addr, "err", err)
 		instances = append(instances, model.RedisInstance{
-			Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 			Role: "sentinel", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		})
 		return nil, instances
@@ -136,7 +136,7 @@ func (c *RedisCollector) collectSentinel(cfg model.RedisInstanceConfig, now int6
 	}
 	// redis_instance_up 统一由 receiver 依据下方 append 的 RedisInstance 生成，此处不重复写入。
 	instances = append(instances, model.RedisInstance{
-		Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 		Role: "sentinel", Topology: cfg.Topology, Group: cfg.Name,
 		Version: sentInfo["redis_version"], Up: true,
 	})
@@ -154,13 +154,13 @@ func (c *RedisCollector) collectSentinel(cfg model.RedisInstanceConfig, now int6
 	// 覆盖 instance 标签为 master 地址，补充哨兵关联标签
 	for i := range m {
 		if m[i].Labels != nil {
-			m[i].Labels["instance"] = masterAddr
+			m[i].Labels["instance"] = normalizeRemoteAddr(masterAddr, "")
 			m[i].Labels["group"] = cfg.Name
 			m[i].Labels["role"] = "master"
 			m[i].Labels["sentinel_master_of"] = cfg.SentinelName
 		}
 	}
-	ri.Instance = masterAddr
+	ri.Instance = normalizeRemoteAddr(masterAddr, "")
 	ri.Name = cfg.Name + "-master"
 	ri.Topology = cfg.Topology
 	ri.Role = "master"
@@ -180,7 +180,7 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 	if err != nil {
 		slog.Warn("Cluster 采集失败", "addr", cfg.Addr, "err", err)
 		instances = append(instances, model.RedisInstance{
-			Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 			Role: "master", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		})
 		return nil, instances
@@ -206,13 +206,13 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 		m, ri := c.collectStandalone(cfg, masterAddr, now)
 		for i := range m {
 			if m[i].Labels != nil {
-				m[i].Labels["instance"] = masterAddr
+				m[i].Labels["instance"] = normalizeRemoteAddr(masterAddr, "")
 				m[i].Labels["topology"] = "cluster"
 				m[i].Labels["group"] = cfg.Name
 				m[i].Labels["role"] = "master"
 			}
 		}
-		ri.Instance = masterAddr
+		ri.Instance = normalizeRemoteAddr(masterAddr, "")
 		ri.Name = cfg.Name + "-" + masterAddr
 		ri.Topology = cfg.Topology
 		ri.Role = "master"
@@ -223,10 +223,10 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 			metrics = append(metrics, model.Metric{
 				Node: c.node,
 				Name: "redis_cluster_slot_range",
-				Labels: map[string]string{
-					"node":     c.node,
-					"instance": masterAddr,
-					"topology": "cluster",
+			Labels: map[string]string{
+				"node":     c.node,
+				"instance": normalizeRemoteAddr(masterAddr, ""),
+				"topology": "cluster",
 					"group":    cfg.Name,
 					"role":     "master",
 					"range":    rng,
@@ -240,18 +240,18 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 			rm, rri := c.collectStandalone(cfg, replicaAddr, now)
 			for i := range rm {
 				if rm[i].Labels != nil {
-					rm[i].Labels["instance"] = replicaAddr
+					rm[i].Labels["instance"] = normalizeRemoteAddr(replicaAddr, "")
 					rm[i].Labels["topology"] = "cluster"
 					rm[i].Labels["group"] = cfg.Name
 					rm[i].Labels["role"] = "replica"
-					rm[i].Labels["replica_of"] = masterAddr
+					rm[i].Labels["replica_of"] = normalizeRemoteAddr(masterAddr, "")
 				}
 			}
-			rri.Instance = replicaAddr
+			rri.Instance = normalizeRemoteAddr(replicaAddr, "")
 			rri.Name = cfg.Name + "-slave-" + replicaAddr
 			rri.Topology = cfg.Topology
 			rri.Role = "replica"
-			rri.ReplicaOf = masterAddr
+			rri.ReplicaOf = normalizeRemoteAddr(masterAddr, "")
 			metrics = append(metrics, rm...)
 			instances = append(instances, rri)
 		}
@@ -268,7 +268,7 @@ func (c *RedisCollector) collectExporter(cfg model.RedisInstanceConfig, now int6
 	if err != nil {
 		slog.Warn("Redis exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, model.RedisInstance{
-			Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 			Role: "unknown", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		}
 	}
@@ -277,13 +277,13 @@ func (c *RedisCollector) collectExporter(cfg model.RedisInstanceConfig, now int6
 	if err != nil {
 		slog.Warn("Redis exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, model.RedisInstance{
-			Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 			Role: "unknown", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		}
 	}
-	metrics := parsePrometheusText(string(body), c.node, cfg.Addr, now)
+	metrics := parsePrometheusText(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), now)
 	ri := model.RedisInstance{
-		Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 		Role: "master", Topology: cfg.Topology, Group: cfg.Name, Up: true,
 	}
 	// 从指标中提取 version 标签
@@ -306,7 +306,7 @@ func (c *RedisCollector) collectExporter(cfg model.RedisInstanceConfig, now int6
 func redisLabels(node, addr string, info map[string]string) map[string]string {
 	labels := map[string]string{
 		"node":     node,
-		"instance": addr,
+		"instance": normalizeRemoteAddr(addr, ""),
 		"role":     info["role"],
 		"version":  info["redis_version"],
 	}

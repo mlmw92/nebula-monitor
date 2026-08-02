@@ -143,7 +143,7 @@ func (c *DockerCollector) collectDaemon(cfg model.DockerInstanceConfig, now int6
 	}
 
 	// daemon 级别汇总指标
-	daemonLabels := map[string]string{"instance": cfg.Addr}
+	daemonLabels := map[string]string{"instance": normalizeRemoteAddr(cfg.Addr, "")}
 	out = append(out, mk("docker_containers_total", float64(totalContainers), daemonLabels))
 	out = append(out, mk("docker_containers_running", float64(running), daemonLabels))
 	out = append(out, mk("docker_containers_paused", float64(paused), daemonLabels))

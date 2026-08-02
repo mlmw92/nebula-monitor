@@ -79,7 +79,7 @@ func (c *KafkaCollector) collectDirect(cfg model.KafkaInstanceConfig, now int64)
 
 	labels := map[string]string{
 		"node":     c.node,
-		"instance": cfg.Addr,
+		"instance": normalizeRemoteAddr(cfg.Addr, ""),
 		"group":    cfg.Name,
 		"role":     "broker",
 		"version":  cfg.Version,
@@ -148,7 +148,7 @@ func (c *KafkaCollector) collectDirect(cfg model.KafkaInstanceConfig, now int64)
 	out = append(out, mk("kafka_consumer_lag_max", maxLag))
 
 	ki := model.KafkaInstance{
-		Instance: cfg.Addr,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""),
 		Name:     cfg.Name,
 		Node:     c.node,
 		Group:    cfg.Name,
@@ -161,7 +161,7 @@ func (c *KafkaCollector) collectDirect(cfg model.KafkaInstanceConfig, now int64)
 
 func (c *KafkaCollector) downInstance(cfg model.KafkaInstanceConfig) model.KafkaInstance {
 	return model.KafkaInstance{
-		Instance: cfg.Addr, Name: cfg.Name, Node: c.node, Group: cfg.Name, Role: "broker", Version: cfg.Version, Up: false,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node, Group: cfg.Name, Role: "broker", Version: cfg.Version, Up: false,
 	}
 }
 
@@ -208,9 +208,9 @@ func (c *KafkaCollector) collectExporter(cfg model.KafkaInstanceConfig, now int6
 		slog.Warn("Kafka exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, c.downInstance(cfg)
 	}
-	metrics := parsePrometheusTextWithPrefix(string(body), c.node, cfg.Addr, "kafka_", now)
+	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), "kafka_", now)
 	ki := model.KafkaInstance{
-		Instance: cfg.Addr, Name: cfg.Name, Node: c.node, Group: cfg.Name, Role: "broker", Version: cfg.Version, Up: true,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node, Group: cfg.Name, Role: "broker", Version: cfg.Version, Up: true,
 	}
 	for _, m := range metrics {
 		if m.Name == "kafka_instance_up" && m.Labels != nil {

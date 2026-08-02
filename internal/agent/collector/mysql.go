@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -316,29 +315,7 @@ func parsePrometheusTextWithPrefix(text, node, instance, prefix string, now int6
 //   - host 为回环地址（127.0.0.1/localhost/::1 等）时，替换为 Agent 本机真实 IP，保留端口；
 //   - 非回环地址（用户配置的真实 IP/域名）原样保留，与 Redis/Nginx 行为一致。
 // 这样即使 Agent 用 127.0.0.1 连接本机 MySQL，监控面板也展示可识别的真实地址。
+// normalizeInstanceAddr 规范化 MySQL 实例地址，默认端口 3306。
 func normalizeInstanceAddr(addr string) string {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		host, port = addr, "3306"
-	}
-	if port == "" {
-		port = "3306"
-	}
-	if isLoopbackHost(host) {
-		if localIP := primaryIP(); localIP != "" {
-			host = localIP
-		}
-	}
-	return net.JoinHostPort(host, port)
-}
-
-// isLoopbackHost 判断 host 是否为回环地址（localhost 或回环 IP）。
-func isLoopbackHost(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
-	}
-	return false
+	return normalizeRemoteAddr(addr, "3306")
 }

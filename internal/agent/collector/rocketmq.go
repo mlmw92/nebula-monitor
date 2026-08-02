@@ -53,7 +53,7 @@ func (c *RocketMQCollector) collectHTTP(cfg model.RocketMQInstanceConfig, now in
 
 	labels := map[string]string{
 		"node":     c.node,
-		"instance": cfg.Addr,
+		"instance": normalizeRemoteAddr(cfg.Addr, ""),
 		"group":    cfg.Name,
 		"name":     cfg.Name,
 		"role":     "nameserver",
@@ -75,7 +75,7 @@ func (c *RocketMQCollector) collectHTTP(cfg model.RocketMQInstanceConfig, now in
 
 	if up == 0 {
 		return out, model.RocketMQInstance{
-			Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 			Group: cfg.Name, Role: "nameserver", Up: false,
 		}
 	}
@@ -149,7 +149,7 @@ func (c *RocketMQCollector) collectHTTP(cfg model.RocketMQInstanceConfig, now in
 	}
 
 	ri := model.RocketMQInstance{
-		Instance: cfg.Addr,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""),
 		Name:     cfg.Name,
 		Node:     c.node,
 		Group:    cfg.Name,
@@ -166,7 +166,7 @@ func (c *RocketMQCollector) collectExporter(cfg model.RocketMQInstanceConfig, no
 	if err != nil {
 		slog.Warn("RocketMQ exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, model.RocketMQInstance{
-			Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 			Group: cfg.Name, Role: "nameserver", Up: false,
 		}
 	}
@@ -175,13 +175,13 @@ func (c *RocketMQCollector) collectExporter(cfg model.RocketMQInstanceConfig, no
 	if err != nil {
 		slog.Warn("RocketMQ exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, model.RocketMQInstance{
-			Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 			Group: cfg.Name, Role: "nameserver", Up: false,
 		}
 	}
-	metrics := parsePrometheusTextWithPrefix(string(body), c.node, cfg.Addr, "rocketmq_", now)
+	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), "rocketmq_", now)
 	ri := model.RocketMQInstance{
-		Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 		Group: cfg.Name, Role: "nameserver", Up: true,
 	}
 	for _, m := range metrics {

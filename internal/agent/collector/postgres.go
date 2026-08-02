@@ -85,7 +85,7 @@ func (c *PostgresCollector) collectDirect(cfg model.PostgresInstanceConfig, now 
 	}
 	labels := map[string]string{
 		"node":     c.node,
-		"instance": cfg.Addr,
+		"instance": normalizeRemoteAddr(cfg.Addr, ""),
 		"role":     role,
 		"topology": cfg.Topology,
 		"group":    cfg.Name,
@@ -136,7 +136,7 @@ func (c *PostgresCollector) collectDirect(cfg model.PostgresInstanceConfig, now 
 	}
 
 	pi := model.PostgresInstance{
-		Instance: cfg.Addr,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""),
 		Name:     cfg.Name,
 		Node:     c.node,
 		Role:     role,
@@ -151,7 +151,7 @@ func (c *PostgresCollector) collectDirect(cfg model.PostgresInstanceConfig, now 
 
 func (c *PostgresCollector) downInstance(cfg model.PostgresInstanceConfig, role string) model.PostgresInstance {
 	return model.PostgresInstance{
-		Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 		Role: role, Topology: cfg.Topology, Group: cfg.Name, Database: cfg.Database, Up: false,
 	}
 }
@@ -169,9 +169,9 @@ func (c *PostgresCollector) collectExporter(cfg model.PostgresInstanceConfig, no
 		slog.Warn("PostgreSQL exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, c.downInstance(cfg, "unknown")
 	}
-	metrics := parsePrometheusTextWithPrefix(string(body), c.node, cfg.Addr, "postgres_", now)
+	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), "postgres_", now)
 	pi := model.PostgresInstance{
-		Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 		Role: "master", Topology: cfg.Topology, Group: cfg.Name, Database: cfg.Database, Up: true,
 	}
 	for _, m := range metrics {
