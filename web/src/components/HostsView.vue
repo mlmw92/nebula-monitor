@@ -35,6 +35,9 @@
             </el-checkbox-group>
           </div>
         </el-popover>
+        <el-button type="warning" :icon="Upload" size="small" :disabled="selectedRows.length === 0" @click="batchUpgrade">
+          批量升级{{ selectedRows.length ? ' (' + selectedRows.length + ')' : '' }}
+        </el-button>
         <el-button type="primary" :icon="Plus" size="small" @click="openAddNode">添加主机</el-button>
       </div>
     </div>
@@ -68,11 +71,14 @@
         stripe
         style="width: 100%"
         empty-text="暂无主机"
+        row-key="hostname"
+        :row-class-name="rowClass"
         @row-click="(r) => goDetail(r)"
         @sort-change="onSortChange"
+        @selection-change="handleSelectionChange"
         class="host-table"
-        :row-class-name="rowClass"
       >
+        <el-table-column type="selection" width="44" :reserve-selection="true" />
         <el-table-column v-if="colVisible('host')" label="主机名称 / IP" prop="hostname" sortable="custom" min-width="160">
           <template #default="{ row }">
             <div class="host-name">
@@ -389,7 +395,7 @@ openssl x509 -req -in edge.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 36
 <script setup>
 import { ref, computed, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, Setting, ArrowDown, Refresh, Edit, Operation } from '@element-plus/icons-vue'
+import { Plus, Search, Setting, ArrowDown, Refresh, Edit, Operation, Upload } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
 import OsIcon from './OsIcon.vue'
@@ -827,6 +833,42 @@ async function remove(row) {
     load()
   } catch (e) {
     /* 取消 */
+  }
+}
+
+const selectedRows = ref([])
+function handleSelectionChange(val) {
+  selectedRows.value = val
+}
+
+async function batchUpgrade() {
+  if (selectedRows.value.length === 0) return
+  const needUpgrade = selectedRows.value.filter((r) => needUpgrade(r))
+  const offline = selectedRows.value.filter((r) => r.status !== 'online')
+  const tips = []
+  if (needUpgrade.length < selectedRows.value.length) {
+    tips.push('已选中 ' + selectedRows.value.length + ' 台，其中 ' + (selectedRows.value.length - needUpgrade.length) + ' 台 Agent 版本已与 Server 一致')
+  }
+  if (offline.length > 0) {
+    tips.push(offline.length + ' 台处于离线状态，升级指令将在其下次上线心跳时执行')
+  }
+  try {
+    await ElMessageBox.confirm(
+      '确认批量升级选中 ' + selectedRows.value.length + ' 台主机的 Agent？\n升级期间 Agent 会短暂离线后自动恢复。\n' + (tips.length ? tips.join('；') + '。' : ''),
+      '批量 Agent 升级',
+      { type: 'warning', confirmButtonText: '批量升级', cancelButtonText: '取消' }
+    )
+    const names = selectedRows.value.map((r) => r.hostname)
+    const res = await http.post('/api/v1/nodes/upgrade', { names })
+    const queued = (res && res.queued) || 0
+    const skipped = (res && res.skipped) || 0
+    let msg = '已下发升级 ' + queued + ' 台'
+    if (skipped > 0) msg += '，跳过 ' + skipped + ' 台（缺二进制/节点不存在）'
+    ElMessage.success(msg + '，Agent 将在下次心跳时执行（约 15-30s 内生效）')
+  } catch (e) {
+    if (e && e.message && !e.message.includes('cancel')) {
+      ElMessage.error('批量升级失败：' + e.message)
+    }
   }
 }
 

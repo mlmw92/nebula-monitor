@@ -102,6 +102,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/nodes/{name}/group", a.handleNodeGroup)
 	mux.HandleFunc("PUT /api/v1/nodes/{name}/display-name", a.handleNodeDisplayName)
 	mux.HandleFunc("POST /api/v1/nodes/{name}/upgrade", a.handleNodeUpgrade)
+	mux.HandleFunc("POST /api/v1/nodes/upgrade", a.handleNodesUpgrade)
 
 	mux.HandleFunc("GET /api/v1/groups", a.handleGroups)
 	mux.HandleFunc("POST /api/v1/groups", a.handleGroupCreate)
@@ -374,6 +375,50 @@ func (a *API) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{
 		"status":  "ok",
 		"message": "升级任务已下发，等待 Agent 下次心跳时执行",
+	})
+}
+
+// handleNodesUpgrade 批量标记节点待升级（主机列表“批量升级”）。
+// 请求体：{"names":["host1","host2",...]}。逐节点复用单机升级的同款逻辑（按架构取 CDN 二进制 SHA256）。
+func (a *API) handleNodesUpgrade(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Names []string `json:"names"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if len(req.Names) == 0 {
+		http.Error(w, "names is empty", http.StatusBadRequest)
+		return
+	}
+	details := make([]map[string]string, 0, len(req.Names))
+	queued, skipped := 0, 0
+	for _, name := range req.Names {
+		node, ok := a.nodeMgr.GetNode(name)
+		if !ok {
+			details = append(details, map[string]string{"name": name, "status": "not_found"})
+			skipped++
+			continue
+		}
+		binPath := filepath.Join(a.agentBinDir, "agent", "linux", node.Arch, "agent")
+		targetSHA, err := fileSHA256(binPath)
+		if err != nil {
+			slog.Warn("批量升级：CDN 缺少该架构 agent 二进制", "node", name, "arch", node.Arch, "err", err)
+			details = append(details, map[string]string{"name": name, "status": "no_binary", "arch": node.Arch})
+			skipped++
+			continue
+		}
+		a.nodeMgr.RequestUpgrade(name, targetSHA, version.Version)
+		details = append(details, map[string]string{"name": name, "status": "queued"})
+		queued++
+	}
+	slog.Info("收到 Agent 批量升级请求", "total", len(req.Names), "queued", queued, "skipped", skipped)
+	writeJSON(w, 200, map[string]any{
+		"status":  "ok",
+		"queued":  queued,
+		"skipped": skipped,
+		"details": details,
 	})
 }
 
