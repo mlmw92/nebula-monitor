@@ -43,24 +43,24 @@
 
       <div class="mw-list glass">
         <div class="mw-list-title">实例列表</div>
-    <el-table :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
-      <el-table-column prop="instance" label="实例地址" width="140" show-overflow-tooltip />
-      <el-table-column prop="name" label="名称" width="80" show-overflow-tooltip />
-      <el-table-column prop="database" label="数据库" width="75" show-overflow-tooltip />
-      <el-table-column prop="role" label="角色" width="65">
+    <el-table class="postgres-table" :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
+      <el-table-column prop="instance" label="实例地址" min-width="150" show-overflow-tooltip />
+      <el-table-column prop="name" label="名称" min-width="110" show-overflow-tooltip />
+      <el-table-column prop="database" label="数据库" min-width="90" show-overflow-tooltip />
+      <el-table-column prop="role" label="角色" min-width="75">
         <template #default="{ row }"><MwRoleTag :role="row.role" /></template>
       </el-table-column>
-      <el-table-column prop="version" label="版本" width="120" show-overflow-tooltip />
-      <el-table-column label="状态" width="75">
+      <el-table-column prop="version" label="版本" min-width="135" show-overflow-tooltip />
+      <el-table-column label="状态" min-width="80">
         <template #default="{ row }"><MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="row.up ? '正常' : '离线'" /></template>
       </el-table-column>
-      <el-table-column prop="numbackends" label="连接数" width="75" sortable />
-      <el-table-column prop="cacheHitRatio" label="缓存命中率" width="90" sortable>
+      <el-table-column prop="numbackends" label="连接数" min-width="85" sortable />
+      <el-table-column prop="cacheHitRatio" label="缓存命中率" min-width="110" sortable>
         <template #default="{ row }"><span :class="hitRateClass(row.cacheHitRatio)">{{ row.cacheHitRatio ? row.cacheHitRatio.toFixed(1) + '%' : '-' }}</span></template>
       </el-table-column>
-      <el-table-column prop="deadlocks" label="死锁" width="65" sortable />
-      <el-table-column prop="replicationLag" label="复制延迟(bytes)" width="115" sortable />
-      <el-table-column label="数据库大小" width="85">
+      <el-table-column prop="deadlocks" label="死锁" min-width="70" sortable />
+      <el-table-column prop="replicationLag" label="复制延迟(bytes)" min-width="135" sortable />
+      <el-table-column label="数据库大小" min-width="100">
         <template #default="{ row }">{{ formatBytes(row.databaseSize) }}</template>
       </el-table-column>
     </el-table>
@@ -209,6 +209,8 @@ onMounted(load)
 .metric-warn { color: var(--warn); }
 .metric-bad { color: var(--danger); }
 .pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+.postgres-table :deep(th) { white-space: nowrap; }
+.postgres-table :deep(td) { white-space: nowrap; }
 :deep(.row-down) { opacity: 0.6; }
 .detail-content { padding: 0 20px; }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; }

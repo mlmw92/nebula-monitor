@@ -564,7 +564,7 @@ dockerInstances:
 
 **RocketMQ 采集模式说明**
 
-Agent 支持两种采集模式，但**强烈建议使用 exporter 模式（路线 A）**：
+Agent 支持两种采集模式，但**强烈建议使用 exporter 模式**：
 
 - **exporter 模式（推荐，必选用于 RocketMQ 5.x）**：Agent 通过 `exporterURL` 拉取一个 RocketMQ Prometheus Exporter 暴露的 `/metrics`，兼容 RocketMQ 4.x / 5.x，无需 NameServer 开启任何 HTTP 接口。
 - **HTTP API 直连模式（不推荐，5.x 不可用）**：Agent 直接向 `addr`（NameServer）发起 HTTP GET 到 `/rocketmq/httpapi/...` 端点。但标准 RocketMQ 的 NameServer（9876）与 Proxy（默认 8080）均只跑二进制 `Remoting` 协议、**不提供标准 HTTP 管理 API**，直连会得到 `EOF` 报错且拿不到数据。该模式仅在你的环境通过反向代理/定制把 `/rocketmq/httpapi/` 以真正 HTTP 形式暴露时才可用。
@@ -583,7 +583,7 @@ rocketmqInstances:
     exporterURL: "http://127.0.0.1:5557/metrics" # 指向 RocketMQ exporter 的 /metrics
 ```
 
-**用户侧操作步骤（路线 A）**
+**用户侧操作步骤（exporter 模式）**
 
 1. 部署一个 RocketMQ Prometheus Exporter（与 Agent 同机或网络可达），把 NameServer 地址指过去：
    ```bash

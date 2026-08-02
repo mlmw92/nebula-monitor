@@ -54,7 +54,7 @@
 
       <div class="mw-list glass">
         <div class="mw-list-title">容器列表</div>
-        <el-table :data="pagedContainers" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
+        <el-table class="docker-table" :data="pagedContainers" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
           <el-table-column prop="name" label="名称" min-width="150" show-overflow-tooltip />
           <el-table-column prop="image" label="镜像" min-width="200" show-overflow-tooltip />
           <el-table-column label="所在主机" min-width="160">
@@ -75,7 +75,13 @@
             <template #default="{ row }">{{ formatBytes(row.memUsage) }}</template>
           </el-table-column>
           <el-table-column prop="memPercent" label="内存%" width="90" sortable />
+          <el-table-column label="操作" width="80" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click.stop="openDetail(row)">查看</el-button>
+            </template>
+          </el-table-column>
         </el-table>
+        <div v-if="containers.length === 0 && stats.hosts.length > 0" class="empty-list-hint">当前主机下暂无容器，请确认 Agent 已配置 Docker 采集且 Docker daemon 上有运行中的容器。</div>
         <div class="pager">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="sortedContainers.length" :page-size="pageSize" :current-page="currentPage" :page-sizes="[10,20,50,100]" @current-change="v => currentPage = v" @size-change="v => { pageSize = v; currentPage = 1 }" />
         </div>
@@ -288,6 +294,8 @@ onMounted(load)
 .host-cell-name { font-size: 13px; }
 .host-cell-ip { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
 .pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+.docker-table :deep(.el-table__row) { cursor: pointer; }
+.empty-list-hint { text-align: center; color: var(--text-muted); font-size: 13px; padding: 24px 0; }
 :deep(.row-down) { opacity: 0.6; }
 .detail-content { padding: 0 20px; }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; }
