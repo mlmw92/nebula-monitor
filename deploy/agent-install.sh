@@ -27,6 +27,16 @@ DIST_DIR=""
 ASSUME_YES=0
 ASK_BINARY=0
 
+# 代理模式相关参数（mode=edge/hub 时生效）
+MODE="collect"
+HUB_ADDR=""
+PROXY_LISTEN=""
+TLS_CERT=""
+TLS_KEY=""
+TLS_CA=""
+BUFFER_SIZE=""
+POOL_SIZE=""
+
 # 采集项开关（默认全开）
 C_CPU=""; C_MEM=""; C_DISK=""; C_NET=""; C_PROC=""; C_LOAD=""
 
@@ -117,6 +127,14 @@ usage() {
   --base-url <url>    二进制下载基址（默认从 \$SERVER_URL/bin 拉取）
   --yes               非交互式，未提供的项使用默认值
   --ask-binary        弹出"获取 Agent 二进制"菜单（交互选择下载源）
+  --mode <mode>       运行模式：collect(默认,采集) | edge(网闸区A边界代理) | hub(网闸区B边界代理)
+  --hub-addr <h:p>    Edge: Hub 地址 host:port（如 10.0.0.2:8443）
+  --listen <addr>     Edge/Hub 监听地址（Edge 默认 :18080，Hub 默认 :8443）
+  --tls-cert <path>   TLS 证书文件路径（mTLS 双向校验）
+  --tls-key <path>    TLS 私钥文件路径
+  --tls-ca <path>     CA 证书文件路径（mTLS 双向校验）
+  --buffer-size <n>   Edge 断连时内存缓冲条数（默认 1000）
+  --pool-size <n>     Edge 到 Hub 的并发隧道连接数（默认 2）
   -h, --help          显示本帮助
 
 示例：
@@ -129,6 +147,9 @@ usage() {
   bash agent-install.sh kafka                # 配置 Kafka 监控
   bash agent-install.sh rocketmq             # 配置 RocketMQ 监控
   bash agent-install.sh k8s                  # 配置 Kubernetes 集群监控
+  # 网闸代理模式部署（详见 README 网闸代理章节）：
+  bash agent-install.sh --mode hub --listen :8443 --tls-cert /path/hub.crt --tls-key /path/hub.key --tls-ca /path/ca.crt --server http://127.0.0.1:8080 --yes
+  bash agent-install.sh --mode edge --listen :18080 --hub-addr 10.0.0.2:8443 --tls-cert /path/edge.crt --tls-key /path/edge.key --tls-ca /path/ca.crt --yes
 EOF
   exit 0
 }
@@ -167,6 +188,15 @@ while [[ $# -gt 0 ]]; do
     --base-url) BASE_URL="$2"; shift 2 ;;
     --yes)      ASSUME_YES=1; shift ;;
     --ask-binary) ASK_BINARY=1; shift ;;
+    # 代理模式参数
+    --mode)     MODE="$2"; shift 2 ;;
+    --hub-addr) HUB_ADDR="$2"; shift 2 ;;
+    --listen)   PROXY_LISTEN="$2"; shift 2 ;;
+    --tls-cert) TLS_CERT="$2"; shift 2 ;;
+    --tls-key)  TLS_KEY="$2"; shift 2 ;;
+    --tls-ca)   TLS_CA="$2"; shift 2 ;;
+    --buffer-size) BUFFER_SIZE="$2"; shift 2 ;;
+    --pool-size)   POOL_SIZE="$2"; shift 2 ;;
     -h|--help)  usage ;;
     *) die "未知参数: $1（用 -h 查看帮助）" ;;
   esac
@@ -1104,6 +1134,207 @@ k8s_config() {
   echo "============================================================"
 }
 
+# ============================ 代理模式安装（edge/hub）============================
+# 网闸场景：mode=edge 在区 A 边界代理，mode=hub 在区 B 边界代理。
+# 代理模式不采集主机指标，仅做隧道转发；配置与 systemd 单元独立生成。
+proxy_install() {
+  echo "============================================================"
+  echo " Agent 代理模式安装（mode=$MODE）"
+  echo "------------------------------------------------------------"
+  echo " 本向导安装 $MODE 代理，生成 agent.yaml 与 systemd 单元。"
+  echo " 代理模式不采集主机指标，仅做隧道转发。"
+  echo " TLS 证书需提前准备好（mTLS 双向校验）。"
+  echo "============================================================"
+  echo
+
+  detect_env
+  preflight
+
+  # 公共参数：节点名、分组、采集间隔（代理模式用 interval 上报自监控指标）
+  step_node
+  step_group
+  step_interval
+
+  # 代理模式特有参数
+  if [[ -z "$PROXY_LISTEN" ]]; then
+    if (( ASSUME_YES )); then
+      [[ "$MODE" == "edge" ]] && PROXY_LISTEN=":18080" || PROXY_LISTEN=":8443"
+    else
+      local def_listen
+      [[ "$MODE" == "edge" ]] && def_listen=":18080" || def_listen=":8443"
+      prompt PROXY_LISTEN "监听地址" "$def_listen"
+    fi
+  fi
+
+  if [[ "$MODE" == "edge" ]]; then
+    # Edge 需要 Hub 地址
+    if [[ -z "$HUB_ADDR" ]]; then
+      if (( ASSUME_YES )); then die "Edge 模式必须指定 --hub-addr"; fi
+      prompt HUB_ADDR "Hub 地址 host:port（如 10.0.0.2:8443）" ""
+    fi
+    [[ -n "$HUB_ADDR" ]] || die "Edge 模式必须指定 Hub 地址（--hub-addr）"
+    # Edge 的 serverURL 用于上报自监控指标，默认指向 Hub（Hub 会转发到真实 Server）
+    [[ -n "$SERVER_URL" ]] || SERVER_URL="https://$HUB_ADDR"
+  else
+    # Hub 需要真实 Server 地址
+    step_server
+  fi
+
+  # TLS 证书参数（代理模式必填）
+  if [[ -z "$TLS_CERT" ]]; then
+    if (( ASSUME_YES )); then die "$MODE 模式必须指定 --tls-cert"; fi
+    prompt TLS_CERT "TLS 证书文件路径" ""
+  fi
+  if [[ -z "$TLS_KEY" ]]; then
+    if (( ASSUME_YES )); then die "$MODE 模式必须指定 --tls-key"; fi
+    prompt TLS_KEY "TLS 私钥文件路径" ""
+  fi
+  if [[ -z "$TLS_CA" ]]; then
+    if (( ASSUME_YES )); then die "$MODE 模式必须指定 --tls-ca"; fi
+    prompt TLS_CA "CA 证书文件路径（mTLS 双向校验）" ""
+  fi
+  [[ -f "$TLS_CERT" ]] || die "TLS 证书文件不存在: $TLS_CERT"
+  [[ -f "$TLS_KEY" ]] || die "TLS 私钥文件不存在: $TLS_KEY"
+  [[ -f "$TLS_CA" ]] || die "CA 证书文件不存在: $TLS_CA"
+
+  # 缓冲大小与连接池（仅 Edge）
+  if [[ "$MODE" == "edge" ]]; then
+    if [[ -z "$BUFFER_SIZE" ]]; then
+      if (( ASSUME_YES )); then BUFFER_SIZE=1000; else prompt BUFFER_SIZE "断连缓冲条数（默认 1000）" "1000"; fi
+    fi
+    if [[ -z "$POOL_SIZE" ]]; then
+      if (( ASSUME_YES )); then POOL_SIZE=2; else prompt POOL_SIZE "到 Hub 的并发隧道连接数（默认 2）" "2"; fi
+    fi
+  fi
+
+  c_ok "代理参数确认: mode=$MODE listen=$PROXY_LISTEN"
+
+  # 获取二进制（复用现有 acquire_binary，但代理模式用同一 agent 二进制）
+  acquire_binary
+
+  # 生成代理模式配置
+  generate_proxy_config
+
+  # 安装脚本自身
+  install_self_script
+
+  # 写 systemd 单元（代理模式服务名区分，避免与采集 agent 冲突）
+  write_proxy_service
+
+  start_proxy_service
+
+  proxy_summary
+}
+
+# 生成代理模式 agent.yaml
+generate_proxy_config() {
+  c_info "生成代理模式配置文件"
+  mkdir -p "$CONFIG_DIR"
+
+  local cfg="$CONFIG_DIR/agent.yaml"
+  cat > "$cfg" <<EOF
+# nebula-monitor Agent 配置（代理模式 $MODE，由 agent-install.sh 生成）
+mode: "$MODE"
+node: "$NODE"
+group: "$GROUP"
+secret: "$SECRET"
+interval: $INTERVAL
+serverURL: "$SERVER_URL"
+
+proxy:
+  listen: "$PROXY_LISTEN"
+  tlsCert: "$TLS_CERT"
+  tlsKey: "$TLS_KEY"
+  tlsCa: "$TLS_CA"
+EOF
+
+  if [[ "$MODE" == "edge" ]]; then
+    cat >> "$cfg" <<EOF
+  hubAddr: "$HUB_ADDR"
+  bufferSize: $BUFFER_SIZE
+  poolSize: $POOL_SIZE
+EOF
+  else
+    # Hub 模式：serverURL 已是真实 Server，proxy.serverURL 可省略（main.go 优先用顶层 serverURL）
+    cat >> "$cfg" <<EOF
+  serverURL: "$SERVER_URL"
+EOF
+  fi
+
+  c_ok "配置已写入: $cfg"
+}
+
+# 代理模式 systemd 单元（服务名 monitor-proxy-edge / monitor-proxy-hub）
+write_proxy_service() {
+  local svc_name="monitor-proxy-$MODE"
+  cat > "$SERVICE_DIR/$svc_name.service" <<EOF
+[Unit]
+Description=nebula-monitor Agent Proxy ($MODE)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$BIN_DIR/monitor-agent -config $CONFIG_DIR/agent.yaml
+Restart=always
+RestartSec=5
+User=root
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  c_ok "已写入 systemd 单元: $SERVICE_DIR/$svc_name.service"
+}
+
+start_proxy_service() {
+  if ! have_cmd systemctl; then
+    c_warn "跳过 systemd 启动；可手动执行: $BIN_DIR/monitor-agent -config $CONFIG_DIR/agent.yaml"
+    return
+  fi
+  local svc_name="monitor-proxy-$MODE"
+  systemctl daemon-reload
+  systemctl enable "$svc_name.service"
+  systemctl restart "$svc_name.service"
+  sleep 2
+  local st
+  st="$(systemctl is-active "$svc_name.service" 2>/dev/null || echo unknown)"
+  if [[ "$st" == "active" ]]; then
+    c_ok "$svc_name 服务运行中"
+  else
+    c_warn "$svc_name 服务状态: $st，请查看: journalctl -u $svc_name -n 50"
+  fi
+}
+
+proxy_summary() {
+  local svc_name="monitor-proxy-$MODE"
+  echo
+  echo "============================================================"
+  echo " nebula-monitor Agent 代理模式安装完成（$MODE）"
+  echo "------------------------------------------------------------"
+  echo " 模式        : $MODE"
+  echo " 节点名      : $NODE"
+  echo " 监听地址    : $PROXY_LISTEN"
+  if [[ "$MODE" == "edge" ]]; then
+    echo " Hub 地址    : $HUB_ADDR"
+    echo " 缓冲条数    : $BUFFER_SIZE"
+    echo " 连接池      : $POOL_SIZE"
+  else
+    echo " 真实 Server : $SERVER_URL"
+  fi
+  echo " 配置文件    : $CONFIG_DIR/agent.yaml"
+  echo " 二进制      : $BIN_DIR/monitor-agent"
+  echo " 服务名      : $svc_name"
+  echo "------------------------------------------------------------"
+  echo " 查看状态 : systemctl status $svc_name"
+  echo " 查看日志 : journalctl -u $svc_name -f"
+  if [[ "$MODE" == "edge" ]]; then
+    echo " 下一步   : 采集 Agent 的 serverURL 指向本机 $PROXY_LISTEN"
+  else
+    echo " 下一步   : 在区 A 部署 Edge 代理（--mode edge --hub-addr <本机IP>:8443）"
+  fi
+  echo "============================================================"
+}
+
 # ============================ 主流程 ============================
 main() {
   detect_env
@@ -1124,7 +1355,8 @@ main() {
   summary
 }
 
-# 子命令分发：redis/mysql/postgres/nginx/kafka/rocketmq/k8s → 配置中间件监控；否则走默认安装流程
+# 子命令分发：redis/mysql/postgres/nginx/kafka/rocketmq/k8s → 配置中间件监控；
+# --mode edge/hub → 代理模式安装；否则走默认采集 Agent 安装流程
 case "$SUBCOMMAND" in
   redis)    redis_config ;;
   mysql)    middleware_config mysql ;;
@@ -1133,5 +1365,11 @@ case "$SUBCOMMAND" in
   kafka)    middleware_config kafka ;;
   rocketmq) middleware_config rocketmq ;;
   k8s)      k8s_config ;;
-  *)        main ;;
+  *)
+    if [[ "$MODE" == "edge" || "$MODE" == "hub" ]]; then
+      proxy_install
+    else
+      main
+    fi
+    ;;
 esac

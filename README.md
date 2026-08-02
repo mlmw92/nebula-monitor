@@ -16,6 +16,8 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
                                         |-- 告警引擎 --> 邮件 / Webhook
 ```
 
+> **网闸场景**：两个网区经网闸隔离时，可在两侧各部署一个代理模式 Agent（Edge/Hub）构成受控 TLS 隧道，使采集 Agent 的上报数据穿透网闸到达 Server。详见下文「网闸代理部署」章节。
+
 ---
 
 ## 功能清单
@@ -43,6 +45,8 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 - 离线安装包：`deploy/install-server.sh` / `agent-install.sh` / `install-tsdb.sh`
 - 交叉编译 `build/cross-compile.sh`：linux amd64/arm64/arm 共 6 个二进制
 - 前端构建 `build/build-web.sh`：Vue 3 + Vite，产物部署到 `/etc/monitor-server/web`
+- **网闸代理模式（v1.13.0+）**：Agent 二进制支持 `mode=collect|edge|hub` 三种运行模式；edge/hub 构成网闸双侧 TLS 隧道，mTLS 双向校验，单端口穿透；含连接池、断线重连（指数退避）、内存缓冲（断连期间请求入队、恢复后补发）、自监控指标（`proxy_*`）
+- **Agent 部署引导页**：Web 端 `/setup` 页一键生成直连安装命令（节点名/分组/密钥/采集间隔实时回填 + 一键复制 + 连通性自检）；网闸场景折叠向导生成 Hub/Edge 两侧 agent.yaml 模板与安装命令；底部展示已上线代理节点状态（活跃连接/转发/丢弃/重连/缓冲）
 
 **告警**
 
@@ -59,6 +63,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 - **巡检报告**：报告生成页面（日报/周报/月报选择 + 即时生成 + 下载 + 历史记录）。
 - **系统升级**：Web 上传 upgrade 包 → 解析版本 → 立即升级（备份+替换+重启）/ 回滚 + 升级历史；Agent 不主动推送，由管理员在主机列表手动触发
 - 升级按钮提交后 15 秒冷却（显示"请等待 Ns"并禁用），防止 server 重启期间重复点击
+- **Agent 部署引导**：`/setup` 页生成直连安装命令 + 网闸代理向导 + 代理节点状态表
 
 **中间件监控（Agent 采集）**
 
@@ -99,6 +104,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 - **告警增强**：告警抑制与分组
 - **可观测性增强**：自定义仪表盘、指标自动发现、历史数据导出
 - **多用户与权限**：SSO 登录、角色权限管理
+- **代理增强**：磁盘缓冲（长时间断网容灾）、请求批量合并（Server 减负）、主备双实例故障切换
 
 ---
 
@@ -273,11 +279,13 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 
 | 字段 | 说明 |
 |------|------|
-| `serverURL` | Server 接收地址 |
+| `mode` | 运行模式：`collect`(默认,采集) \| `edge`(网闸区A边界代理) \| `hub`(网闸区B边界代理)；详见「网闸代理部署」 |
+| `serverURL` | Server 接收地址（collect 模式）；Edge 模式填 Hub 的 HTTPS 地址；Hub 模式填真实 Server 地址 |
 | `node` | 节点名（默认 hostname） |
 | `group` | 分组 |
 | `secret` | 接入授权密钥（与 Server 一致） |
-| `interval` | 采集间隔（秒） |
+| `interval` | 采集间隔（秒）；代理模式下用于自监控指标上报周期 |
+| `proxy` | 代理模式配置（mode=edge/hub 时生效），见下表 |
 | `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / kafka / docker / rocketmq / k8s / port） |
 | `redisInstances` | Redis 实例连接配置列表（数组，密码仅存本地不上报） |
 | `mysqlInstances` | MySQL 实例连接配置列表（数组，密码仅存本地不上报） |
@@ -288,6 +296,19 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `rocketmqInstances` | RocketMQ 实例连接配置列表（数组） |
 | `k8sInstances` | Kubernetes 集群连接配置列表（数组，kubeconfig/token 仅存本地不上报） |
 | `portChecks` | TCP 端口存活检测列表（数组），如 `["80","443","3306"]`，开启 `collectors.port` 后生效 |
+
+**代理模式配置（`proxy` 字段，mode=edge/hub 时生效）**
+
+| 字段 | 模式 | 说明 |
+|------|------|------|
+| `listen` | edge/hub | 监听地址（Edge 默认 `:18080` 本地汇聚口；Hub 默认 `:8443` TLS 监听口） |
+| `hubAddr` | edge | Hub 地址 `host:port`（如 `10.0.0.2:8443`），Edge 主动拨出 TLS 隧道至此 |
+| `serverURL` | hub | 真实 Server 地址（如 `http://127.0.0.1:8080`），Hub 转发请求至此 |
+| `tlsCert` | edge/hub | TLS 证书文件路径（mTLS 双向校验） |
+| `tlsKey` | edge/hub | TLS 私钥文件路径 |
+| `tlsCa` | edge/hub | CA 证书文件路径（用于校验对端证书） |
+| `bufferSize` | edge | 断连期间内存缓冲条数，默认 1000；满时丢弃最旧请求并计数 |
+| `poolSize` | edge | 到 Hub 的并发隧道连接数，默认 2 |
 
 #### 通过命令一键配置（推荐）
 
@@ -626,6 +647,175 @@ k8sInstances:
 
 ---
 
+## 网闸代理部署
+
+当两个网区经网闸隔离、仅有有限开放端口时，采集 Agent 无法直接访问 Server。此时在网闸两侧各部署一个代理模式 Agent（Edge/Hub）构成受控 TLS 隧道，即可穿透网闸。
+
+### 架构
+
+```
+区 A（被监控区）                          网闸                区 B（监控中心区）
+┌───────────────────────────┐            ┌────────┐      ┌──────────────────────────────┐
+│ 采集 Agent（mode=collect） │            │ 仅开放 │      │  Hub Proxy（mode=hub）         │
+│   └─上报→ Edge Proxy(本地) │──TLS隧道──▶│ TCP    │───▶│   └─转发→ Server(HTTP)          │
+│  Edge Proxy（mode=edge）   │◀─回程通道──│ 8443   │◀───│                                │
+└───────────────────────────┘            └────────┘      └──────────────────────────────┘
+```
+
+- **采集 Agent**：部署在被监控节点，`serverURL` 指向区 A 的 Edge 本地口（如 `http://127.0.0.1:18080`）
+- **Edge Proxy**：区 A 边界，监听本地口汇聚采集 Agent 上报，主动拨出 TLS 隧道到 Hub
+- **Hub Proxy**：区 B 边界，TLS 监听口接收 Edge 隧道，还原请求转发至真实 Server
+- **Server**：无感知，收到 Hub 转发的请求与直连无异，复用现有 `/api/v1/report` 等接口，**无需改造**
+
+### 端口规划与网闸策略
+
+| 项目 | 规划 |
+|------|------|
+| 网闸开放端口 | 仅 1 个 `TCP 8443`（隧道端口） |
+| 协议 | 隧道外层 TLS 1.3（mTLS 双向校验）；内层复用现有 HTTP |
+| 源/目的约束 | 源=区A Edge IP，目的=区B Hub IP，端口 8443，其他一律拒绝 |
+| 本地端口 | Edge 本地汇聚口 `18080`（仅区 A 内可达）；Hub 转发至 Server `8080` |
+| 安全 | mTLS 双向证书校验，网闸即使放行也看不到业务数据；沿用 `X-Agent-Secret` 鉴权 |
+
+### Web 引导部署（推荐）
+
+登录后进入「Agent 部署」页（`/setup`）：
+
+1. **直连场景**：填写节点名/分组/密钥/采集间隔，自动生成 `curl|bash` 一行命令，一键复制执行；点击「连通性自检」验证密钥
+2. **网闸场景**：展开折叠区，分别填写 Hub 与 Edge 的监听地址/TLS 证书路径等参数，自动生成：
+   - Hub 安装命令 + agent.yaml 模板
+   - Edge 安装命令 + agent.yaml 模板
+   - 部署步骤说明
+3. **代理状态**：页面底部表格展示已上线代理节点的活跃连接数/累计转发/丢弃/重连/缓冲深度
+
+### 手动部署（命令行）
+
+**1. 生成 TLS 证书（网闸两侧共用同一 CA）**
+
+```bash
+# CA
+openssl genrsa -out ca.key 2048
+openssl req -new -x509 -key ca.key -out ca.crt -days 3650 -subj "/CN=nebula-proxy-ca"
+
+# Hub 证书
+openssl genrsa -out hub.key 2048
+openssl req -new -key hub.key -out hub.csr -subj "/CN=hub"
+openssl x509 -req -in hub.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out hub.crt -days 3650
+
+# Edge 证书
+openssl genrsa -out edge.key 2048
+openssl req -new -key edge.key -out edge.csr -subj "/CN=edge"
+openssl x509 -req -in edge.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out edge.crt -days 3650
+```
+
+**2. 区 B 部署 Hub**
+
+```bash
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- \
+  --mode hub --listen :8443 --server http://127.0.0.1:8080 \
+  --tls-cert /etc/monitor-agent/certs/hub.crt \
+  --tls-key /etc/monitor-agent/certs/hub.key \
+  --tls-ca /etc/monitor-agent/certs/ca.crt --yes [--secret <KEY>]
+```
+
+服务名 `monitor-proxy-hub`。
+
+**3. 网闸开放端口**
+
+在网闸配置中开放 `TCP 8443`：源 IP = 区 A 的 Edge 主机 IP，目的 IP = 区 B 的 Hub 主机 IP。
+
+**4. 区 A 部署 Edge**
+
+```bash
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- \
+  --mode edge --listen :18080 --hub-addr <HUB_IP>:8443 \
+  --tls-cert /etc/monitor-agent/certs/edge.crt \
+  --tls-key /etc/monitor-agent/certs/edge.key \
+  --tls-ca /etc/monitor-agent/certs/ca.crt --yes [--secret <KEY>]
+```
+
+服务名 `monitor-proxy-edge`。
+
+**5. 区 A 采集 Agent**
+
+普通采集 Agent 安装时 `--server` 指向 Edge 本地口：
+
+```bash
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- \
+  --server http://<EDGE_IP>:18080 --yes [--secret <KEY>]
+```
+
+### 代理模式 agent.yaml 示例
+
+**Edge（区 A 边界）**
+
+```yaml
+mode: "edge"
+node: "edge-proxy"
+group: "proxy"
+secret: "<KEY>"
+interval: 15
+serverURL: "https://10.0.0.2:8443"   # Hub 地址（用于 Edge 上报自监控指标）
+
+proxy:
+  listen: ":18080"
+  hubAddr: "10.0.0.2:8443"
+  tlsCert: "/etc/monitor-agent/certs/edge.crt"
+  tlsKey: "/etc/monitor-agent/certs/edge.key"
+  tlsCa: "/etc/monitor-agent/certs/ca.crt"
+  bufferSize: 1000
+  poolSize: 2
+```
+
+**Hub（区 B 边界）**
+
+```yaml
+mode: "hub"
+node: "hub-proxy"
+group: "proxy"
+secret: "<KEY>"
+interval: 15
+serverURL: "http://127.0.0.1:8080"   # 真实 Server
+
+proxy:
+  listen: ":8443"
+  tlsCert: "/etc/monitor-agent/certs/hub.crt"
+  tlsKey: "/etc/monitor-agent/certs/hub.key"
+  tlsCa: "/etc/monitor-agent/certs/ca.crt"
+  serverURL: "http://127.0.0.1:8080"
+```
+
+### 自监控指标
+
+代理模式启动后周期上报以下指标（带 `node`/`mode` 标签），可在「Agent 部署」页或主机详情查看：
+
+| 指标 | 说明 |
+|------|------|
+| `proxy_conn_active` | 当前活跃隧道连接数 |
+| `proxy_forward_total` | 累计成功转发的请求数 |
+| `proxy_dropped_total` | 累计丢弃的请求数（缓冲满或超时） |
+| `proxy_reconnect_total` | 累计重连次数 |
+| `proxy_buffer_depth` | 当前缓冲深度（Edge 断连期间） |
+
+### 故障排查
+
+```bash
+# 查看代理服务状态
+systemctl status monitor-proxy-edge
+systemctl status monitor-proxy-hub
+
+# 查看日志（隧道连接/断连/重连/鉴权失败）
+journalctl -u monitor-proxy-edge -f
+journalctl -u monitor-proxy-hub -f
+
+# 常见问题：
+# 1. 隧道连不上：检查网闸端口是否开放、TLS 证书是否由同一 CA 签发
+# 2. 鉴权失败：检查 --secret 是否与 Server agentAuth.secret 一致
+# 3. 数据丢失：调大 bufferSize，或检查网络抖动时长
+```
+
+---
+
 ## API
 
 | 方法 | 路径 | 说明 |
@@ -661,6 +851,9 @@ k8sInstances:
 | GET | `/api/v1/report/download` | 下载报告 HTML |
 | GET | `/api/v1/report/history` | 报告历史列表 |
 | GET/PUT | `/api/v1/maintenance` | 维护窗口查看/设置 |
+| GET | `/api/v1/install-info` | Agent 安装信息（serverURL + 一行命令 + 代理配置模板） |
+| GET | `/api/v1/agent/check` | Agent 接入鉴权预检（走 X-Agent-Secret，不受登录 token 影响） |
+| GET | `/api/v1/proxy/status` | 代理节点状态（Edge/Hub 自监控指标聚合） |
 
 ---
 
@@ -669,7 +862,15 @@ k8sInstances:
 ```
 cmd/{agent,server}        Agent / Server 入口
 internal/                 业务代码（model / agent / server）
+  agent/
+    collector/              各采集器（host / redis / mysql / postgres / nginx / kafka / docker / rocketmq / k8s / port）
+    config/                 Agent 配置（含 mode/ProxyConfig 代理模式字段）
+    proxy/                  代理模式核心包（tunnel/edge/hub/connpool/reconnector/buffer/monitor/tls）
+    reporter/               Agent 上报逻辑
+  server/
+    api/                    REST / WebSocket / 中间件聚合 / 代理状态接口
 web/                      Vue 3 + Vite 前端源码
+  src/components/           SetupView（Agent 部署引导页）+ 各业务页面
 build/                    构建脚本
   cross-compile.sh          交叉编译 Go 二进制 → dist/artifacts/bin/
   build-web.sh              构建前端 → dist/artifacts/web/
@@ -678,7 +879,7 @@ build/                    构建脚本
 deploy/                   安装/部署脚本
   install-tsdb.sh           时序库安装
   install-server.sh         Server 安装
-  agent-install.sh          Agent 安装
+  agent-install.sh          Agent 安装（含 --mode edge/hub 代理模式）
   uninstall.sh              卸载
 dist/                     编译产物（不入库）
   artifacts/                本地与发布用中间产物

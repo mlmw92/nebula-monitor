@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"flag"
@@ -9,11 +10,14 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/nebula/monitor/internal/agent/collector"
 	"github.com/nebula/monitor/internal/agent/config"
+	"github.com/nebula/monitor/internal/agent/proxy"
 	"github.com/nebula/monitor/internal/agent/reporter"
 	"github.com/nebula/monitor/internal/agent/upgrader"
 	"github.com/nebula/monitor/internal/model"
@@ -78,6 +82,12 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
+	// 代理模式（edge/hub）走独立启动路径，不进入采集主循环
+	if cfg.Mode == config.ModeEdge || cfg.Mode == config.ModeHub {
+		runProxy(cfg)
+		return
+	}
+
 	// 写 pid 文件，升级脚本通过它等待 agent 退出
 	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644)
 	defer os.Remove(pidFile)
@@ -104,6 +114,89 @@ func main() {
 
 	for range ticker.C {
 		collectAndReport(coll, rep, cfg)
+	}
+}
+
+// runProxy 启动代理模式（edge/hub），阻塞直至收到 SIGINT/SIGTERM。
+func runProxy(cfg *config.Config) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 信号监听：SIGINT/SIGTERM 优雅退出
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		slog.Info("收到退出信号", "signal", sig)
+		cancel()
+	}()
+
+	switch cfg.Mode {
+	case config.ModeEdge:
+		slog.Info("Agent 启动（Edge 代理模式）", "listen", cfg.Proxy.Listen, "hub", cfg.Proxy.HubAddr, "version", version.Version)
+		edge, err := proxy.NewEdge(proxy.EdgeCfgFromConfig(cfg.Proxy))
+		if err != nil {
+			slog.Error("Edge 初始化失败", "err", err)
+			os.Exit(1)
+		}
+		// 后台周期上报 Edge 自监控指标（复用 reporter）
+		go reportProxyMetrics(cfg, edge)
+		if err := edge.Run(ctx); err != nil {
+			slog.Error("Edge 运行失败", "err", err)
+			os.Exit(1)
+		}
+	case config.ModeHub:
+		slog.Info("Agent 启动（Hub 代理模式）", "listen", cfg.Proxy.Listen, "server", cfg.Proxy.ServerURL, "version", version.Version)
+		hub, err := proxy.NewHub(proxy.HubCfgFromConfig(cfg.Proxy), cfg.Proxy.ServerURL)
+		if err != nil {
+			slog.Error("Hub 初始化失败", "err", err)
+			os.Exit(1)
+		}
+		go reportProxyMetrics(cfg, hub)
+		if err := hub.Run(ctx); err != nil {
+			slog.Error("Hub 运行失败", "err", err)
+			os.Exit(1)
+		}
+	}
+}
+
+// proxyMetricsProvider 由 edge/hub 实现，提供自监控指标快照。
+type proxyMetricsProvider interface {
+	Metrics() proxy.MetricsSnapshot
+}
+
+// reportProxyMetrics 周期上报代理自监控指标到 Server。
+// 上报格式复用现有 /api/v1/report，构造最小 ReportPayload 只含 proxy_* 指标。
+func reportProxyMetrics(cfg *config.Config, p proxyMetricsProvider) {
+	if cfg.ServerURL == "" && cfg.Mode == config.ModeHub {
+		// Hub 的 ServerURL 是真实 Server，可直接上报
+	}
+	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
+	node := cfg.Node
+	if node == "" {
+		node, _ = os.Hostname()
+	}
+	ticker := time.NewTicker(time.Duration(cfg.Interval) * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		m := p.Metrics()
+		metrics := []model.Metric{
+			{Name: "proxy_conn_active", Node: node, Value: float64(m.ConnActive), Timestamp: model.NowMillis()},
+			{Name: "proxy_forward_total", Node: node, Value: float64(m.ForwardTotal), Timestamp: model.NowMillis()},
+			{Name: "proxy_dropped_total", Node: node, Value: float64(m.DroppedTotal), Timestamp: model.NowMillis()},
+			{Name: "proxy_reconnect_total", Node: node, Value: float64(m.ReconnectTotal), Timestamp: model.NowMillis()},
+			{Name: "proxy_buffer_depth", Node: node, Value: float64(m.BufferDepth), Timestamp: model.NowMillis()},
+		}
+		payload := model.ReportPayload{
+			Node:    node,
+			Group:   cfg.Group,
+			Labels:  cfg.Labels,
+			Version: version.Version,
+			Metrics: metrics,
+		}
+		if _, err := rep.ReportFull(payload); err != nil {
+			slog.Debug("代理指标上报失败", "err", err)
+		}
 	}
 }
 

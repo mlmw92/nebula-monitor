@@ -10,8 +10,16 @@ import (
 	"github.com/nebula/monitor/internal/model"
 )
 
+// Agent 运行模式。
+const (
+	ModeCollect = "collect" // 普通采集模式（默认，现状不变）
+	ModeEdge    = "edge"    // 网闸区 A 边界代理：本地监听汇聚采集 Agent 上报，TLS 隧道转发至 Hub
+	ModeHub     = "hub"     // 网闸区 B 边界代理：TLS 监听接收 Edge 隧道，还原请求转发至真实 Server
+)
+
 // Config 是 Agent 运行配置。
 type Config struct {
+	Mode              string                    `yaml:"mode"`              // 运行模式：collect(默认) | edge | hub
 	ServerURL         string                    `yaml:"serverURL"`         // Server 接收地址，如 http://10.0.0.1:8080
 	Node              string                    `yaml:"node"`              // 节点名（默认自动取 hostname）
 	Group             string                    `yaml:"group"`             // 默认分组
@@ -29,6 +37,31 @@ type Config struct {
 	RocketMQInstances []model.RocketMQInstanceConfig `yaml:"rocketmqInstances"` // RocketMQ 实例连接配置
 	K8sInstances      []model.K8sInstanceConfig      `yaml:"k8sInstances"`      // Kubernetes 集群连接配置
 	PortChecks        []string                  `yaml:"portChecks"`         // TCP 端口存活检测列表，如 ["80","443","3306"]
+	Proxy             ProxyConfig               `yaml:"proxy"`              // 代理模式配置，mode=edge/hub 时生效
+}
+
+// ProxyConfig 是 Agent 代理模式（edge/hub）的配置。
+//
+// Edge 模式（区 A 边界代理）：
+//   - Listen:     本地汇聚监听口，采集 Agent 的 serverURL 指向此地址（如 :18080）
+//   - HubAddr:    Hub 的地址 host:port（如 10.0.0.2:8443），Edge 主动拨出 TLS 隧道
+//   - TLSCert/Key/CA: mTLS 双向校验证书
+//   - BufferSize: 断连期间内存缓冲条数，默认 1000
+//   - PoolSize:   到 Hub 的并发隧道连接数，默认 2
+//
+// Hub 模式（区 B 边界代理）：
+//   - Listen:    TLS 监听口，接收 Edge 隧道连接（如 :8443）
+//   - ServerURL: 真实 Server 地址（如 http://127.0.0.1:8080），Hub 转发至此
+//   - TLSCert/Key/CA: mTLS 双向校验证书
+type ProxyConfig struct {
+	Listen     string `yaml:"listen"`     // 监听地址
+	HubAddr    string `yaml:"hubAddr"`    // Edge: Hub 地址 host:port
+	ServerURL  string `yaml:"serverURL"`  // Hub: 真实 Server 地址
+	TLSCert    string `yaml:"tlsCert"`    // TLS 证书文件路径
+	TLSKey     string `yaml:"tlsKey"`     // TLS 私钥文件路径
+	TLSCA      string `yaml:"tlsCa"`      // CA 证书文件路径（mTLS 双向校验）
+	BufferSize int    `yaml:"bufferSize"` // Edge 断连时内存缓冲条数，默认 1000
+	PoolSize   int    `yaml:"poolSize"`   // Edge 到 Hub 的并发隧道连接数，默认 2
 }
 
 // CollectorToggle 控制各采集器是否启用。
@@ -54,6 +87,7 @@ type CollectorToggle struct {
 func Default() *Config {
 	hostname, _ := os.Hostname()
 	return &Config{
+		Mode:      ModeCollect,
 		ServerURL: "http://127.0.0.1:8080",
 		Node:      hostname,
 		Group:     "default",
@@ -61,6 +95,11 @@ func Default() *Config {
 		BatchSize: 200,
 		Collectors: CollectorToggle{
 			CPU: true, Memory: true, Disk: true, Network: true, Process: true, Load: true,
+		},
+		Proxy: ProxyConfig{
+			Listen:     ":18080",
+			BufferSize: 1000,
+			PoolSize:   2,
 		},
 	}
 }
@@ -83,6 +122,26 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 200
+	}
+	// 规范化 Mode：空值/未知值统一回退为 collect，确保向后兼容
+	switch cfg.Mode {
+	case ModeCollect, ModeEdge, ModeHub:
+		// 合法值，保持不变
+	default:
+		cfg.Mode = ModeCollect
+	}
+	// 代理模式默认值补齐
+	if cfg.Proxy.BufferSize <= 0 {
+		cfg.Proxy.BufferSize = 1000
+	}
+	if cfg.Proxy.PoolSize <= 0 {
+		cfg.Proxy.PoolSize = 2
+	}
+	if cfg.Mode == ModeEdge && cfg.Proxy.Listen == "" {
+		cfg.Proxy.Listen = ":18080"
+	}
+	if cfg.Mode == ModeHub && cfg.Proxy.Listen == "" {
+		cfg.Proxy.Listen = ":8443"
 	}
 	return cfg, nil
 }

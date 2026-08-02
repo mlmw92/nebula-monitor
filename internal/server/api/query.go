@@ -175,14 +175,20 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/report/generate", a.handleReportGenerate)
 	mux.HandleFunc("GET /api/v1/report/download", a.handleReportDownload)
 	mux.HandleFunc("GET /api/v1/report/history", a.handleReportHistory)
+
+	// 代理模式状态查询（网闸场景 Edge/Hub 代理连接状态）
+	mux.HandleFunc("GET /api/v1/proxy/status", a.handleProxyStatus)
 }
 
 // handleInstallInfo 返回 Agent 一行安装命令（server 地址取自请求 Host，secret 取自配置）。
+// 同时返回网闸代理场景（edge/hub）的配置模板，供前端引导页生成两侧 agent.yaml。
 func (a *API) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
 	srv := "http://" + r.Host
 	cmd := "curl -fsSL " + srv + "/install/agent-install.sh | bash -s -- --server " + srv
+	secretPart := ""
 	if a.agentAuth.Enabled {
-		cmd += " --secret " + a.agentAuth.Secret
+		secretPart = " --secret " + a.agentAuth.Secret
+		cmd += secretPart
 	}
 	// 注意：不回显明文 agentAuth.secret 字段，避免该接口成为密钥泄露点
 	// （认证关闭时 /api/v1/install-info 虽需登录后方可访问，但最小暴露原则下仅下发安装命令）。
@@ -190,6 +196,18 @@ func (a *API) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
 		"serverURL":   srv,
 		"command":     cmd,
 		"authEnabled": a.agentAuth.Enabled,
+		"secret":      secretPart, // 已格式化为 " --secret xxx" 便于前端拼接代理命令
+		// 代理模式配置模板（前端引导页填充后生成完整命令）
+		"proxyTemplates": map[string]interface{}{
+			"edge": map[string]interface{}{
+				"command": "curl -fsSL " + srv + "/install/agent-install.sh | bash -s -- --mode edge --listen :18080 --hub-addr <HUB_IP>:8443 --tls-cert /path/edge.crt --tls-key /path/edge.key --tls-ca /path/ca.crt" + secretPart,
+				"config":  "mode: \"edge\"\nproxy:\n  listen: \":18080\"\n  hubAddr: \"<HUB_IP>:8443\"\n  tlsCert: \"/path/edge.crt\"\n  tlsKey: \"/path/edge.key\"\n  tlsCa: \"/path/ca.crt\"\n  bufferSize: 1000\n  poolSize: 2\n",
+			},
+			"hub": map[string]interface{}{
+				"command": "curl -fsSL " + srv + "/install/agent-install.sh | bash -s -- --mode hub --listen :8443 --server " + srv + " --tls-cert /path/hub.crt --tls-key /path/hub.key --tls-ca /path/ca.crt" + secretPart,
+				"config":  "mode: \"hub\"\nserverURL: \"" + srv + "\"\nproxy:\n  listen: \":8443\"\n  tlsCert: \"/path/hub.crt\"\n  tlsKey: \"/path/hub.key\"\n  tlsCa: \"/path/ca.crt\"\n",
+			},
+		},
 	})
 }
 
