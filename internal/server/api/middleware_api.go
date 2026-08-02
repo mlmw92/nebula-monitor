@@ -352,15 +352,19 @@ func (a *API) handleKafkaInstances(w http.ResponseWriter, r *http.Request) {
 		}
 		key := node + "|" + instance
 		if _, exists := instances[key]; !exists {
-			ri := &kafkaInstanceInfo{
-				Node:     node,
-				Instance: instance,
-				Name:     s.Labels["name"],
-				Role:     s.Labels["role"],
-				Version:  s.Labels["version"],
-				Group:    s.Labels["group"],
-				Up:       s.Points[len(s.Points)-1].Value > 0,
-			}
+		name := s.Labels["name"]
+		if name == "" {
+			name = s.Labels["group"]
+		}
+		ri := &kafkaInstanceInfo{
+			Node:     node,
+			Instance: instance,
+			Name:     name,
+			Role:     s.Labels["role"],
+			Version:  s.Labels["version"],
+			Group:    s.Labels["group"],
+			Up:       s.Points[len(s.Points)-1].Value > 0,
+		}
 			instances[key] = ri
 			keys = append(keys, key)
 		}

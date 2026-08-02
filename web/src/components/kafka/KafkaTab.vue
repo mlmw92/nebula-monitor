@@ -15,12 +15,24 @@
 
     <template v-if="instances.length > 0">
       <div class="kpi-row">
-        <KpiCard label="实例总数" :value="stats.total" tone="total" />
-        <KpiCard label="在线实例" :value="stats.up" tone="up" />
-        <KpiCard label="离线实例" :value="stats.down" tone="down" />
-        <KpiCard label="总 Broker 数" :value="stats.totalBrokers" tone="cluster" />
-        <KpiCard label="总 Topic 数" :value="stats.totalTopics" tone="ops" />
-        <KpiCard label="总消费延迟" :value="formatNum(stats.totalLag)" tone="alert" />
+        <KpiCard label="实例总数" :value="stats.total" tone="total">
+          <template #icon><el-icon :size="20"><Grid /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="在线实例" :value="stats.up" tone="up">
+          <template #icon><el-icon :size="20"><CircleCheck /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="离线实例" :value="stats.down" tone="down">
+          <template #icon><el-icon :size="20"><CircleClose /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="总 Broker 数" :value="stats.totalBrokers" tone="cluster">
+          <template #icon><el-icon :size="20"><OfficeBuilding /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="总 Topic 数" :value="stats.totalTopics" tone="ops">
+          <template #icon><el-icon :size="20"><Document /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="总消费延迟" :value="formatNum(stats.totalLag)" tone="alert">
+          <template #icon><el-icon :size="20"><Bell /></el-icon></template>
+        </KpiCard>
       </div>
 
       <div class="chart-section glass">
@@ -32,8 +44,8 @@
           </div>
           <div class="topo-grid">
             <div v-for="i in instances" :key="i.instance" class="rel-node rel-standalone" :class="{'is-down': !i.up}" @click="openDetail(i)">
-              <div class="rel-node-name" :title="i.instance">{{ i.name || i.instance }}</div>
-              <div class="rel-node-meta"><span :class="['dot', i.up ? 'up' : 'down']"></span>{{ i.up ? '在线' : '离线' }}<span class="dim">·</span>{{ i.instance }}</div>
+              <div class="rel-node-name" :title="i.name || i.instance">{{ i.name || i.group || i.instance }}</div>
+              <div class="rel-node-meta"><span :class="['dot', i.up ? 'up' : 'down']"></span>{{ i.up ? '在线' : '离线' }}<span class="dim">·</span><span class="mono">{{ i.instance }}</span></div>
               <div class="rel-node-meta" v-if="i.role"><span>角色：{{ i.role }}</span></div>
             </div>
           </div>
@@ -43,21 +55,21 @@
       <div class="mw-list glass">
         <div class="mw-list-title">实例列表</div>
         <el-table :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
-          <el-table-column prop="instance" label="Broker 地址" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="name" label="名称" min-width="100" show-overflow-tooltip />
-          <el-table-column prop="role" label="角色" width="80">
+          <el-table-column prop="instance" label="Broker 地址" width="140" show-overflow-tooltip />
+          <el-table-column prop="name" label="名称" width="90" show-overflow-tooltip />
+          <el-table-column prop="role" label="角色" width="65">
             <template #default="{ row }"><MwRoleTag :role="row.role" /></template>
           </el-table-column>
-          <el-table-column prop="version" label="版本" width="100" />
-          <el-table-column label="状态" width="90">
+          <el-table-column prop="version" label="版本" width="110" show-overflow-tooltip />
+          <el-table-column label="状态" width="75">
             <template #default="{ row }"><MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="row.up ? '正常' : '离线'" /></template>
           </el-table-column>
-          <el-table-column prop="brokerCount" label="Broker 数" width="90" sortable />
-          <el-table-column prop="topicCount" label="Topic 数" width="90" sortable />
-          <el-table-column prop="partitionCount" label="分区数" width="80" sortable />
-          <el-table-column prop="underReplicatedPartitions" label="未复制分区" width="110" sortable />
-          <el-table-column prop="consumerGroupCount" label="消费组" width="90" sortable />
-          <el-table-column prop="consumerLag" label="消费延迟" width="100" sortable />
+          <el-table-column prop="brokerCount" label="Broker 数" width="80" sortable />
+          <el-table-column prop="topicCount" label="Topic 数" width="80" sortable />
+          <el-table-column prop="partitionCount" label="分区数" width="75" sortable />
+          <el-table-column prop="underReplicatedPartitions" label="未复制分区" width="100" sortable />
+          <el-table-column prop="consumerGroupCount" label="消费组" width="75" sortable />
+          <el-table-column prop="consumerLag" label="消费延迟" width="90" sortable />
         </el-table>
         <div class="pager">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="sortedInstances.length" :page-size="pageSize" :current-page="currentPage" :page-sizes="[10,20,50,100]" @current-change="v => currentPage = v" @size-change="v => { pageSize = v; currentPage = 1 }" />
@@ -212,6 +224,12 @@ onMounted(load)
 .chart-box { width: 100%; height: 300px; }
 
 /* 实例拓扑 */
+.topo-group { margin-bottom: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.02); }
+.topo-group:last-child { margin-bottom: 0; }
+.topo-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+.topo-group-title { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
+.topo-group-title svg { width: 18px; height: 18px; color: var(--accent); flex-shrink: 0; }
+.topo-group-header .dim { color: var(--text-muted); font-size: 12px; }
 .topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .rel-node { padding: 12px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--border); background: var(--bg-elev); transition: transform 0.15s, box-shadow 0.15s; }
 .rel-node:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }

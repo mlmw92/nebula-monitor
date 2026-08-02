@@ -80,6 +80,7 @@ func (c *KafkaCollector) collectDirect(cfg model.KafkaInstanceConfig, now int64)
 	labels := map[string]string{
 		"node":     c.node,
 		"instance": normalizeRemoteAddr(cfg.Addr, ""),
+		"name":     cfg.Name,
 		"group":    cfg.Name,
 		"role":     "broker",
 		"version":  cfg.Version,
