@@ -233,25 +233,14 @@
         <div class="cmd-box">
           <div class="cmd-header">
             <span class="cmd-label">bash</span>
-            <el-button size="small" @click="copy(directCommand)">复制</el-button>
+            <el-button size="small" @click="copy(installInfo.command)">复制</el-button>
           </div>
-          <pre class="cmd-text">{{ directCommand }}</pre>
+          <pre class="cmd-text">{{ installInfo.command }}</pre>
         </div>
         <div class="actions">
           <el-button :loading="checking" @click="checkConn">连通性自检</el-button>
           <el-alert v-if="checkResult" :title="checkResult.msg" :type="checkResult.type" show-icon :closable="false" class="check-alert" />
         </div>
-
-        <el-collapse v-model="directAdvanced">
-          <el-collapse-item title="高级选项（节点名 / 分组 / 密钥 / 采集间隔）" name="advanced">
-            <div class="form-grid">
-              <div class="form-item"><label>节点名</label><el-input v-model="form.node" placeholder="留空则用 hostname" /></div>
-              <div class="form-item"><label>分组</label><el-input v-model="form.group" placeholder="default" /></div>
-              <div class="form-item"><label>接入密钥</label><el-input v-model="form.secret" type="password" show-password placeholder="Server 启用 agentAuth 时必填" /></div>
-              <div class="form-item"><label>采集间隔(秒)</label><el-input-number v-model="form.interval" :min="5" :max="300" controls-position="right" /></div>
-            </div>
-          </el-collapse-item>
-        </el-collapse>
       </div>
 
       <!-- 网闸代理场景 -->
@@ -382,16 +371,8 @@ const nameInput = ref('')
 const nameTarget = ref('')
 
 // ===== 添加主机：部署场景与安装信息 =====
-const installInfo = ref({ serverURL: '', authEnabled: false, secret: '' })
+const installInfo = ref({ serverURL: '', authEnabled: false, secret: '', command: '' })
 const deployScene = ref('direct') // direct | proxy
-
-// 直连场景表单
-const form = reactive({
-  node: '',
-  group: 'default',
-  secret: '',
-  interval: 15,
-})
 
 // 网闸代理：Hub / Edge 表单
 const hubForm = reactive({
@@ -414,18 +395,9 @@ const edgeForm = reactive({
 // 连通性自检
 const checking = ref(false)
 const checkResult = ref(null)
-const directAdvanced = ref('') // 直连高级选项折叠面板，默认收起
 
-// 直连安装命令
-const directCommand = computed(() => {
-  const srv = installInfo.value.serverURL || 'http://<SERVER>:8080'
-  let cmd = `curl -fsSL ${srv}/install/agent-install.sh | bash -s -- --server ${srv}`
-  if (form.node) cmd += ` --node ${form.node}`
-  if (form.group) cmd += ` --group ${form.group}`
-  if (form.interval && form.interval !== 15) cmd += ` --interval ${form.interval}`
-  if (installInfo.value.authEnabled && form.secret) cmd += ` --secret ${form.secret}`
-  return cmd
-})
+// 服务端密钥（安装 Server 时确定）：直连命令已由后端拼接；网闸命令/YAML 复用此值
+const serverSecret = computed(() => (installInfo.value.secret || '').replace(/^ --secret /, '').trim())
 
 // Hub 安装命令
 const hubCommand = computed(() => {
@@ -433,7 +405,7 @@ const hubCommand = computed(() => {
   let cmd = `curl -fsSL ${srv}/install/agent-install.sh | bash -s -- --mode hub --listen ${hubForm.listen} --server ${hubForm.server}`
   cmd += ` --tls-cert ${hubForm.tlsCert} --tls-key ${hubForm.tlsKey} --tls-ca ${hubForm.tlsCa}`
   cmd += ' --yes'
-  if (installInfo.value.authEnabled && form.secret) cmd += ` --secret ${form.secret}`
+  if (installInfo.value.authEnabled) cmd += installInfo.value.secret
   return cmd
 })
 
@@ -442,7 +414,7 @@ const hubYaml = computed(() => {
   return `mode: "hub"
 node: "hub-proxy"
 group: "proxy"
-secret: "${form.secret}"
+secret: "${serverSecret.value}"
 interval: 15
 serverURL: "${hubForm.server}"
 
@@ -462,7 +434,7 @@ const edgeCommand = computed(() => {
   cmd += ` --tls-cert ${edgeForm.tlsCert} --tls-key ${edgeForm.tlsKey} --tls-ca ${edgeForm.tlsCa}`
   cmd += ` --buffer-size ${edgeForm.bufferSize} --pool-size ${edgeForm.poolSize}`
   cmd += ' --yes'
-  if (installInfo.value.authEnabled && form.secret) cmd += ` --secret ${form.secret}`
+  if (installInfo.value.authEnabled) cmd += installInfo.value.secret
   return cmd
 })
 
@@ -471,7 +443,7 @@ const edgeYaml = computed(() => {
   return `mode: "edge"
 node: "edge-proxy"
 group: "proxy"
-secret: "${form.secret}"
+secret: "${serverSecret.value}"
 interval: 15
 serverURL: "https://${edgeForm.hubAddr}"
 
