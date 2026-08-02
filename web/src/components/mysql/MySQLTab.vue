@@ -325,7 +325,7 @@ const topologyGroups = computed(() => {
   const groupBy = (list) => {
     const map = {}
     list.forEach((i) => {
-      const g = i.group || i.name || 'default'
+      const g = i.group || i.name || i.instance
       ;(map[g] = map[g] || []).push(i)
     })
     return Object.keys(map).map((name) => {

@@ -843,11 +843,11 @@ function handleSelectionChange(val) {
 
 async function batchUpgrade() {
   if (selectedRows.value.length === 0) return
-  const needUpgrade = selectedRows.value.filter((r) => needUpgrade(r))
+  const rowsToUpgrade = selectedRows.value.filter((r) => needUpgrade(r))
   const offline = selectedRows.value.filter((r) => r.status !== 'online')
   const tips = []
-  if (needUpgrade.length < selectedRows.value.length) {
-    tips.push('已选中 ' + selectedRows.value.length + ' 台，其中 ' + (selectedRows.value.length - needUpgrade.length) + ' 台 Agent 版本已与 Server 一致')
+  if (rowsToUpgrade.length < selectedRows.value.length) {
+    tips.push('已选中 ' + selectedRows.value.length + ' 台，其中 ' + (selectedRows.value.length - rowsToUpgrade.length) + ' 台 Agent 版本已与 Server 一致')
   }
   if (offline.length > 0) {
     tips.push(offline.length + ' 台处于离线状态，升级指令将在其下次上线心跳时执行')

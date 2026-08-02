@@ -16,12 +16,24 @@
 
     <template v-if="instances.length > 0">
       <div class="kpi-row">
-        <KpiCard label="实例总数" :value="stats.total" tone="total" />
-        <KpiCard label="在线实例" :value="stats.up" tone="up" />
-        <KpiCard label="离线实例" :value="stats.down" tone="down" />
-        <KpiCard label="总连接数" :value="formatNum(stats.totalConnections)" tone="conn" />
-        <KpiCard label="总事务提交" :value="formatNum(stats.totalCommits)" tone="ops" />
-        <KpiCard label="总死锁数" :value="stats.totalDeadlocks" tone="alert" />
+        <KpiCard label="实例总数" :value="stats.total" tone="total">
+          <template #icon><el-icon :size="20"><Grid /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="在线实例" :value="stats.up" tone="up">
+          <template #icon><el-icon :size="20"><CircleCheck /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="离线实例" :value="stats.down" tone="down">
+          <template #icon><el-icon :size="20"><CircleClose /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="总连接数" :value="formatNum(stats.totalConnections)" tone="conn">
+          <template #icon><el-icon :size="20"><Connection /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="总事务提交" :value="formatNum(stats.totalCommits)" tone="ops">
+          <template #icon><el-icon :size="20"><DataLine /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="总死锁数" :value="stats.totalDeadlocks" tone="alert">
+          <template #icon><el-icon :size="20"><Bell /></el-icon></template>
+        </KpiCard>
       </div>
 
       <div class="chart-section glass">
@@ -104,6 +116,7 @@ import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
 import MwStatusDot from '../mw/MwStatusDot.vue'
 import MwRoleTag from '../mw/MwRoleTag.vue'
+import { Grid, CircleCheck, CircleClose, Connection, DataLine, Bell } from '@element-plus/icons-vue'
 
 const loading = ref(true)
 const instances = ref([])

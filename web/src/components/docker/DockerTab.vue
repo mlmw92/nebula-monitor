@@ -88,22 +88,24 @@
       </div>
     </template>
 
-    <el-drawer v-model="drawerVisible" :title="detailTitle" size="50%" :destroy-on-close="true">
+    <el-drawer v-model="drawerVisible" :title="detailTitle" size="50%" :destroy-on-close="true" @opened="onDrawerOpened">
       <div v-if="selected" class="detail-content">
         <div class="detail-meta">
           <div class="meta-item"><span class="meta-label">名称</span>{{ selected.name }}</div>
-          <div class="meta-item"><span class="meta-label">ID</span><span class="mono">{{ selected.id }}</span></div>
+          <div class="meta-item"><span class="meta-label">ID</span><span class="mono">{{ selected.instance }}</span></div>
           <div class="meta-item"><span class="meta-label">主机</span>{{ selected.host }}</div>
-          <div class="meta-item"><span class="meta-label">状态</span>{{ selected.state }}</div>
+          <div class="meta-item"><span class="meta-label">状态</span>{{ dockerStatusText(selected.status) }}</div>
           <div class="meta-item"><span class="meta-label">镜像</span>{{ selected.image }}</div>
         </div>
         <div class="metric-grid">
-          <div class="metric-cell"><div class="mc-label">CPU</div><div class="mc-value">{{ selected.cpuPercent?.toFixed(1) }}%</div></div>
-          <div class="metric-cell"><div class="mc-label">内存</div><div class="mc-value">{{ formatBytes(selected.memoryUsage) }}</div></div>
-          <div class="metric-cell"><div class="mc-label">重启次数</div><div class="mc-value">{{ selected.restartCount }}</div></div>
-          <div class="metric-cell"><div class="mc-label">PID</div><div class="mc-value">{{ selected.pid }}</div></div>
-          <div class="metric-cell"><div class="mc-label">运行时长</div><div class="mc-value">{{ formatUptime(selected.uptime) }}</div></div>
-          <div class="metric-cell"><div class="mc-label">创建时间</div><div class="mc-value">{{ selected.createdAt || '-' }}</div></div>
+          <div class="metric-cell"><div class="mc-label">CPU</div><div class="mc-value">{{ (selected.cpuPercent ?? 0).toFixed(1) }}%</div></div>
+          <div class="metric-cell"><div class="mc-label">内存</div><div class="mc-value">{{ formatBytes(selected.memUsage) }}</div></div>
+          <div class="metric-cell"><div class="mc-label">内存%</div><div class="mc-value">{{ (selected.memPercent ?? 0).toFixed(1) }}%</div></div>
+          <div class="metric-cell"><div class="mc-label">PID</div><div class="mc-value">{{ selected.pidsCurrent ?? '-' }}</div></div>
+          <div class="metric-cell"><div class="mc-label">网络RX</div><div class="mc-value">{{ formatBytes(selected.netRx) }}</div></div>
+          <div class="metric-cell"><div class="mc-label">网络TX</div><div class="mc-value">{{ formatBytes(selected.netTx) }}</div></div>
+          <div class="metric-cell"><div class="mc-label">磁盘读</div><div class="mc-value">{{ formatBytes(selected.diskRead) }}</div></div>
+          <div class="metric-cell"><div class="mc-label">磁盘写</div><div class="mc-value">{{ formatBytes(selected.diskWrite) }}</div></div>
         </div>
         <div class="chart-box" ref="chartRef"></div>
       </div>
@@ -112,7 +114,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick, watch, h } from 'vue'
+import { ref, onMounted, computed, watch, h } from 'vue'
 import * as echarts from 'echarts'
 import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
@@ -192,7 +194,10 @@ async function load() {
 function openDetail(row) {
   selected.value = row
   drawerVisible.value = true
-  nextTick(() => loadTrendChart(row))
+}
+
+function onDrawerOpened() {
+  if (selected.value) loadTrendChart(selected.value)
 }
 
 async function loadTrendChart(row) {
@@ -205,7 +210,7 @@ async function loadTrendChart(row) {
     const cpuData = await http.get(`/api/v1/query/range?node=${row.host}&metric=docker_container_cpu_percent&start=${start}&end=${end}&step=60`)
     const series = []
     if (cpuData.series) for (const s of cpuData.series) {
-      if (s.labels?.id === row.id || s.labels?.name === row.name) series.push({ name: 'CPU%', type: 'line', data: s.points.map(p => [p.timestamp, p.value]), smooth: true, areaStyle: { opacity: 0.2 } })
+      if (s.labels?.instance === row.instance || s.labels?.container_name === row.name) series.push({ name: 'CPU%', type: 'line', data: s.points.map(p => [p.timestamp, p.value]), smooth: true, areaStyle: { opacity: 0.2 } })
     }
     chartInstance.setOption({
       tooltip: { trigger: 'axis' },

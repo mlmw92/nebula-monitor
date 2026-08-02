@@ -80,13 +80,18 @@ func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64)
 	// 规范化实例地址：回环地址（127.0.0.1/localhost 等）替换为 Agent 本机真实 IP，
 	// 保留端口；非回环地址（用户配置的真实 IP/域名）原样保留，与 Redis/Nginx 行为一致。
 	realAddr := normalizeInstanceAddr(cfg.Addr)
+	// 实例别名/分组名：未配置 name 时回退到实例地址，避免分组聚合落入 "default"。
+	labelName := cfg.Name
+	if labelName == "" {
+		labelName = realAddr
+	}
 
 	labels := map[string]string{
 		"node":      c.node,
 		"instance":  realAddr,
 		"topology":  cfg.Topology,
-		"group":     cfg.Name,
-		"name":      cfg.Name,
+		"group":     labelName,
+		"name":      labelName,
 		"version":   vars["version"],
 	}
 	role := "master"
@@ -186,9 +191,14 @@ func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64)
 
 // downInstance 构造一个不可达的实例元信息。
 func (c *MySQLCollector) downInstance(cfg model.MySQLInstanceConfig, role string) model.MySQLInstance {
+	inst := normalizeInstanceAddr(cfg.Addr)
+	labelName := cfg.Name
+	if labelName == "" {
+		labelName = inst
+	}
 	return model.MySQLInstance{
-		Instance: normalizeInstanceAddr(cfg.Addr), Name: cfg.Name, Node: c.node,
-		Role: role, Topology: cfg.Topology, Group: cfg.Name, Up: false,
+		Instance: inst, Name: labelName, Node: c.node,
+		Role: role, Topology: cfg.Topology, Group: labelName, Up: false,
 	}
 }
 
@@ -207,9 +217,14 @@ func (c *MySQLCollector) collectExporter(cfg model.MySQLInstanceConfig, now int6
 		return nil, c.downInstance(cfg, "unknown")
 	}
 	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeInstanceAddr(cfg.Addr), "mysql_", now)
+	inst := normalizeInstanceAddr(cfg.Addr)
+	labelName := cfg.Name
+	if labelName == "" {
+		labelName = inst
+	}
 	mi := model.MySQLInstance{
-		Instance: normalizeInstanceAddr(cfg.Addr), Name: cfg.Name, Node: c.node,
-		Role: "master", Topology: cfg.Topology, Group: cfg.Name, Up: true,
+		Instance: inst, Name: labelName, Node: c.node,
+		Role: "master", Topology: cfg.Topology, Group: labelName, Up: true,
 	}
 	for _, m := range metrics {
 		if m.Name == "mysql_instance_up" && m.Labels != nil {
