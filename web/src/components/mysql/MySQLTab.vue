@@ -60,7 +60,11 @@
                    class="rel-node rel-standalone" :class="{ 'is-down': !i.up }" @click="openDetail(i)">
                 <div class="rel-node-name" :title="i.instance">
                   <span class="role-badge" :class="['primary','master'].includes((i.role||'').toLowerCase()) ? 'role-badge-m' : 'role-badge-s'">{{ ['primary','master'].includes((i.role||'').toLowerCase()) ? 'P' : 'S' }}</span>
-                  {{ i.name || i.instance }}
+                  <span class="mono">{{ i.instance }}</span>
+                </div>
+                <div v-if="i.name && i.name !== i.instance" class="rel-node-meta">
+                  <span class="dim">名称:</span>
+                  <span>{{ i.name }}</span>
                 </div>
                 <div class="rel-node-meta">
                   <span :class="['dot', i.up ? 'up' : 'down']"></span>
@@ -68,7 +72,15 @@
                   <span class="dim">·</span>
                   <span>{{ ['primary','master'].includes((i.role||'').toLowerCase()) ? 'PRIMARY' : ['secondary','slave'].includes((i.role||'').toLowerCase()) ? 'SECONDARY' : (i.role || '—') }}</span>
                 </div>
+                <div v-if="i.up" class="rel-node-meta">
+                  <span>{{ formatNum(i.threadsConnected) }} 连接</span>
+                  <span class="dim">·</span>
+                  <span>{{ formatNum(i.queriesPerSec) }} QPS</span>
+                </div>
               </div>
+            </div>
+            <div class="topo-legend">
+              <span class="topo-legend-item">Group Replication：数据在组内多节点间同步，PRIMARY 故障时由组自动选举新主</span>
             </div>
           </div>
         </template>
@@ -313,7 +325,7 @@ const topologyGroups = computed(() => {
   const groupBy = (list) => {
     const map = {}
     list.forEach((i) => {
-      const g = i.group || 'default'
+      const g = i.group || i.name || 'default'
       ;(map[g] = map[g] || []).push(i)
     })
     return Object.keys(map).map((name) => {
