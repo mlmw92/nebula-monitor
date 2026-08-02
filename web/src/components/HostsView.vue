@@ -252,6 +252,35 @@
           </div>
 
           <div class="drawer-section">
+            <h4 class="section-label">TLS 证书（自签名即可，无需公网 CA）</h4>
+            <p class="section-desc">
+              隧道使用 mTLS 双向校验，证书需提前准备好，但<b>无需向公网 CA 申请</b>——内网自签名证书即可。
+              在任一 Linux 上用 openssl 生成一套 CA + 两套证书，分别放到 Hub / Edge 主机的
+              <code>/etc/monitor-agent/certs/</code>。把下方 10.0.0.2 改成 Hub 的 IP、10.0.0.3 改成 Edge 的 IP：
+            </p>
+            <div class="cmd-box">
+              <div class="cmd-header"><span class="cmd-label">bash</span></div>
+              <pre class="cmd-text"># 1) 生成自签名 CA（根证书）
+openssl genrsa -out ca.key 2048
+openssl req -x509 -new -nodes -key ca.key -subj "/CN=nebula-ca" -days 3650 -out ca.crt
+
+# 2) 生成 Hub 证书（SAN 填 Hub 主机 IP）
+openssl req -newkey rsa:2048 -nodes -keyout hub.key -subj "/CN=hub" -out hub.csr
+openssl x509 -req -in hub.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 3650 -out hub.crt \
+  -extfile <(printf "subjectAltName=IP:10.0.0.2")
+
+# 3) 生成 Edge 证书（SAN 填 Edge 主机 IP）
+openssl req -newkey rsa:2048 -nodes -keyout edge.key -subj "/CN=edge" -out edge.csr
+openssl x509 -req -in edge.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 3650 -out edge.crt \
+  -extfile <(printf "subjectAltName=IP:10.0.0.3")
+
+# 4) 分发：
+#    Hub 主机  /etc/monitor-agent/certs/  ← ca.crt + hub.crt + hub.key
+#    Edge 主机 /etc/monitor-agent/certs/  ← ca.crt + edge.crt + edge.key</pre>
+            </div>
+          </div>
+
+          <div class="drawer-section">
             <h4 class="section-label">Hub Proxy（区 B · 监控中心侧）</h4>
             <div class="form-item"><label>TLS 监听地址</label><el-input v-model="hubForm.listen" placeholder=":8443" /></div>
             <div class="form-item"><label>真实 Server 地址</label><el-input v-model="hubForm.server" placeholder="http://127.0.0.1:8080" /></div>
