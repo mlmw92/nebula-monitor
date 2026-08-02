@@ -94,13 +94,20 @@ func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64)
 	if slave != nil {
 		if ioRunning, ok := slave["Slave_IO_Running"]; ok && ioRunning == "Yes" {
 			role = "slave"
-			if masterHost, ok := slave["Master_Host"]; ok {
-				replicaOf = masterHost
-				if masterPort, ok2 := slave["Master_Port"]; ok2 {
-					replicaOf = masterHost + ":" + masterPort
-				}
+		if masterHost, ok := slave["Master_Host"]; ok {
+			replicaOf = masterHost
+			if masterPort, ok2 := slave["Master_Port"]; ok2 {
+				replicaOf = masterHost + ":" + masterPort
 			}
+			replicaOf = normalizeInstanceAddr(replicaOf)
 		}
+		}
+	}
+	// Group Replication：优先使用成员真实角色（cluster 拓扑）。
+	// 非 GR 实例无本机记录或权限不足，queryGroupReplicationRole 返回空，不影响主从判定。
+	if grRole := queryGroupReplicationRole(db); grRole != "" {
+		role = grRole
+		replicaOf = "" // GR 由前端 group 视图呈现，不依赖 replicaOf
 	}
 	labels["role"] = role
 	if replicaOf != "" {
@@ -215,6 +222,23 @@ func (c *MySQLCollector) collectExporter(cfg model.MySQLInstanceConfig, now int6
 		}
 	}
 	return metrics, mi
+}
+
+// queryGroupReplicationRole 查询本节点在 Group Replication 中的角色（PRIMARY/SECONDARY）。
+// 非 GR 实例无本机记录或权限不足，返回空字符串。
+func queryGroupReplicationRole(db *sql.DB) string {
+	rows, err := db.Query(`SELECT MEMBER_ROLE FROM performance_schema.replication_group_members WHERE MEMBER_ID = (SELECT @@server_uuid)`)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var r string
+		if err := rows.Scan(&r); err == nil {
+			return strings.ToLower(strings.TrimSpace(r))
+		}
+	}
+	return ""
 }
 
 // queryGlobalStatus 执行 SHOW GLOBAL STATUS，返回 Variable_name→Value 映射。

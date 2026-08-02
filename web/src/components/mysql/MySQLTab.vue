@@ -59,14 +59,14 @@
               <div v-for="i in grp.nodes" :key="'cn-'+i.instance"
                    class="rel-node rel-standalone" :class="{ 'is-down': !i.up }" @click="openDetail(i)">
                 <div class="rel-node-name" :title="i.instance">
-                  <span class="role-badge role-badge-m">P</span>
+                  <span class="role-badge" :class="['primary','master'].includes((i.role||'').toLowerCase()) ? 'role-badge-m' : 'role-badge-s'">{{ ['primary','master'].includes((i.role||'').toLowerCase()) ? 'P' : 'S' }}</span>
                   {{ i.name || i.instance }}
                 </div>
                 <div class="rel-node-meta">
                   <span :class="['dot', i.up ? 'up' : 'down']"></span>
                   <span>{{ i.up ? '在线' : '离线' }}</span>
                   <span class="dim">·</span>
-                  <span>{{ i.role === 'master' ? 'PRIMARY' : (i.role === 'slave' ? 'SECONDARY' : i.role) }}</span>
+                  <span>{{ ['primary','master'].includes((i.role||'').toLowerCase()) ? 'PRIMARY' : ['secondary','slave'].includes((i.role||'').toLowerCase()) ? 'SECONDARY' : (i.role || '—') }}</span>
                 </div>
               </div>
             </div>
