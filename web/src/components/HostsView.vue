@@ -217,97 +217,98 @@
       </div>
     </div>
 
-    <!-- 添加主机 / 部署 Agent 弹窗 -->
-    <el-dialog v-model="showAddModal" title="添加主机 / 部署 Agent" width="820px">
-      <el-alert type="info" :closable="false" show-icon class="add-tip">
-        按部署场景选择安装方式：常规直连直接执行安装命令；跨网闸隔离场景使用 Edge/Hub 代理隧道。
-      </el-alert>
+    <!-- 添加主机 / 部署 Agent 抽屉 -->
+    <el-drawer v-model="showAddModal" title="添加主机" direction="rtl" size="520px" :close-on-click-modal="false">
+      <div class="drawer-body">
+        <el-alert type="info" :closable="false" show-icon class="add-tip">
+          按部署场景选择安装方式：常规直连直接执行安装命令；跨网闸隔离场景使用 Edge/Hub 代理隧道。
+        </el-alert>
 
-      <el-radio-group v-model="deployScene" size="small" class="scene-tabs">
-        <el-radio-button value="direct">直连场景（采集 Agent → Server）</el-radio-button>
-        <el-radio-button value="proxy">网闸代理（Edge / Hub 隧道）</el-radio-button>
-      </el-radio-group>
+        <el-radio-group v-model="deployScene" size="small" class="scene-tabs">
+          <el-radio-button value="direct">直连场景</el-radio-button>
+          <el-radio-button value="proxy">网闸代理</el-radio-button>
+        </el-radio-group>
 
-      <!-- 直连场景 -->
-      <div v-if="deployScene === 'direct'" class="scene-pane">
-        <div class="cmd-box">
-          <div class="cmd-header">
-            <span class="cmd-label">bash</span>
-            <el-button size="small" @click="copy(installInfo.command)">复制</el-button>
+        <!-- 直连场景 -->
+        <div v-if="deployScene === 'direct'" class="scene-pane">
+          <div class="drawer-section">
+            <h4 class="section-label">安装命令</h4>
+            <p class="section-desc">在目标机器以 root 执行以下命令即可完成安装并自动上报：</p>
+            <div class="cmd-box">
+              <div class="cmd-header"><span class="cmd-label">bash</span><el-button size="small" @click="copy(installInfo.command)">复制</el-button></div>
+              <pre class="cmd-text">{{ installInfo.command }}</pre>
+            </div>
+            <div class="actions">
+              <el-button :loading="checking" @click="checkConn">连通性自检</el-button>
+              <el-alert v-if="checkResult" :title="checkResult.msg" :type="checkResult.type" show-icon :closable="false" class="check-alert" />
+            </div>
           </div>
-          <pre class="cmd-text">{{ installInfo.command }}</pre>
         </div>
-        <div class="actions">
-          <el-button :loading="checking" @click="checkConn">连通性自检</el-button>
-          <el-alert v-if="checkResult" :title="checkResult.msg" :type="checkResult.type" show-icon :closable="false" class="check-alert" />
-        </div>
-      </div>
 
-      <!-- 网闸代理场景 -->
-      <div v-else class="scene-pane">
-        <p class="block-desc">
-          适用于两个网区经网闸隔离、仅有 1 个开放端口的场景。区 B 部署 Hub、区 A 部署 Edge 构成隧道，
-          采集 Agent 的 serverURL 指向 Edge 本地口。网闸仅需开放 TCP 8443（Edge → Hub）。
-        </p>
-        <div class="proxy-grid">
-          <div class="proxy-col">
-            <div class="proxy-col-head hub"><span class="dot"></span><span>Hub Proxy（区 B · 监控中心侧）</span></div>
+        <!-- 网闸代理场景 -->
+        <div v-else class="scene-pane">
+          <div class="drawer-section">
+            <h4 class="section-label">说明</h4>
+            <p class="block-desc">
+              适用于两个网区经网闸隔离、仅有 1 个开放端口的场景。区 B 部署 Hub、区 A 部署 Edge 构成隧道，
+              采集 Agent 的 serverURL 指向 Edge 本地口。网闸仅需开放 TCP 8443（Edge → Hub）。
+            </p>
+          </div>
+
+          <div class="drawer-section">
+            <h4 class="section-label">Hub Proxy（区 B · 监控中心侧）</h4>
             <div class="form-item"><label>TLS 监听地址</label><el-input v-model="hubForm.listen" placeholder=":8443" /></div>
             <div class="form-item"><label>真实 Server 地址</label><el-input v-model="hubForm.server" placeholder="http://127.0.0.1:8080" /></div>
             <div class="form-item"><label>TLS 证书路径</label><el-input v-model="hubForm.tlsCert" placeholder="/etc/monitor-agent/certs/hub.crt" /></div>
             <div class="form-item"><label>TLS 私钥路径</label><el-input v-model="hubForm.tlsKey" placeholder="/etc/monitor-agent/certs/hub.key" /></div>
             <div class="form-item"><label>CA 证书路径</label><el-input v-model="hubForm.tlsCa" placeholder="/etc/monitor-agent/certs/ca.crt" /></div>
           </div>
-          <div class="proxy-col">
-            <div class="proxy-col-head edge"><span class="dot"></span><span>Edge Proxy（区 A · 被监控侧）</span></div>
+
+          <div class="drawer-section">
+            <h4 class="section-label">Edge Proxy（区 A · 被监控侧）</h4>
             <div class="form-item"><label>本地监听地址</label><el-input v-model="edgeForm.listen" placeholder=":18080" /></div>
             <div class="form-item"><label>Hub 地址 host:port</label><el-input v-model="edgeForm.hubAddr" placeholder="10.0.0.2:8443" /></div>
             <div class="form-item"><label>TLS 证书路径</label><el-input v-model="edgeForm.tlsCert" placeholder="/etc/monitor-agent/certs/edge.crt" /></div>
             <div class="form-item"><label>TLS 私钥路径</label><el-input v-model="edgeForm.tlsKey" placeholder="/etc/monitor-agent/certs/edge.key" /></div>
             <div class="form-item"><label>CA 证书路径</label><el-input v-model="edgeForm.tlsCa" placeholder="/etc/monitor-agent/certs/ca.crt" /></div>
-            <div class="form-item"><label>断连缓冲条数</label><el-input-number v-model="edgeForm.bufferSize" :min="100" :max="100000" :step="100" controls-position="right" /></div>
-            <div class="form-item"><label>并发隧道连接数</label><el-input-number v-model="edgeForm.poolSize" :min="1" :max="10" controls-position="right" /></div>
+            <div class="form-row">
+              <div class="form-item"><label>断连缓冲条数</label><el-input-number v-model="edgeForm.bufferSize" :min="100" :max="100000" :step="100" controls-position="right" /></div>
+              <div class="form-item"><label>并发隧道连接数</label><el-input-number v-model="edgeForm.poolSize" :min="1" :max="10" controls-position="right" /></div>
+            </div>
           </div>
-        </div>
 
-        <div class="gen-section">
-          <h4 class="gen-title">Hub 安装命令（区 B 执行）</h4>
-          <div class="cmd-box">
-            <div class="cmd-header"><span class="cmd-label">bash</span><el-button size="small" @click="copy(hubCommand)">复制</el-button></div>
-            <pre class="cmd-text">{{ hubCommand }}</pre>
+          <div class="drawer-section">
+            <h4 class="section-label">Hub 安装命令（区 B 执行）</h4>
+            <div class="cmd-box"><div class="cmd-header"><span class="cmd-label">bash</span><el-button size="small" @click="copy(hubCommand)">复制</el-button></div><pre class="cmd-text">{{ hubCommand }}</pre></div>
           </div>
-          <h4 class="gen-title">Hub agent.yaml 模板</h4>
-          <div class="cmd-box">
-            <div class="cmd-header"><span class="cmd-label">yaml</span><el-button size="small" @click="copy(hubYaml)">复制</el-button></div>
-            <pre class="cmd-text">{{ hubYaml }}</pre>
-          </div>
-          <h4 class="gen-title">Edge 安装命令（区 A 执行）</h4>
-          <div class="cmd-box">
-            <div class="cmd-header"><span class="cmd-label">bash</span><el-button size="small" @click="copy(edgeCommand)">复制</el-button></div>
-            <pre class="cmd-text">{{ edgeCommand }}</pre>
-          </div>
-          <h4 class="gen-title">Edge agent.yaml 模板</h4>
-          <div class="cmd-box">
-            <div class="cmd-header"><span class="cmd-label">yaml</span><el-button size="small" @click="copy(edgeYaml)">复制</el-button></div>
-            <pre class="cmd-text">{{ edgeYaml }}</pre>
-          </div>
-        </div>
 
-        <div class="deploy-steps">
-          <h4 class="gen-title">部署步骤</h4>
-          <ol class="steps-list">
-            <li><b>区 B 部署 Hub</b>：在监控中心侧主机执行 Hub 安装命令，监听 8443 接收隧道连接并转发至真实 Server。</li>
-            <li><b>网闸开放端口</b>：开放 TCP 8443，源 IP = 区 A 的 Edge 主机 IP，目的 IP = 区 B 的 Hub 主机 IP。</li>
-            <li><b>区 A 部署 Edge</b>：在被监控区主机执行 Edge 安装命令，监听本地 18080 并通过隧道连到 Hub。</li>
-            <li><b>部署采集 Agent</b>：区 A 的采集 Agent 安装时 <code>--server</code> 指向 Edge 本地口（如 <code>http://&lt;EDGE_IP&gt;:18080</code>）。</li>
-          </ol>
+          <div class="drawer-section">
+            <h4 class="section-label">Hub agent.yaml 模板</h4>
+            <div class="cmd-box"><div class="cmd-header"><span class="cmd-label">yaml</span><el-button size="small" @click="copy(hubYaml)">复制</el-button></div><pre class="cmd-text">{{ hubYaml }}</pre></div>
+          </div>
+
+          <div class="drawer-section">
+            <h4 class="section-label">Edge 安装命令（区 A 执行）</h4>
+            <div class="cmd-box"><div class="cmd-header"><span class="cmd-label">bash</span><el-button size="small" @click="copy(edgeCommand)">复制</el-button></div><pre class="cmd-text">{{ edgeCommand }}</pre></div>
+          </div>
+
+          <div class="drawer-section">
+            <h4 class="section-label">Edge agent.yaml 模板</h4>
+            <div class="cmd-box"><div class="cmd-header"><span class="cmd-label">yaml</span><el-button size="small" @click="copy(edgeYaml)">复制</el-button></div><pre class="cmd-text">{{ edgeYaml }}</pre></div>
+          </div>
+
+          <div class="drawer-section deploy-steps">
+            <h4 class="section-label">部署步骤</h4>
+            <ol class="steps-list">
+              <li><b>区 B 部署 Hub</b>：在监控中心侧主机执行 Hub 安装命令，监听 8443 接收隧道连接并转发至真实 Server。</li>
+              <li><b>网闸开放端口</b>：开放 TCP 8443，源 IP = 区 A 的 Edge 主机 IP，目的 IP = 区 B 的 Hub 主机 IP。</li>
+              <li><b>区 A 部署 Edge</b>：在被监控区主机执行 Edge 安装命令，监听本地 18080 并通过隧道连到 Hub。</li>
+              <li><b>部署采集 Agent</b>：区 A 的采集 Agent 安装时 <code>--server</code> 指向 Edge 本地口（如 <code>http://&lt;EDGE_IP&gt;:18080</code>）。</li>
+            </ol>
+          </div>
         </div>
       </div>
-
-      <template #footer>
-        <el-button @click="showAddModal = false">关闭</el-button>
-      </template>
-    </el-dialog>
+    </el-drawer>
 
     <!-- 分组管理弹窗 -->
     <GroupManage
@@ -1103,24 +1104,55 @@ defineExpose({ reload: load })
   gap: 8px;
 }
 
-/* 添加主机：场景化弹窗 */
+/* ===== 添加主机 Drawer ===== */
+.drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
 .add-tip {
-  margin-bottom: 14px;
+  margin-bottom: 2px;
 }
 .scene-tabs {
-  margin-bottom: 14px;
+  margin-bottom: 2px;
   display: flex;
   gap: 8px;
 }
 .scene-pane {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
-.form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px 16px;
+.drawer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.section-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+  position: relative;
+  padding-left: 10px;
+}
+.section-label::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+.section-desc {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-muted);
+  margin: 0;
 }
 .form-item {
   display: flex;
@@ -1130,6 +1162,11 @@ defineExpose({ reload: load })
 .form-item label {
   font-size: 12px;
   color: var(--text-dim);
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 .actions {
   display: flex;
@@ -1141,7 +1178,7 @@ defineExpose({ reload: load })
   margin: 0;
 }
 .block-desc {
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.7;
   color: var(--text-dim);
   background: rgba(255, 255, 255, 0.03);
@@ -1150,72 +1187,32 @@ defineExpose({ reload: load })
   padding: 10px 14px;
   margin: 0;
 }
-.proxy-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-.proxy-col {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.proxy-col-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 13px;
-  margin-bottom: 2px;
-}
-.proxy-col-head .dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  display: inline-block;
-}
-.proxy-col-head.hub .dot {
-  background: #22c55e;
-}
-.proxy-col-head.edge .dot {
-  background: #38bdf8;
-}
-.gen-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.gen-title {
-  margin: 6px 0 0;
-  font-size: 13px;
-  color: var(--text-dim);
-  font-weight: 600;
-}
 .deploy-steps {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
-  padding: 12px 16px;
+  padding: 12px 14px;
 }
 .steps-list {
-  margin: 8px 0 0;
-  padding-left: 20px;
+  margin: 6px 0 0;
+  padding-left: 18px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  line-height: 1.6;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.7;
   color: var(--text-dim);
 }
 .steps-list code {
   font-family: var(--mono);
   background: rgba(0, 0, 0, 0.3);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 3px;
   color: var(--accent);
+  font-size: 11px;
+}
+.steps-list b {
+  color: var(--text);
 }
 .cmd-box {
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1238,14 +1235,24 @@ defineExpose({ reload: load })
 }
 .cmd-text {
   margin: 0;
-  padding: 12px 14px;
+  padding: 10px 12px;
   font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: 11px;
+  line-height: 1.65;
   color: var(--accent);
   white-space: pre-wrap;
   word-break: break-all;
-  max-height: 240px;
+  max-height: 200px;
   overflow: auto;
+}
+
+/* Drawer 覆盖：标题栏与 body 样式微调 */
+.drawer-body :deep(.el-drawer__header) {
+  margin-bottom: 0;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-body :deep(.el-drawer__body) {
+  padding: 16px 18px;
 }
 </style>
