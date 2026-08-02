@@ -77,9 +77,19 @@ func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64)
 	// 3. SHOW SLAVE STATUS（复制信息）
 	slave, err := querySlaveStatus(db)
 
+	// 从 MySQL 服务器获取真实地址（hostname:port），避免使用 127.0.0.1 等回环地址
+	realAddr := cfg.Addr
+	if host := vars["hostname"]; host != "" {
+		if port := vars["port"]; port != "" {
+			realAddr = host + ":" + port
+		} else {
+			realAddr = host + ":3306"
+		}
+	}
+
 	labels := map[string]string{
 		"node":      c.node,
-		"instance":  cfg.Addr,
+		"instance":  realAddr,
 		"topology":  cfg.Topology,
 		"group":     cfg.Name,
 		"name":      cfg.Name,
@@ -160,7 +170,7 @@ func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64)
 	out = append(out, mk("mysql_uptime", uptime))
 
 	mi := model.MySQLInstance{
-		Instance:  cfg.Addr,
+		Instance:  realAddr,
 		Name:      cfg.Name,
 		Node:      c.node,
 		Role:      role,
