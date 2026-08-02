@@ -181,7 +181,7 @@ func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64)
 // downInstance 构造一个不可达的实例元信息。
 func (c *MySQLCollector) downInstance(cfg model.MySQLInstanceConfig, role string) model.MySQLInstance {
 	return model.MySQLInstance{
-		Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+		Instance: normalizeInstanceAddr(cfg.Addr), Name: cfg.Name, Node: c.node,
 		Role: role, Topology: cfg.Topology, Group: cfg.Name, Up: false,
 	}
 }
