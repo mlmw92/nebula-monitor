@@ -862,11 +862,12 @@ middleware_config() {
         prompt user "用户名" "root"
         prompt password "密码（仅存本地不上报）" ""
         echo "请选择部署拓扑："
-        choose "拓扑类型" 1 "单机(standalone)" "主从(replication)" "exporter(Prometheus)"
+        choose "拓扑类型" 1 "单机(standalone)" "主从(replication)" "集群(cluster)" "exporter(Prometheus)"
         local topo=""
         case "$CHOICE_VAL" in
           单机*) topo="standalone" ;;
           主从*) topo="replication" ;;
+          集群*) topo="cluster" ;;
           exporter*) topo="standalone" ;;
         esac
         if [[ "$CHOICE_VAL" == exporter* ]]; then

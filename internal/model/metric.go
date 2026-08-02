@@ -91,7 +91,7 @@ type MySQLInstanceConfig struct {
 	Addr        string `yaml:"addr"`        // MySQL 地址 host:port
 	User        string `yaml:"user"`        // 用户名
 	Password    string `yaml:"password"`    // 密码（json:"-"）
-	Topology    string `yaml:"topology"`    // standalone|replication
+	Topology    string `yaml:"topology"`    // standalone|replication|cluster
 	ExporterURL string `yaml:"exporterURL"` // exporter 模式的 /metrics URL（留空走直连）
 }
 
@@ -101,7 +101,7 @@ type MySQLInstance struct {
 	Name      string `json:"name"`      // 实例别名
 	Node      string `json:"node"`      // 采集 Agent 节点名
 	Role      string `json:"role"`      // master|slave
-	Topology  string `json:"topology"`  // standalone|replication
+	Topology  string `json:"topology"`  // standalone|replication|cluster
 	Group     string `json:"group"`     // 分组名
 	ReplicaOf string `json:"replicaOf,omitempty"`
 	Version   string `json:"version"`   // MySQL 版本
