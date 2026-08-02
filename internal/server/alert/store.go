@@ -3,6 +3,8 @@ package alert
 import (
 	"log/slog"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
@@ -38,6 +40,16 @@ func (s *VMAlertStore) Add(e model.AlertEvent) {
 	}
 	if e.GroupKey != "" {
 		labels["group"] = e.GroupKey
+	}
+	if e.Metric != "" {
+		labels["metric"] = e.Metric
+	}
+	if e.Operator != "" {
+		labels["operator"] = e.Operator
+	}
+	labels["threshold"] = strconv.FormatFloat(e.Threshold, 'f', -1, 64)
+	if e.Message != "" {
+		labels["message"] = strings.ReplaceAll(e.Message, "\n", " ")
 	}
 	if err := s.store.Write([]model.Metric{
 		{
@@ -155,5 +167,11 @@ func buildEvent(labels map[string]string, ts int64, value float64) model.AlertEv
 	if labels["group"] != "" {
 		ev.GroupKey = labels["group"]
 	}
+	ev.Metric = labels["metric"]
+	ev.Operator = labels["operator"]
+	if v, err := strconv.ParseFloat(labels["threshold"], 64); err == nil {
+		ev.Threshold = v
+	}
+	ev.Message = labels["message"]
 	return ev
 }
