@@ -413,9 +413,31 @@ function copyText(t) {
   if (!t) return
   const s = String(t)
   if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(s).then(() => ElMessage.success('已复制: ' + s)).catch(() => {})
+    navigator.clipboard.writeText(s)
+      .then(() => ElMessage.success('已复制: ' + s))
+      .catch(() => fallbackCopy(s, '已复制: '))
   } else {
-    ElMessage.info(s)
+    fallbackCopy(s, '已复制: ')
+  }
+}
+
+// 非安全上下文（HTTP）下 navigator.clipboard 不可用，用 execCommand 兜底
+function fallbackCopy(text, prefix) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.top = '-9999px'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.focus()
+  ta.select()
+  try {
+    document.execCommand('copy')
+    ElMessage.success((prefix || '已复制到剪贴板') + text)
+  } catch {
+    ElMessage.error('复制失败，请手动复制')
+  } finally {
+    document.body.removeChild(ta)
   }
 }
 

@@ -779,17 +779,34 @@ async function saveName() {
 }
 
 function copy(text) {
-  navigator.clipboard.writeText(text).then(() => {
-    ElMessage.success('已复制到剪贴板')
-  }).catch(() => {
-    const ta = document.createElement('textarea')
-    ta.value = text
-    document.body.appendChild(ta)
-    ta.select()
+  const s = String(text || '')
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(s)
+      .then(() => ElMessage.success('已复制到剪贴板'))
+      .catch(() => fallbackCopy(s))
+  } else {
+    fallbackCopy(s)
+  }
+}
+
+// 非安全上下文（HTTP）下 navigator.clipboard 不可用，用 execCommand 兜底
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.top = '-9999px'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.focus()
+  ta.select()
+  try {
     document.execCommand('copy')
-    document.body.removeChild(ta)
     ElMessage.success('已复制到剪贴板')
-  })
+  } catch {
+    ElMessage.error('复制失败，请手动复制')
+  } finally {
+    document.body.removeChild(ta)
+  }
 }
 
 async function remove(row) {
