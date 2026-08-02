@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -77,15 +78,9 @@ func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64)
 	// 3. SHOW SLAVE STATUS（复制信息）
 	slave, err := querySlaveStatus(db)
 
-	// 从 MySQL 服务器获取真实地址（hostname:port），避免使用 127.0.0.1 等回环地址
-	realAddr := cfg.Addr
-	if host := vars["hostname"]; host != "" {
-		if port := vars["port"]; port != "" {
-			realAddr = host + ":" + port
-		} else {
-			realAddr = host + ":3306"
-		}
-	}
+	// 规范化实例地址：回环地址（127.0.0.1/localhost 等）替换为 Agent 本机真实 IP，
+	// 保留端口；非回环地址（用户配置的真实 IP/域名）原样保留，与 Redis/Nginx 行为一致。
+	realAddr := normalizeInstanceAddr(cfg.Addr)
 
 	labels := map[string]string{
 		"node":      c.node,
@@ -205,9 +200,9 @@ func (c *MySQLCollector) collectExporter(cfg model.MySQLInstanceConfig, now int6
 		slog.Warn("MySQL exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, c.downInstance(cfg, "unknown")
 	}
-	metrics := parsePrometheusTextWithPrefix(string(body), c.node, cfg.Addr, "mysql_", now)
+	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeInstanceAddr(cfg.Addr), "mysql_", now)
 	mi := model.MySQLInstance{
-		Instance: cfg.Addr, Name: cfg.Name, Node: c.node,
+		Instance: normalizeInstanceAddr(cfg.Addr), Name: cfg.Name, Node: c.node,
 		Role: "master", Topology: cfg.Topology, Group: cfg.Name, Up: true,
 	}
 	for _, m := range metrics {
@@ -310,9 +305,40 @@ func parsePrometheusTextWithPrefix(text, node, instance, prefix string, now int6
 		if _, exists := labels["instance"]; !exists {
 			labels["instance"] = instance
 		}
-		out = append(out, model.Metric{
-			Node: node, Name: name, Labels: labels, Value: value, Timestamp: now,
-		})
+	out = append(out, model.Metric{
+		Node: node, Name: name, Labels: labels, Value: value, Timestamp: now,
+	})
 	}
 	return out
+}
+
+// normalizeInstanceAddr 规范化 MySQL 实例地址：
+//   - host 为回环地址（127.0.0.1/localhost/::1 等）时，替换为 Agent 本机真实 IP，保留端口；
+//   - 非回环地址（用户配置的真实 IP/域名）原样保留，与 Redis/Nginx 行为一致。
+// 这样即使 Agent 用 127.0.0.1 连接本机 MySQL，监控面板也展示可识别的真实地址。
+func normalizeInstanceAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		host, port = addr, "3306"
+	}
+	if port == "" {
+		port = "3306"
+	}
+	if isLoopbackHost(host) {
+		if localIP := primaryIP(); localIP != "" {
+			host = localIP
+		}
+	}
+	return net.JoinHostPort(host, port)
+}
+
+// isLoopbackHost 判断 host 是否为回环地址（localhost 或回环 IP）。
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
