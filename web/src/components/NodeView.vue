@@ -236,6 +236,7 @@ import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from
 import { Connection, Cpu, HomeFilled, ArrowRight, DocumentCopy, Search } from '@element-plus/icons-vue'
 import OsIcon from './OsIcon.vue'
 import { ElMessage } from 'element-plus'
+import { useRoute } from 'vue-router'
 import http from '../api/http'
 import { initChart, areaOption, areaMultiOption, monitorOption, gaugeOption, COLORS, rateShort } from '../charts/echarts'
 
@@ -246,6 +247,7 @@ let alertTimer = null
 
 const nodes = ref([])
 const selected = ref('')
+const route = useRoute()
 const activeTab = ref('overview')
 const procs = ref([])
 const alertEvents = ref([])
@@ -806,7 +808,27 @@ function initRealtimeCharts() {
   updateGauges()
 }
 
+// 路由参数变化（从列表点击不同主机，/node/:name 复用组件实例）时同步切换节点
+watch(
+  () => route.params.name,
+  (name) => {
+    if (!name) return
+    selected.value = name
+    connectWS(name)
+    loadProcesses(name)
+    loadAlerts(name)
+    loadPortStatuses(name)
+    if (activeTab.value === 'monitor') {
+      nextTick(() => {
+        initMonitorCharts()
+        loadMonitor(name)
+      })
+    }
+  }
+)
+
 onMounted(async () => {
+  if (route.params.name) selected.value = route.params.name
   await loadNodes()
   if (selected.value) {
     connectWS(selected.value)
