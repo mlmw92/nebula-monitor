@@ -43,27 +43,27 @@
 
       <div class="mw-list glass">
         <div class="mw-list-title">实例列表</div>
-        <el-table :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
-          <el-table-column prop="instance" label="实例地址" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="name" label="名称" min-width="100" show-overflow-tooltip />
-          <el-table-column prop="database" label="数据库" width="100" />
-          <el-table-column prop="role" label="角色" width="80">
-            <template #default="{ row }"><MwRoleTag :role="row.role" /></template>
-          </el-table-column>
-          <el-table-column prop="version" label="版本" width="100" />
-          <el-table-column label="状态" width="90">
-            <template #default="{ row }"><MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="row.up ? '正常' : '离线'" /></template>
-          </el-table-column>
-          <el-table-column prop="numbackends" label="连接数" width="90" sortable />
-          <el-table-column prop="cacheHitRatio" label="缓存命中率" width="110" sortable>
-            <template #default="{ row }"><span :class="hitRateClass(row.cacheHitRatio)">{{ row.cacheHitRatio ? row.cacheHitRatio.toFixed(1) + '%' : '-' }}</span></template>
-          </el-table-column>
-          <el-table-column prop="deadlocks" label="死锁" width="80" sortable />
-          <el-table-column prop="replicationLag" label="复制延迟(bytes)" width="130" sortable />
-          <el-table-column label="数据库大小" width="100">
-            <template #default="{ row }">{{ formatBytes(row.databaseSize) }}</template>
-          </el-table-column>
-        </el-table>
+    <el-table :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
+      <el-table-column prop="instance" label="实例地址" width="140" show-overflow-tooltip />
+      <el-table-column prop="name" label="名称" width="80" show-overflow-tooltip />
+      <el-table-column prop="database" label="数据库" width="75" show-overflow-tooltip />
+      <el-table-column prop="role" label="角色" width="65">
+        <template #default="{ row }"><MwRoleTag :role="row.role" /></template>
+      </el-table-column>
+      <el-table-column prop="version" label="版本" width="120" show-overflow-tooltip />
+      <el-table-column label="状态" width="75">
+        <template #default="{ row }"><MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="row.up ? '正常' : '离线'" /></template>
+      </el-table-column>
+      <el-table-column prop="numbackends" label="连接数" width="75" sortable />
+      <el-table-column prop="cacheHitRatio" label="缓存命中率" width="90" sortable>
+        <template #default="{ row }"><span :class="hitRateClass(row.cacheHitRatio)">{{ row.cacheHitRatio ? row.cacheHitRatio.toFixed(1) + '%' : '-' }}</span></template>
+      </el-table-column>
+      <el-table-column prop="deadlocks" label="死锁" width="65" sortable />
+      <el-table-column prop="replicationLag" label="复制延迟(bytes)" width="115" sortable />
+      <el-table-column label="数据库大小" width="85">
+        <template #default="{ row }">{{ formatBytes(row.databaseSize) }}</template>
+      </el-table-column>
+    </el-table>
         <div class="pager">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="sortedInstances.length" :page-size="pageSize" :current-page="currentPage" :page-sizes="[10,20,50,100]" @current-change="v => currentPage = v" @size-change="v => { pageSize = v; currentPage = 1 }" />
         </div>
@@ -222,6 +222,12 @@ onMounted(load)
 .chart-box { width: 100%; height: 300px; }
 
 /* 实例拓扑 */
+.topo-group { margin-bottom: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.02); }
+.topo-group:last-child { margin-bottom: 0; }
+.topo-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+.topo-group-title { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
+.topo-group-title svg { width: 18px; height: 18px; color: var(--accent); flex-shrink: 0; }
+.topo-group-header .dim { color: var(--text-muted); font-size: 12px; }
 .topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .rel-node { padding: 12px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--border); background: var(--bg-elev); transition: transform 0.15s, box-shadow 0.15s; }
 .rel-node:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
