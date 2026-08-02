@@ -230,24 +230,6 @@
 
       <!-- 直连场景 -->
       <div v-if="deployScene === 'direct'" class="scene-pane">
-        <div class="form-grid">
-          <div class="form-item">
-            <label>节点名</label>
-            <el-input v-model="form.node" placeholder="留空则用 hostname" />
-          </div>
-          <div class="form-item">
-            <label>分组</label>
-            <el-input v-model="form.group" placeholder="default" />
-          </div>
-          <div class="form-item">
-            <label>接入密钥</label>
-            <el-input v-model="form.secret" type="password" show-password placeholder="Server 启用 agentAuth 时必填" />
-          </div>
-          <div class="form-item">
-            <label>采集间隔(秒)</label>
-            <el-input-number v-model="form.interval" :min="5" :max="300" controls-position="right" />
-          </div>
-        </div>
         <div class="cmd-box">
           <div class="cmd-header">
             <span class="cmd-label">bash</span>
@@ -259,6 +241,17 @@
           <el-button :loading="checking" @click="checkConn">连通性自检</el-button>
           <el-alert v-if="checkResult" :title="checkResult.msg" :type="checkResult.type" show-icon :closable="false" class="check-alert" />
         </div>
+
+        <el-collapse v-model="directAdvanced">
+          <el-collapse-item title="高级选项（节点名 / 分组 / 密钥 / 采集间隔）" name="advanced">
+            <div class="form-grid">
+              <div class="form-item"><label>节点名</label><el-input v-model="form.node" placeholder="留空则用 hostname" /></div>
+              <div class="form-item"><label>分组</label><el-input v-model="form.group" placeholder="default" /></div>
+              <div class="form-item"><label>接入密钥</label><el-input v-model="form.secret" type="password" show-password placeholder="Server 启用 agentAuth 时必填" /></div>
+              <div class="form-item"><label>采集间隔(秒)</label><el-input-number v-model="form.interval" :min="5" :max="300" controls-position="right" /></div>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
       </div>
 
       <!-- 网闸代理场景 -->
@@ -421,6 +414,7 @@ const edgeForm = reactive({
 // 连通性自检
 const checking = ref(false)
 const checkResult = ref(null)
+const directAdvanced = ref('') // 直连高级选项折叠面板，默认收起
 
 // 直连安装命令
 const directCommand = computed(() => {
