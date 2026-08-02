@@ -68,7 +68,7 @@ collectors:
 #     topology: "standalone"
 #     exporterURL: "http://127.0.0.1:9121/metrics"
 
-# MySQL：支持 standalone / replication
+# MySQL：支持 standalone / replication / cluster（cluster 指 Group Replication / InnoDB Cluster，多节点多主，按相同 name 分组）
 # mysqlInstances:
 #   - name: "mysql-master"
 #     addr: "127.0.0.1:3306"

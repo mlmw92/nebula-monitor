@@ -507,6 +507,11 @@ $( [[ -n "$LABELS_YAML" ]] && printf 'labels:\n%s' "$LABELS_YAML" )
 #     user: "monitor"
 #     password: "yourpassword"
 #     topology: "standalone"
+#   - name: "mysql-cluster"        # Group Replication / InnoDB Cluster 多节点，name 相同即归为一组
+#     addr: "127.0.0.1:3306"
+#     user: "monitor"
+#     password: "yourpassword"
+#     topology: "cluster"
 # postgresInstances:
 #   - name: "pg-primary"
 #     addr: "127.0.0.1:5432"

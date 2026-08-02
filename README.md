@@ -70,7 +70,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 | 指标 | 说明 |
 |------|------|
 | Redis | 支持单机/主从/哨兵/集群四种部署模式；Agent 内置直连（RESP 协议）+ Prometheus exporter 双采集模式；实例密码仅存 Agent 本地不上报；上报 redis_instance_up 存活状态 + 20+ 核心指标（连接数/内存/OPS/命中率/键空间/复制延迟/哨兵/集群等） |
-| MySQL | `go-sql-driver/mysql` 直连 `SHOW GLOBAL STATUS` / `SHOW SLAVE STATUS` + Prometheus exporter 双采集模式；密码仅存本地；支持 standalone / replication 拓扑；22 项核心指标（QPS/TPS/连接数/InnoDB 缓冲池/慢查询/主从延迟/复制状态等） |
+| MySQL | `go-sql-driver/mysql` 直连 `SHOW GLOBAL STATUS` / `SHOW SLAVE STATUS` + Prometheus exporter 双采集模式；密码仅存本地；支持 standalone / replication / cluster 拓扑（cluster 指 MySQL Group Replication / InnoDB Cluster，多节点多主，按相同 name 分组展示）；22 项核心指标（QPS/TPS/连接数/InnoDB 缓冲池/慢查询/主从延迟/复制状态等） |
 | PostgreSQL | `lib/pq` 直连 `pg_stat_database` / `pg_stat_replication` 等系统视图 + exporter 双模式；密码仅存本地；20 项指标（连接数/事务提交回滚/缓存命中率/死锁/复制延迟/WAL 写入量等） |
 | Nginx | HTTP GET `stub_status` 页面解析 + VTS exporter 双模式；10 项指标（活跃连接/接受/处理/请求数/读写等待） |
 | Kafka | `sarama` AdminClient 直连（Broker/Topic/ConsumerGroup）+ JMX exporter 双模式；22 项指标（Broker 吞吐/ISR 收缩/Topic 分区/Consumer Lag/请求队列等） |
@@ -420,7 +420,13 @@ mysqlInstances:
     addr: "127.0.0.1:3306"
     user: "monitor"
     password: "yourpassword"      # 仅存本地，不上报 Server
-    topology: "standalone"        # standalone | replication
+    topology: "standalone"        # standalone | replication | cluster
+
+  - name: "mysql-cluster"         # Group Replication / InnoDB Cluster 多节点，name 相同即归为一组
+    addr: "127.0.0.1:3306"
+    user: "monitor"
+    password: "yourpassword"
+    topology: "cluster"
 
   - name: "mysql-exporter"
     addr: "127.0.0.1:3306"
@@ -438,7 +444,7 @@ mysqlInstances:
 | `addr` | 是 | MySQL 地址 `host:port` |
 | `user` | 是 | 采集账号（建议授予 `PROCESS`、`REPLICATION CLIENT` 权限） |
 | `password` | 否 | 密码，`json:"-"` 标记，仅存本地不上报 |
-| `topology` | 是 | `standalone` \| `replication`（replication 额外采集主从延迟/复制状态） |
+| `topology` | 是 | `standalone` \| `replication` \| `cluster`（cluster 指 MySQL Group Replication / InnoDB Cluster，多节点多主；同集群各节点取相同 `name` 即在前端「实例拓扑」以集群分组展示；agent-install.sh 向导暂仅提供 standalone / replication，配置 cluster 需手动编辑 agent.yaml） |
 | `exporterURL` | exporter 选填 | 填写后走 mysqld_exporter 拉取模式 |
 
 ---
