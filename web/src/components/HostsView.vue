@@ -252,15 +252,32 @@
           </div>
 
           <div class="drawer-section">
-            <h4 class="section-label">TLS 证书（自签名即可，无需公网 CA）</h4>
+            <h4 class="section-label">TLS 证书</h4>
             <p class="section-desc">
-              隧道使用 mTLS 双向校验，证书需提前准备好，但<b>无需向公网 CA 申请</b>——内网自签名证书即可。
-              在任一 Linux 上用 openssl 生成一套 CA + 两套证书，分别放到 Hub / Edge 主机的
-              <code>/etc/monitor-agent/certs/</code>。把下方 10.0.0.2 改成 Hub 的 IP、10.0.0.3 改成 Edge 的 IP：
+              隧道使用 mTLS 双向校验。推荐<b>自动生成</b>：安装时加 <code>--tls-auto</code>，
+              脚本会在 <code>/etc/monitor-agent/certs/</code> 生成自签 CA + 节点证书，无需公网 CA、无需手动准备。
             </p>
-            <div class="cmd-box">
-              <div class="cmd-header"><span class="cmd-label">bash</span></div>
-              <pre class="cmd-text"># 1) 生成自签名 CA（根证书）
+            <el-radio-group v-model="tlsAuto" size="small" class="tls-mode">
+              <el-radio-button :value="true">自动生成（推荐）</el-radio-button>
+              <el-radio-button :value="false">手动指定</el-radio-button>
+            </el-radio-group>
+
+            <template v-if="tlsAuto">
+              <p class="section-desc tip">
+                自动模式会在两端各生成证书，<b>需保证对端持有同一 ca.crt</b>：先在一端安装并把
+                <code>/etc/monitor-agent/certs/</code> 整个目录复制到对端，再安装对端（脚本检测到已有 ca.crt 会复用，
+                确保 mTLS 校验通过）。下方安装命令已包含 <code>--tls-auto</code>。
+              </p>
+            </template>
+
+            <template v-else>
+              <p class="section-desc">
+                手动方式：在任一 Linux 用 openssl 生成一套 CA + 两套证书，分别放到 Hub / Edge 主机的
+                <code>/etc/monitor-agent/certs/</code>。把下方 10.0.0.2 改成 Hub 的 IP、10.0.0.3 改成 Edge 的 IP：
+              </p>
+              <div class="cmd-box">
+                <div class="cmd-header"><span class="cmd-label">bash</span></div>
+                <pre class="cmd-text"># 1) 生成自签名 CA（根证书）
 openssl genrsa -out ca.key 2048
 openssl req -x509 -new -nodes -key ca.key -subj "/CN=nebula-ca" -days 3650 -out ca.crt
 
@@ -277,25 +294,30 @@ openssl x509 -req -in edge.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 36
 # 4) 分发：
 #    Hub 主机  /etc/monitor-agent/certs/  ← ca.crt + hub.crt + hub.key
 #    Edge 主机 /etc/monitor-agent/certs/  ← ca.crt + edge.crt + edge.key</pre>
-            </div>
+              </div>
+            </template>
           </div>
 
           <div class="drawer-section">
             <h4 class="section-label">Hub Proxy（区 B · 监控中心侧）</h4>
             <div class="form-item"><label>TLS 监听地址</label><el-input v-model="hubForm.listen" placeholder=":8443" /></div>
             <div class="form-item"><label>真实 Server 地址</label><el-input v-model="hubForm.server" placeholder="http://127.0.0.1:8080" /></div>
-            <div class="form-item"><label>TLS 证书路径</label><el-input v-model="hubForm.tlsCert" placeholder="/etc/monitor-agent/certs/hub.crt" /></div>
-            <div class="form-item"><label>TLS 私钥路径</label><el-input v-model="hubForm.tlsKey" placeholder="/etc/monitor-agent/certs/hub.key" /></div>
-            <div class="form-item"><label>CA 证书路径</label><el-input v-model="hubForm.tlsCa" placeholder="/etc/monitor-agent/certs/ca.crt" /></div>
+            <template v-if="!tlsAuto">
+              <div class="form-item"><label>TLS 证书路径</label><el-input v-model="hubForm.tlsCert" placeholder="/etc/monitor-agent/certs/hub.crt" /></div>
+              <div class="form-item"><label>TLS 私钥路径</label><el-input v-model="hubForm.tlsKey" placeholder="/etc/monitor-agent/certs/hub.key" /></div>
+              <div class="form-item"><label>CA 证书路径</label><el-input v-model="hubForm.tlsCa" placeholder="/etc/monitor-agent/certs/ca.crt" /></div>
+            </template>
           </div>
 
           <div class="drawer-section">
             <h4 class="section-label">Edge Proxy（区 A · 被监控侧）</h4>
             <div class="form-item"><label>本地监听地址</label><el-input v-model="edgeForm.listen" placeholder=":18080" /></div>
             <div class="form-item"><label>Hub 地址 host:port</label><el-input v-model="edgeForm.hubAddr" placeholder="10.0.0.2:8443" /></div>
-            <div class="form-item"><label>TLS 证书路径</label><el-input v-model="edgeForm.tlsCert" placeholder="/etc/monitor-agent/certs/edge.crt" /></div>
-            <div class="form-item"><label>TLS 私钥路径</label><el-input v-model="edgeForm.tlsKey" placeholder="/etc/monitor-agent/certs/edge.key" /></div>
-            <div class="form-item"><label>CA 证书路径</label><el-input v-model="edgeForm.tlsCa" placeholder="/etc/monitor-agent/certs/ca.crt" /></div>
+            <template v-if="!tlsAuto">
+              <div class="form-item"><label>TLS 证书路径</label><el-input v-model="edgeForm.tlsCert" placeholder="/etc/monitor-agent/certs/edge.crt" /></div>
+              <div class="form-item"><label>TLS 私钥路径</label><el-input v-model="edgeForm.tlsKey" placeholder="/etc/monitor-agent/certs/edge.key" /></div>
+              <div class="form-item"><label>CA 证书路径</label><el-input v-model="edgeForm.tlsCa" placeholder="/etc/monitor-agent/certs/ca.crt" /></div>
+            </template>
             <div class="form-row">
               <div class="form-item"><label>断连缓冲条数</label><el-input-number v-model="edgeForm.bufferSize" :min="100" :max="100000" :step="100" controls-position="right" /></div>
               <div class="form-item"><label>并发隧道连接数</label><el-input-number v-model="edgeForm.poolSize" :min="1" :max="10" controls-position="right" /></div>
@@ -399,6 +421,7 @@ const nameTarget = ref('')
 // ===== 添加主机：部署场景与安装信息 =====
 const installInfo = ref({ serverURL: '', authEnabled: false, secret: '', command: '' })
 const deployScene = ref('direct') // direct | proxy
+const tlsAuto = ref(true) // 网闸代理证书自动生成（推荐）
 
 // 网闸代理：Hub / Edge 表单
 const hubForm = reactive({
@@ -425,7 +448,7 @@ const serverSecret = computed(() => (installInfo.value.secret || '').replace(/^ 
 const hubCommand = computed(() => {
   const srv = installInfo.value.serverURL || 'http://<SERVER>:8080'
   let cmd = `curl -fsSL ${srv}/install/agent-install.sh | bash -s -- --mode hub --listen ${hubForm.listen} --server ${hubForm.server}`
-  cmd += ` --tls-cert ${hubForm.tlsCert} --tls-key ${hubForm.tlsKey} --tls-ca ${hubForm.tlsCa}`
+  cmd += tlsAuto.value ? ' --tls-auto' : ` --tls-cert ${hubForm.tlsCert} --tls-key ${hubForm.tlsKey} --tls-ca ${hubForm.tlsCa}`
   cmd += ' --yes'
   if (installInfo.value.authEnabled) cmd += installInfo.value.secret
   return cmd
@@ -453,7 +476,7 @@ proxy:
 const edgeCommand = computed(() => {
   const srv = installInfo.value.serverURL || 'http://<SERVER>:8080'
   let cmd = `curl -fsSL ${srv}/install/agent-install.sh | bash -s -- --mode edge --listen ${edgeForm.listen} --hub-addr ${edgeForm.hubAddr}`
-  cmd += ` --tls-cert ${edgeForm.tlsCert} --tls-key ${edgeForm.tlsKey} --tls-ca ${edgeForm.tlsCa}`
+  cmd += tlsAuto.value ? ' --tls-auto' : ` --tls-cert ${edgeForm.tlsCert} --tls-key ${edgeForm.tlsKey} --tls-ca ${edgeForm.tlsCa}`
   cmd += ` --buffer-size ${edgeForm.bufferSize} --pool-size ${edgeForm.poolSize}`
   cmd += ' --yes'
   if (installInfo.value.authEnabled) cmd += installInfo.value.secret

@@ -46,7 +46,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 - 交叉编译 `build/cross-compile.sh`：linux amd64/arm64/arm 共 6 个二进制
 - 前端构建 `build/build-web.sh`：Vue 3 + Vite，产物部署到 `/etc/monitor-server/web`
 - **网闸代理模式（v1.13.0+）**：Agent 二进制支持 `mode=collect|edge|hub` 三种运行模式；edge/hub 构成网闸双侧 TLS 隧道，mTLS 双向校验，单端口穿透；含连接池、断线重连（指数退避）、内存缓冲（断连期间请求入队、恢复后补发）、自监控指标（`proxy_*`）
-- **Agent 部署引导页**：Web 端 `/setup` 页一键生成直连安装命令（节点名/分组/密钥/采集间隔实时回填 + 一键复制 + 连通性自检）；网闸场景折叠向导生成 Hub/Edge 两侧 agent.yaml 模板与安装命令；底部展示已上线代理节点状态（活跃连接/转发/丢弃/重连/缓冲）
+- **添加主机引导（Web）**：「主机列表 → 添加主机」抽屉，按场景生成安装方式；直连场景自动生成含密钥的一行命令；网闸代理场景支持 TLS 证书「自动生成（--tls-auto）」或手动指定，生成 Hub/Edge 两侧安装命令与 agent.yaml 模板
 
 **告警**
 
@@ -679,18 +679,32 @@ k8sInstances:
 
 ### Web 引导部署（推荐）
 
-登录后进入「Agent 部署」页（`/setup`）：
+登录后进入「主机列表」→「添加主机」抽屉，按场景选择：
 
-1. **直连场景**：填写节点名/分组/密钥/采集间隔，自动生成 `curl|bash` 一行命令，一键复制执行；点击「连通性自检」验证密钥
-2. **网闸场景**：展开折叠区，分别填写 Hub 与 Edge 的监听地址/TLS 证书路径等参数，自动生成：
-   - Hub 安装命令 + agent.yaml 模板
-   - Edge 安装命令 + agent.yaml 模板
-   - 部署步骤说明
-3. **代理状态**：页面底部表格展示已上线代理节点的活跃连接数/累计转发/丢弃/重连/缓冲深度
+1. **直连场景**：自动生成 `curl|bash` 一行命令（已含密钥），一键复制执行
+2. **网闸场景**：切换「网闸代理」，分别填写 Hub / Edge 的监听地址等参数；TLS 证书默认「自动生成（推荐）」，点击后自动生成 Hub/Edge 安装命令与 agent.yaml 模板；也可切到「手动指定」自行填写证书路径
+3. 控制台支持手动部署（见下文），代理节点状态可在「中间件/代理状态」等处查看
 
 ### 手动部署（命令行）
 
 **1. 生成 TLS 证书（网闸两侧共用同一 CA）**
+
+推荐**自动生成**：安装命令加 `--tls-auto`，脚本在 `/etc/monitor-agent/certs/` 生成自签 CA + Hub/Edge 节点证书，无需公网 CA、无需手动准备 openssl 命令。
+
+```bash
+# 区 B Hub 节点（自动生成证书）
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- \
+  --mode hub --listen :8443 --server http://127.0.0.1:8080 --tls-auto --yes [--secret <KEY>]
+
+# 把证书目录复制到对端（保证两端 ca.crt 一致，mTLS 才能校验通过）
+scp -r /etc/monitor-agent/certs/ <区A Edge>:/etc/monitor-agent/certs/
+
+# 区 A Edge 节点（脚本检测到已有 ca.crt 会复用，不再生成新 CA）
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- \
+  --mode edge --listen :18080 --hub-addr <HUB_IP>:8443 --tls-auto --yes [--secret <KEY>]
+```
+
+如需**手动生成**（可选），在任一 Linux 用 openssl 生成一套 CA + 两套证书，分别放到 Hub / Edge 主机的 `/etc/monitor-agent/certs/`：
 
 ```bash
 # CA
@@ -711,6 +725,11 @@ openssl x509 -req -in edge.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out edg
 **2. 区 B 部署 Hub**
 
 ```bash
+# 自动生成证书
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- \
+  --mode hub --listen :8443 --server http://127.0.0.1:8080 --tls-auto --yes [--secret <KEY>]
+
+# 或手动指定证书
 curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- \
   --mode hub --listen :8443 --server http://127.0.0.1:8080 \
   --tls-cert /etc/monitor-agent/certs/hub.crt \
@@ -727,6 +746,11 @@ curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- \
 **4. 区 A 部署 Edge**
 
 ```bash
+# 自动生成证书
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- \
+  --mode edge --listen :18080 --hub-addr <HUB_IP>:8443 --tls-auto --yes [--secret <KEY>]
+
+# 或手动指定证书
 curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- \
   --mode edge --listen :18080 --hub-addr <HUB_IP>:8443 \
   --tls-cert /etc/monitor-agent/certs/edge.crt \

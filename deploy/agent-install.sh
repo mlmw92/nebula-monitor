@@ -37,6 +37,10 @@ TLS_CA=""
 BUFFER_SIZE=""
 POOL_SIZE=""
 
+# TLS 证书：--tls-auto 时自动生成自签 CA + 节点证书；否则需手动指定三件套
+TLS_AUTO=0
+TLS_DAYS=3650
+
 # 采集项开关（默认全开）
 C_CPU=""; C_MEM=""; C_DISK=""; C_NET=""; C_PROC=""; C_LOAD=""
 
@@ -130,9 +134,11 @@ usage() {
   --mode <mode>       运行模式：collect(默认,采集) | edge(网闸区A边界代理) | hub(网闸区B边界代理)
   --hub-addr <h:p>    Edge: Hub 地址 host:port（如 10.0.0.2:8443）
   --listen <addr>     Edge/Hub 监听地址（Edge 默认 :18080，Hub 默认 :8443）
-  --tls-cert <path>   TLS 证书文件路径（mTLS 双向校验）
+  --tls-cert <path>   TLS 证书文件路径（mTLS 双向校验，未指定且用 --tls-auto 时自动生成）
   --tls-key <path>    TLS 私钥文件路径
   --tls-ca <path>     CA 证书文件路径（mTLS 双向校验）
+  --tls-auto          自动生成自签 CA + 节点证书（Hub/Edge 共用同一 CA，部署到 $CONFIG_DIR/certs）
+  --tls-days <n>      自动生成证书有效期天数（默认 3650）
   --buffer-size <n>   Edge 断连时内存缓冲条数（默认 1000）
   --pool-size <n>     Edge 到 Hub 的并发隧道连接数（默认 2）
   -h, --help          显示本帮助
@@ -150,6 +156,9 @@ usage() {
   # 网闸代理模式部署（详见 README 网闸代理章节）：
   bash agent-install.sh --mode hub --listen :8443 --tls-cert /path/hub.crt --tls-key /path/hub.key --tls-ca /path/ca.crt --server http://127.0.0.1:8080 --yes
   bash agent-install.sh --mode edge --listen :18080 --hub-addr 10.0.0.2:8443 --tls-cert /path/edge.crt --tls-key /path/edge.key --tls-ca /path/ca.crt --yes
+  # 自动生成自签证书（无需手工准备）：先在一端执行，再把 /etc/monitor-agent/certs 拷到对端
+  bash agent-install.sh --mode hub --listen :8443 --tls-auto --server http://127.0.0.1:8080 --yes
+  bash agent-install.sh --mode edge --listen :18080 --hub-addr 10.0.0.2:8443 --tls-auto --yes
 EOF
   exit 0
 }
@@ -195,6 +204,8 @@ while [[ $# -gt 0 ]]; do
     --tls-cert) TLS_CERT="$2"; shift 2 ;;
     --tls-key)  TLS_KEY="$2"; shift 2 ;;
     --tls-ca)   TLS_CA="$2"; shift 2 ;;
+    --tls-auto) TLS_AUTO=1; shift ;;
+    --tls-days) TLS_DAYS="$2"; shift 2 ;;
     --buffer-size) BUFFER_SIZE="$2"; shift 2 ;;
     --pool-size)   POOL_SIZE="$2"; shift 2 ;;
     -h|--help)  usage ;;
@@ -1137,13 +1148,101 @@ k8s_config() {
 # ============================ 代理模式安装（edge/hub）============================
 # 网闸场景：mode=edge 在区 A 边界代理，mode=hub 在区 B 边界代理。
 # 代理模式不采集主机指标，仅做隧道转发；配置与 systemd 单元独立生成。
+
+# 自动生成自签证书：CA + Hub 证书 + Edge 证书，三者共用同一 CA（mTLS 双向校验）。
+# 生成的证书统一放在 $CONFIG_DIR/certs/：
+#   ca.crt/ca.key          共享 CA（对端需持有同一 ca.crt 才能通过 mTLS 校验）
+#   hub.crt/hub.key        Hub 节点证书
+#   edge.crt/edge.key      Edge 节点证书
+# 若 ca.crt 已存在（如从对端拷贝过来的 certs 目录），则复用同一 CA，仅补生成本节点证书，
+# 确保跨网闸两端使用同一个 CA 签发的证书链。
+gen_self_signed_certs() {
+  have_cmd openssl || die "未找到 openssl，无法自动生成证书（请安装 openssl 或改用 --tls-cert/--tls-key/--tls-ca 手动指定）"
+  local cert_dir="$CONFIG_DIR/certs"
+  mkdir -p "$cert_dir" || die "创建证书目录失败: $cert_dir"
+  chmod 700 "$cert_dir"
+
+  local ca_crt="$cert_dir/ca.crt" ca_key="$cert_dir/ca.key"
+  local hub_crt="$cert_dir/hub.crt" hub_key="$cert_dir/hub.key"
+  local edge_crt="$cert_dir/edge.crt" edge_key="$cert_dir/edge.key"
+
+  # 1) CA：已存在则复用（保证对端 mTLS 校验一致）
+  if [[ -f "$ca_crt" && -f "$ca_key" ]]; then
+    c_info "复用已有 CA: $ca_crt"
+  else
+    c_info "生成自签 CA（有效期 ${TLS_DAYS} 天）"
+    openssl req -x509 -newkey rsa:2048 -nodes \
+      -keyout "$ca_key" -out "$ca_crt" -days "$TLS_DAYS" \
+      -subj "/CN=nebula-monitor-ca" >/dev/null 2>&1 \
+      || die "生成 CA 失败"
+  fi
+
+  # 2) 计算 Hub 证书 SAN：取监听地址的 host，通配/空/0.0.0.0 时回退本机 IP
+  local hub_host="${PROXY_LISTEN%%:*}"
+  if [[ -z "$hub_host" || "$hub_host" == "0.0.0.0" || "$hub_host" == "*" ]]; then
+    hub_host="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    [[ -n "$hub_host" ]] || hub_host="$(hostname)"
+  fi
+  local node_host
+  node_host="$(hostname)"
+  local node_ip
+  node_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+
+  # 3) Hub 证书（CA 签发，含 IP/DNS SAN）
+  if [[ ! -f "$hub_crt" || ! -f "$hub_key" ]]; then
+    c_info "生成 Hub 证书（SAN: IP=$hub_host, DNS=$node_host）"
+    openssl req -newkey rsa:2048 -nodes \
+      -keyout "$hub_key" -out "$cert_dir/hub.csr" \
+      -subj "/CN=hub.$hub_host" >/dev/null 2>&1 || die "生成 Hub 证书请求失败"
+    cat > "$cert_dir/hub.ext" <<EOF
+subjectAltName = IP:$hub_host,DNS:$node_host
+EOF
+    openssl x509 -req -in "$cert_dir/hub.csr" \
+      -CA "$ca_crt" -CAkey "$ca_key" -CAcreateserial \
+      -out "$hub_crt" -days "$TLS_DAYS" -extfile "$cert_dir/hub.ext" >/dev/null 2>&1 \
+      || die "签发 Hub 证书失败"
+  else
+    c_info "复用已有 Hub 证书: $hub_crt"
+  fi
+
+  # 4) Edge 证书（CA 签发）
+  if [[ ! -f "$edge_crt" || ! -f "$edge_key" ]]; then
+    c_info "生成 Edge 证书（SAN: IP=$node_ip, DNS=$node_host）"
+    openssl req -newkey rsa:2048 -nodes \
+      -keyout "$edge_key" -out "$cert_dir/edge.csr" \
+      -subj "/CN=edge.$node_host" >/dev/null 2>&1 || die "生成 Edge 证书请求失败"
+    cat > "$cert_dir/edge.ext" <<EOF
+subjectAltName = IP:$node_ip,DNS:$node_host
+EOF
+    openssl x509 -req -in "$cert_dir/edge.csr" \
+      -CA "$ca_crt" -CAkey "$ca_key" -CAcreateserial \
+      -out "$edge_crt" -days "$TLS_DAYS" -extfile "$cert_dir/edge.ext" >/dev/null 2>&1 \
+      || die "签发 Edge 证书失败"
+  else
+    c_info "复用已有 Edge 证书: $edge_crt"
+  fi
+
+  # 5) 按当前模式设置 TLS 三件套
+  if [[ "$MODE" == "edge" ]]; then
+    TLS_CERT="$edge_crt"; TLS_KEY="$edge_key"; TLS_CA="$ca_crt"
+  else
+    TLS_CERT="$hub_crt"; TLS_KEY="$hub_key"; TLS_CA="$ca_crt"
+  fi
+  c_ok "证书已就绪: $cert_dir（ca.crt 需与对端一致）"
+  c_warn "部署对端前请将整个目录复制过去: scp -r $cert_dir <对端>:$cert_dir"
+}
+
 proxy_install() {
   echo "============================================================"
   echo " Agent 代理模式安装（mode=$MODE）"
   echo "------------------------------------------------------------"
   echo " 本向导安装 $MODE 代理，生成 agent.yaml 与 systemd 单元。"
   echo " 代理模式不采集主机指标，仅做隧道转发。"
-  echo " TLS 证书需提前准备好（mTLS 双向校验）。"
+  if (( TLS_AUTO )); then
+    echo " TLS 证书将自动生成自签 CA + 节点证书（mTLS 双向校验）。"
+  else
+    echo " TLS 证书需提前准备好（mTLS 双向校验），或用 --tls-auto 自动生成。"
+  fi
   echo "============================================================"
   echo
 
@@ -1180,18 +1279,22 @@ proxy_install() {
     step_server
   fi
 
-  # TLS 证书参数（代理模式必填）
-  if [[ -z "$TLS_CERT" ]]; then
-    if (( ASSUME_YES )); then die "$MODE 模式必须指定 --tls-cert"; fi
-    prompt TLS_CERT "TLS 证书文件路径" ""
-  fi
-  if [[ -z "$TLS_KEY" ]]; then
-    if (( ASSUME_YES )); then die "$MODE 模式必须指定 --tls-key"; fi
-    prompt TLS_KEY "TLS 私钥文件路径" ""
-  fi
-  if [[ -z "$TLS_CA" ]]; then
-    if (( ASSUME_YES )); then die "$MODE 模式必须指定 --tls-ca"; fi
-    prompt TLS_CA "CA 证书文件路径（mTLS 双向校验）" ""
+  # TLS 证书：--tls-auto 自动生成，否则手动指定三件套
+  if (( TLS_AUTO )); then
+    gen_self_signed_certs
+  else
+    if [[ -z "$TLS_CERT" ]]; then
+      if (( ASSUME_YES )); then die "$MODE 模式必须指定 --tls-cert（或用 --tls-auto 自动生成）"; fi
+      prompt TLS_CERT "TLS 证书文件路径" ""
+    fi
+    if [[ -z "$TLS_KEY" ]]; then
+      if (( ASSUME_YES )); then die "$MODE 模式必须指定 --tls-key（或用 --tls-auto 自动生成）"; fi
+      prompt TLS_KEY "TLS 私钥文件路径" ""
+    fi
+    if [[ -z "$TLS_CA" ]]; then
+      if (( ASSUME_YES )); then die "$MODE 模式必须指定 --tls-ca（或用 --tls-auto 自动生成）"; fi
+      prompt TLS_CA "CA 证书文件路径（mTLS 双向校验）" ""
+    fi
   fi
   [[ -f "$TLS_CERT" ]] || die "TLS 证书文件不存在: $TLS_CERT"
   [[ -f "$TLS_KEY" ]] || die "TLS 私钥文件不存在: $TLS_KEY"
@@ -1324,9 +1427,13 @@ proxy_summary() {
   echo " 配置文件    : $CONFIG_DIR/agent.yaml"
   echo " 二进制      : $BIN_DIR/monitor-agent"
   echo " 服务名      : $svc_name"
+  echo " TLS 证书    : $TLS_CERT"
   echo "------------------------------------------------------------"
   echo " 查看状态 : systemctl status $svc_name"
   echo " 查看日志 : journalctl -u $svc_name -f"
+  if (( TLS_AUTO )); then
+    echo " 证书目录 : $CONFIG_DIR/certs（含 ca.crt，部署对端前请先复制此目录）"
+  fi
   if [[ "$MODE" == "edge" ]]; then
     echo " 下一步   : 采集 Agent 的 serverURL 指向本机 $PROXY_LISTEN"
   else
