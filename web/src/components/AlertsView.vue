@@ -101,9 +101,20 @@
       </div>
       <el-table :data="rules" stripe style="width: 100%" empty-text="暂无规则">
         <el-table-column prop="name" label="名称" min-width="140" />
-        <el-table-column label="触发条件" min-width="180">
+        <el-table-column label="类型" width="120">
           <template #default="{ row }">
-            <span class="mono">{{ row.metric }} {{ row.operator }} {{ row.threshold }}</span>
+            <el-tag :type="typeTag(row)" size="small" effect="plain">{{ typeLabel(row) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="触发条件" min-width="200">
+          <template #default="{ row }">
+            <span class="mono">{{ conditionText(row) }}</span>
+            <div v-if="row.quietPeriods && row.quietPeriods.length" class="muted" style="font-size: 12px">
+              静默时段 {{ row.quietPeriods.length }} 个
+            </div>
+            <div v-if="row.escalation && row.escalation.enabled" class="muted" style="font-size: 12px">
+              升级 {{ row.escalation.afterMinutes }}m{{ row.escalation.toSeverity ? '→' + sevLabel(row.escalation.toSeverity) : '' }}
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="级别" width="90">
@@ -136,6 +147,14 @@
             <el-switch
               v-model="row.enabled"
               @change="toggleRule(row)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="静默" width="80" align="center">
+          <template #default="{ row }">
+            <el-switch
+              v-model="row.silenced"
+              @change="toggleSilence(row)"
             />
           </template>
         </el-table-column>
@@ -530,6 +549,72 @@ async function toggleRule(rule) {
   } catch (e) {
     rule.enabled = !rule.enabled
     ElMessage.error('操作失败')
+  }
+}
+// 规则单次静默开关
+async function toggleSilence(rule) {
+  try {
+    await http.post('/api/v1/rules/' + rule.id + '/toggle-silence', { silenced: rule.silenced })
+    ElMessage.success(rule.silenced ? '已静默' : '已取消静默')
+    load()
+  } catch (e) {
+    rule.silenced = !rule.silenced
+    ElMessage.error('操作失败')
+  }
+}
+
+// ===== 规则类型/触发条件的展示辅助 =====
+const TYPE_LABELS = {
+  '': '阈值',
+  node_offline: '主机离线',
+  service_down: '服务离线',
+  role_change: '主从切换',
+  cluster_fault: '集群损坏',
+}
+const SERVICE_LABELS = {
+  mysql: 'MySQL', postgres: 'PostgreSQL', redis: 'Redis', nginx: 'Nginx',
+  kafka: 'Kafka', rocketmq: 'RocketMQ', docker: 'Docker', k8s: 'Kubernetes',
+}
+function typeLabel(row) {
+  return TYPE_LABELS[row.type || ''] || '阈值'
+}
+function typeTag(row) {
+  switch (row.type || '') {
+    case 'node_offline':
+    case 'service_down':
+    case 'cluster_fault':
+      return 'danger'
+    case 'role_change':
+      return 'warning'
+    default:
+      return 'info'
+  }
+}
+function conditionText(row) {
+  switch (row.type || '') {
+    case 'node_offline':
+      return '主机心跳离线 持续 ' + (row.for || '5m')
+    case 'service_down':
+      return (
+        (SERVICE_LABELS[row.service] || row.service) +
+        ' 离线：*_instance_up ' +
+        (row.operator || '<=') +
+        ' ' +
+        (row.threshold != null ? row.threshold : 0.5) +
+        ' 持续 ' + (row.for || '3m')
+      )
+    case 'role_change':
+      return (
+        (SERVICE_LABELS[row.service] || row.service) +
+        ' 主从切换（' + (row.topology || 'cluster') + '）：检测到角色变化'
+      )
+    case 'cluster_fault':
+      return (
+        (SERVICE_LABELS[row.service] || row.service) +
+        ' 集群状态损坏（' + (row.topology || 'cluster') + '）无主/多主，持续 ' + (row.for || '2m')
+      )
+    default:
+      return row.metric + ' ' + (row.operator || '') + ' ' + (row.threshold != null ? row.threshold : '')
   }
 }
 

@@ -312,10 +312,20 @@ const (
 	AlertStateResolved AlertState = "resolved" // 已恢复
 )
 
-// AlertRule 阈值告警规则。
+// 告警规则类型。空字符串与 "threshold" 等价，表示基于指标阈值的传统规则（向后兼容旧数据）。
+const (
+	RuleTypeThreshold   string = ""        // 阈值规则（默认）
+	RuleTypeNodeOffline string = "node_offline" // 主机离线
+	RuleTypeServiceDown string = "service_down" // 中间件/服务离线
+	RuleTypeRoleChange  string = "role_change"  // 数据库主从切换
+	RuleTypeClusterFault string = "cluster_fault" // 集群状态损坏
+)
+
+// AlertRule 告警规则（阈值 + 场景化类型共用）。
 type AlertRule struct {
 	ID          string   `json:"id"`          // 规则 ID
 	Name        string   `json:"name"`        // 规则名称
+	Type        string   `json:"type,omitempty"`        // 规则类型：空/threshold|node_offline|service_down|role_change|cluster_fault
 	Metric      string   `json:"metric"`      // 指标名，如 cpu_usage
 	Operator    string   `json:"operator"`    // 比较运算符: > >= < <= == !=
 	Threshold   float64  `json:"threshold"`   // 阈值
@@ -328,8 +338,31 @@ type AlertRule struct {
 	Enabled     bool     `json:"enabled"`     // 是否启用
 	Silenced    bool     `json:"silenced"`    // 是否静默（临时停止评估触发）
 	SilenceUntil int64   `json:"silenceUntil,omitempty"` // 静默截止时间（毫秒），0 表示不限时
+	// ===== 场景化规则参数 =====
+	Service    string        `json:"service,omitempty"`    // 服务离线/主从切换/集群损坏的中间件类型：mysql|postgres|redis|nginx|kafka|rocketmq|docker|k8s
+	Topology   string        `json:"topology,omitempty"`   // 主从切换/集群损坏的拓扑：cluster|replication
+	QuietPeriods []QuietPeriod `json:"quietPeriods,omitempty"` // 按周重复的静默时段（与单次静默、全局维护窗口构成三层静默）
+	Escalation *Escalation   `json:"escalation,omitempty"` // 告警升级策略（持续未恢复时升级级别/渠道并重复提醒）
 	CreatedAt   int64    `json:"createdAt"`   // 创建时间（毫秒）
 	UpdatedAt   int64    `json:"updatedAt"`   // 更新时间（毫秒）
+}
+
+// QuietPeriod 周期静默时段：在每周指定的星期几、指定的本地时间区间内跳过该规则的评估触发。
+// Days 为空表示每天；取值 0=周日, 1=周一, ..., 6=周六。Start/End 格式 "HH:MM"。
+type QuietPeriod struct {
+	Days  []int  `json:"days"`  // 生效星期，空=每天
+	Start string `json:"start"` // 开始时间 "HH:MM"
+	End   string `json:"end"`   // 结束时间 "HH:MM"
+}
+
+// Escalation 告警升级策略：告警持续未恢复超过 AfterMinutes 后，按升级级别/渠道通知，
+// 并按 RepeatMinutes 间隔重复提醒（仅通知，不落新事件）。Enabled=false 时整体关闭。
+type Escalation struct {
+	Enabled      bool     `json:"enabled"`      // 是否启用升级
+	AfterMinutes int      `json:"afterMinutes"` // 持续未恢复多少分钟后升级（0 表示立即）
+	ToSeverity   Severity `json:"toSeverity"`   // 升级后的告警级别（空表示沿用原级别）
+	RepeatMinutes int     `json:"repeatMinutes"` // 升级后重复提醒间隔（分钟，0=不重复）
+	Channels     []string `json:"channels"`     // 升级后使用的通知渠道（空=沿用规则渠道）
 }
 
 // MaintenanceWindow 维护窗口，启用时全局抑制告警通知（事件仍记录）。

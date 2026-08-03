@@ -41,6 +41,20 @@ func DefaultTemplates() []model.AlertRule {
 		{Name: "内存使用率过高", Metric: "mem_used_percent", Operator: ">", Threshold: 90, For: "5m", Severity: model.SeverityWarning, Scope: "all", Enabled: true},
 		{Name: "磁盘使用率过高", Metric: "disk_used_percent", Operator: ">", Threshold: 85, For: "5m", Severity: model.SeverityCritical, Scope: "all", Enabled: true},
 		{Name: "系统负载过高", Metric: "load1", Operator: ">", Threshold: 8, For: "5m", Severity: model.SeverityWarning, Scope: "all", Enabled: true},
+		// ===== 场景化告警模板 =====
+		{Name: "主机离线", Type: model.RuleTypeNodeOffline, For: "5m", Severity: model.SeverityCritical, Scope: "all", Enabled: true,
+			Escalation: &model.Escalation{Enabled: true, AfterMinutes: 15, ToSeverity: model.SeverityCritical, RepeatMinutes: 30}},
+		{Name: "MySQL 服务离线", Type: model.RuleTypeServiceDown, Service: "mysql", Operator: "<=", Threshold: 0, For: "3m", Severity: model.SeverityCritical, Scope: "all", Enabled: true},
+		{Name: "Redis 服务离线", Type: model.RuleTypeServiceDown, Service: "redis", Operator: "<=", Threshold: 0, For: "3m", Severity: model.SeverityCritical, Scope: "all", Enabled: true},
+		{Name: "Nginx 服务离线", Type: model.RuleTypeServiceDown, Service: "nginx", Operator: "<=", Threshold: 0, For: "3m", Severity: model.SeverityCritical, Scope: "all", Enabled: true},
+		{Name: "Kafka 服务离线", Type: model.RuleTypeServiceDown, Service: "kafka", Operator: "<=", Threshold: 0, For: "3m", Severity: model.SeverityCritical, Scope: "all", Enabled: true},
+		{Name: "Kubernetes 集群离线", Type: model.RuleTypeServiceDown, Service: "k8s", Operator: "<=", Threshold: 0, For: "3m", Severity: model.SeverityCritical, Scope: "all", Enabled: true},
+		{Name: "MySQL 主从切换", Type: model.RuleTypeRoleChange, Service: "mysql", Topology: "cluster", For: "0s", Severity: model.SeverityWarning, Scope: "all", Enabled: true,
+			Escalation: &model.Escalation{Enabled: true, AfterMinutes: 10, ToSeverity: model.SeverityCritical, RepeatMinutes: 0}},
+		{Name: "PostgreSQL 主从切换", Type: model.RuleTypeRoleChange, Service: "postgres", Topology: "replication", For: "0s", Severity: model.SeverityWarning, Scope: "all", Enabled: true},
+		{Name: "MySQL 集群状态损坏", Type: model.RuleTypeClusterFault, Service: "mysql", Topology: "cluster", For: "2m", Severity: model.SeverityCritical, Scope: "all", Enabled: true,
+			Escalation: &model.Escalation{Enabled: true, AfterMinutes: 10, ToSeverity: model.SeverityCritical, RepeatMinutes: 20}},
+		{Name: "Kubernetes 集群状态损坏", Type: model.RuleTypeClusterFault, Service: "k8s", Topology: "cluster", For: "2m", Severity: model.SeverityCritical, Scope: "all", Enabled: true},
 	}
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "nebulaeye-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.15.0",
   "type": "module",
   "description": "NebulaEye 服务器监控仪表盘前端（Vue 3 + Vite）",
   "scripts": {

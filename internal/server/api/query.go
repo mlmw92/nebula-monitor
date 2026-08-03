@@ -129,6 +129,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/rules", a.handleRuleCreate)
 	mux.HandleFunc("PUT /api/v1/rules/{id}", a.handleRuleUpdate)
 	mux.HandleFunc("POST /api/v1/rules/{id}/toggle", a.handleRuleToggle)
+	mux.HandleFunc("POST /api/v1/rules/{id}/toggle-silence", a.handleRuleToggleSilence)
 	mux.HandleFunc("DELETE /api/v1/rules/{id}", a.handleRuleDelete)
 
 	mux.HandleFunc("GET /api/v1/install-info", a.handleInstallInfo)
@@ -760,6 +761,34 @@ func (a *API) handleRuleToggle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rule.Enabled = !rule.Enabled
+	if err := a.rules.Update(rule); err != nil {
+		http.Error(w, "update failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, 200, rule)
+}
+
+// handleRuleToggleSilence 通过 body 的 {silenced: bool} 设置规则静默（支持周期静默时段外的临时静默）。
+func (a *API) handleRuleToggleSilence(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	rule, ok := a.rules.Get(id)
+	if !ok {
+		http.Error(w, "rule not found", http.StatusNotFound)
+		return
+	}
+	var body struct {
+		Silenced bool  `json:"silenced"`
+		Until    int64 `json:"silenceUntil"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err.Error() != "EOF" {
+		// 允许空 body（仅按查询参数行为处理）；解码失败也继续
+	}
+	rule.Silenced = body.Silenced
+	if body.Until > 0 {
+		rule.SilenceUntil = body.Until
+	} else if !body.Silenced {
+		rule.SilenceUntil = 0
+	}
 	if err := a.rules.Update(rule); err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
 		return
