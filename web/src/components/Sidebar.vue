@@ -88,7 +88,7 @@ import http from '../api/http'
 import { useBrand } from '../composables/useBrand'
 import { WEB_VERSION } from '../version'
 
-defineProps({
+const props = defineProps({
   collapsed: Boolean,
   alertCount: { type: Number, default: 0 },
 })
@@ -136,13 +136,12 @@ function isGroupActive(g) {
 }
 
 function isGroupOpen(g) {
-  // 当前路由在该组下时始终展开；否则取决于用户手动状态
-  if (isGroupActive(g)) return true
+  // 完全由用户手动状态控制，默认不展开
   return openGroups.value[g.key] === true
 }
 
 function onGroupClick(g) {
-  if (collapsed) {
+  if (props.collapsed) {
     // 折叠态点击分组：先展开侧边栏，再展开该分组
     emit('toggle')
     openGroups.value[g.key] = true
