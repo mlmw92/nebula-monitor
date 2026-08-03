@@ -18,18 +18,20 @@ const (
 
 // Point 地理来源点聚合（省份或国家）。
 type Point struct {
-	Name     string  `json:"name"`     // 省份简称 / 国家中文名
-	Requests float64 `json:"requests"` // 请求数
-	Bytes    float64 `json:"bytes"`    // 响应字节数
+	Name      string  `json:"name"`      // 省份简称 / 国家中文名
+	CountryEn string  `json:"countryEn"` // 国家英文名（世界地图 GeoJSON name 匹配用）
+	Requests  float64 `json:"requests"`  // 请求数
+	Bytes     float64 `json:"bytes"`     // 响应字节数
 }
 
 // IPAgg 来源 IP 聚合（带归属地，用于 Top IP 排行）。
 type IPAgg struct {
-	IP       string  `json:"ip"`
-	Requests float64 `json:"requests"`
-	Bytes    float64 `json:"bytes"`
-	Country  string  `json:"country"`
-	Province string  `json:"province"`
+	IP         string  `json:"ip"`
+	Requests   float64 `json:"requests"`
+	Bytes      float64 `json:"bytes"`
+	Country    string  `json:"country"`
+	CountryEn  string  `json:"countryEn"`
+	Province   string  `json:"province"`
 }
 
 // InstanceRate 单实例汇总（用于实例速率展示）。
@@ -128,18 +130,18 @@ func (w *Window) Add(stats []model.NginxAccessStat) {
 			agg := w.ips[ip.IP]
 			if agg == nil {
 				agg = &IPAgg{IP: ip.IP}
-				agg.Country, agg.Province, _ = w.geo.Search(ip.IP)
+				agg.Country, agg.CountryEn, agg.Province, _ = w.geo.Search(ip.IP)
 				w.ips[ip.IP] = agg
 			}
 			agg.Requests += ip.Requests
 			agg.Bytes += ip.Bytes
 			if agg.Province != "" {
-				p := w.point("cn|" + agg.Province)
+				p := w.point("cn|"+agg.Province, "")
 				p.Requests += ip.Requests
 				p.Bytes += ip.Bytes
 			}
 			if agg.Country != "" {
-				p := w.point("world|" + agg.Country)
+				p := w.point("world|"+agg.Country, agg.CountryEn)
 				p.Requests += ip.Requests
 				p.Bytes += ip.Bytes
 			}
@@ -147,12 +149,12 @@ func (w *Window) Add(stats []model.NginxAccessStat) {
 	}
 }
 
-// point 获取（或创建）指定 key 的地理点。
-func (w *Window) point(key string) *Point {
+// point 获取（或创建）指定 key 的地理点；countryEn 仅在创建时生效。
+func (w *Window) point(key, countryEn string) *Point {
 	p := w.points[key]
 	if p == nil {
 		name := key[strings.Index(key, "|")+1:]
-		p = &Point{Name: name}
+		p = &Point{Name: name, CountryEn: countryEn}
 		w.points[key] = p
 	}
 	return p

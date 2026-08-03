@@ -24,22 +24,28 @@ type Geo struct {
 // NewGeo 创建 Geo 查询器。
 func NewGeo() *Geo { return &Geo{} }
 
-// Search 查询 IP 归属地，返回国家（中文名）、省份（中文简称，去行政后缀）、城市。
-// 查询失败或无法识别时返回空字符串。
-func (g *Geo) Search(ip string) (country, province, city string) {
+// Search 查询 IP 归属地，返回国家（中文名）、国家（英文原名，用于世界地图匹配）、
+// 省份（中文简称，去行政后缀）、城市。查询失败或无法识别时返回空字符串。
+func (g *Geo) Search(ip string) (country, countryEn, province, city string) {
 	g.once.Do(func() {
 		g.searcher, g.err = xdb.NewWithBuffer(xdb.IPv4, ipDB)
 	})
 	if g.err != nil || g.searcher == nil {
-		return "", "", ""
+		return "", "", "", ""
 	}
 	region, err := g.searcher.Search(ip)
 	if err != nil {
-		return "", "", ""
+		return "", "", "", ""
 	}
 	parts := strings.Split(region, "|")
 	if len(parts) >= 1 {
 		country = countryCN(parts[0])
+		// 国内 IP 段国家字段为中文（"中国"），转英文便于世界地图匹配
+		if parts[0] == "中国" {
+			countryEn = "China"
+		} else {
+			countryEn = strings.TrimSpace(parts[0])
+		}
 	}
 	if len(parts) >= 3 {
 		province = normProvince(parts[2])

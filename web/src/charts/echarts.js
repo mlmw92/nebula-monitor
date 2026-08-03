@@ -209,4 +209,94 @@ export function gaugeOption(color, name) {
   }
 }
 
+// 地图热力散点 + 流量动线 option 工厂。
+// data: { points:[{name,requests,bytes}], deployPoints:[{name,requests}], lines:[{fromName,toName,value}] }
+// scope: 'cn' 中国省份地图 | 'world' 世界国家地图。调用前需先执行 registerMaps()。
+export function mapGeoOption(scope, data) {
+  const o = data || {}
+  const isWorld = scope === 'world'
+  const map = isWorld ? 'world' : 'china'
+  const series = []
+
+  if (o.lines && o.lines.length) {
+    series.push({
+      name: '访问动线',
+      type: 'lines',
+      coordinateSystem: 'geo',
+      zlevel: 2,
+      effect: { show: true, period: 4, trailLength: 0.25, symbol: 'arrow', symbolSize: 4, color: '#22d3ee' },
+      lineStyle: { color: 'rgba(34,211,238,0.45)', width: 1, curveness: 0.3 },
+      data: o.lines,
+    })
+  }
+  if (o.points && o.points.length) {
+    series.push({
+      name: '访问来源',
+      type: 'effectScatter',
+      coordinateSystem: 'geo',
+      zlevel: 2,
+      rippleEffect: { brushType: 'stroke', scale: 3 },
+      symbolSize: (val) => Math.max(6, Math.min(28, Math.sqrt(val[1] || 1) * 3)),
+      itemStyle: { color: '#f59e0b', shadowBlur: 14, shadowColor: '#f59e0b' },
+      label: { show: false },
+      data: o.points.map((p) => ({ name: p.name, value: [p.name, p.requests, p.bytes] })),
+    })
+  }
+  if (o.deployPoints && o.deployPoints.length) {
+    series.push({
+      name: '数据中心',
+      type: 'scatter',
+      coordinateSystem: 'geo',
+      zlevel: 2,
+      symbol: 'diamond',
+      symbolSize: 14,
+      itemStyle: { color: '#22c55e', shadowBlur: 16, shadowColor: '#22c55e' },
+      label: { show: true, formatter: '{b}', color: '#e5edf7', fontSize: 11, position: 'top' },
+      data: o.deployPoints.map((p) => ({ name: p.name, value: [p.name, p.requests || 0] })),
+    })
+  }
+
+  return {
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: 'rgba(11,17,32,0.92)',
+      borderColor: 'rgba(34,211,238,0.3)',
+      textStyle: { color: '#e5edf7', fontSize: 12 },
+      formatter: (p) => {
+        if (p.seriesType === 'lines') {
+          return `${p.data.fromName} → ${p.data.toName}<br/>请求量: ${p.data.value}`
+        }
+        if (p.seriesType === 'scatter' && p.data.name) {
+          return `${p.data.name}<br/>请求量: ${p.data.value[1] || 0}`
+        }
+        if (p.seriesType === 'effectScatter') {
+          const v = p.data.value || []
+          return `${p.name}<br/>请求量: ${v[1] || 0}<br/>流量: ${rateShort(v[2] || 0)}`
+        }
+        return p.name || ''
+      },
+    },
+    geo: {
+      map,
+      roam: false,
+      zoom: 1,
+      layoutCenter: ['50%', '50%'],
+      layoutSize: isWorld ? '92%' : '100%',
+      itemStyle: {
+        areaColor: 'rgba(59,130,246,0.12)',
+        borderColor: 'rgba(34,211,238,0.35)',
+        borderWidth: 0.8,
+      },
+      emphasis: {
+        label: { show: false },
+        itemStyle: { areaColor: 'rgba(34,211,238,0.25)' },
+      },
+      regions: o.deployPoints && o.deployPoints[0]
+        ? [{ name: o.deployPoints[0].name, itemStyle: { areaColor: 'rgba(34,197,94,0.18)' } }]
+        : [],
+    },
+    series,
+  }
+}
+
 export { echarts }

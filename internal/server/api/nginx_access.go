@@ -131,10 +131,11 @@ func (a *API) handleNginxAccessGeo(w http.ResponseWriter, r *http.Request) {
 	resp.Points = a.ngx.Points(scope)
 	// 部署点：数据中心位置（内网场景无真实地理，固定取地图中心；中国=北京，世界=中国）
 	deployName := "北京"
+	center := nginxaccess.Point{Name: deployName}
 	if scope == "world" {
 		deployName = "中国"
+		center = nginxaccess.Point{Name: deployName, CountryEn: "China"}
 	}
-	center := nginxaccess.Point{Name: deployName}
 	for _, p := range resp.Points {
 		if p.Name == deployName {
 			center.Requests += p.Requests
