@@ -21,7 +21,17 @@ async function request(path, opts) {
     window.dispatchEvent(new CustomEvent('auth-expired'))
     throw new Error('未登录或登录已过期')
   }
-  if (!r.ok) throw new Error('HTTP ' + r.status)
+  if (!r.ok) {
+    // 优先展示后端返回的 error 文案（如校验失败原因），解析失败再退回状态码
+    let msg = 'HTTP ' + r.status
+    try {
+      const body = await r.json()
+      if (body && body.error) msg = body.error
+    } catch (e) {
+      /* 非 JSON 响应体，保留状态码文案 */
+    }
+    throw new Error(msg)
+  }
   return r.json()
 }
 

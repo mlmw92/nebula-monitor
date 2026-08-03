@@ -100,7 +100,7 @@ async function save() {
   saving.value = true
   try {
     await saveBrand(form.value.name.trim(), form.value.logo)
-    ElMessage.success('已保存，刷新后全局生效')
+    ElMessage.success('已保存，全局即时生效')
   } catch (e) {
     ElMessage.error(e.message || '保存失败')
   } finally {

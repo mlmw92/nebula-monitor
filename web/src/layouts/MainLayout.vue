@@ -95,7 +95,18 @@ function changeTheme(t) {
 applyTheme(theme.value)
 
 const pageTitle = computed(() => {
-  const m = { overview: '首页概览', hosts: '主机列表', node: '主机详情', alerts: '告警中心' }
+  const m = {
+    overview: '首页概览',
+    hosts: '主机列表',
+    node: '主机详情',
+    middleware: '中间件监控',
+    alerts: '告警中心',
+    dialtest: '服务拨测',
+    report: '巡检报告',
+    'system-upgrade': '系统升级',
+    notify: '通知配置',
+    'system-settings': '系统设置',
+  }
   return m[route.name] || ''
 })
 
