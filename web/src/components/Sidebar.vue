@@ -1,12 +1,13 @@
 <template>
   <aside class="sidebar glass" :class="{ collapsed }">
-    <div class="brand">
-      <div class="logo-mark"></div>
-      <div class="brand-text" v-show="!collapsed">
-        <h1>NebulaEye</h1>
-        <p>监控中心</p>
+      <div class="brand">
+        <img v-if="brand.logo" :src="brand.logo" alt="logo" style="width:36px;height:36px;border-radius:10px;object-fit:contain;background:rgba(255,255,255,0.05);box-shadow:0 0 16px rgba(64,158,255,0.35)" />
+        <div v-else class="logo-mark"></div>
+        <div class="brand-text" v-show="!collapsed">
+          <h1>{{ brand.name }}</h1>
+          <p>监控中心</p>
+        </div>
       </div>
-    </div>
 
     <nav class="nav">
       <router-link
@@ -47,8 +48,9 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Odometer, Monitor, Bell, Upload, Message, Connection, Document, DataAnalysis } from '@element-plus/icons-vue'
+import { Odometer, Monitor, Bell, Upload, Message, Connection, Document, DataAnalysis, Setting } from '@element-plus/icons-vue'
 import http from '../api/http'
+import { useBrand } from '../composables/useBrand'
 import { WEB_VERSION } from '../version'
 
 defineProps({
@@ -58,6 +60,7 @@ defineProps({
 defineEmits(['toggle', 'logout'])
 
 const route = useRoute()
+const { brand } = useBrand()
 
 const serverVersion = ref(WEB_VERSION) // 初始用构建内嵌版本，加载后覆盖为 Server 实际运行版本
 
@@ -70,6 +73,7 @@ const items = [
   { key: 'report', to: '/report', label: '巡检报告', icon: Document },
   { key: 'upgrade', to: '/system/upgrade', label: '系统升级', icon: Upload },
   { key: 'notify', to: '/notify', label: '通知配置', icon: Message },
+  { key: 'settings', to: '/system/settings', label: '系统设置', icon: Setting },
 ]
 
 function isActive(item) {

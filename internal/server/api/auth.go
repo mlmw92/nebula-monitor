@@ -135,6 +135,11 @@ func AuthMiddleware(next http.Handler, authCfg config.AuthConfig) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// 品牌配置：允许匿名只读（GET），写操作（PUT）仍需登录鉴权
+		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/ui/settings") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		tok := r.Header.Get("Authorization")
 		tok = strings.TrimPrefix(tok, "Bearer ")
 		if tok == "" {

@@ -25,6 +25,7 @@ import (
 	"github.com/nebula/monitor/internal/server/report"
 	"github.com/nebula/monitor/internal/server/screencfg"
 	"github.com/nebula/monitor/internal/server/storage"
+	"github.com/nebula/monitor/internal/server/uicfg"
 	"github.com/nebula/monitor/internal/server/upgrade"
 	"github.com/nebula/monitor/internal/version"
 )
@@ -112,6 +113,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 系统 UI 品牌配置（系统名称/Logo）：独立文件（Web 端设置写入），不存在则用默认初始化并落盘。
+	uiMgr, err := uicfg.New(cfg.UIFile, uicfg.DefaultUIConfig())
+	if err != nil {
+		slog.Error("初始化 UI 配置失败", "err", err)
+		os.Exit(1)
+	}
+
 	// 系统升级管理器
 	var upgrader *upgrade.Manager
 	if cfg.Upgrade.Enabled {
@@ -132,7 +140,7 @@ func main() {
 	}
 
 	// API
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)

@@ -33,6 +33,7 @@ type Config struct {
 	DialtestFile    string          `yaml:"dialtestFile"`    // 拨测任务配置文件
 	ReportDir       string          `yaml:"reportDir"`       // 报告存储目录
 	ScreenFile      string          `yaml:"screenFile"`      // 数据大屏模块显隐配置文件（Web 端设置写入）
+	UIFile          string          `yaml:"uiFile"`          // 系统 UI 品牌配置（系统名称/Logo，Web 端设置写入）
 }
 
 // ScreenConfig 数据大屏模块显隐配置（全局单份，与 notify 一致）。
@@ -186,6 +187,7 @@ func Default() *Config {
 		DialtestFile:    "/etc/monitor-server/dialtest.yaml",
 		ReportDir:       "/var/lib/monitor-server/reports",
 		ScreenFile:      "/etc/monitor-server/screen.yaml",
+		UIFile:          "/etc/monitor-server/ui.yaml",
 		Auth:            AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: ""},
 		Upgrade: UpgradeConfig{
 			Enabled:    true,

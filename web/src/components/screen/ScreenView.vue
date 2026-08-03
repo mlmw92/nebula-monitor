@@ -4,9 +4,9 @@
     <header class="hud-top">
       <div class="hud-side hud-clock mono">{{ clock }}</div>
       <h1 class="hud-title">
-        <span class="ht-en">NEBULA</span>
+        <span class="ht-en">{{ brand.name }}</span>
         <span class="ht-sep"></span>
-        <span class="ht-cn">星云监控指挥中心</span>
+        <span class="ht-cn">{{ brand.name }}监控指挥中心</span>
       </h1>
       <div class="hud-side hud-actions">
         <button class="hud-btn" title="全屏" @click="toggleFullscreen"><FullScreen /></button>
@@ -84,8 +84,10 @@ import { rateShort } from '../../charts/echarts'
 import HostMonitorPanel from './HostMonitorPanel.vue'
 import MiddlewareMonitorPanel from './MiddlewareMonitorPanel.vue'
 import NginxAnalysisPanel from './NginxAnalysisPanel.vue'
+import { useBrand } from '../../composables/useBrand'
 
 const router = useRouter()
+const { brand } = useBrand()
 
 const nodes = ref([])
 const metrics = ref({})

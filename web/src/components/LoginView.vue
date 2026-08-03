@@ -63,8 +63,10 @@ import { useRouter } from 'vue-router'
 import { User, Lock } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import http, { setToken } from '../api/http'
+import { useBrand } from '../composables/useBrand'
 
 const router = useRouter()
+const { brand } = useBrand()
 
 const username = ref('admin')
 const password = ref('')
