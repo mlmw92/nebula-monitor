@@ -1,13 +1,5 @@
 <template>
   <aside class="sidebar glass" :class="{ collapsed }">
-      <div class="brand">
-        <img v-if="brand.logo" :src="brand.logo" alt="logo" style="width:36px;height:36px;border-radius:10px;object-fit:contain;background:rgba(255,255,255,0.05);box-shadow:0 0 16px rgba(64,158,255,0.35)" />
-        <div class="brand-text" v-show="!collapsed">
-          <h1 :title="brand.name">{{ brand.name }}</h1>
-          <p>监控中心</p>
-        </div>
-      </div>
-
     <nav class="nav">
       <router-link
         v-for="item in flatItems"
@@ -84,7 +76,6 @@ import {
   ArrowRight,
 } from '@element-plus/icons-vue'
 import http from '../api/http'
-import { useBrand } from '../composables/useBrand'
 import { WEB_VERSION } from '../version'
 
 const props = defineProps({
@@ -94,7 +85,6 @@ const props = defineProps({
 const emit = defineEmits(['toggle', 'logout'])
 
 const route = useRoute()
-const { brand } = useBrand()
 
 const serverVersion = ref(WEB_VERSION) // 初始用构建内嵌版本，加载后覆盖为 Server 实际运行版本
 
@@ -182,31 +172,6 @@ onMounted(loadVersion)
 }
 .sidebar.collapsed {
   width: 64px;
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 6px 16px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 12px;
-  height: 52px;
-}
-.brand-text {
-  min-width: 0;
-  overflow: hidden;
-}
-.brand-text h1 {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.brand-text p {
-  font-size: 10px;
-  color: var(--text-dim);
 }
 .nav {
   flex: 1;

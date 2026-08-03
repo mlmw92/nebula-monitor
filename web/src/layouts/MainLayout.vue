@@ -3,8 +3,18 @@
     <Sidebar :alert-count="alertCount" :collapsed="collapsed" @toggle="collapsed = !collapsed" @logout="logout" />
 
     <div class="main-wrap" :class="{ collapsed }">
-      <header class="topbar glass">
+      <header class="topbar">
         <div class="topbar-left">
+          <div class="brand-bar">
+            <img v-if="brand.logo" :src="brand.logo" alt="logo" class="brand-logo" />
+            <div v-else class="brand-logo brand-logo--default">
+              <el-icon :size="22"><Monitor /></el-icon>
+            </div>
+            <div class="brand-titles">
+              <span class="brand-name" :title="brand.name">{{ brand.name }}</span>
+              <span class="brand-sub">监控中心</span>
+            </div>
+          </div>
           <el-button link @click="collapsed = !collapsed">
             <el-icon :size="18"><Expand v-if="collapsed" /><Fold v-else /></el-icon>
           </el-button>
@@ -72,7 +82,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Expand, Fold, Refresh, Bell, User, DataAnalysis } from '@element-plus/icons-vue'
+import { Expand, Fold, Refresh, Bell, User, DataAnalysis, Monitor } from '@element-plus/icons-vue'
 import Sidebar from '../components/Sidebar.vue'
 import http, { setToken } from '../api/http'
 import { connectWS } from '../api/ws'
@@ -212,20 +222,86 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 40;
-  height: 52px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 16px;
   border-radius: 0;
-  border-left: none;
-  border-right: none;
-  border-top: none;
+  border: none;
+  background: linear-gradient(90deg, #b91c1c 0%, #dc2626 100%);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 .topbar-left {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+}
+.topbar-right {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.brand-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: 16px;
+  min-width: 0;
+}
+.brand-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+  flex-shrink: 0;
+}
+.brand-logo--default {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.brand-titles {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+}
+.brand-name {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 360px;
+}
+.brand-sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+}
+.topbar :deep(.el-button) {
+  color: #fff;
+}
+.topbar :deep(.el-button.is-circle) {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+.topbar :deep(.el-breadcrumb__inner),
+.topbar :deep(.el-breadcrumb__inner a),
+.topbar :deep(.el-breadcrumb__separator) {
+  color: #fff !important;
+}
+.topbar :deep(.el-breadcrumb__item:last-child .el-breadcrumb__inner) {
+  color: rgba(255, 255, 255, 0.85) !important;
 }
 .topbar-right {
   display: flex;
