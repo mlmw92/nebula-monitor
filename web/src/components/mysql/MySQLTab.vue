@@ -62,10 +62,6 @@
                   <span class="role-badge" :class="['primary','master'].includes((i.role||'').toLowerCase()) ? 'role-badge-m' : 'role-badge-s'">{{ ['primary','master'].includes((i.role||'').toLowerCase()) ? 'P' : 'S' }}</span>
                   <span class="mono">{{ i.instance }}</span>
                 </div>
-                <div v-if="i.name && i.name !== i.instance" class="rel-node-meta">
-                  <span class="dim">名称:</span>
-                  <span>{{ i.name }}</span>
-                </div>
                 <div class="rel-node-meta">
                   <span :class="['dot', i.up ? 'up' : 'down']"></span>
                   <span>{{ i.up ? '在线' : '离线' }}</span>
