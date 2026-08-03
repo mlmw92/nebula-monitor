@@ -161,7 +161,7 @@ watch(() => props.nodes, loadTrends, { deep: false })
 <style scoped>
 .host-panel {
   display: grid;
-  grid-template-columns: 400px 1fr;
+  grid-template-columns: minmax(360px, 24%) 1fr;
   gap: 12px;
   min-height: 0;
   height: 100%;
@@ -305,5 +305,45 @@ watch(() => props.nodes, loadTrends, { deep: false })
   flex: 1;
   min-height: 0;
   width: 100%;
+}
+
+/* ============ 宽屏 / 4K 适配 ============ */
+@media (min-width: 2400px) {
+  .host-panel { gap: 18px; grid-template-columns: minmax(420px, 22%) 1fr; }
+  .left-col { gap: 18px; }
+  .host-list { padding: 16px 18px; }
+  .hl-title { font-size: 17px; margin-bottom: 12px; }
+  .hl-head, .hl-row { gap: 10px; font-size: 15px; }
+  .hl-head { padding: 6px 12px; }
+  .hl-row { padding: 9px 12px; }
+  .hl-name { font-size: 15px; gap: 8px; }
+  .hl-val { font-size: 15px; }
+  .hl-val.dim { font-size: 14px; }
+  .host-text-ip { font-size: 12px; }
+  .dot { width: 9px; height: 9px; }
+  .hl-empty { padding: 26px 0; font-size: 15px; }
+  .right-col { gap: 18px; }
+  .trend-net { padding: 16px 18px 10px; }
+  .trend-title { font-size: 15px; }
+  .trend-cur { font-size: 19px; }
+}
+@media (min-width: 3440px) {
+  .host-panel { gap: 24px; grid-template-columns: minmax(520px, 22%) 1fr; }
+  .left-col { gap: 24px; }
+  .host-list { padding: 20px 22px; }
+  .hl-title { font-size: 22px; margin-bottom: 16px; }
+  .hl-head, .hl-row { gap: 14px; font-size: 19px; }
+  .hl-head { padding: 8px 16px; }
+  .hl-row { padding: 12px 16px; }
+  .hl-name { font-size: 19px; gap: 10px; }
+  .hl-val { font-size: 19px; }
+  .hl-val.dim { font-size: 18px; }
+  .host-text-ip { font-size: 15px; }
+  .dot { width: 11px; height: 11px; }
+  .hl-empty { padding: 34px 0; font-size: 19px; }
+  .right-col { gap: 24px; }
+  .trend-net { padding: 20px 24px 14px; }
+  .trend-title { font-size: 19px; }
+  .trend-cur { font-size: 25px; }
 }
 </style>

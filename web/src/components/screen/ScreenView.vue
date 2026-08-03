@@ -617,4 +617,77 @@ onUnmounted(() => {
   gap: 14px;
   padding: 4px 0;
 }
+
+/* ============ 宽屏 / 4K 适配 ============ */
+/* 2K+ 宽屏：整体放大字号与间距，避免元素稀疏 */
+@media (min-width: 2400px) {
+  .screen-view {
+    padding: 14px 24px;
+    gap: 14px;
+    grid-template-rows: 78px 132px 1fr 68px;
+  }
+  .hud-side { width: 380px; }
+  .hud-clock { font-size: 18px; }
+  .hud-btn { width: 42px; height: 42px; }
+  .hud-btn svg { width: 21px; height: 21px; }
+  .ht-en { font-size: 32px; letter-spacing: 0.42em; }
+  .ht-cn { font-size: 25px; letter-spacing: 0.24em; }
+  .ht-sep { height: 30px; }
+  .kpi-row { gap: 16px; }
+  .kpi-card { padding: 18px 26px; gap: 6px; }
+  .kpi-label { font-size: 15px; letter-spacing: 0.1em; }
+  .kpi-value { font-size: 40px; }
+  .kpi-value em { font-size: 17px; margin-left: 6px; }
+  .kpi-glow { right: -26px; top: -26px; width: 96px; height: 96px; }
+  .tab-item { padding: 11px 34px; font-size: 18px; }
+  .ab-label { font-size: 16px; gap: 9px; }
+  .ab-item { font-size: 16px; gap: 8px; }
+  .ab-none { font-size: 16px; }
+  :deep(.hp-title) { font-size: 20px; }
+  :deep(.hp-sub) { font-size: 13px; }
+  :deep(.hp-kpi-label) { font-size: 13px; }
+  :deep(.hp-kpi-value) { font-size: 24px; }
+  :deep(.sg-label) { font-size: 15px; }
+  :deep(.sg-text-value) { font-size: 18px; }
+  :deep(.st-title) { font-size: 15px; }
+  :deep(.stat-label) { font-size: 13px; }
+  :deep(.stat-value) { font-size: 26px; }
+  :deep(.stat-unit) { font-size: 13px; }
+}
+
+/* 4K 及以上：进一步放大 */
+@media (min-width: 3440px) {
+  .screen-view {
+    padding: 20px 34px;
+    gap: 20px;
+    grid-template-rows: 96px 162px 1fr 84px;
+  }
+  .hud-side { width: 460px; }
+  .hud-clock { font-size: 22px; }
+  .hud-btn { width: 50px; height: 50px; }
+  .hud-btn svg { width: 25px; height: 25px; }
+  .ht-en { font-size: 42px; letter-spacing: 0.38em; }
+  .ht-cn { font-size: 33px; letter-spacing: 0.2em; }
+  .ht-sep { height: 38px; }
+  .kpi-row { gap: 22px; }
+  .kpi-card { padding: 24px 34px; gap: 8px; }
+  .kpi-label { font-size: 19px; letter-spacing: 0.08em; }
+  .kpi-value { font-size: 54px; }
+  .kpi-value em { font-size: 22px; margin-left: 8px; }
+  .kpi-glow { right: -32px; top: -32px; width: 120px; height: 120px; }
+  .tab-item { padding: 14px 42px; font-size: 22px; }
+  .ab-label { font-size: 20px; gap: 11px; }
+  .ab-item { font-size: 20px; gap: 10px; }
+  .ab-none { font-size: 20px; }
+  :deep(.hp-title) { font-size: 26px; }
+  :deep(.hp-sub) { font-size: 16px; }
+  :deep(.hp-kpi-label) { font-size: 16px; }
+  :deep(.hp-kpi-value) { font-size: 32px; }
+  :deep(.sg-label) { font-size: 19px; }
+  :deep(.sg-text-value) { font-size: 24px; }
+  :deep(.st-title) { font-size: 19px; }
+  :deep(.stat-label) { font-size: 16px; }
+  :deep(.stat-value) { font-size: 34px; }
+  :deep(.stat-unit) { font-size: 16px; }
+}
 </style>

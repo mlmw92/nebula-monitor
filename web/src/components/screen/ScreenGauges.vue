@@ -123,4 +123,26 @@ function dash(v) {
   color: var(--text-dim);
   margin-top: 4px;
 }
+
+/* 宽屏 / 4K 适配 */
+@media (min-width: 2400px) {
+  .screen-gauges { padding: 18px 20px; }
+  .sg-title { font-size: 17px; margin-bottom: 14px; }
+  .sg-grid { gap: 16px 8px; }
+  .sg-ring { width: 96px; height: 96px; }
+  .sg-center { font-size: 18px; }
+  .sg-text-card { width: 96px; height: 96px; }
+  .sg-text-value { font-size: 18px; }
+  .sg-label { font-size: 15px; margin-top: 6px; }
+}
+@media (min-width: 3440px) {
+  .screen-gauges { padding: 24px 26px; }
+  .sg-title { font-size: 22px; margin-bottom: 18px; }
+  .sg-grid { gap: 22px 12px; }
+  .sg-ring { width: 120px; height: 120px; }
+  .sg-center { font-size: 24px; }
+  .sg-text-card { width: 120px; height: 120px; }
+  .sg-text-value { font-size: 24px; }
+  .sg-label { font-size: 19px; margin-top: 8px; }
+}
 </style>
