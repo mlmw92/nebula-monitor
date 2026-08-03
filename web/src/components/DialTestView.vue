@@ -34,6 +34,15 @@
             <el-tag v-for="c in (row.notify || [])" :key="c" size="small" class="ch-tag">{{ chLabel(c) }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="证书" width="110">
+          <template #default="{ row }">
+            <template v-if="row.type === 'https'">
+              <span v-if="certFor(row.name)" :class="certClass(certFor(row.name).certExpiry)">{{ certFor(row.name).certExpiry.toFixed(0) }} 天</span>
+              <span v-else class="muted">检测中</span>
+            </template>
+            <span v-else class="muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-button link @click="editTask(row)">编辑</el-button>
@@ -103,6 +112,16 @@
             <el-option label="企业微信" value="wecom" />
           </el-select>
         </el-form-item>
+        <template v-if="form.type === 'https'">
+          <el-form-item label="证书预警(天)">
+            <el-input-number v-model="form.cert_warn" :min="1" :max="365" :step="1" />
+            <span class="hint-inline">剩余 ≤ 此天数触发「警告」（默认 30）</span>
+          </el-form-item>
+          <el-form-item label="证书告警(天)">
+            <el-input-number v-model="form.cert_crit" :min="1" :max="form.cert_warn || 30" :step="1" />
+            <span class="hint-inline">剩余 ≤ 此天数触发「紧急」（默认 7）</span>
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="showDialog = false">取消</el-button>
@@ -113,7 +132,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import http from '../api/http'
 
 const loading = ref(false)
@@ -121,7 +140,14 @@ const tasks = ref([])
 const results = ref([])
 const showDialog = ref(false)
 const editing = ref(false)
-const form = ref({ name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true, severity: 'warning', notify: [] })
+const form = ref({ name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true, severity: 'warning', notify: [], cert_warn: 30, cert_crit: 7 })
+// 最近结果按任务名索引，用于任务列表展示证书剩余天数
+const resultByName = computed(() => {
+  const m = {}
+  for (const r of results.value) m[r.name] = r
+  return m
+})
+function certFor(name) { return resultByName.value[name] || null }
 
 async function load() {
   loading.value = true
@@ -150,7 +176,7 @@ async function saveTask() {
     }
     showDialog.value = false
     editing.value = false
-    form.value = { name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true, severity: 'warning', notify: [] }
+    form.value = { name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true, severity: 'warning', notify: [], cert_warn: 30, cert_crit: 7 }
     await load()
   } catch (e) { console.error(e) }
 }
@@ -210,4 +236,6 @@ onMounted(load)
 .metric-warn { color: var(--warn); }
 .metric-bad { color: var(--danger); }
 .ch-tag { margin-right: 4px; }
+.hint-inline { font-size: 12px; color: var(--text-dim); margin-left: 8px; }
+.el-form-item :deep(.el-input-number) { width: 120px; }
 </style>

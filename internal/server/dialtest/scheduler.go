@@ -87,8 +87,14 @@ func (s *Scheduler) runOnce() {
 		s.upState[task.ID] = result.Up
 		sink := s.sink
 		s.mu.Unlock()
-		if sink != nil && (!seen || prevUp != result.Up) {
-			sink.EmitDialtestAlert(task, result, result.Up)
+		if sink != nil {
+			if !seen || prevUp != result.Up {
+				sink.EmitDialtestAlert(task, result, result.Up)
+			}
+			// HTTPS 任务：SSL 证书过期检测（仅当成功解析到对端证书时）。
+			if task.Type == TaskTypeHTTPS && result.CertNotAfter > 0 {
+				sink.EmitCertAlert(task, result)
+			}
 		}
 	}
 	if len(allMetrics) > 0 {
@@ -103,4 +109,6 @@ func (s *Scheduler) runOnce() {
 type AlertSink interface {
 	// EmitDialtestAlert 在拨测状态发生跃迁时调用：up=false 表示故障触发，up=true 表示恢复。
 	EmitDialtestAlert(task Task, result Result, up bool)
+	// EmitCertAlert 在检测到 HTTPS 任务 SSL 证书剩余天数低于阈值时调用（证书过期预警）。
+	EmitCertAlert(task Task, result Result)
 }

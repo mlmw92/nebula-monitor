@@ -44,6 +44,7 @@ type Engine struct {
 	mu           sync.Mutex
 	states       map[string]*ruleState
 	dialActive   map[string]bool           // 拨测任务是否有未恢复故障事件，按 "dialtest:<taskID>" 记录
+	certActive   map[string]certState      // SSL 证书过期告警状态，按 "cert:<taskID>" 记录
 	firing       map[string]*firingEntry   // 活跃 firing 事件（用于抑制匹配），按 rule|node|instance 记录
 	inhibit      *InhibitStore             // 抑制规则（可选）
 	grouping     *GroupingStore            // 分组配置（可选）
@@ -58,6 +59,12 @@ type ruleState struct {
 	lastRepeat  int64  // 上次重复提醒时间（用于升级后重复提醒）
 	lastRole    string // role_change 场景：上次记录的 role 值
 	resolvedAt  int64  // 最后恢复时间（事件型规则避免抖动用）
+}
+
+// certState 记录 SSL 证书过期告警的当前状态，用于去重、级别升级与每日重复提醒。
+type certState struct {
+	severity   model.Severity
+	lastNotify int64
 }
 
 // firingEntry 记录一个活跃 firing 事件及其是否已被抑制。
@@ -84,6 +91,7 @@ func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
 		evalInterval: evalInterval,
 		states:       map[string]*ruleState{},
 		dialActive:   map[string]bool{},
+		certActive:   map[string]certState{},
 		firing:       map[string]*firingEntry{},
 		inhibit:      inhibit,
 		grouping:     grouping,
@@ -847,6 +855,156 @@ func (e *Engine) notifyDialtest(task dialtest.Task, ev model.AlertEvent) {
 			slog.Warn("拨测告警通知失败", "channel", n.Channel(), "err", err)
 		}
 	}
+}
+
+// EmitCertAlert 由拨测调度器在检测到 HTTPS 任务 SSL 证书剩余天数低于阈值时调用，
+// 产生证书过期类告警事件并联动通知。证书更新（剩余天数回升到阈值以上）时自动恢复。
+// 为避免每次拨测都刷屏，采用状态去重：仅在级别跃迁或每日重复提醒时再次通知。
+func (e *Engine) EmitCertAlert(task dialtest.Task, result dialtest.Result) {
+	if result.CertNotAfter <= 0 {
+		return // 无证书数据（非 HTTPS 或证书读取失败）
+	}
+	now := model.NowMillis()
+	warnDays := task.CertWarnDays
+	if warnDays <= 0 {
+		warnDays = 30
+	}
+	critDays := task.CertCritDays
+	if critDays <= 0 {
+		critDays = 7
+	}
+	days := result.CertExpiry
+	var sev model.Severity
+	switch {
+	case days <= float64(critDays):
+		sev = model.SeverityCritical
+	case days <= float64(warnDays):
+		sev = model.SeverityWarning
+	default:
+		sev = ""
+	}
+	key := "cert:" + task.ID
+	e.mu.Lock()
+	st, existed := e.certActive[key]
+	switch {
+	case sev == "":
+		if existed {
+			delete(e.certActive, key)
+			e.mu.Unlock()
+			e.emitCertEvent(task, result, false, st.severity, warnDays)
+		} else {
+			e.mu.Unlock()
+		}
+		return
+	case !existed:
+		e.certActive[key] = certState{severity: sev, lastNotify: now}
+		e.mu.Unlock()
+		e.emitCertEvent(task, result, true, sev, daysToThreshold(days, warnDays, critDays))
+	case sevMoreSevere(sev, st.severity):
+		e.certActive[key] = certState{severity: sev, lastNotify: now}
+		e.mu.Unlock()
+		e.emitCertEvent(task, result, true, sev, daysToThreshold(days, warnDays, critDays))
+	case now-st.lastNotify >= 24*3600*1000:
+		e.certActive[key] = certState{severity: sev, lastNotify: now}
+		e.mu.Unlock()
+		e.emitCertEvent(task, result, true, sev, daysToThreshold(days, warnDays, critDays))
+	default:
+		e.mu.Unlock()
+	}
+}
+
+// daysToThreshold 返回用于展示的阈值天数（取当前生效的预警/告警阈值）。
+func daysToThreshold(days float64, warn, crit int) int {
+	if days <= float64(crit) {
+		return crit
+	}
+	return warn
+}
+
+// sevMoreSevere 判断 a 的级别是否高于 b（critical > warning > info）。
+func sevMoreSevere(a, b model.Severity) bool {
+	rank := func(s model.Severity) int {
+		switch s {
+		case model.SeverityCritical:
+			return 3
+		case model.SeverityWarning:
+			return 2
+		case model.SeverityInfo:
+			return 1
+		default:
+			return 0
+		}
+	}
+	return rank(a) > rank(b)
+}
+
+// emitCertEvent 构造并投递证书过期告警/恢复事件，复用拨测通知与抑制/恢复逻辑。
+func (e *Engine) emitCertEvent(task dialtest.Task, result dialtest.Result, firing bool, sev model.Severity, thresholdDays int) {
+	now := model.NowMillis()
+	expiry := "未知"
+	if result.CertNotAfter > 0 {
+		expiry = time.UnixMilli(result.CertNotAfter).Format("2006-01-02")
+	}
+	var msg string
+	if firing {
+		if result.CertExpiry < 0 {
+			msg = fmt.Sprintf("SSL 证书已过期：%s (%s %s) 证书于 %s 到期，请立即更新", task.Name, task.Type, task.Target, expiry)
+		} else {
+			msg = fmt.Sprintf("SSL 证书即将过期：%s (%s %s) 剩余 %d 天（到期日 %s），请尽快更新", task.Name, task.Type, task.Target, int(result.CertExpiry), expiry)
+		}
+	} else {
+		msg = fmt.Sprintf("SSL 证书恢复正常：%s (%s %s) 证书有效（到期日 %s）", task.Name, task.Type, task.Target, expiry)
+	}
+	ev := model.AlertEvent{
+		ID:        "cert-" + task.ID + "-" + strconv.FormatInt(now, 36),
+		RuleID:    "dialcert-" + task.ID,
+		RuleName:  "证书过期 - " + task.Name,
+		Node:      task.Target,
+		Metric:    "dial_test_cert_expiry",
+		Value:     result.CertExpiry,
+		Operator:  "<=",
+		Threshold: float64(thresholdDays),
+		Severity:  sev,
+		Message:   msg,
+	}
+	if firing {
+		ev.State = model.AlertStateFiring
+		ev.StartsAt = now
+	} else {
+		ev.State = model.AlertStateResolved
+		ev.EndsAt = now
+	}
+
+	e.mu.Lock()
+	if firing {
+		suppressed, by := e.computeSuppressedLocked(ev)
+		ev.Suppressed = suppressed
+		ev.SuppressedBy = by
+		e.trackFiringLocked(ev, suppressed)
+		e.mu.Unlock()
+	} else {
+		wasSuppressed := e.untrackFiringLocked(ev)
+		e.mu.Unlock()
+		if !wasSuppressed {
+			e.notifyDialtest(task, ev)
+		}
+		e.recheckSuppressed()
+		e.alerts.Add(ev)
+		if e.broadcaster != nil {
+			e.broadcaster.BroadcastAlert(ev)
+		}
+		slog.Info("证书过期告警恢复", "task", task.Name, "target", task.Target, "event", ev.ID)
+		return
+	}
+
+	e.alerts.Add(ev)
+	if e.broadcaster != nil {
+		e.broadcaster.BroadcastAlert(ev)
+	}
+	if !ev.Suppressed {
+		e.notifyDialtest(task, ev)
+	}
+	slog.Info("证书过期告警触发", "task", task.Name, "target", task.Target, "days", result.CertExpiry, "severity", sev, "event", ev.ID)
 }
 
 // dialMessage 构造拨测故障的描述信息。

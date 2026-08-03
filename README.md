@@ -139,7 +139,8 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 
 - HTTP / HTTPS / TCP / ICMP 四种拨测类型
 - 定时调度器，支持自定义检测间隔与超时
-- SSL/TLS 证书到期时间检测
+- SSL/TLS 证书到期时间检测：HTTPS 任务自动读取对端证书剩余天数
+- **SSL 证书过期告警**：HTTPS 任务按「证书预警(天)/证书告警(天)」两个阈值触发告警（默认 ≤30 天「警告」、≤7 天「紧急」，已过期视为「紧急」）；证书更新后自动恢复；持续未恢复时每日重复提醒；沿用任务的「通知渠道」并受全局维护窗口约束。阈值在任务编辑表单的 HTTPS 类型下配置。
 - 任务 CRUD API + Web 可视化管理页面
 - 拨测结果指标 `dial_test_up` / `dial_test_latency` / `dial_test_cert_expiry` 写入时序库
 

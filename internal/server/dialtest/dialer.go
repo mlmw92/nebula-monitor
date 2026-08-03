@@ -31,6 +31,11 @@ type Task struct {
 	Enabled  bool     `json:"enabled" yaml:"enabled"`
 	Severity string   `json:"severity" yaml:"severity"` // 告警严重级别: critical/warning/info，默认 warning
 	Notify   []string `json:"notify" yaml:"notify"`     // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示仅平台展示、不推送外部渠道
+
+	// SSL 证书过期预警阈值（天）：仅 HTTPS 任务生效；≤ 0 表示沿用默认（预警 30 / 告警 7）。
+	// 证书剩余天数 ≤ CertWarnDays 触发「警告」，≤ CertCritDays 触发「紧急」。
+	CertWarnDays int `json:"cert_warn,omitempty" yaml:"cert_warn,omitempty"`
+	CertCritDays int `json:"cert_crit,omitempty" yaml:"cert_crit,omitempty"`
 }
 
 // Result 拨测结果。
@@ -38,7 +43,8 @@ type Result struct {
 	TaskID     string
 	Up         bool
 	Latency    float64 // 毫秒
-	CertExpiry float64 // SSL 证书剩余天数（仅 HTTPS）
+	CertExpiry float64 // SSL 证书剩余天数（仅 HTTPS，可为负表示已过期）
+	CertNotAfter int64  // SSL 证书到期时间戳（毫秒，仅 HTTPS 且成功解析到证书时 > 0）
 	StatusCode int     // HTTP 状态码（仅 HTTP/HTTPS）
 	Error      string  // 异常原因（仅 Up=false 时有效，如连接拒绝/超时/DNS失败/HTTP状态文本）
 }
@@ -109,6 +115,7 @@ func (d *Dialer) dialHTTP(task Task) Result {
 		cert := resp.TLS.PeerCertificates[0]
 		days := cert.NotAfter.Sub(time.Now()).Hours() / 24
 		result.CertExpiry = round2(days)
+		result.CertNotAfter = cert.NotAfter.UnixMilli()
 	}
 	return result
 }
