@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
@@ -19,11 +20,15 @@ import (
 type RedisCollector struct {
 	node      string
 	instances []model.RedisInstanceConfig
+	// clusterSeeds 缓存各集群组上次成功发现的节点地址，入口节点宕机时用于故障转移。
+	// key 为 group（cfg.Name），value 为该组内所有节点地址（host:port）。
+	clusterSeedsMu sync.Mutex
+	clusterSeeds   map[string][]string
 }
 
 // NewRedisCollector 创建 RedisCollector。
 func NewRedisCollector(node string, instances []model.RedisInstanceConfig) *RedisCollector {
-	return &RedisCollector{node: node, instances: instances}
+	return &RedisCollector{node: node, instances: instances, clusterSeeds: map[string][]string{}}
 }
 
 // Collect 采集所有 Redis 实例指标，返回 redis_* 前缀指标与实例元信息。
@@ -175,17 +180,17 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 	var metrics []model.Metric
 	var instances []model.RedisInstance
 
-	// 1. CLUSTER INFO 获取集群级指标
-	clusterInfo, err := redisClusterInfo(cfg.Addr, cfg.Password)
-	if err != nil {
-		slog.Warn("Cluster 采集失败", "addr", cfg.Addr, "err", err)
+	// 1. 选取可用入口：首选配置地址，其次尝试上次成功发现的其他存活节点（入口宕机时故障转移）
+	entryAddr, clusterInfo, err := c.pickClusterEntry(cfg)
+	if err != nil || clusterInfo == nil {
+		slog.Warn("Cluster 采集失败：所有种子节点不可达", "group", cfg.Name, "addr", cfg.Addr, "err", err)
 		instances = append(instances, model.RedisInstance{
 			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 			Role: "master", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		})
 		return nil, instances
 	}
-	clusterLabels := redisLabels(c.node, cfg.Addr, clusterInfo)
+	clusterLabels := redisLabels(c.node, entryAddr, clusterInfo)
 	clusterLabels["topology"] = "cluster"
 	clusterLabels["role"] = "master"
 	clusterLabels["group"] = cfg.Name
@@ -196,11 +201,13 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 	}
 
 	// 2. CLUSTER NODES 解析拓扑（含 slot 区间），遍历所有 master 与 replica
-	masters, replicasByMaster, slotsByMaster, err := redisClusterNodes(cfg.Addr, cfg.Password)
+	masters, replicasByMaster, slotsByMaster, err := redisClusterNodes(entryAddr, cfg.Password)
 	if err != nil {
-		slog.Warn("CLUSTER NODES 解析失败", "addr", cfg.Addr, "err", err)
+		slog.Warn("CLUSTER NODES 解析失败", "addr", entryAddr, "err", err)
 		return metrics, instances
 	}
+	// 缓存本集群所有节点地址，供下次入口宕机时故障转移
+	c.cacheClusterSeeds(cfg.Name, masters, replicasByMaster)
 	for _, masterAddr := range masters {
 		// 2.1 master 自身
 		m, ri := c.collectStandalone(cfg, masterAddr, now)
@@ -257,6 +264,53 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 		}
 	}
 	return metrics, instances
+}
+
+// pickClusterEntry 选择可用的集群入口地址。
+// 优先使用配置的 addr；若该地址不可达，则依次尝试上次成功发现的其他节点（故障转移）。
+// 返回可用的入口地址与 CLUSTER INFO 结果；所有候选均不可达时返回最后的错误。
+func (c *RedisCollector) pickClusterEntry(cfg model.RedisInstanceConfig) (string, map[string]string, error) {
+	// 候选列表：首选配置 addr + 上次缓存的其他节点，去重
+	seen := map[string]bool{}
+	var addrs []string
+	for _, a := range append([]string{cfg.Addr}, c.clusterSeedsOf(cfg.Name)...) {
+		if !seen[a] {
+			seen[a] = true
+			addrs = append(addrs, a)
+		}
+	}
+	var lastErr error
+	for _, addr := range addrs {
+		info, err := redisClusterInfo(addr, cfg.Password)
+		if err != nil {
+			slog.Warn("Cluster 入口探测失败，尝试下一候选", "addr", addr, "err", err)
+			lastErr = err
+			continue
+		}
+		return addr, info, nil
+	}
+	return "", nil, lastErr
+}
+
+// clusterSeedsOf 返回上次成功发现的该集群组所有节点地址（含主从），用于入口故障转移。
+func (c *RedisCollector) clusterSeedsOf(group string) []string {
+	c.clusterSeedsMu.Lock()
+	defer c.clusterSeedsMu.Unlock()
+	out := make([]string, len(c.clusterSeeds[group]))
+	copy(out, c.clusterSeeds[group])
+	return out
+}
+
+// cacheClusterSeeds 缓存集群组的所有节点地址。
+func (c *RedisCollector) cacheClusterSeeds(group string, masters []string, replicasByMaster map[string][]string) {
+	c.clusterSeedsMu.Lock()
+	defer c.clusterSeedsMu.Unlock()
+	addrs := make([]string, 0, len(masters)+len(replicasByMaster))
+	addrs = append(addrs, masters...)
+	for _, rs := range replicasByMaster {
+		addrs = append(addrs, rs...)
+	}
+	c.clusterSeeds[group] = addrs
 }
 
 // ---- exporter 模式 ----
