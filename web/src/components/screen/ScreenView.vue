@@ -216,7 +216,7 @@ function exitFullscreen() {
   return Promise.resolve()
 }
 function goBack() {
-  exitFullscreen().finally(() => router.push('/overview'))
+  exitFullscreen().finally(() => router.push({ name: 'overview' }))
 }
 
 // 模块配置

@@ -1,58 +1,79 @@
 <template>
   <div class="na-panel">
+    <div v-if="!accessEnabled" class="na-hint glass">
+      未启用 Nginx 访问日志分析，当前展示 Nginx 实例指标。如需 Top URI / Top IP / 状态码分布 / 来源地理分布，请在 Agent 开启
+      <b>NginxLog</b> 并为实例配置 <b>accessLog</b> 路径。
+    </div>
+
     <!-- 左侧：趋势 / 状态码 / Top 排行 -->
-    <div class="na-left">
+    <div class="na-left" :class="{ full: !accessEnabled }">
       <div class="glass na-card">
         <div class="nc-head">
-          <span>访问量 / 流量趋势</span>
-          <span class="nc-stat">{{ rateShort(totalRate) }} /s</span>
+          <span>请求趋势</span>
+          <span class="nc-stat">{{ accessEnabled ? rateShort(totalRate) + ' /s' : nginxInstances.length + ' 实例' }}</span>
         </div>
         <div ref="trendChart" class="nc-chart"></div>
       </div>
       <div class="glass na-card">
-        <div class="nc-head"><span>状态码分布</span><span class="nc-stat">{{ totalRequests }} 次</span></div>
+        <div class="nc-head">
+          <span>{{ accessEnabled ? '状态码分布' : '实例活跃连接' }}</span>
+          <span class="nc-stat" v-if="accessEnabled">{{ totalRequests }} 次</span>
+        </div>
         <div ref="statusChart" class="nc-chart"></div>
       </div>
       <div class="glass na-card na-list">
-        <div class="nc-head"><span>Top URI</span></div>
+        <div class="nc-head"><span>{{ accessEnabled ? 'Top URI' : '实例 Top · 活跃连接' }}</span></div>
         <div class="rank-list">
-          <div class="rank-row" v-for="(u, i) in topUris" :key="u.name">
+          <div class="rank-row" v-for="(u, i) in uriList" :key="u.name">
             <span class="rk-idx" :class="{ top: i < 3 }">{{ i + 1 }}</span>
             <span class="rk-name" :title="u.name">{{ u.name }}</span>
             <span class="rk-bar"><i :style="{ width: uriPct(u) }"></i></span>
             <span class="rk-val">{{ fmtNum(u.count) }}</span>
           </div>
-          <div class="nc-empty" v-if="!topUris.length">暂无数据</div>
+          <div class="nc-empty" v-if="!uriList.length">暂无数据</div>
         </div>
       </div>
       <div class="glass na-card na-list">
-        <div class="nc-head"><span>Top IP 来源</span></div>
+        <div class="nc-head"><span>{{ accessEnabled ? 'Top IP 来源' : '实例 Top · 请求数' }}</span></div>
         <div class="rank-list">
-          <div class="rank-row" v-for="(ip, i) in topIps" :key="ip.ip">
+          <div class="rank-row" v-for="(ip, i) in ipList" :key="ip.name">
             <span class="rk-idx" :class="{ top: i < 3 }">{{ i + 1 }}</span>
-            <span class="rk-name" :title="ip.ip">{{ ip.ip }}</span>
-            <span class="rk-sub">{{ ip.province || ip.country || '--' }}</span>
+            <span class="rk-name" :title="ip.name">{{ ip.name }}</span>
             <span class="rk-bar"><i :style="{ width: ipPct(ip) }"></i></span>
-            <span class="rk-val">{{ fmtNum(ip.requests) }}</span>
+            <span class="rk-val">{{ fmtNum(ip.count) }}</span>
           </div>
-          <div class="nc-empty" v-if="!topIps.length">暂无数据</div>
+          <div class="nc-empty" v-if="!ipList.length">暂无数据</div>
         </div>
       </div>
     </div>
 
-    <!-- 右侧：地理分布 + 来源 Top -->
+    <!-- 右侧：地理分布 + 来源 Top / 实例概览 -->
     <div class="na-right">
-      <GeoMap v-model:scope="geoScope" :data="geoData[geoScope]" />
+      <GeoMap v-if="accessEnabled" v-model:scope="geoScope" :data="geoData[geoScope]" />
+      <div v-else class="glass na-card na-inst">
+        <div class="nc-head"><span>Nginx 实例概览</span></div>
+        <div class="rank-list">
+          <div class="rank-row inst" v-for="it in nginxInstances" :key="it.instance">
+            <span class="rk-name">{{ it.name || it.instance }}</span>
+            <span :class="['rk-badge', it.up ? 'on' : 'off']">{{ it.up ? '在线' : '离线' }}</span>
+            <span class="rk-sub">活跃 {{ fmtNum(it.activeConnections) }}</span>
+            <span class="rk-sub">请求 {{ fmtNum(it.requests) }}</span>
+          </div>
+          <div class="nc-empty" v-if="!nginxInstances.length">暂无数据</div>
+        </div>
+      </div>
       <div class="glass na-sources">
-        <div class="nc-head"><span>来源地 Top · {{ geoScope === 'cn' ? '省份' : '国家' }}</span></div>
+        <div class="nc-head">
+          <span>{{ accessEnabled ? '来源地 Top · ' + (geoScope === 'cn' ? '省份' : '国家') : '实例请求 Top' }}</span>
+        </div>
         <div class="rank-list src">
-          <div class="rank-row" v-for="(s, i) in sourceTop" :key="s.name">
+          <div class="rank-row" v-for="(s, i) in sourceList" :key="s.name">
             <span class="rk-idx" :class="{ top: i < 3 }">{{ i + 1 }}</span>
             <span class="rk-name">{{ s.name }}</span>
             <span class="rk-bar"><i :style="{ width: srcPct(s) }"></i></span>
             <span class="rk-val">{{ fmtNum(s.requests) }}</span>
           </div>
-          <div class="nc-empty" v-if="!sourceTop.length">暂无数据</div>
+          <div class="nc-empty" v-if="!sourceList.length">暂无数据</div>
         </div>
       </div>
     </div>
@@ -80,6 +101,18 @@ let timer = null
 const summary = ref(null)
 const geoData = ref({ cn: null, world: null })
 const geoScope = ref('cn')
+const nginxInstances = ref([])
+
+// 是否已启用 Nginx 访问日志分析（access log 数据是否有）
+const accessEnabled = computed(() => {
+  const s = summary.value || {}
+  return !!(
+    (s.topUris && s.topUris.length) ||
+    (s.topIps && s.topIps.length) ||
+    s.totalRequests ||
+    (s.statusCounts && Object.keys(s.statusCounts).length)
+  )
+})
 
 const totalRequests = computed(() => summary.value?.totalRequests || 0)
 const totalRate = computed(() => summary.value?.totalRate || 0)
@@ -91,7 +124,34 @@ const statusCounts = computed(() => {
     .map((k) => ({ code: k, count: m[k] }))
     .sort((a, b) => a.code.localeCompare(b.code))
 })
-const sourceTop = computed(() => (geoData.value[geoScope.value]?.points || []).slice(0, 10))
+
+// 未启用访问日志分析时，用 Nginx 实例指标兜底展示
+const instByConns = computed(() =>
+  [...nginxInstances.value].sort((a, b) => (b.activeConnections || 0) - (a.activeConnections || 0)).slice(0, 10)
+)
+const instByReqs = computed(() =>
+  [...nginxInstances.value].sort((a, b) => (b.requests || 0) - (a.requests || 0)).slice(0, 10)
+)
+const uriList = computed(() =>
+  accessEnabled.value
+    ? topUris.value
+    : instByConns.value.map((i) => ({ name: i.name || i.instance, count: i.activeConnections || 0 }))
+)
+const ipList = computed(() =>
+  accessEnabled.value
+    ? topIps.value
+    : instByReqs.value.map((i) => ({ name: i.instance, count: i.requests || 0 }))
+)
+const statusData = computed(() =>
+  accessEnabled.value && statusCounts.value.length
+    ? statusCounts.value
+    : instByConns.value.map((i) => ({ code: i.name || i.instance, count: i.activeConnections || 0 }))
+)
+const sourceList = computed(() =>
+  accessEnabled.value
+    ? (geoData.value[geoScope.value]?.points || []).slice(0, 10)
+    : instByReqs.value.map((i) => ({ name: i.name || i.instance, requests: i.requests || 0 }))
+)
 
 function fmtNum(v) {
   if (v == null) return '-'
@@ -100,15 +160,15 @@ function fmtNum(v) {
   return String(Math.round(v))
 }
 
-const maxUri = computed(() => Math.max(...topUris.value.map((u) => u.count), 1))
-const maxIp = computed(() => Math.max(...topIps.value.map((i) => i.requests), 1))
-const maxSrc = computed(() => Math.max(...sourceTop.value.map((s) => s.requests), 1))
+const maxUri = computed(() => Math.max(...uriList.value.map((u) => u.count || 0), 1))
+const maxIp = computed(() => Math.max(...ipList.value.map((i) => i.count || 0), 1))
+const maxSrc = computed(() => Math.max(...sourceList.value.map((s) => s.requests || 0), 1))
 
 function uriPct(u) {
   return ((u.count / maxUri.value) * 100).toFixed(1) + '%'
 }
 function ipPct(ip) {
-  return ((ip.requests / maxIp.value) * 100).toFixed(1) + '%'
+  return ((ip.count / maxIp.value) * 100).toFixed(1) + '%'
 }
 function srcPct(s) {
   return ((s.requests / maxSrc.value) * 100).toFixed(1) + '%'
@@ -119,6 +179,14 @@ async function loadSummary() {
     summary.value = await http.get('/api/v1/middleware/nginx/access/summary')
   } catch (e) {
     console.error('nginx access summary 加载失败', e)
+  }
+}
+
+async function loadInstances() {
+  try {
+    nginxInstances.value = await http.get('/api/v1/middleware/nginx/instances')
+  } catch (e) {
+    nginxInstances.value = []
   }
 }
 
@@ -134,9 +202,19 @@ async function loadGeo(scope) {
 async function loadTrends() {
   const list = props.nodes || []
   if (!list.length) return
+  let reqMetric = 'nginx_access_requests'
+  let byteMetric = 'nginx_access_bytes'
+  let name1 = '请求数'
+  let name2 = '流量'
+  if (!accessEnabled.value) {
+    reqMetric = 'nginx_requests'
+    byteMetric = 'nginx_connections_active'
+    name1 = '请求数'
+    name2 = '活跃连接'
+  }
   const [req, bytes] = await Promise.all([
-    queryClusterTrend(list, 'nginx_access_requests', 'sum'),
-    queryClusterTrend(list, 'nginx_access_bytes', 'sum'),
+    queryClusterTrend(list, reqMetric, 'sum'),
+    queryClusterTrend(list, byteMetric, 'sum'),
   ])
   trend &&
     trend.setOption(
@@ -144,8 +222,8 @@ async function loadTrends() {
         yMin: 0,
         yFormatter: (v) => fmtNum(v),
         series: [
-          { name: '请求数', color: COLORS.cyan, data: req },
-          { name: '流量', color: COLORS.purple, data: bytes },
+          { name: name1, color: COLORS.cyan, data: req },
+          { name: name2, color: COLORS.purple, data: bytes },
         ],
       }),
       true
@@ -154,7 +232,7 @@ async function loadTrends() {
 
 function renderStatus() {
   if (!status) return
-  const data = statusCounts.value
+  const data = statusData.value
   status.setOption(
     {
       tooltip: {
@@ -178,7 +256,7 @@ function renderStatus() {
       },
       series: [
         {
-          name: '请求数',
+          name: '数量',
           type: 'bar',
           barMaxWidth: 26,
           data: data.map((d) => d.count),
@@ -201,10 +279,11 @@ function renderStatus() {
 }
 
 async function refresh() {
-  await Promise.all([loadSummary(), loadTrends()])
+  await loadSummary()
+  await loadInstances()
+  await loadTrends()
   renderStatus()
-  loadGeo('cn')
-  loadGeo('world')
+  await Promise.all([loadGeo('cn'), loadGeo('world')])
 }
 
 onMounted(() => {
@@ -237,12 +316,26 @@ onUnmounted(() => {
   height: 100%;
   min-height: 0;
 }
+.na-hint {
+  grid-column: 1 / -1;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.na-hint b {
+  color: var(--accent);
+  font-weight: 600;
+}
 .na-left {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
   gap: 12px;
   min-height: 0;
+}
+.na-left.full {
+  grid-template-rows: 0.9fr 1.1fr 1.1fr 1.1fr;
 }
 .na-card {
   display: flex;
@@ -297,6 +390,9 @@ onUnmounted(() => {
 .rank-row + .rank-row {
   border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
+.rank-row.inst {
+  grid-template-columns: 1fr 56px 72px 72px;
+}
 .rk-idx {
   width: 16px;
   height: 16px;
@@ -325,6 +421,20 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.rk-badge {
+  font-size: 10px;
+  text-align: center;
+  border-radius: 4px;
+  padding: 1px 0;
+}
+.rk-badge.on {
+  color: #22d3ee;
+  background: rgba(34, 211, 238, 0.12);
+}
+.rk-badge.off {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
 }
 .rk-bar {
   height: 4px;
@@ -362,5 +472,10 @@ onUnmounted(() => {
 }
 .na-sources .rank-list {
   overflow-y: auto;
+}
+.na-inst {
+  flex: 1;
+  padding: 10px 12px;
+  min-height: 0;
 }
 </style>
