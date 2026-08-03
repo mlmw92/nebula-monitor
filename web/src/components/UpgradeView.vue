@@ -5,11 +5,7 @@
       <div class="panel-title">当前版本</div>
       <div class="ver-grid">
         <div class="ver-item">
-          <span class="ver-label">Web</span>
-          <span class="ver-val">{{ webVersion }}</span>
-        </div>
-        <div class="ver-item">
-          <span class="ver-label">Server</span>
+          <span class="ver-label">版本</span>
           <span class="ver-val">{{ currentVersion.server || '...' }}</span>
         </div>
         <div class="ver-item">
@@ -160,8 +156,7 @@ import { UploadFilled } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { WEB_VERSION } from '../version'
 
-const webVersion = WEB_VERSION
-const currentVersion = ref({})
+const currentVersion = ref({ server: WEB_VERSION }) // 初始用构建内嵌版本，加载后覆盖为 Server 实际运行版本
 const pending = ref(null)
 const applying = ref(false)
 const applyError = ref('')

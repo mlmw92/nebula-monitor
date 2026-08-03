@@ -27,15 +27,11 @@
       </router-link>
     </nav>
 
-    <!-- 版本信息 -->
+    <!-- 版本信息（统一取 Server 运行版本，不再区分 Web/Server 版本） -->
     <div class="version-info" v-show="!collapsed">
       <div class="ver-row">
-        <span class="ver-label">Web</span>
-        <span class="ver-val">{{ webVersion }}</span>
-      </div>
-      <div class="ver-row">
-        <span class="ver-label">Server</span>
-        <span class="ver-val" :class="serverVersion === '...' ? 'loading' : ''">{{ serverVersion }}</span>
+        <span class="ver-label">版本</span>
+        <span class="ver-val">{{ serverVersion }}</span>
       </div>
     </div>
 
@@ -63,8 +59,7 @@ defineEmits(['toggle', 'logout'])
 
 const route = useRoute()
 
-const webVersion = WEB_VERSION
-const serverVersion = ref('...')
+const serverVersion = ref(WEB_VERSION) // 初始用构建内嵌版本，加载后覆盖为 Server 实际运行版本
 
 const items = [
   { key: 'overview', to: '/', label: '首页概览', icon: Odometer },
