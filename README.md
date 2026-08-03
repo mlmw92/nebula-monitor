@@ -345,7 +345,7 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `secret` | 接入授权密钥（与 Server 一致） |
 | `interval` | 采集间隔（秒）；代理模式下用于自监控指标上报周期 |
 | `proxy` | 代理模式配置（mode=edge/hub 时生效），见下表 |
-| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / kafka / docker / rocketmq / k8s / port） |
+| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / nginxLog / kafka / docker / rocketmq / k8s / port） |
 | `redisInstances` | Redis 实例连接配置列表（数组，密码仅存本地不上报） |
 | `mysqlInstances` | MySQL 实例连接配置列表（数组，密码仅存本地不上报） |
 | `postgresInstances` | PostgreSQL 实例连接配置列表（数组，密码仅存本地不上报） |
@@ -571,6 +571,7 @@ postgresInstances:
 ```yaml
 collectors:
   nginx: true
+  nginxLog: true   # 访问日志采集开关，用于数据大屏 Nginx 分析板块
 
 nginxInstances:
   - name: "nginx-01"
@@ -598,9 +599,10 @@ nginxInstances:
 
 **Nginx access.log 配置说明**
 
-大屏的请求来源地理分布依赖 access log 解析，需同时满足：
+大屏的请求来源地理分布、状态码分布、Top URI/Top IP 等分析依赖 access log 解析，需同时满足以下条件：
 
-1. Nginx 的 `log_format` 与 Agent 的 `logFormat` 保持一致。启用响应时间统计时，Nginx 侧可配置：
+1. 在 Agent 配置的 `collectors` 中开启 `nginxLog: true`，否则不会创建访问日志采集器，仅配置 `accessLog` 路径不会生效。
+2. Nginx 的 `log_format` 与 Agent 的 `logFormat` 保持一致。启用响应时间统计时，Nginx 侧可配置：
 
 ```nginx
 http {
@@ -611,8 +613,8 @@ http {
 }
 ```
 
-2. 日志文件的读取权限：Agent 进程需能读取该文件（如运行用户为 root，或将该用户加入日志目录所属组）。
-3. 修改配置后重启 Agent 生效：`systemctl restart monitor-agent`。首次采集从文件末尾开始增量跟踪，历史行不计入统计。
+3. 日志文件的读取权限：Agent 进程需能读取该文件（如运行用户为 root，或将该用户加入日志目录所属组）。
+4. 修改配置后重启 Agent 生效：`systemctl restart monitor-agent`。首次采集从文件末尾开始增量跟踪，历史行不计入统计。
 
 ---
 
