@@ -407,6 +407,24 @@ redisInstances:
 | `sentinelName` | 哨兵必填 | sentinel 模式监控的 master 名称 |
 | `exporterURL` | exporter 必填 | Prometheus exporter 的 `/metrics` URL；**一旦填写即走 exporter 拉取模式，忽略直连** |
 
+#### 采集高可用：Agent 冗余部署（避免单点故障）
+
+中间件采集依赖部署在某台机器上的 Agent。**如果只装了一台 Agent，它所在的服务器宕机或进程退出，则该 Agent 负责采集的所有 Redis 实例（含整个集群）监控数据全部中断**——Redis 本身照常运行，只是监控出现盲区（前端显示"未采集"/离线，该 Agent 节点被 Server 标为 offline）。
+
+Redis 集群入口节点的单点问题已由 Agent 内置的入口故障转移解决（`collectCluster` 在配置入口不可达时，自动改用上次成功发现的其他存活节点作为入口）。但 **Agent 这台机器本身挂了没有任何内部机制能补**，需要冗余部署来消除：
+
+**方案：双 Agent 同 `node` 名兜底（零代码改动，推荐）**
+
+1. 在另一台**独立**的机器上安装 Agent（建议与 Redis 节点分离，避免同机共损）；
+2. 两台 Agent 的 `agent.yaml` 使用**完全相同的 `node` 名**（如都叫 `redis-monitor`），并配置**相同的 `redisInstances`**（含同一个集群入口）；
+3. 两台 Agent 各自独立采集、独立上报。指标按 `node|instance` 聚合，前端把这台 node 下的 Redis 实例合并显示为一份，**不会翻倍**；
+4. 任一 Agent 存活，Server 看到的都是同一个 node，数据不断；一台宕机，另一台无缝兜底。
+
+> 关键点：**两个 Agent 的 `node` 名必须相同**。若配成不同名，同一 Redis 集群会在前端出现两份（两个 node 下各一份），造成重复展示。
+
+**进阶：keepalived VIP**
+如需更"生产级"的单主漂移，可在两台机器上用 keepalived 漂一个 VIP，两台 Agent 的 `node` 均配置为 VIP 对应的主机名，平时一主一备，主机宕机后 VIP 漂到备机，Server 视角节点不变（本质仍是上面的同 `node` 名方案，只是用 VIP 保证同一时刻只有一个主在写，避免双写）。
+
 ---
 
 **MySQL 配置示例**
