@@ -38,6 +38,12 @@ var nginxLogReCombined = regexp.MustCompile(`^(\S+) - (\S+) \[([^\]]+)\] "([^"]*
 // 分组：1=addr 2=time_local 3=request 4=status 5=body_bytes 6=request_time
 var nginxLogReCombinedTimed = regexp.MustCompile(`^(\S+) - - \[([^\]]+)\] "([^"]*)" (\d{3}) (\d+)(?:\s+(\S+))?$`)
 
+// nginxLogReFlex 兼容多种主流 Nginx 日志变体：combined、combined_timed，
+// 以及 combined + 额外尾部字段（如 $http_x_forwarded_for，为空时记 "-"）。
+// 只提取聚合所需字段；末尾可选的纯数字视为 $request_time（用于延迟统计）。
+// 分组：1=addr 2=time_local 3=request 4=status 5=body_bytes 6=request_time(可选)
+var nginxLogReFlex = regexp.MustCompile(`^(\S+) - - \[([^\]]+)\] "([^"]*)" (\d{3}) (\d+)(?:\s+"([^"]*)")*(?:\s+([\d.]+))?$`)
+
 // nginxLogParser 封装特定格式的正则与解析逻辑。
 type nginxLogParser struct {
 	re *regexp.Regexp
@@ -105,6 +111,36 @@ func combinedTimedParser(m []string, ipStats map[string]*ipAgg, statusCount map[
 	}
 }
 
+// combinedFlexParser 解析上述多种变体（combined / combined_timed / 带额外尾部字段）。
+// 仅依赖固定前缀与可选尾部字段，末尾纯数字视为 $request_time。
+// 分组：1=addr 2=time_local 3=request 4=status 5=body_bytes 6=request_time
+func combinedFlexParser(m []string, ipStats map[string]*ipAgg, statusCount map[string]float64,
+	uriCount map[string]float64, totalRequests, totalBytes *float64,
+	latencySum, latencyN *float64) {
+	ip := strings.TrimPrefix(m[1], "::ffff:")
+	status := m[4]
+	bodyBytes, _ := parseFloatOK(m[5])
+	statusCount[status]++
+	*totalRequests++
+	*totalBytes += bodyBytes
+	agg := ipStats[ip]
+	if agg == nil {
+		agg = &ipAgg{}
+		ipStats[ip] = agg
+	}
+	agg.requests++
+	agg.bytes += bodyBytes
+	if req := m[3]; req != "" && req != "-" {
+		uriCount[extractURI(req)]++
+	}
+	if m[6] != "" {
+		if lt, ok := parseFloatOK(m[6]); ok && lt >= 0 {
+			*latencySum += lt
+			*latencyN++
+		}
+	}
+}
+
 // getParser 根据 LogFormat 名称返回对应的解析器。
 // 默认回退到 combined（包含 referer/ua 的最常见格式）。
 func getParser(format string) *nginxLogParser {
@@ -116,20 +152,23 @@ func getParser(format string) *nginxLogParser {
 	}
 }
 
-// nginxLogParserList 返回按“配置格式优先、其余格式兜底”排序的解析器列表。
-// 兼容同一 access.log 混合多种日志格式（常见于主站 combined_timed、状态探测 combined，
-// 或不同 server 块/片段使用不同 log_format 却写入同一文件）。
+// nginxLogParserList 返回解析器列表，通吃格式优先，再按配置格式与其余格式兜底。
+// 兼容同一 access.log 混合多种日志格式（combined / combined_timed / 带额外尾部字段，
+// 常见于不同 server 块或片段使用不同 log_format 却写入同一文件）。
 func nginxLogParserList(format string) []*nginxLogParser {
 	primary := getParser(format)
-	others := []*nginxLogParser{
+	all := []*nginxLogParser{
+		{re: nginxLogReFlex, parse: combinedFlexParser}, // 兼容多格式，优先尝试
+		primary,
 		{re: nginxLogReCombined, parse: combinedParser},
 		{re: nginxLogReCombinedTimed, parse: combinedTimedParser},
 	}
-	out := make([]*nginxLogParser, 0, len(others)+1)
-	out = append(out, primary)
-	for _, o := range others {
-		if o.re != primary.re {
-			out = append(out, o)
+	seen := map[*regexp.Regexp]bool{}
+	out := make([]*nginxLogParser, 0, len(all))
+	for _, p := range all {
+		if !seen[p.re] {
+			seen[p.re] = true
+			out = append(out, p)
 		}
 	}
 	return out
