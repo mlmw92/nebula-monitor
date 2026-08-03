@@ -212,6 +212,7 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 	metrics = append(metrics, pgMetrics...)
 	nginxMetrics, nginxInstances := coll.CollectNginx()
 	metrics = append(metrics, nginxMetrics...)
+	nginxAccessStats := coll.CollectNginxAccess()
 	kafkaMetrics, kafkaInstances := coll.CollectKafka()
 	metrics = append(metrics, kafkaMetrics...)
 	dockerMetrics, dockerInstances := coll.CollectDocker()
@@ -242,6 +243,7 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 		DockerInstances:   dockerInstances,
 		RocketMQInstances: rmqInstances,
 		K8sInstances:      k8sInstances,
+		NginxAccessStats:  nginxAccessStats,
 		ReportAt:          model.NowMillis(),
 	}
 	resp, err := rep.ReportFull(payload)

@@ -76,6 +76,7 @@ type CollectorToggle struct {
 	MySQL    bool `yaml:"mysql"`    // MySQL 中间件监控，默认关闭
 	Postgres bool `yaml:"postgres"` // PostgreSQL 中间件监控，默认关闭
 	Nginx    bool `yaml:"nginx"`    // Nginx 中间件监控，默认关闭
+	NginxLog bool `yaml:"nginxLog"` // Nginx access log 访问日志解析（需实例配置 accessLog 路径），默认关闭
 	Kafka    bool `yaml:"kafka"`    // Kafka 中间件监控，默认关闭
 	Docker   bool `yaml:"docker"`   // Docker 容器监控，默认关闭
 	RocketMQ bool `yaml:"rocketmq"` // RocketMQ 中间件监控，默认关闭

@@ -55,6 +55,7 @@ type ReportPayload struct {
 	DockerInstances   []DockerInstance   `json:"dockerInstances,omitempty"`   // Docker 容器元信息
 	RocketMQInstances []RocketMQInstance `json:"rocketmqInstances,omitempty"` // RocketMQ 实例元信息
 	K8sInstances      []K8sInstance      `json:"k8sInstances,omitempty"`      // Kubernetes 集群元信息
+	NginxAccessStats  []NginxAccessStat  `json:"nginxAccessStats,omitempty"`  // Nginx access log 聚合统计
 	ReportAt          int64              `json:"reportAt"`                    // 上报时间（毫秒）
 }
 
@@ -144,6 +145,8 @@ type NginxInstanceConfig struct {
 	Addr        string `yaml:"addr"`        // host:port
 	StatusPath  string `yaml:"statusPath"`  // stub_status 路径，如 /nginx_status
 	ExporterURL string `yaml:"exporterURL"` // VTS exporter URL
+	AccessLog   string `yaml:"accessLog"`   // access.log 文件路径（留空则不采集访问日志）
+	LogFormat   string `yaml:"logFormat"`   // 日志格式：combined（默认）|combined_timed（含 $request_time）
 }
 
 // NginxInstance 是上报给 Server 的 Nginx 实例元信息。
@@ -154,6 +157,36 @@ type NginxInstance struct {
 	Group    string `json:"group"`
 	Version  string `json:"version"` // nginx 版本（从响应头或 stub_status 获取）
 	Up       bool   `json:"up"`
+}
+
+// ---- Nginx access log 统计 ----
+
+// IPCount 单个来源 IP 的访问聚合。
+type IPCount struct {
+	IP       string  `json:"ip"`       // 客户端 IP
+	Requests float64 `json:"requests"` // 周期内请求数
+	Bytes    float64 `json:"bytes"`    // 周期内响应字节数
+}
+
+// NameCount 名称-计数对（Top URI 等）。
+type NameCount struct {
+	Name  string  `json:"name"`  // 名称（URI）
+	Count float64 `json:"count"` // 计数
+}
+
+// NginxAccessStat 是 Agent 单采集周期内对某个 Nginx access.log 的聚合统计。
+// 该数据不写入时序库（来源 IP 高基数），而是随上报体提交 Server 做地理聚合，
+// 仅保留 Top-N IP/URI 控制数据量。
+type NginxAccessStat struct {
+	Instance    string             `json:"instance"`            // nginx 实例地址（与 nginx_instance_up 对齐）
+	Group       string             `json:"group"`               // 分组
+	PeriodSec   float64            `json:"periodSec"`           // 聚合周期秒数（用于计算速率）
+	Requests    float64            `json:"requests"`            // 周期内请求总数
+	Bytes       float64            `json:"bytes"`               // 周期内响应字节总数
+	AvgLatency  float64            `json:"avgLatency,omitempty"` // 平均响应时间 ms（日志含 $request_time 时）
+	StatusCount map[string]float64 `json:"statusCount,omitempty"` // 状态码分布 {200:123, 404:5}
+	TopURIs     []NameCount        `json:"topUris,omitempty"`   // Top URI（最多 10）
+	TopIPs      []IPCount          `json:"topIps,omitempty"`    // Top-N 来源 IP（最多 200）
 }
 
 // ---- Kafka ----

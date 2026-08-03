@@ -18,15 +18,16 @@ type Collector struct {
 	cpu    *CPUCollector
 	disk   *DiskCollector
 	net    *NetworkCollector
-	redis  *RedisCollector
-	mysql  *MySQLCollector
-	pg     *PostgresCollector
-	nginx  *NginxCollector
-	kafka  *KafkaCollector
-	docker *DockerCollector
-	rmq    *RocketMQCollector
-	k8s    *K8sCollector
-	port   *PortCollector
+	redis       *RedisCollector
+	mysql       *MySQLCollector
+	pg          *PostgresCollector
+	nginx       *NginxCollector
+	nginxAccess *NginxAccessCollector
+	kafka       *KafkaCollector
+	docker      *DockerCollector
+	rmq         *RocketMQCollector
+	k8s         *K8sCollector
+	port        *PortCollector
 }
 
 // New 创建 Collector。
@@ -61,6 +62,9 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	}
 	if cfg.Nginx {
 		c.nginx = NewNginxCollector(node, nginxInstances)
+	}
+	if cfg.NginxLog {
+		c.nginxAccess = NewNginxAccessCollector(node, group, nginxInstances)
 	}
 	if cfg.Kafka {
 		c.kafka = NewKafkaCollector(node, kafkaInstances)
@@ -162,6 +166,14 @@ func (c *Collector) CollectNginx() ([]model.Metric, []model.NginxInstance) {
 		return nil, nil
 	}
 	return c.nginx.Collect()
+}
+
+// CollectNginxAccess 采集 Nginx access log 聚合统计（每实例一条）。
+func (c *Collector) CollectNginxAccess() []model.NginxAccessStat {
+	if c.nginxAccess == nil {
+		return nil
+	}
+	return c.nginxAccess.Collect()
 }
 
 // CollectKafka 采集 Kafka 指标。
