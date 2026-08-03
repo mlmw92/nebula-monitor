@@ -939,6 +939,38 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("聚合 Redis 指标查询失败", "metric", metricName, "err", err)
 			continue
 		}
+
+		// 集群级指标（cluster_state/slots/size/known_nodes 等）在 agent 端只绑定到集群入口实例，
+		// 但详情抽屉需要在任意节点上都能看到整体集群状态，因此按 node|group 维度做组级聚合。
+		isClusterMetric := strings.HasPrefix(metricName, "redis_cluster_") && metricName != "redis_cluster_slot_range"
+		if isClusterMetric {
+			groupLatest := map[string]float64{}
+			groupTs := map[string]int64{}
+			for _, s := range series {
+				node := s.Labels["node"]
+				group := s.Labels["group"]
+				if node == "" || group == "" || len(s.Points) == 0 {
+					continue
+				}
+				key := node + "|" + group
+				ts := s.Points[len(s.Points)-1].Timestamp
+				if ts > groupTs[key] {
+					groupTs[key] = ts
+					groupLatest[key] = s.Points[len(s.Points)-1].Value
+				}
+			}
+			for _, ri := range instances {
+				if ri.Topology != "cluster" {
+					continue
+				}
+				key := ri.Node + "|" + ri.Group
+				if v, ok := groupLatest[key]; ok {
+					setter(ri, v)
+				}
+			}
+			continue
+		}
+
 		for _, s := range series {
 			node := s.Labels["node"]
 			instance := s.Labels["instance"]
