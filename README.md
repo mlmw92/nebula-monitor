@@ -62,6 +62,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 
 - 登录、总览、主机列表（Agent 版本低于服务端时显示红点）、主机详情（含端口状态区块）、告警列表、规则新增/编辑（含静默设置）、分组管理
 - **中间件监控**：独立一级菜单，Tab 布局（一种中间件一个 Tab）。已实现 Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes 八个 Tab：统计概览卡片 + 实例列表表格 + 实例详情抽屉（多趋势图）。
+- **数据大屏**：`/screen` 全屏自适应数据分析视图，三大板块 Tab 切换：主机监控（CPU/内存/磁盘/网络实时仪表盘 + 集群趋势 + 主机健康列表）、中间件监控（8 类组件健康度总览 + 关键参数趋势 + 实例下钻）、Nginx 分析（访问量/流量趋势、状态码分布、Top URI/Top IP 排行、请求来源地理分布中国/世界地图热力散点与动线）；顶部 KPI 指标卡、底部实时告警滚动区，模块显隐可配置并持久化。
 - **服务拨测**：拨测任务管理页面（新增/编辑/删除/启用切换），实时展示拨测结果（在线状态/延迟/证书到期）。
 - **巡检报告**：报告生成页面（日报/周报/月报选择 + 即时生成 + 下载 + 历史记录）。
 - **系统升级**：Web 上传 upgrade 包 → 解析版本 → 立即升级（备份+替换+重启）/ 回滚 + 升级历史；Agent 不主动推送，由管理员在主机列表手动触发
@@ -575,6 +576,8 @@ nginxInstances:
   - name: "nginx-01"
     addr: "127.0.0.1:80"
     statusPath: "/nginx_status"   # stub_status 路径，默认 /nginx_status
+    accessLog: "/var/log/nginx/access.log"   # access.log 路径；填写后采集访问日志
+    logFormat: "combined_timed"   # 日志格式：combined（默认）| combined_timed（含 $request_time）
 
   - name: "nginx-vts"
     addr: "127.0.0.1:80"
@@ -590,6 +593,26 @@ nginxInstances:
 | `addr` | 是 | Nginx 监听地址 `host:port` |
 | `statusPath` | 否 | `stub_status` 路径，默认 `/nginx_status` |
 | `exporterURL` | exporter 选填 | 填写后走 nginx-vts-exporter 拉取模式 |
+| `accessLog` | 否 | access.log 文件路径；填写后按行增量采集访问日志，用于数据大屏 Nginx 分析板块（请求来源地理分布、状态码分布、Top URI/Top IP）。留空则不采集 |
+| `logFormat` | 否 | access.log 格式：`combined`（默认，对应 Nginx 默认 log_format）或 `combined_timed`（追加 `$request_time`，可统计平均响应时间）。需与实际日志格式一致，否则解析失败会跳过该行 |
+
+**Nginx access.log 配置说明**
+
+大屏的请求来源地理分布依赖 access log 解析，需同时满足：
+
+1. Nginx 的 `log_format` 与 Agent 的 `logFormat` 保持一致。启用响应时间统计时，Nginx 侧可配置：
+
+```nginx
+http {
+    log_format combined_timed '$remote_addr - - [$time_local] "$request" $status $body_bytes_sent $request_time';
+    server {
+        access_log /var/log/nginx/access.log combined_timed;
+    }
+}
+```
+
+2. 日志文件的读取权限：Agent 进程需能读取该文件（如运行用户为 root，或将该用户加入日志目录所属组）。
+3. 修改配置后重启 Agent 生效：`systemctl restart monitor-agent`。首次采集从文件末尾开始增量跟踪，历史行不计入统计。
 
 ---
 
@@ -971,6 +994,9 @@ journalctl -u monitor-proxy-hub -f
 | GET | `/api/v1/middleware/docker/instances` | Docker 实例列表 |
 | GET | `/api/v1/middleware/rocketmq/instances` | RocketMQ 实例列表 |
 | GET | `/api/v1/middleware/k8s/instances` | Kubernetes 集群列表（集群聚合 + Node/异常 Pod 明细） |
+| GET | `/api/v1/middleware/overview` | 中间件健康度总览（8 类组件实例数 / 在线数 / 告警数聚合） |
+| GET | `/api/v1/middleware/nginx/access/summary` | Nginx 访问日志汇总（总请求 / 速率 / 状态码分布 / Top URI / Top IP） |
+| GET | `/api/v1/middleware/nginx/access/geo?scope=cn\|world` | 请求来源地理分布（来源热力点 / 部署点 / 动线） |
 | GET | `/api/v1/alerts?state=active` | 告警事件 |
 | GET/POST/PUT/DELETE | `/api/v1/rules` | 告警规则 CRUD |
 | GET | `/ws?topic=metrics&node=` | 实时指标（WebSocket） |
