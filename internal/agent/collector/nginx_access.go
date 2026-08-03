@@ -36,7 +36,7 @@ var nginxLogReCombined = regexp.MustCompile(`^(\S+) - (\S+) \[([^\]]+)\] "([^"]*
 // nginxLogReCombinedTimed 匹配 combined_timed 格式（无 referer/ua，末尾有 request_time）。
 // combined_timed: $remote_addr - - [$time_local] "$request" $status $body_bytes_sent $request_time
 // 分组：1=addr 2=time_local 3=request 4=status 5=body_bytes 6=request_time
-var nginxLogReCombinedTimed = regexp.MustCompile(`^(\S+) - - \[([^\]]+)\] "([^"]*)" (\d{3}) (\d+)(?:\s+([\d.]+))?$`)
+var nginxLogReCombinedTimed = regexp.MustCompile(`^(\S+) - - \[([^\]]+)\] "([^"]*)" (\d{3}) (\d+)(?:\s+(\S+))?$`)
 
 // nginxLogParser 封装特定格式的正则与解析逻辑。
 type nginxLogParser struct {
@@ -97,7 +97,7 @@ func combinedTimedParser(m []string, ipStats map[string]*ipAgg, statusCount map[
 	if req := m[3]; req != "" && req != "-" {
 		uriCount[extractURI(req)]++
 	}
-	if m[6] != "" {
+	if m[6] != "" && m[6] != "-" {
 		if lt, ok := parseFloatOK(m[6]); ok && lt >= 0 {
 			*latencySum += lt
 			*latencyN++
