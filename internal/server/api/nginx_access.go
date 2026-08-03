@@ -32,11 +32,13 @@ type nginxAccessSummaryResp struct {
 	Instances     []nginxAccessInstance `json:"instances"`
 }
 
-// nginxAccessLine 是地图动线的起终点对（名称，坐标由前端按地图 geoCoord 解析）。
+// nginxAccessLine 是地图动线的起终点对（中文名 + 英文名，坐标由前端按地图 name 解析）。
 type nginxAccessLine struct {
-	From  string  `json:"from"`
-	To    string  `json:"to"`
-	Value float64 `json:"value"`
+	From   string  `json:"from"`
+	FromEn string  `json:"fromEn"`
+	To     string  `json:"to"`
+	ToEn   string  `json:"toEn"`
+	Value  float64 `json:"value"`
 }
 
 // nginxAccessGeoResp 是 /access/geo 的响应体。
@@ -148,7 +150,11 @@ func (a *API) handleNginxAccessGeo(w http.ResponseWriter, r *http.Request) {
 		if p.Name == deployName {
 			continue
 		}
-		resp.Lines = append(resp.Lines, nginxAccessLine{From: p.Name, To: deployName, Value: p.Requests})
+		resp.Lines = append(resp.Lines, nginxAccessLine{
+			From: p.Name, FromEn: p.CountryEn,
+			To: deployName, ToEn: center.CountryEn,
+			Value: p.Requests,
+		})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
