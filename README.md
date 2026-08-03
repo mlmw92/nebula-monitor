@@ -413,7 +413,7 @@ redisInstances:
 
 Redis 集群入口节点的单点问题已由 Agent 内置的入口故障转移解决（`collectCluster` 在配置入口不可达时，自动改用上次成功发现的其他存活节点作为入口）。但 **Agent 这台机器本身挂了没有任何内部机制能补**，需要冗余部署来消除：
 
-**方案：双 Agent 同 `node` 名兜底（零代码改动，推荐）**
+**方案：双 Agent 同 `node` 名兜底**
 
 1. 在另一台**独立**的机器上安装 Agent（建议与 Redis 节点分离，避免同机共损）；
 2. 两台 Agent 的 `agent.yaml` 使用**完全相同的 `node` 名**（如都叫 `redis-monitor`），并配置**相同的 `redisInstances`**（含同一个集群入口）；
