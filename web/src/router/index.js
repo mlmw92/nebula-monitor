@@ -31,8 +31,7 @@ const routes = [
         component: () => import('../layouts/SettingsLayout.vue'),
         redirect: '/system/settings/brand',
         children: [
-          { path: 'brand', name: 'system-settings-brand', component: () => import('../components/settings/BrandSettingsSubView.vue') },
-          { path: 'footer', name: 'system-settings-footer', component: () => import('../components/settings/FooterSettingsSubView.vue') },
+          { path: 'brand', name: 'system-settings', component: () => import('../components/settings/BrandSettingsSubView.vue') },
         ],
       },
     ],

@@ -46,6 +46,33 @@
           </el-form-item>
         </el-col>
       </el-row>
+
+      <el-divider />
+
+      <el-row :gutter="28">
+        <el-col :xs="24" :md="12">
+          <el-form-item label="页脚文本">
+            <el-input
+              v-model="form.footer"
+              type="textarea"
+              :rows="4"
+              maxlength="512"
+              show-word-limit
+              placeholder="如 © 2025 您的公司。保留所有权利。"
+            />
+            <div class="field-hint">留空则不在页面底部显示页脚；支持纯文本，保存后全局即时生效</div>
+          </el-form-item>
+        </el-col>
+
+        <el-col :xs="24" :md="12">
+          <el-form-item label="页脚预览">
+            <div class="footer-preview">
+              <span v-if="form.footer" class="preview-text">{{ form.footer }}</span>
+              <span v-else class="preview-empty">当前未设置页脚文本</span>
+            </div>
+          </el-form-item>
+        </el-col>
+      </el-row>
     </el-form>
   </el-card>
 </template>
@@ -56,13 +83,14 @@ import { ElMessage } from 'element-plus'
 import { useBrand } from '../../composables/useBrand'
 
 const { brand, saveBrand } = useBrand()
-const form = ref({ name: 'NebulaEye', logo: '' })
+const form = ref({ name: 'NebulaEye', logo: '', footer: '' })
 const fileInput = ref(null)
 const saving = ref(false)
 
 onMounted(() => {
   form.value.name = brand.name || 'NebulaEye'
   form.value.logo = brand.logo || ''
+  form.value.footer = brand.footer || ''
 })
 
 function pickFile() {
@@ -95,6 +123,7 @@ function clearLogo() {
 function resetDefault() {
   form.value.name = 'NebulaEye'
   form.value.logo = ''
+  form.value.footer = ''
 }
 
 async function save() {
@@ -104,7 +133,7 @@ async function save() {
   }
   saving.value = true
   try {
-    await saveBrand(form.value.name.trim(), form.value.logo)
+    await saveBrand(form.value.name.trim(), form.value.logo, form.value.footer)
     ElMessage.success('已保存，全局即时生效')
   } catch (e) {
     ElMessage.error(e.message || '保存失败')
@@ -184,5 +213,22 @@ async function save() {
 .btn-line {
   display: flex;
   gap: 8px;
+}
+.footer-preview {
+  width: 100%;
+  padding: 16px 20px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: var(--bg-soft, rgba(255, 255, 255, 0.04));
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.preview-text {
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.preview-empty {
+  color: var(--text-muted);
 }
 </style>

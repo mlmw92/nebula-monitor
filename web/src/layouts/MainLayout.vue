@@ -111,8 +111,7 @@ const pageTitle = computed(() => {
     report: '巡检报告',
     'system-upgrade': '系统升级',
     notify: '通知配置',
-    'system-settings-brand': '系统设置',
-    'system-settings-footer': '系统设置',
+    'system-settings': '系统设置',
   }
   return m[route.name] || ''
 })

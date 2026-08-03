@@ -29,13 +29,12 @@
 
 <script setup>
 import { useRoute } from 'vue-router'
-import { Setting, Shop, Document } from '@element-plus/icons-vue'
+import { Setting, Shop } from '@element-plus/icons-vue'
 
 const route = useRoute()
 
 const menus = [
   { key: 'brand', to: '/system/settings/brand', label: '站点与品牌', icon: Shop },
-  { key: 'footer', to: '/system/settings/footer', label: '页脚', icon: Document },
 ]
 </script>
 
