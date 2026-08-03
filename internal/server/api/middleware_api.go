@@ -57,8 +57,16 @@ func (a *API) handleMySQLInstances(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		key := node + "|" + instance
-		if _, exists := instances[key]; !exists {
-			ri := &mysqlInstanceInfo{
+		if ri, exists := instances[key]; exists {
+			// 已存在的实例：持续更新元数据（role/topology/version 等），确保 GR 切主后角色能刷新。
+			ri.Role = s.Labels["role"]
+			ri.Topology = s.Labels["topology"]
+			ri.Version = s.Labels["version"]
+			ri.Group = s.Labels["group"]
+			ri.ReplicaOf = s.Labels["replica_of"]
+			ri.Up = s.Points[len(s.Points)-1].Value > 0
+		} else {
+			instances[key] = &mysqlInstanceInfo{
 				Node:      node,
 				Instance:  instance,
 				Name:      s.Labels["name"],
@@ -69,7 +77,6 @@ func (a *API) handleMySQLInstances(w http.ResponseWriter, r *http.Request) {
 				ReplicaOf: s.Labels["replica_of"],
 				Up:        s.Points[len(s.Points)-1].Value > 0,
 			}
-			instances[key] = ri
 			keys = append(keys, key)
 		}
 	}
@@ -157,8 +164,15 @@ func (a *API) handlePostgresInstances(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		key := node + "|" + instance
-		if _, exists := instances[key]; !exists {
-			ri := &postgresInstanceInfo{
+		if ri, exists := instances[key]; exists {
+			ri.Role = s.Labels["role"]
+			ri.Topology = s.Labels["topology"]
+			ri.Version = s.Labels["version"]
+			ri.Database = s.Labels["database"]
+			ri.Group = s.Labels["group"]
+			ri.Up = s.Points[len(s.Points)-1].Value > 0
+		} else {
+			instances[key] = &postgresInstanceInfo{
 				Node:     node,
 				Instance: instance,
 				Name:     s.Labels["name"],
@@ -169,7 +183,6 @@ func (a *API) handlePostgresInstances(w http.ResponseWriter, r *http.Request) {
 				Group:    s.Labels["group"],
 				Up:       s.Points[len(s.Points)-1].Value > 0,
 			}
-			instances[key] = ri
 			keys = append(keys, key)
 		}
 	}
@@ -249,8 +262,12 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		key := node + "|" + instance
-		if _, exists := instances[key]; !exists {
-			ri := &nginxInstanceInfo{
+		if ri, exists := instances[key]; exists {
+			ri.Version = s.Labels["version"]
+			ri.Group = s.Labels["group"]
+			ri.Up = s.Points[len(s.Points)-1].Value > 0
+		} else {
+			instances[key] = &nginxInstanceInfo{
 				Node:     node,
 				NodeIP:   a.nodeIP(node),
 				Instance: instance,
@@ -259,7 +276,6 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 				Group:   s.Labels["group"],
 				Up:      s.Points[len(s.Points)-1].Value > 0,
 			}
-			instances[key] = ri
 			keys = append(keys, key)
 		}
 	}
@@ -351,21 +367,25 @@ func (a *API) handleKafkaInstances(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		key := node + "|" + instance
-		if _, exists := instances[key]; !exists {
 		name := s.Labels["name"]
 		if name == "" {
 			name = s.Labels["group"]
 		}
-		ri := &kafkaInstanceInfo{
-			Node:     node,
-			Instance: instance,
-			Name:     name,
-			Role:     s.Labels["role"],
-			Version:  s.Labels["version"],
-			Group:    s.Labels["group"],
-			Up:       s.Points[len(s.Points)-1].Value > 0,
-		}
-			instances[key] = ri
+		if ri, exists := instances[key]; exists {
+			ri.Role = s.Labels["role"]
+			ri.Version = s.Labels["version"]
+			ri.Group = s.Labels["group"]
+			ri.Up = s.Points[len(s.Points)-1].Value > 0
+		} else {
+			instances[key] = &kafkaInstanceInfo{
+				Node:     node,
+				Instance: instance,
+				Name:     name,
+				Role:     s.Labels["role"],
+				Version:  s.Labels["version"],
+				Group:    s.Labels["group"],
+				Up:       s.Points[len(s.Points)-1].Value > 0,
+			}
 			keys = append(keys, key)
 		}
 	}
@@ -630,8 +650,13 @@ func (a *API) handleRocketMQInstances(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		key := node + "|" + instance
-		if _, exists := instances[key]; !exists {
-			ri := &rocketmqInstanceInfo{
+		if ri, exists := instances[key]; exists {
+			ri.Role = s.Labels["role"]
+			ri.Version = s.Labels["version"]
+			ri.Group = s.Labels["group"]
+			ri.Up = s.Points[len(s.Points)-1].Value > 0
+		} else {
+			instances[key] = &rocketmqInstanceInfo{
 				Node:     node,
 				Instance: instance,
 				Name:     s.Labels["name"],
@@ -640,7 +665,6 @@ func (a *API) handleRocketMQInstances(w http.ResponseWriter, r *http.Request) {
 				Group:    s.Labels["group"],
 				Up:       s.Points[len(s.Points)-1].Value > 0,
 			}
-			instances[key] = ri
 			keys = append(keys, key)
 		}
 	}
