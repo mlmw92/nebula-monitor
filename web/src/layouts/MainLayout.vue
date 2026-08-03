@@ -3,7 +3,7 @@
     <Sidebar :alert-count="alertCount" :collapsed="collapsed" @toggle="collapsed = !collapsed" @logout="logout" />
 
     <div class="main-wrap" :class="{ collapsed }">
-      <header class="topbar">
+      <header class="topbar glass">
         <div class="topbar-left">
           <div class="brand-bar">
             <img v-if="brand.logo" :src="brand.logo" alt="logo" class="brand-logo" />
@@ -222,16 +222,15 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 40;
-  height: 60px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 16px;
   border-radius: 0;
-  border: none;
-  background: linear-gradient(90deg, #b91c1c 0%, #dc2626 100%);
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  border-left: none;
+  border-right: none;
+  border-top: none;
 }
 .topbar-left {
   display: flex;
@@ -253,19 +252,19 @@ onUnmounted(() => {
   min-width: 0;
 }
 .brand-logo {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
   object-fit: contain;
-  background: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+  background: var(--accent-dim);
+  box-shadow: 0 0 0 1px var(--border);
   flex-shrink: 0;
 }
 .brand-logo--default {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--accent);
 }
 .brand-titles {
   display: flex;
@@ -276,9 +275,10 @@ onUnmounted(() => {
   overflow: hidden;
 }
 .brand-name {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: 0.02em;
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -286,27 +286,7 @@ onUnmounted(() => {
 }
 .brand-sub {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.85);
-}
-.topbar :deep(.el-button) {
-  color: #fff;
-}
-.topbar :deep(.el-button.is-circle) {
-  background: transparent;
-  border-color: rgba(255, 255, 255, 0.25);
-}
-.topbar :deep(.el-breadcrumb__inner),
-.topbar :deep(.el-breadcrumb__inner a),
-.topbar :deep(.el-breadcrumb__separator) {
-  color: #fff !important;
-}
-.topbar :deep(.el-breadcrumb__item:last-child .el-breadcrumb__inner) {
-  color: rgba(255, 255, 255, 0.85) !important;
-}
-.topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  color: var(--text-dim);
 }
 .theme-dot {
   width: 12px;
