@@ -249,6 +249,7 @@ func (c *NginxAccessCollector) collectFile(cfg model.NginxInstanceConfig, state 
 	state.offset += readBytes // 推进到实际读取位置（超限时下次从断点续读）
 
 	if totalRequests == 0 {
+		slog.Debug("Nginx access.log 解析结果为空", "path", state.path, "rows", rows, "readBytes", readBytes)
 		return nil
 	}
 
