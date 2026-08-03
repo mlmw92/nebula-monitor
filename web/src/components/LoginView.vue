@@ -54,6 +54,10 @@
 
       <p class="hint">账号与口令由部署时设定（安装脚本默认生成强口令，请查阅安装日志 / server.yaml）</p>
     </div>
+
+    <footer v-if="brand.footer" class="login-footer">
+      {{ brand.footer }}
+    </footer>
   </div>
 </template>
 
@@ -183,5 +187,15 @@ async function doLogin() {
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 20px;
+}
+.login-footer {
+  position: absolute;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  z-index: 1;
 }
 </style>

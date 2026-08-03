@@ -17,17 +17,20 @@ const (
 	MaxNameLen = 64
 	// MaxLogoLen Logo（data URL 明文）最大字节数，约对应 3MB 原图。
 	MaxLogoLen = 4 * 1024 * 1024
+	// MaxFooterLen 页脚文本最大字符数（按 rune 计）。
+	MaxFooterLen = 512
 )
 
 // UIConfig 系统 UI 品牌配置。
 type UIConfig struct {
-	Name string `yaml:"name" json:"name"` // 系统名称
-	Logo string `yaml:"logo" json:"logo"` // 可选 Logo：图片 data URL（data:image/...;base64,）或 http(s) 链接
+	Name   string `yaml:"name" json:"name"`   // 系统名称
+	Logo   string `yaml:"logo" json:"logo"`   // 可选 Logo：图片 data URL（data:image/...;base64,）或 http(s) 链接
+	Footer string `yaml:"footer" json:"footer"` // 页脚文本（支持 HTML），空则隐藏
 }
 
 // DefaultUIConfig 返回默认品牌（系统名 NebulaEye，无自定义 Logo 时使用前端默认徽标）。
 func DefaultUIConfig() UIConfig {
-	return UIConfig{Name: "NebulaEye", Logo: ""}
+	return UIConfig{Name: "NebulaEye", Logo: "", Footer: ""}
 }
 
 // Manager 负责 UI 配置的加载与落盘。
@@ -76,6 +79,9 @@ func (m *Manager) Save(c UIConfig) error {
 	}
 	if c.Logo != "" && !isValidLogo(c.Logo) {
 		return fmt.Errorf("Logo 仅支持图片 data URL（data:image/...;base64,）或 http(s) 链接")
+	}
+	if len([]rune(c.Footer)) > MaxFooterLen {
+		return fmt.Errorf("页脚文本过长（上限 %d 字符）", MaxFooterLen)
 	}
 	if err := os.MkdirAll(filepath.Dir(m.path), 0o755); err != nil {
 		return err

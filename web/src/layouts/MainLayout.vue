@@ -59,6 +59,10 @@
           </keep-alive>
         </router-view>
       </main>
+
+      <footer v-if="brand.footer" class="global-footer">
+        {{ brand.footer }}
+      </footer>
     </div>
   </div>
 </template>
@@ -70,9 +74,11 @@ import { Expand, Fold, Refresh, Bell, User, DataAnalysis } from '@element-plus/i
 import Sidebar from '../components/Sidebar.vue'
 import http, { setToken } from '../api/http'
 import { connectWS } from '../api/ws'
+import { useBrand } from '../composables/useBrand'
 
 const router = useRouter()
 const route = useRoute()
+const { brand } = useBrand()
 const collapsed = ref(false)
 const alertCount = ref(0)
 const username = ref(localStorage.getItem('nebula_user') || 'admin')
@@ -105,7 +111,8 @@ const pageTitle = computed(() => {
     report: '巡检报告',
     'system-upgrade': '系统升级',
     notify: '通知配置',
-    'system-settings': '系统设置',
+    'system-settings-brand': '系统设置',
+    'system-settings-footer': '系统设置',
   }
   return m[route.name] || ''
 })
@@ -315,5 +322,13 @@ onUnmounted(() => {
   max-width: 1700px;
   width: 100%;
   margin: 0 auto;
+}
+.global-footer {
+  padding: 14px 20px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  background: var(--card-bg);
 }
 </style>

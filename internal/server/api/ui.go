@@ -21,14 +21,15 @@ func (a *API) handleUIGet(w http.ResponseWriter, r *http.Request) {
 // 写操作受登录鉴权保护（AuthMiddleware 对匿名 GET 放行、PUT 仍要求 token）。
 func (a *API) handleUIPut(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
-		Logo string `json:"logo"`
+		Name   string `json:"name"`
+		Logo   string `json:"logo"`
+		Footer string `json:"footer"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
 		return
 	}
-	if err := a.uiMgr.Save(uicfg.UIConfig{Name: body.Name, Logo: body.Logo}); err != nil {
+	if err := a.uiMgr.Save(uicfg.UIConfig{Name: body.Name, Logo: body.Logo, Footer: body.Footer}); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

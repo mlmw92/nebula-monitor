@@ -7,7 +7,7 @@ import http from '../api/http'
 const STORAGE_KEY = 'nebula_brand'
 
 function defaults() {
-  return { name: 'NebulaEye', logo: '' }
+  return { name: 'NebulaEye', logo: '', footer: '' }
 }
 
 function loadCache() {
@@ -15,7 +15,7 @@ function loadCache() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const d = JSON.parse(raw)
-      if (d && typeof d.name === 'string') return { name: d.name, logo: d.logo || '' }
+      if (d && typeof d.name === 'string') return { name: d.name, logo: d.logo || '', footer: d.footer || '' }
     }
   } catch (e) {
     /* 损坏缓存忽略 */
@@ -29,7 +29,7 @@ let loadPromise = null
 
 function persist() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: brand.name, logo: brand.logo }))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: brand.name, logo: brand.logo, footer: brand.footer }))
   } catch (e) {
     /* 忽略容量错误 */
   }
@@ -49,6 +49,7 @@ export function useBrand() {
         if (d && d.name) {
           brand.name = d.name
           brand.logo = d.logo || ''
+          brand.footer = d.footer || ''
           persist()
         }
       } catch (e) {
@@ -61,11 +62,14 @@ export function useBrand() {
   }
 
   // 保存品牌配置（需登录），成功后更新内存与缓存
-  async function saveBrand(name, logo) {
-    const d = await http.put('/api/v1/ui/settings', { name, logo })
+  async function saveBrand(name, logo, footer) {
+    const payload = { name, logo }
+    if (typeof footer === 'string') payload.footer = footer
+    const d = await http.put('/api/v1/ui/settings', payload)
     if (d && d.config) {
       brand.name = d.config.name || name
       brand.logo = d.config.logo || ''
+      brand.footer = d.config.footer || ''
       persist()
       applyTitle()
     }
