@@ -16,12 +16,24 @@
 
     <template v-if="instances.length > 0">
       <div class="kpi-row">
-        <KpiCard label="实例总数" :value="stats.total" tone="total" />
-        <KpiCard label="在线实例" :value="stats.up" tone="up" />
-        <KpiCard label="离线实例" :value="stats.down" tone="down" />
-        <KpiCard label="总 Broker 数" :value="stats.totalBrokers" tone="cluster" />
-        <KpiCard label="总 Topic 数" :value="stats.totalTopics" tone="ops" />
-        <KpiCard label="总消息积压" :value="formatNum(stats.totalBacklog)" tone="alert" />
+        <KpiCard label="实例总数" :value="stats.total" tone="total">
+          <template #icon><el-icon :size="20"><Grid /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="在线实例" :value="stats.up" tone="up">
+          <template #icon><el-icon :size="20"><CircleCheck /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="离线实例" :value="stats.down" tone="down">
+          <template #icon><el-icon :size="20"><CircleClose /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="总 Broker 数" :value="stats.totalBrokers" tone="cluster">
+          <template #icon><el-icon :size="20"><Monitor /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="总 Topic 数" :value="stats.totalTopics" tone="ops">
+          <template #icon><el-icon :size="20"><Document /></el-icon></template>
+        </KpiCard>
+        <KpiCard label="总消息积压" :value="formatNum(stats.totalBacklog)" tone="alert">
+          <template #icon><el-icon :size="20"><Bell /></el-icon></template>
+        </KpiCard>
       </div>
 
       <div class="chart-section glass">
@@ -100,6 +112,7 @@ import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
 import MwStatusDot from '../mw/MwStatusDot.vue'
 import MwRoleTag from '../mw/MwRoleTag.vue'
+import { Grid, CircleCheck, CircleClose, Monitor, Document, Bell } from '@element-plus/icons-vue'
 
 const loading = ref(true)
 const instances = ref([])
@@ -216,6 +229,11 @@ onMounted(load)
 .chart-box { width: 100%; height: 300px; }
 
 /* 实例拓扑 */
+.topo-group { margin-bottom: 22px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.02); }
+.topo-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
+.topo-group-title { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
+.topo-group-title svg { color: var(--accent); }
+.dim { color: var(--text-muted); }
 .topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .rel-node { padding: 12px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--border); background: var(--bg-elev); transition: transform 0.15s, box-shadow 0.15s; }
 .rel-node:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
