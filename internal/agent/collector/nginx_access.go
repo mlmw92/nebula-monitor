@@ -22,22 +22,110 @@ const (
 	nginxAccessMaxRows = 50000
 	// nginxAccessMaxBytes 单周期最多读取的日志字节数（约 8MB），超限则下次继续。
 	nginxAccessMaxBytes = 8 << 20
+
+	// 支持的日志格式名称
+	nginxLogFormatCombined      = "combined"
+	nginxLogFormatCombinedTimed = "combined_timed"
 )
 
-// nginxLogRe 匹配 combined 日志行，末尾可选 $request_time（combined_timed 格式）。
-// 分组：1=remote_addr 2=remote_user 3=time_local 4=request 5=status 6=body_bytes_sent 7=referer 8=ua 9=request_time
-var nginxLogRe = regexp.MustCompile(`^(\S+) - (\S+) \[([^\]]+)\] "([^"]*)" (\d{3}) (\d+) "([^"]*)" "([^"]*)"(?:\s+([\d.]+))?$`)
+// nginxLogReCombined 匹配标准 combined 格式，末尾可选 $request_time。
+// combined: $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" [$request_time]
+// 分组：1=addr 2=user 3=time_local 4=request 5=status 6=body_bytes 7=referer 8=ua 9=request_time
+var nginxLogReCombined = regexp.MustCompile(`^(\S+) - (\S+) \[([^\]]+)\] "([^"]*)" (\d{3}) (\d+) "([^"]*)" "([^"]*)"(?:\s+([\d.]+))?$`)
 
-// accessFileState 记录单个 access.log 的增量读取状态。
-type accessFileState struct {
-	path   string // 日志文件路径
-	offset int64  // 上次读取到的字节偏移
+// nginxLogReCombinedTimed 匹配 combined_timed 格式（无 referer/ua，末尾有 request_time）。
+// combined_timed: $remote_addr - - [$time_local] "$request" $status $body_bytes_sent $request_time
+// 分组：1=addr 2=time_local 3=request 4=status 5=body_bytes 6=request_time
+var nginxLogReCombinedTimed = regexp.MustCompile(`^(\S+) - - \[([^\]]+)\] "([^"]*)" (\d{3}) (\d+)(?:\s+([\d.]+))?$`)
+
+// nginxLogParser 封装特定格式的正则与解析逻辑。
+type nginxLogParser struct {
+	re *regexp.Regexp
+	// parse 从匹配分组中提取字段并累加进聚合结构。
+	parse func(m []string, ipStats map[string]*ipAgg, statusCount map[string]float64,
+		uriCount map[string]float64, totalRequests, totalBytes *float64,
+		latencySum, latencyN *float64)
+}
+
+// combinedParser 解析 standard combined 日志行。
+// 分组：1=addr 2=user 3=time_local 4=request 5=status 6=body_bytes 7=referer 8=ua 9=request_time
+func combinedParser(m []string, ipStats map[string]*ipAgg, statusCount map[string]float64,
+	uriCount map[string]float64, totalRequests, totalBytes *float64,
+	latencySum, latencyN *float64) {
+	ip := strings.TrimPrefix(m[1], "::ffff:")
+	status := m[5]
+	bodyBytes, _ := parseFloatOK(m[6])
+	statusCount[status]++
+	*totalRequests++
+	*totalBytes += bodyBytes
+	agg := ipStats[ip]
+	if agg == nil {
+		agg = &ipAgg{}
+		ipStats[ip] = agg
+	}
+	agg.requests++
+	agg.bytes += bodyBytes
+	if req := m[4]; req != "" && req != "-" {
+		uriCount[extractURI(req)]++
+	}
+	if m[9] != "" {
+		if lt, ok := parseFloatOK(m[9]); ok && lt >= 0 {
+			*latencySum += lt
+			*latencyN++
+		}
+	}
+}
+
+// combinedTimedParser 解析 combined_timed 日志行（无 referer/ua）。
+// 分组：1=addr 2=time_local 3=request 4=status 5=body_bytes 6=request_time
+func combinedTimedParser(m []string, ipStats map[string]*ipAgg, statusCount map[string]float64,
+	uriCount map[string]float64, totalRequests, totalBytes *float64,
+	latencySum, latencyN *float64) {
+	ip := strings.TrimPrefix(m[1], "::ffff:")
+	status := m[4]
+	bodyBytes, _ := parseFloatOK(m[5])
+	statusCount[status]++
+	*totalRequests++
+	*totalBytes += bodyBytes
+	agg := ipStats[ip]
+	if agg == nil {
+		agg = &ipAgg{}
+		ipStats[ip] = agg
+	}
+	agg.requests++
+	agg.bytes += bodyBytes
+	if req := m[3]; req != "" && req != "-" {
+		uriCount[extractURI(req)]++
+	}
+	if m[6] != "" {
+		if lt, ok := parseFloatOK(m[6]); ok && lt >= 0 {
+			*latencySum += lt
+			*latencyN++
+		}
+	}
+}
+
+// getParser 根据 LogFormat 名称返回对应的解析器。
+// 默认回退到 combined（包含 referer/ua 的最常见格式）。
+func getParser(format string) *nginxLogParser {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case nginxLogFormatCombinedTimed:
+		return &nginxLogParser{re: nginxLogReCombinedTimed, parse: combinedTimedParser}
+	default:
+		return &nginxLogParser{re: nginxLogReCombined, parse: combinedParser}
+	}
 }
 
 // ipAgg 单个来源 IP 的周期内聚合。
 type ipAgg struct {
 	requests float64
 	bytes    float64
+}
+
+// accessFileState 记录单个 access.log 的增量读取状态。
+type accessFileState struct {
+	path   string // 日志文件路径
+	offset int64  // 上次读取到的字节偏移
 }
 
 // NginxAccessCollector 增量解析 Nginx access.log，按 IP/URI/状态码聚合统计。
@@ -132,6 +220,7 @@ func (c *NginxAccessCollector) collectFile(cfg model.NginxInstanceConfig, state 
 	var totalRequests, totalBytes float64
 	var latencySum, latencyN float64
 
+	parser := getParser(cfg.LogFormat)
 	r := bufio.NewReader(f)
 	var readBytes int64
 	rows := 0
@@ -149,7 +238,10 @@ func (c *NginxAccessCollector) collectFile(cfg model.NginxInstanceConfig, state 
 		if rows > nginxAccessMaxRows {
 			break
 		}
-		processAccessLine(line, ipStats, statusCount, uriCount, &totalRequests, &totalBytes, &latencySum, &latencyN)
+		// 按实例配置的日志格式解析
+		if m := parser.re.FindStringSubmatch(line); m != nil {
+			parser.parse(m, ipStats, statusCount, uriCount, &totalRequests, &totalBytes, &latencySum, &latencyN)
+		}
 		if err != nil { // io.EOF 等正常读完
 			break
 		}
@@ -194,38 +286,6 @@ func (c *NginxAccessCollector) collectFile(cfg model.NginxInstanceConfig, state 
 		stat.AvgLatency = round2(latencySum / latencyN)
 	}
 	return stat
-}
-
-// processAccessLine 解析单行 access log 并累加进聚合结构。
-func processAccessLine(line string,
-	ipStats map[string]*ipAgg, statusCount map[string]float64, uriCount map[string]float64,
-	totalRequests, totalBytes *float64, latencySum *float64, latencyN *float64) {
-	m := nginxLogRe.FindStringSubmatch(line)
-	if m == nil {
-		return
-	}
-	ip := strings.TrimPrefix(m[1], "::ffff:")
-	status := m[5]
-	bodyBytes, _ := parseFloatOK(m[6])
-	statusCount[status]++
-	*totalRequests++
-	*totalBytes += bodyBytes
-	agg := ipStats[ip]
-	if agg == nil {
-		agg = &ipAgg{}
-		ipStats[ip] = agg
-	}
-	agg.requests++
-	agg.bytes += bodyBytes
-	if req := m[4]; req != "" && req != "-" {
-		uriCount[extractURI(req)]++
-	}
-	if m[9] != "" {
-		if lt, ok := parseFloatOK(m[9]); ok && lt >= 0 {
-			*latencySum += lt
-			*latencyN++
-		}
-	}
 }
 
 // extractURI 从 "GET /path?query HTTP/1.1" 提取不含查询参数的路径。
