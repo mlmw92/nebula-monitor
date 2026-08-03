@@ -104,7 +104,27 @@ func main() {
 	)
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
-	slog.Info("Agent 启动", "node", cfg.Node, "server", cfg.ServerURL, "interval", cfg.Interval, "version", version.Version)
+	// 构建已开启的采集器列表
+	var enabledCollectors []string
+	cs := cfg.Collectors
+	if cs.CPU { enabledCollectors = append(enabledCollectors, "cpu") }
+	if cs.Memory { enabledCollectors = append(enabledCollectors, "memory") }
+	if cs.Disk { enabledCollectors = append(enabledCollectors, "disk") }
+	if cs.Network { enabledCollectors = append(enabledCollectors, "network") }
+	if cs.Process { enabledCollectors = append(enabledCollectors, "process") }
+	if cs.Load { enabledCollectors = append(enabledCollectors, "load") }
+	if cs.Redis { enabledCollectors = append(enabledCollectors, "redis") }
+	if cs.MySQL { enabledCollectors = append(enabledCollectors, "mysql") }
+	if cs.Postgres { enabledCollectors = append(enabledCollectors, "postgres") }
+	if cs.Nginx { enabledCollectors = append(enabledCollectors, "nginx") }
+	if cs.NginxLog { enabledCollectors = append(enabledCollectors, "nginxLog") }
+	if cs.Kafka { enabledCollectors = append(enabledCollectors, "kafka") }
+	if cs.Docker { enabledCollectors = append(enabledCollectors, "docker") }
+	if cs.RocketMQ { enabledCollectors = append(enabledCollectors, "rocketmq") }
+	if cs.K8s { enabledCollectors = append(enabledCollectors, "k8s") }
+	if cs.Port { enabledCollectors = append(enabledCollectors, "port") }
+
+	slog.Info("Agent 启动", "node", cfg.Node, "server", cfg.ServerURL, "interval", cfg.Interval, "version", version.Version, "collectors", enabledCollectors)
 
 	ticker := time.NewTicker(time.Duration(cfg.Interval) * time.Second)
 	defer ticker.Stop()
