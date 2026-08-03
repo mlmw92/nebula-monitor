@@ -2,7 +2,6 @@
   <aside class="sidebar glass" :class="{ collapsed }">
       <div class="brand">
         <img v-if="brand.logo" :src="brand.logo" alt="logo" style="width:36px;height:36px;border-radius:10px;object-fit:contain;background:rgba(255,255,255,0.05);box-shadow:0 0 16px rgba(64,158,255,0.35)" />
-        <div v-else class="logo-mark"></div>
         <div class="brand-text" v-show="!collapsed">
           <h1>{{ brand.name }}</h1>
           <p>监控中心</p>
@@ -192,25 +191,6 @@ onMounted(loadVersion)
   border-bottom: 1px solid var(--border);
   margin-bottom: 12px;
   height: 52px;
-}
-.logo-mark {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: var(--brand-grad);
-  box-shadow: 0 0 16px var(--accent-glow);
-  position: relative;
-}
-.logo-mark::after {
-  content: '';
-  position: absolute;
-  inset: 9px;
-  border: 2px solid var(--brand-ink);
-  border-radius: 3px;
-  border-top-color: transparent;
-  border-right-color: transparent;
-  transform: rotate(-45deg);
 }
 .brand-text h1 {
   font-size: 15px;

@@ -40,7 +40,7 @@
                   <el-button size="small" @click="pickFile">选择图片</el-button>
                   <el-button size="small" text type="danger" :disabled="!form.logo" @click="clearLogo">清除</el-button>
                 </div>
-                <div class="field-hint">建议 PNG/SVG，≤ 3MB；以内嵌方式存储</div>
+                <div class="field-hint">建议 PNG/SVG，≤ 3MB；以内嵌方式存储。留空则不显示 Logo</div>
               </div>
             </div>
           </el-form-item>
