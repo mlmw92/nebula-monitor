@@ -75,11 +75,6 @@
             <template #default="{ row }">{{ formatBytes(row.memUsage) }}</template>
           </el-table-column>
           <el-table-column prop="memPercent" label="内存%" width="90" sortable />
-          <el-table-column label="操作" width="80" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" size="small" @click.stop="openDetail(row)">查看</el-button>
-            </template>
-          </el-table-column>
         </el-table>
         <div v-if="containers.length === 0 && stats.hosts.length > 0" class="empty-list-hint">当前主机下暂无容器，请确认 Agent 已配置 Docker 采集且 Docker daemon 上有运行中的容器。</div>
         <div class="pager">
