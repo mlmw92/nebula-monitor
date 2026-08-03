@@ -26,10 +26,10 @@
 
     <!-- Tab 主区 -->
     <main class="tab-main">
-      <div class="tab-bar">
-        <div class="tab-item" v-for="(t, i) in tabs" :key="t.key"
+      <div class="tab-bar" ref="tabBarRef">
+        <div class="tab-item" v-for="(t, i) in tabs" :key="t.key" ref="tabRefs"
           :class="{ on: tab === t.key }" @click="tab = t.key">{{ t.label }}</div>
-        <div class="tab-slider" :style="{ transform: `translateX(${tabIndex * 100}%)` }"></div>
+        <div class="tab-slider" :style="sliderStyle"></div>
       </div>
       <div class="tab-body">
         <HostMonitorPanel v-show="tab === 'host'" v-if="cfg.modules.hostMonitor" :nodes="nodeCards" />
@@ -74,7 +74,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { FullScreen, Back, Setting } from '@element-plus/icons-vue'
@@ -105,6 +105,29 @@ const tabs = [
   { key: 'nginx', label: 'Nginx 分析' },
 ]
 const tabIndex = computed(() => tabs.findIndex((t) => t.key === tab.value))
+
+const tabBarRef = ref(null)
+const tabRefs = ref([])
+const sliderStyle = ref({})
+function updateSlider() {
+  nextTick(() => {
+    const idx = tabIndex.value
+    const el = tabRefs.value ? tabRefs.value[idx] : null
+    if (!el || !tabBarRef.value) return
+    sliderStyle.value = {
+      transform: `translateX(${el.offsetLeft}px)`,
+      width: `${el.offsetWidth}px`,
+    }
+  })
+}
+watch(tabIndex, updateSlider)
+onMounted(() => {
+  window.addEventListener('resize', updateSlider)
+  updateSlider()
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', updateSlider)
+})
 
 const settingOpen = ref(false)
 const savingCfg = ref(false)
@@ -473,13 +496,13 @@ onUnmounted(() => {
   position: absolute;
   left: 0;
   top: 0;
-  width: 96px;
   height: 100%;
   border-radius: 8px;
   background: linear-gradient(90deg, rgba(34, 211, 238, 0.16), rgba(34, 211, 238, 0.04));
   border: 1px solid rgba(34, 211, 238, 0.35);
   box-shadow: 0 0 14px var(--accent-glow);
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
 }
 .tab-body {
   flex: 1;
