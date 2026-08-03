@@ -174,6 +174,11 @@ func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64)
 	out = append(out, mk("mysql_created_tmp_disk_tables", parseFloat(status["Created_tmp_disk_tables"])))
 	// 运行时长
 	out = append(out, mk("mysql_uptime", uptime))
+	// 平均语句响应时间（ms）：基于 performance_schema 中各语句类型的累计等待时间/次数加权威得出，
+	// 反映实例处理 SQL 的真实时延，用于巡检报告「响应时间」维度。
+	if lat, ok := queryMySQLStmtLatencyMs(db); ok {
+		out = append(out, mk("mysql_query_latency_ms", round2(lat)))
+	}
 
 	mi := model.MySQLInstance{
 		Instance:  realAddr,
@@ -237,6 +242,21 @@ func (c *MySQLCollector) collectExporter(cfg model.MySQLInstanceConfig, now int6
 		}
 	}
 	return metrics, mi
+}
+
+// queryMySQLStmtLatencyMs 返回实例平均语句响应时间（毫秒）。
+// 基于 performance_schema.events_statements_summary_by_digest 的累计等待时间/语句数加权得出，
+// 即全部 SQL 类型的平均执行时延。需要 performance_schema 启用且当前用户可读该表；
+// 否则（表不存在/无权限/未启用）返回 ok=false，由调用方决定是否上报该指标。
+func queryMySQLStmtLatencyMs(db *sql.DB) (float64, bool) {
+	var avgMs float64
+	// SUM_TIMER_WAIT 以皮秒为单位，1ms = 1e9 ps。
+	query := `SELECT COALESCE(SUM(SUM_TIMER_WAIT)/NULLIF(SUM(COUNT_STAR),0)/1000000000.0, 0)
+		FROM performance_schema.events_statements_summary_by_digest`
+	if err := db.QueryRow(query).Scan(&avgMs); err != nil {
+		return 0, false
+	}
+	return avgMs, true
 }
 
 // queryGroupReplicationRole 查询本节点在 Group Replication 中的角色（PRIMARY/SECONDARY）。

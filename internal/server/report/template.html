@@ -128,7 +128,7 @@
   {{if .Middleware}}
   <div class="section">
     <h2>中间件监控明细</h2>
-    <p class="desc">补充连接数、响应时间、内存使用率、命中率等关键指标。其中响应时间由 Redis 命令平均时延提供；其余类型可结合其监控详情页查看对应指标。</p>
+    <p class="desc">补充连接数、响应时间、内存使用率、命中率等关键指标。响应时间：Redis 取自命令平均时延，MySQL/PostgreSQL 取自在库平均语句时延（分别来自 performance_schema 与 pg_stat_statements，未启用相关统计时显示「—」）。</p>
     <table>
       <thead>
         <tr>

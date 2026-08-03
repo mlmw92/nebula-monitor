@@ -333,10 +333,11 @@ var mwDefs = []mwDef{
 	{"mysql", "mysql_instance_up", "mysql_threads_connected", []string{
 		"mysql_threads_connected", "mysql_max_connections", "mysql_buffer_pool_hit_rate",
 		"mysql_queries_per_sec", "mysql_seconds_behind_master", "mysql_slow_queries",
+		"mysql_query_latency_ms",
 	}},
 	{"postgres", "postgres_instance_up", "postgres_numbackends", []string{
 		"postgres_numbackends", "postgres_max_connections", "postgres_cache_hit_ratio",
-		"postgres_replication_lag_bytes",
+		"postgres_replication_lag_bytes", "postgres_query_latency_ms",
 	}},
 	{"nginx", "nginx_instance_up", "nginx_active_connections", []string{
 		"nginx_active_connections", "nginx_5xx",
@@ -404,25 +405,27 @@ func (g *Generator) collectMiddleware(startMs, endMs, step int64) []mwInstance {
 				if lag := lv("redis_replication_lag_seconds"); lag > 0 {
 					mi.Extra = fmt.Sprintf("主从复制延迟 %.1fs", lag)
 				}
-			case "mysql":
-				mi.ConnMax = lv("mysql_max_connections")
-				mi.HitRate = lv("mysql_buffer_pool_hit_rate")
-				slaveLag := lv("mysql_seconds_behind_master")
-				slow := lv("mysql_slow_queries")
-				var parts []string
-				if slaveLag > 0 {
-					parts = append(parts, fmt.Sprintf("主从延迟 %.1fs", slaveLag))
-				}
-				if slow > 0 {
-					parts = append(parts, fmt.Sprintf("慢查询 %d", int(slow)))
-				}
-				mi.Extra = strings.Join(parts, "；")
-			case "postgres":
-				mi.ConnMax = lv("postgres_max_connections")
-				mi.HitRate = lv("postgres_cache_hit_ratio")
-				if lag := lv("postgres_replication_lag_bytes"); lag > 0 {
-					mi.Extra = fmt.Sprintf("复制延迟 %.0fB", lag)
-				}
+		case "mysql":
+			mi.ConnMax = lv("mysql_max_connections")
+			mi.HitRate = lv("mysql_buffer_pool_hit_rate")
+			mi.RespTime = lv("mysql_query_latency_ms")
+			slaveLag := lv("mysql_seconds_behind_master")
+			slow := lv("mysql_slow_queries")
+			var parts []string
+			if slaveLag > 0 {
+				parts = append(parts, fmt.Sprintf("主从延迟 %.1fs", slaveLag))
+			}
+			if slow > 0 {
+				parts = append(parts, fmt.Sprintf("慢查询 %d", int(slow)))
+			}
+			mi.Extra = strings.Join(parts, "；")
+		case "postgres":
+			mi.ConnMax = lv("postgres_max_connections")
+			mi.HitRate = lv("postgres_cache_hit_ratio")
+			mi.RespTime = lv("postgres_query_latency_ms")
+			if lag := lv("postgres_replication_lag_bytes"); lag > 0 {
+				mi.Extra = fmt.Sprintf("复制延迟 %.0fB", lag)
+			}
 			case "nginx":
 				mi.ConnUsed = lv("nginx_active_connections")
 				if c5 := lv("nginx_5xx"); c5 > 0 {
@@ -520,6 +523,11 @@ func evalMwStatus(mi mwInstance) string {
 		if mi.HitRate > 0 && mi.HitRate < hitCrit {
 			downgrade("critical")
 		} else if mi.HitRate > 0 && mi.HitRate < hitWarn {
+			downgrade("warning")
+		}
+		if mi.RespTime >= dbLatCrit {
+			downgrade("critical")
+		} else if mi.RespTime >= dbLatWarn {
 			downgrade("warning")
 		}
 	}
@@ -761,7 +769,22 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 					Title:    "MySQL InnoDB 缓冲池命中率偏低",
 					Detail:   fmt.Sprintf("MySQL 实例 %s InnoDB 缓冲池命中率 %.1f%%，低于推荐值。", m.Instance, m.HitRate),
 					Impact:   "缓冲池命中率下降会增加磁盘 IO，查询延迟上升，数据库整体吞吐受限。",
-					Suggestion: "适当增大 innodb_buffer_pool_size（建议不超过物理内存的 75%）；排查全表扫描与大结果集查询；结合慢查询日志优化索引。",
+				Suggestion: "适当增大 innodb_buffer_pool_size（建议不超过物理内存的 75%）；排查全表扫描与大结果集查询；结合慢查询日志优化索引。",
+			})
+			}
+			if m.RespTime >= dbLatWarn {
+				sev := "warning"
+				if m.RespTime >= dbLatCrit {
+					sev = "critical"
+				}
+				fs = append(fs, finding{
+					Severity: sev,
+					Category: "中间件",
+					Resource: name,
+					Title:    "MySQL 平均语句响应时间偏高",
+					Detail:   fmt.Sprintf("MySQL 实例 %s 平均语句响应时间 %.2fms，高于常态水平。", m.Instance, m.RespTime),
+					Impact:   "SQL 时延升高会拖慢调用方 RT，高并发下引发请求堆积与超时，影响上游业务。",
+					Suggestion: "结合 performance_schema.events_statements_summary_by_digest 定位高耗时 SQL 类型；优化索引与执行计划；排查锁等待、全表扫描与临时表落盘；必要时扩容或读写分离。",
 				})
 			}
 		case "postgres":
@@ -792,7 +815,22 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 					Title:    "PostgreSQL 缓存命中率偏低",
 					Detail:   fmt.Sprintf("PostgreSQL 实例 %s 缓存命中率 %.1f%%。", m.Instance, m.HitRate),
 					Impact:   "缓存命中率下降增加磁盘读取，查询性能下降。",
-					Suggestion: "适当增大 shared_buffers；排查大表顺序扫描；结合 pg_stat_statements 优化高频 SQL 与索引。",
+				Suggestion: "适当增大 shared_buffers；排查大表顺序扫描；结合 pg_stat_statements 优化高频 SQL 与索引。",
+			})
+			}
+			if m.RespTime >= dbLatWarn {
+				sev := "warning"
+				if m.RespTime >= dbLatCrit {
+					sev = "critical"
+				}
+				fs = append(fs, finding{
+					Severity: sev,
+					Category: "中间件",
+					Resource: name,
+					Title:    "PostgreSQL 平均语句响应时间偏高",
+					Detail:   fmt.Sprintf("PostgreSQL 实例 %s 平均语句响应时间 %.2fms，高于常态水平。", m.Instance, m.RespTime),
+					Impact:   "SQL 时延升高会拖慢调用方 RT，高并发下引发请求堆积与超时，影响上游业务。",
+					Suggestion: "结合 pg_stat_statements 定位高耗时 SQL 与执行计划；优化索引、避免全表扫描与顺序扫描；排查锁等待与长事务；必要时扩容或读写分离。",
 				})
 			}
 		}
@@ -976,4 +1014,5 @@ const (
 	hitWarn, hitCrit         = 90.0, 80.0 // 命中率低于该值告警（%）
 	redisMemWarn, redisMemCrit = 80.0, 90.0
 	redisLatWarn, redisLatCrit = 5.0, 20.0 // ms
+	dbLatWarn, dbLatCrit     = 50.0, 200.0 // ms，关系型数据库平均语句时延
 )

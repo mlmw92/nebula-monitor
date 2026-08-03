@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,6 +134,11 @@ func (c *PostgresCollector) collectDirect(cfg model.PostgresInstanceConfig, now 
 	// 运行时长
 	if uptime, err := queryPGUptime(db); err == nil {
 		out = append(out, mk("postgres_uptime_seconds", uptime))
+	}
+	// 平均语句响应时间（ms）：基于 pg_stat_statements 的累计执行时间/调用次数加权得出，
+	// 反映实例处理 SQL 的真实时延，用于巡检报告「响应时间」维度。
+	if lat, ok := queryPGStmtLatencyMs(db, settings["server_version"]); ok {
+		out = append(out, mk("postgres_query_latency_ms", round2(lat)))
 	}
 
 	pi := model.PostgresInstance{
@@ -270,6 +276,41 @@ func queryPGUptime(db *sql.DB) (float64, error) {
 	var uptime float64
 	err := db.QueryRow("SELECT EXTRACT(EPOCH FROM (now() - pg_postmaster_start_time()))").Scan(&uptime)
 	return uptime, err
+}
+
+// queryPGStmtLatencyMs 返回实例平均语句响应时间（毫秒），基于 pg_stat_statements。
+// PG 13+ 使用 total_exec_time 列，更早版本使用 total_time 列；扩展未安装/未加载时返回 ok=false。
+func queryPGStmtLatencyMs(db *sql.DB, version string) (float64, bool) {
+	var exists int
+	if err := db.QueryRow("SELECT 1 FROM pg_extension WHERE extname='pg_stat_statements' LIMIT 1").Scan(&exists); err != nil {
+		return 0, false // 扩展未安装
+	}
+	col := "total_exec_time"
+	if major := pgMajorVersion(version); major > 0 && major < 13 {
+		col = "total_time"
+	}
+	var avgMs float64
+	query := fmt.Sprintf("SELECT COALESCE(SUM(%s)/NULLIF(SUM(calls),0), 0) FROM pg_stat_statements", col)
+	if err := db.QueryRow(query).Scan(&avgMs); err != nil {
+		return 0, false
+	}
+	return avgMs, true
+}
+
+// pgMajorVersion 从 server_version 字符串（如 "15.3 (Debian...)"）解析主版本号。
+func pgMajorVersion(version string) int {
+	v := strings.TrimSpace(version)
+	if idx := strings.IndexAny(v, " "); idx >= 0 {
+		v = v[:idx]
+	}
+	if idx := strings.IndexByte(v, '.'); idx >= 0 {
+		v = v[:idx]
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // splitHostPort 拆分 host:port，port 为空时返回默认值。
