@@ -58,7 +58,6 @@
     <el-table class="postgres-table" :data="pagedInstances" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
       <el-table-column prop="instance" label="实例地址" min-width="150" show-overflow-tooltip />
       <el-table-column prop="name" label="名称" min-width="110" show-overflow-tooltip />
-      <el-table-column prop="database" label="数据库" min-width="90" show-overflow-tooltip />
       <el-table-column prop="role" label="角色" min-width="75">
         <template #default="{ row }"><MwRoleTag :role="row.role" /></template>
       </el-table-column>
