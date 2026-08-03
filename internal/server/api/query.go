@@ -579,8 +579,8 @@ func (a *API) handleQueryRange(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	node := q.Get("node")
 	name := q.Get("metric")
-	if node == "" || name == "" {
-		http.Error(w, "node and metric required", http.StatusBadRequest)
+	if name == "" {
+		http.Error(w, "metric required", http.StatusBadRequest)
 		return
 	}
 	start, _ := strconv.ParseInt(q.Get("start"), 10, 0)

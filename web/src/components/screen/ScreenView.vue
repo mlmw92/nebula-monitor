@@ -11,7 +11,7 @@
       <div class="hud-side hud-actions">
         <button class="hud-btn" title="全屏" @click="toggleFullscreen"><FullScreen /></button>
         <button class="hud-btn" title="模块设置" @click="settingOpen = true"><Setting /></button>
-        <button class="hud-btn" title="返回概览" @click="router.push('/overview')"><Back /></button>
+        <button class="hud-btn" title="返回概览" @click="goBack"><Back /></button>
       </div>
     </header>
 
@@ -144,6 +144,7 @@ const firingCount = computed(() => activeAlerts.value.length)
 const nodeCards = computed(() =>
   nodes.value.map((n) => ({
     name: n.hostname,
+    ip: n.ip || '-',
     online: n.status === 'online',
     cpu: metrics.value[n.hostname]?.cpu || 0,
     mem: metrics.value[n.hostname]?.mem || 0,
@@ -207,6 +208,15 @@ function toggleFullscreen() {
   const el = document.documentElement
   if (!document.fullscreenElement) el.requestFullscreen && el.requestFullscreen()
   else document.exitFullscreen && document.exitFullscreen()
+}
+function exitFullscreen() {
+  if (document.fullscreenElement && document.exitFullscreen) {
+    return document.exitFullscreen().catch(() => {})
+  }
+  return Promise.resolve()
+}
+function goBack() {
+  exitFullscreen().finally(() => router.push('/overview'))
 }
 
 // 模块配置

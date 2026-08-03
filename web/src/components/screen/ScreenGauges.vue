@@ -2,18 +2,25 @@
   <div class="glass screen-gauges">
     <div class="sg-title">{{ title }}</div>
     <div class="sg-grid" :style="{ gridTemplateColumns: `repeat(${cols}, 1fr)` }">
-      <div class="sg-item" v-for="g in items" :key="g.key">
-        <div class="sg-ring">
-          <svg viewBox="0 0 80 80">
-            <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="7" />
-            <circle
-              cx="40" cy="40" r="34" fill="none"
-              :stroke="g.color" stroke-width="7" stroke-linecap="round"
-              :stroke-dasharray="dash(g.value)" transform="rotate(-90 40 40)" class="sg-prog"
-            />
-          </svg>
-          <div class="sg-center" :style="{ color: g.color }">{{ g.text }}</div>
-        </div>
+      <div class="sg-item" v-for="g in gauges" :key="g.key">
+        <template v-if="g.type === 'text'">
+          <div class="sg-text-card" :style="{ borderColor: g.color, boxShadow: `0 0 12px ${g.color}33` }">
+            <div class="sg-text-value" :style="{ color: g.color }">{{ g.text }}</div>
+          </div>
+        </template>
+        <template v-else>
+          <div class="sg-ring">
+            <svg viewBox="0 0 80 80">
+              <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="7" />
+              <circle
+                cx="40" cy="40" r="34" fill="none"
+                :stroke="g.color" stroke-width="7" stroke-linecap="round"
+                :stroke-dasharray="dash(g.value)" transform="rotate(-90 40 40)" class="sg-prog"
+              />
+            </svg>
+            <div class="sg-center" :style="{ color: g.color }">{{ g.text }}</div>
+          </div>
+        </template>
         <div class="sg-label">{{ g.label }}</div>
       </div>
     </div>
@@ -37,6 +44,7 @@ const gauges = computed(() =>
   props.items.map((g) => ({
     key: g.key,
     label: g.label,
+    type: g.type || 'gauge',
     value: Math.max(0, Math.min(100, g.value ?? 0)),
     text: g.text ?? Math.round((g.value ?? 0)) + '%',
     color: g.color || 'var(--accent)',
@@ -91,6 +99,24 @@ function dash(v) {
   font-size: 14px;
   font-weight: 700;
   font-family: var(--mono);
+}
+.sg-text-card {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1.5px solid var(--accent);
+  transition: all 0.4s ease;
+}
+.sg-text-value {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: var(--mono);
+  text-align: center;
+  line-height: 1.1;
 }
 .sg-label {
   font-size: 11px;

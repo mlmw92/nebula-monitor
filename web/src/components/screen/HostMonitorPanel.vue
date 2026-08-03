@@ -11,7 +11,11 @@
         <div class="hl-body">
           <div class="hl-row" v-for="n in nodes" :key="n.name" @click="drillNode(n.name)">
             <span class="hl-name">
-              <i class="dot" :class="n.online ? 'on' : 'off'"></i>{{ n.name }}
+              <i class="dot" :class="n.online ? 'on' : 'off'"></i>
+              <span class="host-text">
+                <span class="host-text-name" :title="n.name">{{ n.name }}</span>
+                <span class="host-text-ip" :title="n.ip">{{ n.ip }}</span>
+              </span>
             </span>
             <span class="hl-val" :style="pctStyle(n.cpu)">{{ fmtPct(n.cpu) }}</span>
             <span class="hl-val" :style="pctStyle(n.mem)">{{ fmtPct(n.mem) }}</span>
@@ -77,7 +81,7 @@ const gaugeItems = computed(() => {
     { key: 'cpu', label: 'CPU 使用率', value: cpu, text: cpu.toFixed(1) + '%', color: usageColor(cpu) },
     { key: 'mem', label: '内存使用率', value: mem, text: mem.toFixed(1) + '%', color: usageColor(mem) },
     { key: 'disk', label: '磁盘使用率', value: disk, text: disk.toFixed(1) + '%', color: usageColor(disk) },
-    { key: 'net', label: '实时入流量', value: 100, text: rateShort(netIn), color: 'var(--info)' },
+    { key: 'net', label: '实时入流量', type: 'text', text: rateShort(netIn), color: 'var(--info)' },
   ]
 })
 
@@ -219,8 +223,24 @@ watch(() => props.nodes, loadTrends, { deep: false })
   gap: 6px;
   color: var(--text);
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.host-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.host-text-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.host-text-ip {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .dot {
   width: 7px;

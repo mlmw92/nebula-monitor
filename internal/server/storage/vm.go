@@ -78,14 +78,18 @@ func quotePromQLValue(v string) string {
 
 // buildExpr 安全拼接 PromQL 表达式：对指标名、标签名做白名单校验，
 // 对标签值做转义，杜绝 PromQL 注入（如通过 node 传入 `"} or up{__name__=~".*"}}`）。
+// node 为空时表示跨节点查询（不限定 node 标签）。
 func buildExpr(node, name string, labels map[string]string) (string, error) {
 	if !isValidMetricName(name) {
 		return "", fmt.Errorf("invalid metric name: %q", name)
 	}
-	if !isValidLabelValue(node) {
-		return "", fmt.Errorf("invalid node label value: %q", node)
+	selectors := make([]string, 0, len(labels)+1)
+	if node != "" {
+		if !isValidLabelValue(node) {
+			return "", fmt.Errorf("invalid node label value: %q", node)
+		}
+		selectors = append(selectors, "node="+quotePromQLValue(node))
 	}
-	expr := name + "{node=" + quotePromQLValue(node)
 	for k, v := range labels {
 		if !isValidLabelName(k) {
 			return "", fmt.Errorf("invalid label name: %q", k)
@@ -93,9 +97,12 @@ func buildExpr(node, name string, labels map[string]string) (string, error) {
 		if !isValidLabelValue(v) {
 			return "", fmt.Errorf("invalid label value for %s: %q", k, v)
 		}
-		expr += "," + k + "=" + quotePromQLValue(v)
+		selectors = append(selectors, k+"="+quotePromQLValue(v))
 	}
-	expr += "}"
+	expr := name
+	if len(selectors) > 0 {
+		expr += "{" + strings.Join(selectors, ",") + "}"
+	}
 	return expr, nil
 }
 
