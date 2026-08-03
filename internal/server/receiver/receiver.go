@@ -10,6 +10,7 @@ import (
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/config"
+	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/storage"
 )
@@ -22,11 +23,13 @@ type Receiver struct {
 	storage storage.Storage
 	nodeMgr *node.Manager
 	auth    config.AgentAuthConfig
+	ngx     *nginxaccess.Window // Nginx access log 地理聚合窗口（可空）
 }
 
-// New 创建 Receiver。auth 为 Agent 接入授权配置（参考哪吒探针密钥机制）。
-func New(s storage.Storage, mgr *node.Manager, auth config.AgentAuthConfig) *Receiver {
-	return &Receiver{storage: s, nodeMgr: mgr, auth: auth}
+// New 创建 Receiver。auth 为 Agent 接入授权配置（参考哪吒探针密钥机制）；
+// ngx 为 Nginx access log 聚合窗口，可传 nil 关闭该能力。
+func New(s storage.Storage, mgr *node.Manager, auth config.AgentAuthConfig, ngx *nginxaccess.Window) *Receiver {
+	return &Receiver{storage: s, nodeMgr: mgr, auth: auth, ngx: ngx}
 }
 
 // HandleReport 处理 POST /api/v1/report。
@@ -135,6 +138,36 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Nginx access log 聚合统计：写低基数指标 + 送地理窗口（高基数 IP 不进时序库）
+	if len(payload.NginxAccessStats) > 0 {
+		accessMets := make([]model.Metric, 0, len(payload.NginxAccessStats)*5)
+		for _, st := range payload.NginxAccessStats {
+			group := st.Group
+			if group == "" {
+				group = payload.Group
+			}
+			base := map[string]string{"group": group, "instance": st.Instance}
+			accessMets = append(accessMets,
+				model.Metric{Node: payload.Node, Name: "nginx_access_requests", Labels: cloneLabels(base), Value: st.Requests, Timestamp: payload.ReportAt},
+				model.Metric{Node: payload.Node, Name: "nginx_access_bytes", Labels: cloneLabels(base), Value: st.Bytes, Timestamp: payload.ReportAt},
+			)
+			if st.AvgLatency > 0 {
+				accessMets = append(accessMets, model.Metric{Node: payload.Node, Name: "nginx_access_avg_latency", Labels: cloneLabels(base), Value: st.AvgLatency, Timestamp: payload.ReportAt})
+			}
+			for code, cnt := range st.StatusCount {
+				lbs := cloneLabels(base)
+				lbs["status"] = code
+				accessMets = append(accessMets, model.Metric{Node: payload.Node, Name: "nginx_access_requests_by_status", Labels: lbs, Value: cnt, Timestamp: payload.ReportAt})
+			}
+		}
+		if err := r.storage.Write(accessMets); err != nil {
+			slog.Error("写入 Nginx access 指标失败", "node", payload.Node, "err", err)
+		}
+		if r.ngx != nil {
+			r.ngx.Add(payload.NginxAccessStats)
+		}
+	}
+
 	// 响应：若节点仍需升级（agent 版本未达标），持续下发 upgrade 指令
 	resp := map[string]interface{}{"status": "ok"}
 	if r.nodeMgr.ConsumeUpgrade(payload.Node, payload.Version, payload.BinSHA256) {
@@ -144,4 +177,13 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// cloneLabels 复制标签 map，避免多个指标共享同一 map 被并发修改。
+func cloneLabels(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }

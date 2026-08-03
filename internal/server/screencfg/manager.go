@@ -39,6 +39,13 @@ func (m *Manager) loadOrInit(initial config.ScreenConfig) error {
 		}
 		if c.Modules == nil {
 			c.Modules = initial.Modules
+		} else {
+			// 老配置补齐新增模块 key（默认开启），避免升级后新板块不显示
+			for k, v := range initial.Modules {
+				if _, ok := c.Modules[k]; !ok {
+					c.Modules[k] = v
+				}
+			}
 		}
 		m.current = c
 		slog.Info("已加载大屏配置文件", "path", m.path)

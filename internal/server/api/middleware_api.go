@@ -317,6 +317,84 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"instances": out})
 }
 
+// middlewareOverviewType 单类中间件健康度。
+type middlewareOverviewType struct {
+	Type       string `json:"type"`       // redis/mysql/postgres/nginx/kafka/docker/rocketmq/k8s
+	Label      string `json:"label"`      // 中文名
+	Total      int    `json:"total"`      // 实例总数
+	Up         int    `json:"up"`         // 在线实例数
+	Down       int    `json:"down"`       // 离线实例数
+	AlertCount int    `json:"alertCount"` // 关联活跃告警数
+}
+
+// middlewareOverviewResp 是 /api/v1/middleware/overview 的响应体。
+type middlewareOverviewResp struct {
+	Total      int                      `json:"total"`
+	Up         int                      `json:"up"`
+	Down       int                      `json:"down"`
+	AlertCount int                      `json:"alertCount"`
+	Types      []middlewareOverviewType `json:"types"`
+}
+
+// middlewareTypes 8 类中间件的 up 指标与展示名。
+var middlewareTypes = []struct{ typ, label, upMetric string }{
+	{"redis", "Redis", "redis_instance_up"},
+	{"mysql", "MySQL", "mysql_instance_up"},
+	{"postgres", "PostgreSQL", "postgres_instance_up"},
+	{"nginx", "Nginx", "nginx_instance_up"},
+	{"kafka", "Kafka", "kafka_instance_up"},
+	{"docker", "Docker", "docker_container_up"},
+	{"rocketmq", "RocketMQ", "rocketmq_instance_up"},
+	{"k8s", "Kubernetes", "k8s_cluster_up"},
+}
+
+// handleMiddlewareOverview 返回中间件健康度总览（各类型实例数/在线率/告警数），
+// 供数据大屏中间件监控板块一次拉取，避免前端 8 个请求轮询。
+func (a *API) handleMiddlewareOverview(w http.ResponseWriter, r *http.Request) {
+	// 活跃告警按指标前缀归类
+	alertCount := map[string]int{}
+	for _, ev := range a.alerts.Active() {
+		metric := strings.ToLower(ev.Metric)
+		for _, t := range middlewareTypes {
+			if strings.HasPrefix(metric, t.typ+"_") {
+				alertCount[t.typ]++
+				break
+			}
+		}
+	}
+
+	resp := middlewareOverviewResp{Types: make([]middlewareOverviewType, 0, len(middlewareTypes))}
+	for _, t := range middlewareTypes {
+		item := middlewareOverviewType{Type: t.typ, Label: t.label, AlertCount: alertCount[t.typ]}
+		series, err := a.store.QueryAllLatest(t.upMetric, nil)
+		if err != nil {
+			slog.Warn("查询中间件 up 指标失败", "metric", t.upMetric, "err", err)
+			resp.Types = append(resp.Types, item)
+			continue
+		}
+		seen := map[string]bool{}
+		for _, s := range series {
+			key := s.Labels["node"] + "|" + s.Labels["instance"]
+			if key == "|" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			item.Total++
+			if len(s.Points) > 0 && s.Points[len(s.Points)-1].Value > 0 {
+				item.Up++
+			} else {
+				item.Down++
+			}
+		}
+		resp.Total += item.Total
+		resp.Up += item.Up
+		resp.Down += item.Down
+		resp.AlertCount += item.AlertCount
+		resp.Types = append(resp.Types, item)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // nodeIP 返回指定节点上报的主机 IP（primaryIP，首个非回环 IPv4）；节点未在线或查不到时返回空串。
 func (a *API) nodeIP(node string) string {
 	if node == "" {

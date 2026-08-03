@@ -18,6 +18,7 @@ import (
 	"github.com/nebula/monitor/internal/server/api"
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/dialtest"
+	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/receiver"
@@ -90,8 +91,9 @@ func main() {
 	// 用加载后的配置同步内存通知器（若文件存在则覆盖初始 cfg.Notify）。
 	engine.SetNotifiers(alert.BuildNotifiers(notifyMgr.Get()))
 
-	// 上报接收
-	recv := receiver.New(store, nodeMgr, cfg.AgentAuth)
+	// 上报接收（Nginx access log 地理聚合窗口：TTL 1h，实时大屏场景）
+	ngxWin := nginxaccess.NewWindow(nginxaccess.NewGeo(), time.Hour)
+	recv := receiver.New(store, nodeMgr, cfg.AgentAuth, ngxWin)
 
 	// 拨测模块
 	dialtestStore := dialtest.NewStore(cfg.DialtestFile)
@@ -130,7 +132,7 @@ func main() {
 	}
 
 	// API
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)

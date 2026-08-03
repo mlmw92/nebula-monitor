@@ -18,6 +18,7 @@ import (
 	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/dialtest"
+	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/report"
@@ -86,11 +87,12 @@ type API struct {
 	acks      *alert.AckStore
 	inhibit   *alert.InhibitStore
 	grouping  *alert.GroupingStore
+	ngx       *nginxaccess.Window // Nginx access log 地理聚合窗口（可空）
 }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -120,6 +122,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/middleware/docker/containers", a.handleDockerContainers)
 	mux.HandleFunc("GET /api/v1/middleware/rocketmq/instances", a.handleRocketMQInstances)
 	mux.HandleFunc("GET /api/v1/middleware/k8s/instances", a.handleK8sInstances)
+	mux.HandleFunc("GET /api/v1/middleware/overview", a.handleMiddlewareOverview)
+	mux.HandleFunc("GET /api/v1/middleware/nginx/access/summary", a.handleNginxAccessSummary)
+	mux.HandleFunc("GET /api/v1/middleware/nginx/access/geo", a.handleNginxAccessGeo)
 
 	mux.HandleFunc("GET /api/v1/alerts", a.handleAlerts)
 	mux.HandleFunc("GET /api/v1/alerts/acks", a.handleAlertAcks)

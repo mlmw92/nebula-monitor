@@ -42,19 +42,14 @@ type ScreenConfig struct {
 }
 
 // DefaultScreenConfig 返回默认全开的大屏模块配置。
+// key 见前端设置项：kpiTop/hostMonitor/middlewareMonitor/nginxAnalysis/alerts。
 func DefaultScreenConfig() ScreenConfig {
 	return ScreenConfig{Modules: map[string]bool{
-		"kpiTop":      true,
-		"topology":    true,
-		"gauges":      true,
-		"risk":        true,
-		"alerts":      true,
-		"containers":  true,
-		"trends":      true,
-		"healthScore": true,
-		"alertLevels": true,
-		"dbConn":      true,
-		"redis":       true,
+		"kpiTop":            true,
+		"hostMonitor":       true,
+		"middlewareMonitor": true,
+		"nginxAnalysis":     true,
+		"alerts":            true,
 	}}
 }
 
