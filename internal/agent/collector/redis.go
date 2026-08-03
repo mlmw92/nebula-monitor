@@ -402,6 +402,22 @@ func mapInfoToMetrics(info map[string]string, labels map[string]string, now int6
 	} else {
 		out = append(out, mk("redis_hit_rate", 0))
 	}
+	// 命令平均响应时间（ms）：由 INFO commandstats 中各命令的累计耗时/调用次数加权得出，
+	// 反映实例处理命令的真实时延，用于巡检报告「响应时间」维度。
+	var latUsec, latCalls float64
+	for k, v := range info {
+		if !strings.HasPrefix(k, "cmdstat_") {
+			continue
+		}
+		// 形如 cmdstat_get:calls=120,usec=480,usec_per_call=4.00
+		calls := parseFloat(extractCmdstatField(v, "calls"))
+		usec := parseFloat(extractCmdstatField(v, "usec"))
+		latCalls += calls
+		latUsec += usec
+	}
+	if latCalls > 0 {
+		out = append(out, mk("redis_cmd_latency_ms", round2(latUsec/latCalls/1000)))
+	}
 	// 运行时长
 	out = append(out, mk("redis_uptime_in_seconds", parseFloat(info["uptime_in_seconds"])))
 	// 网络
@@ -456,6 +472,18 @@ func extractDBKeys(dbField string) string {
 		p = strings.TrimSpace(p)
 		if strings.HasPrefix(p, "keys=") {
 			return strings.TrimPrefix(p, "keys=")
+		}
+	}
+	return "0"
+}
+
+// extractCmdstatField 从 INFO commandstats 的字段值（如 calls=120,usec=480,usec_per_call=4.00）
+// 中提取指定子字段（calls/usec/usec_per_call）的数值字符串。
+func extractCmdstatField(val, field string) string {
+	for _, p := range strings.Split(val, ",") {
+		p = strings.TrimSpace(p)
+		if strings.HasPrefix(p, field+"=") {
+			return strings.TrimPrefix(p, field+"=")
 		}
 	}
 	return "0"

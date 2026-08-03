@@ -1,74 +1,190 @@
-{{ define "report" }}<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>巡检报告 - {{ .Period }}</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>巡检报告</title>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 40px; background: #f5f7fa; color: #303133; }
-  .report-header { text-align: center; margin-bottom: 32px; padding: 24px; background: linear-gradient(135deg, #00a37a, #00c48c); color: #fff; border-radius: 12px; }
-  .report-header h1 { margin: 0 0 8px; font-size: 28px; }
-  .report-header p { margin: 0; opacity: 0.9; }
-  .section { background: #fff; border-radius: 8px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-  .section h2 { margin: 0 0 16px; font-size: 18px; color: #00a37a; border-bottom: 2px solid #e8f5e9; padding-bottom: 8px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #ebeef5; }
-  th { background: #f5f7fa; font-weight: 600; color: #606266; }
-  .status-online { color: #67c23a; font-weight: 600; }
-  .status-offline { color: #f56c6c; font-weight: 600; }
-  .metric-good { color: #67c23a; }
-  .metric-warn { color: #e6a23c; }
-  .metric-bad { color: #f56c6c; }
-  .footer { text-align: center; margin-top: 32px; color: #909399; font-size: 12px; }
+  :root{
+    --bg:#f4f6fa; --card:#ffffff; --line:#ebeef5; --text:#1f2d3d; --dim:#8492a6;
+    --blue:#409eff; --green:#67c23a; --orange:#e6a23c; --red:#f56c6c; --gray:#909399;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;line-height:1.6;}
+  .wrap{max-width:1100px;margin:0 auto;padding:28px 22px 60px;}
+  .hero{background:linear-gradient(135deg,#2b5876,#4e4376);color:#fff;border-radius:14px;padding:26px 30px;box-shadow:0 10px 30px rgba(40,60,90,.18);}
+  .hero h1{margin:0;font-size:24px;font-weight:700;letter-spacing:1px;}
+  .hero .meta{margin-top:10px;font-size:13px;opacity:.92;display:flex;gap:24px;flex-wrap:wrap;}
+  .hero .meta b{font-weight:600;}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin:22px 0;}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;}
+  .stat .k{font-size:12px;color:var(--dim);}
+  .stat .v{font-size:22px;font-weight:700;margin-top:4px;}
+  .stat .v small{font-size:12px;color:var(--dim);font-weight:400;}
+  .section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:22px;}
+  .section h2{font-size:17px;margin:0 0 6px;display:flex;align-items:center;gap:8px;}
+  .section h2::before{content:"";width:4px;height:16px;background:var(--blue);border-radius:2px;}
+  .section .desc{color:var(--dim);font-size:12.5px;margin:0 0 14px;}
+  .chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;}
+  .chart-card{border:1px solid var(--line);border-radius:12px;padding:10px;background:#fbfcfe;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle;}
+  th{background:#f7f9fc;color:var(--dim);font-weight:600;font-size:12px;white-space:nowrap;}
+  tbody tr:hover{background:#fafbfe;}
+  .badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600;color:#fff;}
+  .badge-healthy,.badge-info{background:var(--green);}
+  .badge-warning{background:var(--orange);}
+  .badge-critical{background:var(--red);}
+  .badge-offline{background:var(--gray);}
+  .badge-sev-critical{background:var(--red);}
+  .badge-sev-warning{background:var(--orange);}
+  .badge-sev-info{background:var(--blue);}
+  .tag{display:inline-block;padding:1px 8px;border-radius:6px;background:#eef2f7;color:#5a6573;font-size:12px;margin-right:4px;}
+  .findings{display:flex;flex-direction:column;gap:12px;}
+  .finding{border:1px solid var(--line);border-left-width:4px;border-radius:10px;padding:14px 16px;background:#fcfdff;}
+  .finding.critical{border-left-color:var(--red);}
+  .finding.warning{border-left-color:var(--orange);}
+  .finding.info{border-left-color:var(--blue);}
+  .finding .f-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;}
+  .finding .f-title{font-size:15px;font-weight:700;}
+  .finding .f-res{font-size:12px;color:var(--dim);}
+  .finding .f-body{font-size:13px;}
+  .finding .f-body p{margin:6px 0;}
+  .finding .f-body .lab{font-weight:600;color:#34495e;}
+  .muted{color:var(--dim);}
+  .empty{color:var(--dim);font-size:13px;padding:8px 0;}
+  .footer{text-align:center;color:var(--dim);font-size:12px;margin-top:30px;}
+  @media print{
+    body{background:#fff;}
+    .hero{box-shadow:none;}
+    .section{break-inside:avoid;box-shadow:none;}
+    .chart-card{break-inside:avoid;}
+  }
 </style>
 </head>
 <body>
-  <div class="report-header">
-    <h1>NebulaEye 巡检报告</h1>
-    <p>统计周期：{{ .Period }}　|　生成时间：{{ .GeneratedAt }}</p>
+<div class="wrap">
+  <div class="hero">
+    <h1>系统巡检报告</h1>
+    <div class="meta">
+      <span><b>统计周期：</b>{{.Period}}</span>
+      <span><b>生成时间：</b>{{fmtTime .GeneratedAt}}</span>
+    </div>
   </div>
 
+  <div class="cards">
+    <div class="stat"><div class="k">主机总数</div><div class="v">{{.Summary.Total}}</div></div>
+    <div class="stat"><div class="k">在线 / 离线</div><div class="v">{{.Summary.Online}} <small>/ {{.Summary.Offline}}</small></div></div>
+    <div class="stat"><div class="k">CPU 均值 / 峰值</div><div class="v">{{f1 .Summary.CPUAvg}}<small>% / {{f1 .Summary.CPUMax}}%</small></div></div>
+    <div class="stat"><div class="k">内存 均值 / 峰值</div><div class="v">{{f1 .Summary.MemAvg}}<small>% / {{f1 .Summary.MemMax}}%</small></div></div>
+    <div class="stat"><div class="k">磁盘 均值 / 峰值</div><div class="v">{{f1 .Summary.DiskAvg}}<small>% / {{f1 .Summary.DiskMax}}%</small></div></div>
+  </div>
+
+  {{if .Charts}}
   <div class="section">
-    <h2>主机资源概览</h2>
+    <h2>资源趋势与健康概览</h2>
+    <p class="desc">柱状图用于横向对比各主机资源水位与健康状态分布；折线图展示单节点 CPU、内存、磁盘使用率随时间的变化趋势。</p>
+    <div class="chart-grid">
+      {{range .Charts}}
+      <div class="chart-card">
+        <div style="font-size:13px;font-weight:600;color:#1f2d3d;padding:2px 4px 6px;">{{.Title}}</div>
+        {{.SVG}}
+      </div>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+
+  <div class="section">
+    <h2>主机巡检明细</h2>
+    <p class="desc">覆盖 CPU、内存、磁盘使用率峰值与系统负载，并给出综合健康评分（满分 100）。</p>
     <table>
       <thead>
         <tr>
-          <th>主机名</th>
-          <th>IP</th>
-          <th>分组</th>
-          <th>系统</th>
-          <th>状态</th>
-          <th>CPU 平均</th>
-          <th>CPU 峰值</th>
-          <th>内存 平均</th>
-          <th>内存 峰值</th>
-          <th>磁盘 平均</th>
+          <th>主机</th><th>IP</th><th>分组</th><th>状态</th><th>健康</th><th>评分</th>
+          <th>CPU 均值/峰值</th><th>内存 均值/峰值</th><th>磁盘 均值/峰值</th><th>负载</th><th>最后上报</th>
         </tr>
       </thead>
       <tbody>
-        {{ range .Nodes }}
+        {{range .Nodes}}
         <tr>
-          <td>{{ .Name }}</td>
-          <td>{{ .IP }}</td>
-          <td>{{ .Group }}</td>
-          <td>{{ .OS }}</td>
-          <td>
-            {{ if eq .Status "online" }}<span class="status-online">在线</span>
-            {{ else }}<span class="status-offline">离线</span>{{ end }}
-          </td>
-          <td class="{{ if gt .CPUAvg 80.0 }}metric-bad{{ else if gt .CPUAvg 60.0 }}metric-warn{{ else }}metric-good{{ end }}">{{ printf "%.1f" .CPUAvg }}%</td>
-          <td class="{{ if gt .CPUMax 90.0 }}metric-bad{{ else }}metric-warn{{ end }}">{{ printf "%.1f" .CPUMax }}%</td>
-          <td class="{{ if gt .MemAvg 85.0 }}metric-bad{{ else if gt .MemAvg 70.0 }}metric-warn{{ else }}metric-good{{ end }}">{{ printf "%.1f" .MemAvg }}%</td>
-          <td class="{{ if gt .MemMax 95.0 }}metric-bad{{ else }}metric-warn{{ end }}">{{ printf "%.1f" .MemMax }}%</td>
-          <td class="{{ if gt .DiskAvg 85.0 }}metric-bad{{ else if gt .DiskAvg 70.0 }}metric-warn{{ else }}metric-good{{ end }}">{{ printf "%.1f" .DiskAvg }}%</td>
+          <td>{{.Name}}</td>
+          <td class="muted">{{.IP}}</td>
+          <td class="muted">{{if .Group}}{{.Group}}{{else}}—{{end}}</td>
+          <td>{{if eq .Status "online"}}<span class="badge badge-healthy">在线</span>{{else}}<span class="badge badge-offline">离线</span>{{end}}</td>
+          <td><span class="badge badge-{{.Health}}">{{statusLabel .Health}}</span></td>
+          <td><b>{{f1 .HealthScore}}</b></td>
+          <td>{{f1 .CPUAvg}}% / {{f1 .CPUMax}}%</td>
+          <td>{{f1 .MemAvg}}% / {{f1 .MemMax}}%</td>
+          <td>{{f1 .DiskAvg}}% / {{f1 .DiskMax}}%</td>
+          <td>{{f1 .LoadAvg}}</td>
+          <td class="muted">{{fmtTime .LastSeen}}</td>
         </tr>
-        {{ end }}
+        {{end}}
       </tbody>
     </table>
   </div>
 
-  <div class="footer">
-    <p>NebulaEye 监控中心 - 自动生成报告</p>
+  {{if .Middleware}}
+  <div class="section">
+    <h2>中间件监控明细</h2>
+    <p class="desc">补充连接数、响应时间、内存使用率、命中率等关键指标。其中响应时间由 Redis 命令平均时延提供；其余类型可结合其监控详情页查看对应指标。</p>
+    <table>
+      <thead>
+        <tr>
+          <th>类型</th><th>实例</th><th>节点</th><th>角色/拓扑</th><th>状态</th>
+          <th>连接数</th><th>响应时间</th><th>内存使用率</th><th>命中率</th><th>吞吐</th><th>连接数趋势</th><th>备注</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Middleware}}
+        <tr>
+          <td><span class="tag">{{.Type}}</span></td>
+          <td>{{.Instance}}</td>
+          <td class="muted">{{.Node}}</td>
+          <td class="muted">{{if .Role}}{{.Role}}{{end}}{{if .Topology}} / {{.Topology}}{{end}}</td>
+          <td>{{if .Up}}<span class="badge badge-{{.Status}}">{{statusLabel .Status}}</span>{{else}}<span class="badge badge-offline">离线</span>{{end}}</td>
+          <td>{{f1 .ConnUsed}}{{if .ConnMax}} <span class="muted">/ {{f1 .ConnMax}} ({{f1 .ConnPct}}%)</span>{{end}}</td>
+          <td>{{if .RespTime}}{{f1 .RespTime}} ms{{else}}—{{end}}</td>
+          <td>{{if .MemPct}}{{f1 .MemPct}}%{{else}}—{{end}}</td>
+          <td>{{if .HitRate}}{{f1 .HitRate}}%{{else}}—{{end}}</td>
+          <td>{{if .Throughput}}{{f1 .Throughput}}{{else}}—{{end}}</td>
+          <td>{{spark .Trend}}</td>
+          <td class="muted">{{if .Extra}}{{.Extra}}{{else}}—{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
   </div>
+  {{end}}
+
+  {{if .Findings}}
+  <div class="section">
+    <h2>巡检发现与处置建议</h2>
+    <p class="desc">按严重程度（严重 &gt; 警告）排序，每条发现均细化到具体问题描述、影响范围与修复建议。</p>
+    <div class="findings">
+      {{range .Findings}}
+      <div class="finding {{.Severity}}">
+        <div class="f-head">
+          <span class="badge badge-sev-{{.Severity}}">{{sevLabel .Severity}}</span>
+          <span class="f-title">{{.Title}}</span>
+          <span class="tag">{{.Category}}</span>
+          <span class="f-res">对象：{{.Resource}}</span>
+        </div>
+        <div class="f-body">
+          <p><span class="lab">问题描述：</span>{{.Detail}}</p>
+          <p><span class="lab">影响范围：</span>{{.Impact}}</p>
+          <p><span class="lab">修复建议：</span>{{.Suggestion}}</p>
+        </div>
+      </div>
+      {{end}}
+    </div>
+  </div>
+  {{else}}
+  <div class="section"><p class="empty">本周期未检测到明显风险项，各主机与中间件指标处于正常区间。</p></div>
+  {{end}}
+
+  <div class="footer">本报告由 nebula-monitor 自动生成 · 数据来源为时序监控库</div>
+</div>
 </body>
-</html>{{ end }}
+</html>
