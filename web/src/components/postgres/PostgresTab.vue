@@ -88,7 +88,6 @@
           <div class="meta-item"><span class="meta-label">节点</span>{{ selected.node }}</div>
           <div class="meta-item"><span class="meta-label">角色</span>{{ selected.role }}</div>
           <div class="meta-item"><span class="meta-label">版本</span>{{ selected.version }}</div>
-          <div class="meta-item"><span class="meta-label">数据库</span>{{ selected.database }}</div>
         </div>
         <div class="metric-grid">
           <div class="metric-cell"><div class="mc-label">连接数</div><div class="mc-value">{{ selected.numbackends }}</div></div>
