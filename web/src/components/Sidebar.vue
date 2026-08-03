@@ -11,11 +11,11 @@
 
     <nav class="nav">
       <router-link
-        v-for="item in items"
+        v-for="item in flatItems"
         :key="item.key"
         :to="item.to"
         class="nav-item"
-        :class="{ active: isActive(item) }"
+        :class="{ active: isActiveItem(item) }"
       >
         <el-icon :size="18"><component :is="item.icon" /></el-icon>
         <span class="label" v-show="!collapsed">{{ item.label }}</span>
@@ -26,6 +26,31 @@
           class="nav-badge"
         />
       </router-link>
+
+      <div
+        v-for="g in groups"
+        :key="g.key"
+        class="nav-group"
+        :class="{ 'group-open': isGroupOpen(g), 'group-active': isGroupActive(g) }"
+      >
+        <div class="nav-group-title" @click="onGroupClick(g)">
+          <el-icon :size="18"><component :is="g.icon" /></el-icon>
+          <span class="label" v-show="!collapsed">{{ g.label }}</span>
+          <el-icon v-show="!collapsed" class="caret"><ArrowDown v-if="isGroupOpen(g)" /><ArrowRight v-else /></el-icon>
+        </div>
+        <div v-show="!collapsed && isGroupOpen(g)" class="nav-group-items">
+          <router-link
+            v-for="sub in g.items"
+            :key="sub.key"
+            :to="sub.to"
+            class="nav-subitem"
+            :class="{ active: isActiveItem(sub) }"
+          >
+            <span class="sub-dot"></span>
+            <span class="label">{{ sub.label }}</span>
+          </router-link>
+        </div>
+      </div>
     </nav>
 
     <!-- 版本信息（统一取 Server 运行版本，不再区分 Web/Server 版本） -->
@@ -48,7 +73,17 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Odometer, Monitor, Bell, Upload, Message, Connection, Document, DataAnalysis, Setting } from '@element-plus/icons-vue'
+import {
+  Odometer,
+  Monitor,
+  Bell,
+  Message,
+  Connection,
+  Document,
+  Setting,
+  ArrowDown,
+  ArrowRight,
+} from '@element-plus/icons-vue'
 import http from '../api/http'
 import { useBrand } from '../composables/useBrand'
 import { WEB_VERSION } from '../version'
@@ -57,28 +92,63 @@ defineProps({
   collapsed: Boolean,
   alertCount: { type: Number, default: 0 },
 })
-defineEmits(['toggle', 'logout'])
+const emit = defineEmits(['toggle', 'logout'])
 
 const route = useRoute()
 const { brand } = useBrand()
 
 const serverVersion = ref(WEB_VERSION) // 初始用构建内嵌版本，加载后覆盖为 Server 实际运行版本
 
-const items = [
+// 普通一级菜单项
+const flatItems = [
   { key: 'overview', to: '/', label: '首页概览', icon: Odometer },
   { key: 'hosts', to: '/hosts', label: '主机列表', icon: Monitor },
   { key: 'middleware', to: '/middleware', label: '中间件监控', icon: Connection },
   { key: 'alerts', to: '/alerts', label: '告警中心', icon: Bell },
   { key: 'dialtest', to: '/dialtest', label: '服务拨测', icon: Connection },
   { key: 'report', to: '/report', label: '巡检报告', icon: Document },
-  { key: 'upgrade', to: '/system/upgrade', label: '系统升级', icon: Upload },
   { key: 'notify', to: '/notify', label: '通知配置', icon: Message },
-  { key: 'settings', to: '/system/settings', label: '系统设置', icon: Setting },
 ]
 
-function isActive(item) {
+// 分组菜单：一级菜单 + 二级子菜单
+const groups = [
+  {
+    key: 'system',
+    label: '系统设置',
+    icon: Setting,
+    items: [
+      { key: 'settings', to: '/system/settings', label: '站点与品牌' },
+      { key: 'upgrade', to: '/system/upgrade', label: '系统升级' },
+    ],
+  },
+]
+
+// 用户手动展开/收起的分组状态
+const openGroups = ref({})
+
+function isActiveItem(item) {
   if (item.key === 'overview') return route.path === '/'
   return route.path.startsWith(item.to)
+}
+
+function isGroupActive(g) {
+  return g.items.some(isActiveItem)
+}
+
+function isGroupOpen(g) {
+  // 当前路由在该组下时始终展开；否则取决于用户手动状态
+  if (isGroupActive(g)) return true
+  return openGroups.value[g.key] === true
+}
+
+function onGroupClick(g) {
+  if (collapsed) {
+    // 折叠态点击分组：先展开侧边栏，再展开该分组
+    emit('toggle')
+    openGroups.value[g.key] = true
+    return
+  }
+  openGroups.value[g.key] = !isGroupOpen(g)
 }
 
 async function loadVersion() {
@@ -195,6 +265,66 @@ onMounted(loadVersion)
 }
 .nav-badge {
   margin-left: auto;
+}
+/* 分组菜单 */
+.nav-group {
+  margin-top: 2px;
+}
+.nav-group-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  color: var(--text-dim);
+  font-size: 13px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+.nav-group-title:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+.nav-group.group-active .nav-group-title {
+  color: var(--accent);
+}
+.nav-group-title .caret {
+  margin-left: auto;
+  transition: transform 0.15s;
+}
+.nav-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 2px 30px;
+}
+.nav-subitem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+.nav-subitem:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+.nav-subitem.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.sub-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+  flex-shrink: 0;
 }
 /* 版本信息 */
 .version-info {

@@ -10,7 +10,9 @@
           </el-button>
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
-            <el-breadcrumb-item v-if="$route.name !== 'overview'">{{ pageTitle }}</el-breadcrumb-item>
+            <template v-if="$route.name !== 'overview'">
+              <el-breadcrumb-item v-for="(b, i) in breadcrumb" :key="i">{{ b }}</el-breadcrumb-item>
+            </template>
           </el-breadcrumb>
         </div>
         <div class="topbar-right">
@@ -114,6 +116,17 @@ const pageTitle = computed(() => {
     'system-settings': '系统设置',
   }
   return m[route.name] || ''
+})
+
+// 面包屑：系统设置分组下显示两级（系统设置 / 子菜单）
+const breadcrumb = computed(() => {
+  const groupMap = {
+    'system-settings': ['系统设置', '站点与品牌'],
+    'system-upgrade': ['系统设置', '系统升级'],
+  }
+  if (groupMap[route.name]) return groupMap[route.name]
+  const t = pageTitle.value
+  return t ? [t] : []
 })
 
 let ws = null
