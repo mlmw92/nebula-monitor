@@ -5,16 +5,6 @@
     <div class="main-wrap" :class="{ collapsed }">
       <header class="topbar glass">
         <div class="topbar-left">
-          <div class="brand-bar">
-            <img v-if="brand.logo" :src="brand.logo" alt="logo" class="brand-logo" />
-            <div v-else class="brand-logo brand-logo--default">
-              <el-icon :size="22"><Monitor /></el-icon>
-            </div>
-            <div class="brand-titles">
-              <span class="brand-name" :title="brand.name">{{ brand.name }}</span>
-              <span class="brand-sub">监控中心</span>
-            </div>
-          </div>
           <el-button link @click="collapsed = !collapsed">
             <el-icon :size="18"><Expand v-if="collapsed" /><Fold v-else /></el-icon>
           </el-button>
@@ -82,7 +72,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Expand, Fold, Refresh, Bell, User, DataAnalysis, Monitor } from '@element-plus/icons-vue'
+import { Expand, Fold, Refresh, Bell, User, DataAnalysis } from '@element-plus/icons-vue'
 import Sidebar from '../components/Sidebar.vue'
 import http, { setToken } from '../api/http'
 import { connectWS } from '../api/ws'
@@ -222,7 +212,7 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 40;
-  height: 56px;
+  height: 52px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -236,57 +226,11 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-width: 0;
 }
 .topbar-right {
-  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.brand-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-right: 16px;
-  min-width: 0;
-}
-.brand-logo {
-  width: 38px;
-  height: 38px;
-  border-radius: 9px;
-  object-fit: contain;
-  background: var(--accent-dim);
-  box-shadow: 0 0 0 1px var(--border);
-  flex-shrink: 0;
-}
-.brand-logo--default {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-}
-.brand-titles {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  line-height: 1.2;
-  min-width: 0;
-  overflow: hidden;
-}
-.brand-name {
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 360px;
-}
-.brand-sub {
-  font-size: 12px;
-  color: var(--text-dim);
 }
 .theme-dot {
   width: 12px;
