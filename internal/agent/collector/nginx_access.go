@@ -116,6 +116,25 @@ func getParser(format string) *nginxLogParser {
 	}
 }
 
+// nginxLogParserList 返回按“配置格式优先、其余格式兜底”排序的解析器列表。
+// 兼容同一 access.log 混合多种日志格式（常见于主站 combined_timed、状态探测 combined，
+// 或不同 server 块/片段使用不同 log_format 却写入同一文件）。
+func nginxLogParserList(format string) []*nginxLogParser {
+	primary := getParser(format)
+	others := []*nginxLogParser{
+		{re: nginxLogReCombined, parse: combinedParser},
+		{re: nginxLogReCombinedTimed, parse: combinedTimedParser},
+	}
+	out := make([]*nginxLogParser, 0, len(others)+1)
+	out = append(out, primary)
+	for _, o := range others {
+		if o.re != primary.re {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
 // ipAgg 单个来源 IP 的周期内聚合。
 type ipAgg struct {
 	requests float64
@@ -220,7 +239,7 @@ func (c *NginxAccessCollector) collectFile(cfg model.NginxInstanceConfig, state 
 	var totalRequests, totalBytes float64
 	var latencySum, latencyN float64
 
-	parser := getParser(cfg.LogFormat)
+	parsers := nginxLogParserList(cfg.LogFormat)
 	r := bufio.NewReader(f)
 	var readBytes int64
 	rows := 0
@@ -238,9 +257,12 @@ func (c *NginxAccessCollector) collectFile(cfg model.NginxInstanceConfig, state 
 		if rows > nginxAccessMaxRows {
 			break
 		}
-		// 按实例配置的日志格式解析
-		if m := parser.re.FindStringSubmatch(line); m != nil {
-			parser.parse(m, ipStats, statusCount, uriCount, &totalRequests, &totalBytes, &latencySum, &latencyN)
+		// 逐行尝试所有已知格式，兼容同一文件混合多种日志格式。
+		for _, p := range parsers {
+			if m := p.re.FindStringSubmatch(line); m != nil {
+				p.parse(m, ipStats, statusCount, uriCount, &totalRequests, &totalBytes, &latencySum, &latencyN)
+				break
+			}
 		}
 		if err != nil { // io.EOF 等正常读完
 			break

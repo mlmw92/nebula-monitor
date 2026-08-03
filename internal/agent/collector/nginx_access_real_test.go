@@ -27,7 +27,7 @@ func TestRealNginxLog(t *testing.T) {
 	}
 	defer f.Close()
 
-	parser := getParser(*realLogFormat)
+	parsers := nginxLogParserList(*realLogFormat)
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 
@@ -41,7 +41,15 @@ func TestRealNginxLog(t *testing.T) {
 	for sc.Scan() {
 		line := sc.Text()
 		total++
-		m := parser.re.FindStringSubmatch(line)
+		var m []string
+		var used *nginxLogParser
+		for _, p := range parsers {
+			if mm := p.re.FindStringSubmatch(line); mm != nil {
+				m = mm
+				used = p
+				break
+			}
+		}
 		if m == nil {
 			if len(unmatched) < 10 {
 				unmatched = append(unmatched, fmt.Sprintf("[行 %d] %q", total, line))
@@ -49,7 +57,7 @@ func TestRealNginxLog(t *testing.T) {
 			continue
 		}
 		matched++
-		parser.parse(m, ipStats, statusCount, uriCount, &totalRequests, &totalBytes, &latencySum, &latencyN)
+		used.parse(m, ipStats, statusCount, uriCount, &totalRequests, &totalBytes, &latencySum, &latencyN)
 	}
 
 	fmt.Printf("\n=== Nginx access.log 诊断 ===\n")
