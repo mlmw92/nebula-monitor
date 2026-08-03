@@ -34,18 +34,6 @@
             <el-tag v-for="c in (row.notify || [])" :key="c" size="small" class="ch-tag">{{ chLabel(c) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="证书" width="150">
-          <template #default="{ row }">
-            <template v-if="row.type === 'https'">
-              <span v-if="certFor(row.name)">
-                <span :class="certClass(certFor(row.name).certExpiry)">{{ certFor(row.name).certExpiry.toFixed(0) }} 天</span>
-                <span class="muted"> / ≤{{ row.cert_warn || 30 }}≤{{ row.cert_crit || 7 }}</span>
-              </span>
-              <span v-else class="muted">检测中</span>
-            </template>
-            <span v-else class="muted">-</span>
-          </template>
-        </el-table-column>
         <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-button link @click="editTask(row)">编辑</el-button>
@@ -144,14 +132,6 @@ const results = ref([])
 const showDialog = ref(false)
 const editing = ref(false)
 const form = ref({ name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true, severity: 'warning', notify: [], cert_warn: 30, cert_crit: 7 })
-// 最近结果按任务名索引，用于任务列表展示证书剩余天数
-const resultByName = computed(() => {
-  const m = {}
-  for (const r of results.value) m[r.name] = r
-  return m
-})
-function certFor(name) { return resultByName.value[name] || null }
-
 async function load() {
   loading.value = true
   try {
