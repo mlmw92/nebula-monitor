@@ -34,10 +34,13 @@
             <el-tag v-for="c in (row.notify || [])" :key="c" size="small" class="ch-tag">{{ chLabel(c) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="证书" width="110">
+        <el-table-column label="证书" width="150">
           <template #default="{ row }">
             <template v-if="row.type === 'https'">
-              <span v-if="certFor(row.name)" :class="certClass(certFor(row.name).certExpiry)">{{ certFor(row.name).certExpiry.toFixed(0) }} 天</span>
+              <span v-if="certFor(row.name)">
+                <span :class="certClass(certFor(row.name).certExpiry)">{{ certFor(row.name).certExpiry.toFixed(0) }} 天</span>
+                <span class="muted"> / ≤{{ row.cert_warn || 30 }}≤{{ row.cert_crit || 7 }}</span>
+              </span>
               <span v-else class="muted">检测中</span>
             </template>
             <span v-else class="muted">-</span>
@@ -81,8 +84,8 @@
     </div>
 
     <!-- 新建/编辑对话框 -->
-    <el-dialog v-model="showDialog" :title="editing ? '编辑拨测任务' : '新建拨测任务'" width="500px">
-      <el-form :model="form" label-width="80px">
+    <el-dialog v-model="showDialog" :title="editing ? '编辑拨测任务' : '新建拨测任务'" width="540px">
+      <el-form :model="form" label-width="95px">
         <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="类型">
           <el-select v-model="form.type">
@@ -113,11 +116,11 @@
           </el-select>
         </el-form-item>
         <template v-if="form.type === 'https'">
-          <el-form-item label="证书预警(天)">
+          <el-form-item label="预警阈值(天)">
             <el-input-number v-model="form.cert_warn" :min="1" :max="365" :step="1" />
             <span class="hint-inline">剩余 ≤ 此天数触发「警告」（默认 30）</span>
           </el-form-item>
-          <el-form-item label="证书告警(天)">
+          <el-form-item label="告警阈值(天)">
             <el-input-number v-model="form.cert_crit" :min="1" :max="form.cert_warn || 30" :step="1" />
             <span class="hint-inline">剩余 ≤ 此天数触发「紧急」（默认 7）</span>
           </el-form-item>
