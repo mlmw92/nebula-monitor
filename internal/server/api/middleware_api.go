@@ -319,12 +319,106 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 
 // middlewareOverviewType 单类中间件健康度。
 type middlewareOverviewType struct {
-	Type       string `json:"type"`       // redis/mysql/postgres/nginx/kafka/docker/rocketmq/k8s
-	Label      string `json:"label"`      // 中文名
-	Total      int    `json:"total"`      // 实例总数
-	Up         int    `json:"up"`         // 在线实例数
-	Down       int    `json:"down"`       // 离线实例数
-	AlertCount int    `json:"alertCount"` // 关联活跃告警数
+	Type       string           `json:"type"`       // redis/mysql/postgres/nginx/kafka/docker/rocketmq/k8s
+	Label      string           `json:"label"`      // 中文名
+	Total      int              `json:"total"`      // 实例总数
+	Up         int              `json:"up"`         // 在线实例数
+	Down       int              `json:"down"`       // 离线实例数
+	AlertCount int              `json:"alertCount"` // 关联活跃告警数
+	Summary    []mwSummaryItem  `json:"summary"`    // 核心指标摘要（卡片展示）
+}
+
+// mwSummaryItem 是某类中间件在总览卡片上展示的核心指标摘要。
+type mwSummaryItem struct {
+	Key   string  `json:"key"`
+	Label string  `json:"label"`
+	Value float64 `json:"value"`
+	Unit  string  `json:"unit"`
+	Warn  bool    `json:"warn"` // 是否超过预警阈值
+}
+
+// mwSummarySpec 描述某类中间件在卡片上要展示的核心指标及其聚合方式。
+type mwSummarySpec struct {
+	metric    string
+	label     string
+	agg       string // max / avg / sum
+	unit      string
+	warnAbove float64
+}
+
+// mwSummarySpecs 各中间件类型在总览卡片上的核心指标摘要定义。
+var mwSummarySpecs = map[string][]mwSummarySpec{
+	"redis": {
+		{"redis_ops_per_sec", "QPS峰值", "max", "", 0},
+		{"redis_used_memory_percent", "内存使用率", "avg", "%", 85},
+		{"redis_hit_rate", "命中率", "avg", "%", 0},
+	},
+	"mysql": {
+		{"mysql_queries_per_sec", "QPS", "sum", "", 0},
+		{"mysql_threads_connected", "连接数", "max", "", 0},
+		{"mysql_innodb_buffer_pool_hit_rate", "缓冲命中率", "avg", "%", 0},
+	},
+	"postgres": {
+		{"postgres_numbackends", "连接数", "max", "", 0},
+		{"postgres_cache_hit_ratio", "缓存命中率", "avg", "%", 0},
+		{"postgres_replication_lag_bytes", "复制延迟", "max", "B", 0},
+	},
+	"nginx": {
+		{"nginx_active_connections", "活动连接", "max", "", 0},
+		{"nginx_requests", "请求量", "sum", "", 0},
+		{"nginx_5xx_rate", "5xx率", "avg", "%", 1},
+	},
+	"kafka": {
+		{"kafka_consumer_lag", "消费积压", "sum", "", 0},
+		{"kafka_under_replicated_partitions", "欠副本分区", "sum", "", 0},
+		{"kafka_offline_partitions", "离线分区", "sum", "", 0},
+	},
+	"docker": {
+		{"docker_container_up", "运行容器", "sum", "", 0},
+		{"docker_container_cpu_percent", "CPU使用率", "avg", "%", 0},
+		{"docker_container_mem_percent", "内存使用率", "avg", "%", 0},
+	},
+	"rocketmq": {
+		{"rocketmq_producer_tps", "生产TPS", "sum", "", 0},
+		{"rocketmq_message_accumulation", "消息堆积", "sum", "", 0},
+		{"rocketmq_consumer_lag", "消费积压", "sum", "", 0},
+	},
+	"k8s": {
+		{"k8s_pods_running", "运行Pod", "sum", "", 0},
+		{"k8s_pods_pending", "待调度Pod", "sum", "", 0},
+		{"k8s_nodes_ready", "就绪节点", "sum", "", 0},
+	},
+}
+
+// mwAggregateLatest 对指定指标的「最新值」按 agg 方式跨所有序列聚合（sum/avg/max）。
+func mwAggregateLatest(a *API, metric, agg string) (float64, bool) {
+	series, err := a.store.QueryAllLatest(metric, nil)
+	if err != nil {
+		return 0, false
+	}
+	var sum, max, count float64
+	for _, s := range series {
+		if len(s.Points) == 0 {
+			continue
+		}
+		v := s.Points[len(s.Points)-1].Value
+		sum += v
+		count++
+		if count == 1 || v > max {
+			max = v
+		}
+	}
+	if count == 0 {
+		return 0, false
+	}
+	switch agg {
+	case "max":
+		return max, true
+	case "sum":
+		return sum, true
+	default:
+		return round2(sum / count), true
+	}
 }
 
 // middlewareOverviewResp 是 /api/v1/middleware/overview 的响应体。
@@ -384,6 +478,20 @@ func (a *API) handleMiddlewareOverview(w http.ResponseWriter, r *http.Request) {
 				item.Up++
 			} else {
 				item.Down++
+			}
+		}
+		// 核心指标摘要（卡片展示）
+		if specs, ok := mwSummarySpecs[t.typ]; ok {
+			for _, sp := range specs {
+				if v, ok := mwAggregateLatest(a, sp.metric, sp.agg); ok {
+					item.Summary = append(item.Summary, mwSummaryItem{
+						Key:   sp.metric,
+						Label: sp.label,
+						Value: v,
+						Unit:  sp.unit,
+						Warn:  sp.warnAbove > 0 && v >= sp.warnAbove,
+					})
+				}
 			}
 		}
 		resp.Total += item.Total
