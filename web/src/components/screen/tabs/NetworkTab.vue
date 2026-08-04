@@ -649,7 +649,7 @@ onUnmounted(() => {
 .nt-sources {
   flex-shrink: 0;
   padding: 10px 12px;
-  max-height: 160px;
+  max-height: 132px;
   display: flex;
   flex-direction: column;
 }
