@@ -15,6 +15,7 @@
             <span class="cd-unit">s</span>
           </div>
         </div>
+        <span class="weekday-text">{{ weekday }}</span>
       </div>
 
       <div class="hud-center">
@@ -33,10 +34,6 @@
       </div>
 
       <div class="hud-side hud-right">
-        <div class="hud-date">
-          <div class="hd-time">{{ timeOnly }}</div>
-          <div class="hd-date">{{ dateText }}</div>
-        </div>
         <div class="hud-actions">
           <button class="hud-btn" title="全屏" @click="toggleFullscreen"><FullScreen /></button>
           <button class="hud-btn" title="模块设置" @click="settingOpen = true"><Setting /></button>
@@ -173,8 +170,7 @@ async function onSaveCfg() {
 }
 const activeTab = ref('overview')
 const clock = ref('')
-const dateText = ref('')
-const timeOnly = ref('')
+const weekday = ref('')
 let dataTimer = null
 let clockTimer = null
 let ws = null
@@ -243,9 +239,8 @@ function tickClock() {
   const d = new Date()
   const p = (x) => String(x).padStart(2, '0')
   clock.value = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-  timeOnly.value = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
   const days = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
-  dateText.value = `${p(d.getMonth() + 1)}月${p(d.getDate())}日 ${days[d.getDay()]}`
+  weekday.value = days[d.getDay()]
 }
 
 // 全屏
@@ -400,6 +395,12 @@ onUnmounted(() => {
   color: var(--text);
 }
 
+.weekday-text {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-left: 2px;
+}
+
 .hud-actions {
   justify-content: flex-end;
 }
@@ -492,29 +493,6 @@ onUnmounted(() => {
   margin-top: 6px;
   width: fit-content;
   max-width: 90%;
-}
-
-.hud-date {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  margin-right: 10px;
-  letter-spacing: 0.06em;
-}
-
-.hd-time {
-  font-size: 20px;
-  font-weight: 700;
-  font-family: var(--mono);
-  color: var(--text);
-  text-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
-  line-height: 1;
-}
-
-.hd-date {
-  font-size: 12px;
-  color: var(--text-dim);
 }
 
 /* 倒计时 */
@@ -797,8 +775,7 @@ onUnmounted(() => {
   .title-deco { margin-top: 8px; }
   .td-line { width: 110px; }
   .hud-tabs { margin-top: 8px; }
-  .hd-time { font-size: 26px; }
-  .hd-date { font-size: 14px; }
+  .weekday-text { font-size: 14px; }
   .cd-label { font-size: 13px; }
   .cd-num { font-size: 24px; }
   .cd-unit { font-size: 14px; }
@@ -825,8 +802,7 @@ onUnmounted(() => {
   .title-deco { margin-top: 10px; }
   .td-line { width: 140px; }
   .hud-tabs { margin-top: 10px; }
-  .hd-time { font-size: 34px; }
-  .hd-date { font-size: 17px; }
+  .weekday-text { font-size: 17px; }
   .cd-label { font-size: 16px; }
   .cd-num { font-size: 30px; }
   .cd-unit { font-size: 17px; }
