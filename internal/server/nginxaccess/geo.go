@@ -38,6 +38,7 @@ func (g *Geo) Search(ip string) (country, countryEn, province, city string) {
 		return "", "", "", ""
 	}
 	parts := strings.Split(region, "|")
+	// ip2region v4 分段格式: 国家|省份|城市|ISP|国家代码
 	if len(parts) >= 1 {
 		country = countryCN(parts[0])
 		// 国内 IP 段国家字段为中文（"中国"），转英文便于世界地图匹配
@@ -47,11 +48,11 @@ func (g *Geo) Search(ip string) (country, countryEn, province, city string) {
 			countryEn = strings.TrimSpace(parts[0])
 		}
 	}
-	if len(parts) >= 3 {
-		province = normProvince(parts[2])
+	if len(parts) >= 2 {
+		province = normProvince(parts[1])
 	}
-	if len(parts) >= 4 && parts[3] != "" && parts[3] != "0" {
-		city = parts[3]
+	if len(parts) >= 3 && parts[2] != "" && parts[2] != "0" {
+		city = parts[2]
 	}
 	return
 }
