@@ -52,7 +52,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
@@ -60,7 +60,7 @@ const props = defineProps({
   redisStats: { type: Object, default: () => ({}) }, // { total, up, down, clusterCount, alertCount }
   dockerStats: { type: Object, default: () => ({}) }, // { total, running, stopped, abnormal }
 })
-const emit = defineEmits(['select-node', 'select-redis', 'select-docker'])
+const emit = defineEmits(['select-node', 'select-redis', 'select-docker', 'has-nodes-change'])
 
 // viewBox 逻辑坐标系（与 DOM 百分比定位共用同一比例）
 const VB = { w: 1000, h: 640 }
@@ -68,6 +68,8 @@ const CX = VB.w / 2
 const CY = VB.h / 2
 
 const hover = ref(null)
+const hasNodes = computed(() => placedNodes.value.length > 0)
+watch(hasNodes, (val) => emit('has-nodes-change', val), { immediate: true })
 
 // 组装环绕节点：Redis + 容器集群，并按圆周均匀布点
 const placedNodes = computed(() => {

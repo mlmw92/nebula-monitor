@@ -2,8 +2,8 @@
   <div class="overview-tab">
     <!-- 左列：TopologyMap + CenterPanel -->
     <div class="ot-left">
-      <div class="ot-topo">
-        <TopologyMap :nodes="nodeCards" />
+      <div class="ot-topo" :class="{ 'ot-topo--empty': !topoHasNodes }">
+        <TopologyMap :nodes="nodeCards" @has-nodes-change="topoHasNodes = $event" />
       </div>
       <div class="ot-center">
         <CenterPanel :nodes="nodeCards" :alerts="alerts" :health-score="healthScore" :health-level="healthLevel" />
@@ -30,7 +30,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import TopologyMap from '../TopologyMap.vue'
 import CenterPanel from '../CenterPanel.vue'
 import ScreenHealthScore from '../ScreenHealthScore.vue'
@@ -42,6 +42,8 @@ const props = defineProps({
   metrics: { type: Object, default: () => ({}) },
   alerts: { type: Array, default: () => [] },
 })
+
+const topoHasNodes = ref(false)
 
 const nodeCards = computed(() =>
   props.nodes.map((n) => ({
@@ -146,6 +148,12 @@ const hostRows = computed(() =>
   flex: 1;
   min-height: 0;
   position: relative;
+  transition: flex 0.25s ease, min-height 0.25s ease;
+}
+.ot-topo--empty {
+  flex: 0 0 0px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .ot-center {
