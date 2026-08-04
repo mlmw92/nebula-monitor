@@ -1,21 +1,6 @@
 <template>
   <div ref="wrap" class="topo-wrap">
     <svg class="topo-svg" :viewBox="`0 0 ${VB.w} ${VB.h}`" preserveAspectRatio="xMidYMid meet">
-      <defs>
-        <filter id="coreGlow" x="-60%" y="-60%" width="220%" height="220%">
-          <feGaussianBlur stdDeviation="6" result="b" />
-          <feMerge>
-            <feMergeNode in="b" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-        <radialGradient id="coreFill" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" :stop-color="coreHex" stop-opacity="0.9" />
-          <stop offset="70%" :stop-color="coreHex" stop-opacity="0.25" />
-          <stop offset="100%" :stop-color="coreHex" stop-opacity="0" />
-        </radialGradient>
-      </defs>
-
       <!-- 连线（中心 -> 各节点） -->
       <g class="links">
         <path
@@ -38,12 +23,6 @@
         </circle>
       </g>
 
-      <!-- 中心核心（纯装饰视觉焦点，随健康等级变色） -->
-      <g :transform="`translate(${CX} ${CY})`">
-        <circle r="72" fill="url(#coreFill)" />
-        <circle r="58" fill="none" :stroke="coreHex" stroke-width="1.5" opacity="0.45" filter="url(#coreGlow)" class="core-ring" />
-        <circle r="44" fill="none" :stroke="coreHex" stroke-width="2" opacity="0.7" filter="url(#coreGlow)" />
-      </g>
     </svg>
 
     <!-- 节点框（DOM 覆盖层，百分比定位） -->
@@ -82,7 +61,6 @@ const props = defineProps({
   alerts: { type: Array, default: () => [] },
   redisStats: { type: Object, default: () => ({}) }, // { total, up, down, clusterCount, alertCount }
   dockerStats: { type: Object, default: () => ({}) }, // { total, running, stopped, abnormal }
-  healthLevel: { type: String, default: 'green' }, // green | amber | red
 })
 const emit = defineEmits(['select-node', 'select-redis', 'select-docker'])
 const router = useRouter()
@@ -93,10 +71,6 @@ const CX = VB.w / 2
 const CY = VB.h / 2
 
 const hover = ref(null)
-
-// 蓝色科技风：健康核颜色（green 为亮蓝，amber/red 保留预警/故障）
-const COLOR = { green: '#38bdf8', amber: '#f59e0b', red: '#f43f5e' }
-const coreHex = computed(() => COLOR[props.healthLevel] || COLOR.green)
 
 // 主机按 group 聚合
 const hostGroups = computed(() => {
@@ -248,11 +222,6 @@ function linkPath(n) {
 .flow.ok { fill: var(--accent); }
 .flow.warn { fill: var(--warn); }
 .flow.danger { fill: var(--danger); }
-
-.core-ring { animation: spin 18s linear infinite; transform-origin: center; }
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
 
 /* 节点框：百分比定位并居中于坐标点 */
 .topo-node {

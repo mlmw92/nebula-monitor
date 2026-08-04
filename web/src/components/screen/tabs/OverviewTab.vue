@@ -3,7 +3,7 @@
     <!-- 左列：TopologyMap + CenterPanel -->
     <div class="ot-left">
       <div class="ot-topo">
-        <TopologyMap :nodes="nodeCards" :health-level="healthLevel" />
+        <TopologyMap :nodes="nodeCards" />
       </div>
       <div class="ot-center">
         <CenterPanel :nodes="nodeCards" :alerts="alerts" :health-score="healthScore" :health-level="healthLevel" />
