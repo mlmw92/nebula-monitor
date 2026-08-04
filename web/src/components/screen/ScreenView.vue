@@ -28,48 +28,53 @@
       </div>
     </header>
 
-    <!-- 五面板主区 -->
-    <main class="panel-main">
-      <!-- 左侧两个面板 -->
-      <div class="side-col left-col">
-        <ScrollTablePanel
-          class="side-panel"
-          title="主机监控实时列表"
-          :columns="hostColumns"
-          :rows="hostRows"
-          :speed="0.4"
-        />
-        <ScrollTablePanel
-          class="side-panel"
-          title="实时告警事件"
-          :columns="alertColumns"
-          :rows="alertRows"
-          :speed="0.3"
-        />
-      </div>
+    <!-- Tab 导航栏 -->
+    <div class="hud-tab-row">
+      <ScreenTabBar :active="activeTab" :firingCount="firingCount" @update:active="activeTab = $event" />
+    </div>
 
-      <!-- 中间主面板 -->
-      <div class="center-col">
-        <CenterPanel :nodes="nodeCards" :alerts="alerts" />
+    <!-- 持久 KPI 条 -->
+    <div class="hud-kpi-bar">
+      <div class="kpi-bar-item" v-for="k in kpiBar" :key="k.key">
+        <span class="kpi-bar-label">{{ k.label }}</span>
+        <span class="kpi-bar-value" :style="{ color: k.color }">{{ k.value }}</span>
+        <span class="kpi-bar-unit" v-if="k.unit">{{ k.unit }}</span>
       </div>
+    </div>
 
-      <!-- 右侧两个面板 -->
-      <div class="side-col right-col">
-        <ScrollTablePanel
-          class="side-panel"
-          title="中间件实例状态"
-          :columns="mwColumns"
-          :rows="mwRows"
-          :speed="0.35"
+    <!-- Tab 内容区 -->
+    <main class="tab-content">
+      <Transition name="tab-fade" mode="out-in">
+        <OverviewTab
+          v-if="activeTab === 'overview'"
+          key="overview"
+          :nodes="nodes"
+          :metrics="metrics"
+          :alerts="alerts"
         />
-        <ScrollTablePanel
-          class="side-panel"
-          title="Nginx 访问 Top 排行"
-          :columns="nginxColumns"
-          :rows="nginxRows"
-          :speed="0.3"
+        <HostsTab
+          v-else-if="activeTab === 'hosts'"
+          key="hosts"
+          :nodes="nodes"
+          :metrics="metrics"
         />
-      </div>
+        <MiddlewareTab
+          v-else-if="activeTab === 'middleware'"
+          key="middleware"
+        />
+        <NetworkTab
+          v-else-if="activeTab === 'network'"
+          key="network"
+          :nodes="nodeNames"
+        />
+        <AlertsTab
+          v-else-if="activeTab === 'alerts'"
+          key="alerts"
+          :nodes="nodes"
+          :metrics="metrics"
+          :alerts="alerts"
+        />
+      </Transition>
     </main>
 
     <!-- 底部告警滚动区 -->
@@ -104,146 +109,91 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { FullScreen, Back, Setting } from '@element-plus/icons-vue'
-import http from '../../api/http'
 import { connectWS } from '../../api/ws'
 import { rateShort } from '../../charts/echarts'
 import ParticleBg from './ParticleBg.vue'
-import CenterPanel from './CenterPanel.vue'
-import ScrollTablePanel from './ScrollTablePanel.vue'
+import ScreenTabBar from './ScreenTabBar.vue'
+import OverviewTab from './tabs/OverviewTab.vue'
+import HostsTab from './tabs/HostsTab.vue'
+import MiddlewareTab from './tabs/MiddlewareTab.vue'
+import NetworkTab from './tabs/NetworkTab.vue'
+import AlertsTab from './tabs/AlertsTab.vue'
 import { useBrand } from '../../composables/useBrand'
+import { useScreenData } from './composables/useScreenData'
+import { useCountdown } from './composables/useCountdown'
+import { useScreenConfig } from './composables/useScreenConfig'
 
 const router = useRouter()
 const { brand } = useBrand()
+const { nodes, metrics, alerts, activeAlerts, firingCount, nodeCards, refreshAll } = useScreenData()
+const { countdown, start: startCountdown, reset: resetCountdown } = useCountdown(30)
+const { cfg, settingOpen, savingCfg, loadScreenConfig, saveScreenConfig } = useScreenConfig()
 
-const REFRESH_INTERVAL = 30 // 数据刷新周期（秒）
-const countdown = ref(REFRESH_INTERVAL)
-
-const nodes = ref([])
-const metrics = ref({})
-const alerts = ref([])
+const REFRESH_INTERVAL = 30
+const activeTab = ref('overview')
 const clock = ref('')
-const mwInstances = ref([])
-const nginxSummary = ref(null)
-const cfg = reactive({ modules: { alerts: true } })
 let dataTimer = null
 let clockTimer = null
-let countTimer = null
 let ws = null
 let visible = true
 
-const settingOpen = ref(false)
-const savingCfg = ref(false)
+// 节点名列表（用于趋势查询）
+const nodeNames = computed(() => nodeCards.value.filter((n) => n.online).map((n) => n.name))
 
-const activeAlerts = computed(() => alerts.value.filter((a) => a.state === 'firing'))
-const firingCount = computed(() => activeAlerts.value.length)
+// 持久 KPI 条数据
+const kpiBar = computed(() => {
+  const online = nodeCards.value.filter((n) => n.online !== false).length
+  const total = nodeCards.value.length
+  const cpu = total > 0 ? nodeCards.value.reduce((s, n) => s + (n.cpu || 0), 0) / total : 0
+  const mem = total > 0 ? nodeCards.value.reduce((s, n) => s + (n.mem || 0), 0) / total : 0
 
-// ==================== 节点数据 ====================
-const nodeCards = computed(() =>
-  nodes.value.map((n) => ({
-    name: n.hostname,
-    ip: n.ip || '-',
-    online: n.status === 'online',
-    cpu: metrics.value[n.hostname]?.cpu || 0,
-    mem: metrics.value[n.hostname]?.mem || 0,
-    disk: metrics.value[n.hostname]?.disk || 0,
-    load1: metrics.value[n.hostname]?.load1 || 0,
-    load: metrics.value[n.hostname]?.load1 || 0,
-    netIn: metrics.value[n.hostname]?.netIn || 0,
-    netOut: metrics.value[n.hostname]?.netOut || 0,
-    memTotal: metrics.value[n.hostname]?.memTotal || 0,
-    procCount: metrics.value[n.hostname]?.procCount || 0,
-  }))
-)
+  function usageColor(v) {
+    if (v >= 90) return 'var(--danger)'
+    if (v >= 70) return 'var(--warn)'
+    return 'var(--accent)'
+  }
 
-// ==================== 左上：主机列表 ====================
-const hostColumns = [
-  { key: 'name', label: '主机名', width: '1.4fr' },
-  { key: 'cpu', label: 'CPU', width: '1fr', type: 'bar', align: 'right', max: (rows) => Math.max(...rows.map((r) => r.cpu), 100) },
-  { key: 'mem', label: '内存', width: '1fr', type: 'bar', align: 'right', max: (rows) => Math.max(...rows.map((r) => r.mem), 100) },
-  { key: 'disk', label: '磁盘', width: '1fr', type: 'bar', align: 'right', max: (rows) => Math.max(...rows.map((r) => r.disk), 100) },
-  { key: 'netIn', label: '入流量', width: '0.9fr', type: 'num', align: 'right', fmt: (v) => rateShort(v) },
-  { key: 'status', label: '状态', width: '0.7fr', type: 'badge', align: 'center' },
-]
-const hostRows = computed(() =>
-  nodeCards.value.map((n) => ({
-    name: n.name,
-    cpu: n.cpu,
-    mem: n.mem,
-    disk: n.disk,
-    netIn: n.netIn,
-    status: n.online ? '在线' : '离线',
-  }))
-)
-
-// ==================== 左下：告警列表 ====================
-const alertColumns = [
-  { key: 'severity', label: '级别', width: '0.7fr', type: 'badge', align: 'center' },
-  { key: 'node', label: '节点', width: '1.1fr' },
-  { key: 'rule', label: '告警规则', width: '1.8fr' },
-  { key: 'time', label: '时间', width: '1.1fr', align: 'right' },
-]
-const alertRows = computed(() =>
-  activeAlerts.value.map((a) => ({
-    severity: a.severity === 'critical' ? '故障' : a.severity === 'warning' ? '预警' : '提示',
-    node: a.node || '-',
-    rule: a.ruleName || a.summary || '未知告警',
-    time: fmtShort(a.startsAt),
-  }))
-)
-
-// ==================== 右上：中间件实例 ====================
-const mwColumns = [
-  { key: 'type', label: '类型', width: '0.8fr', type: 'badge', align: 'center' },
-  { key: 'name', label: '实例名称', width: '1.4fr' },
-  { key: 'node', label: '节点', width: '1.1fr' },
-  { key: 'status', label: '状态', width: '0.7fr', type: 'badge', align: 'center' },
-]
-const mwRows = computed(() => mwInstances.value)
-
-// ==================== 右下：Nginx Top ====================
-const nginxColumns = [
-  { key: 'rank', label: '#', width: '0.4fr', align: 'center' },
-  { key: 'uri', label: 'URI / IP', width: '2fr' },
-  { key: 'count', label: '请求数', width: '1fr', type: 'num', align: 'right' },
-  { key: 'pct', label: '占比', width: '0.8fr', type: 'bar', align: 'right', max: (rows) => Math.max(...rows.map((r) => r.pct), 100) },
-]
-const nginxRows = computed(() => {
-  const s = nginxSummary.value
-  if (!s) return []
-  const uris = s.topUris || []
-  const ips = s.topIps || []
-  const maxReq = Math.max(...uris.map((u) => u.count || 0), ...ips.map((i) => i.count || 0), 1)
-  const rows = []
-  uris.slice(0, 15).forEach((u, i) => {
-    rows.push({
-      rank: i + 1,
-      uri: u.name || u.uri || '-',
-      count: u.count || 0,
-      pct: ((u.count || 0) / maxReq) * 100,
-    })
-  })
-  ips.slice(0, 15).forEach((ip, i) => {
-    rows.push({
-      rank: i + 1,
-      uri: ip.name || ip.ip || '-',
-      count: ip.count || 0,
-      pct: ((ip.count || 0) / maxReq) * 100,
-    })
-  })
-  return rows
+  return [
+    { key: 'hosts', label: '主机', value: `${online}/${total}`, color: 'var(--accent)', unit: '在线/总数' },
+    { key: 'cpu', label: 'CPU', value: cpu.toFixed(1), color: usageColor(cpu), unit: '%' },
+    { key: 'mem', label: '内存', value: mem.toFixed(1), color: usageColor(mem), unit: '%' },
+    { key: 'alerts', label: '告警', value: firingCount.value, color: firingCount.value > 0 ? 'var(--danger)' : 'var(--chart-green)', unit: firingCount.value > 0 ? '条活跃' : '正常' },
+    { key: 'health', label: '健康', value: healthScore.value, color: healthScoreColor.value, unit: '分' },
+  ]
 })
 
-// ==================== 工具函数 ====================
+const healthScore = computed(() => {
+  const online = nodeCards.value.filter((n) => n.online !== false).length
+  const total = nodeCards.value.length
+  const cpu = total > 0 ? nodeCards.value.reduce((s, n) => s + (n.cpu || 0), 0) / total : 0
+  const mem = total > 0 ? nodeCards.value.reduce((s, n) => s + (n.mem || 0), 0) / total : 0
+  const disk = total > 0 ? nodeCards.value.reduce((s, n) => s + (n.disk || 0), 0) / total : 0
+  const onlineScore = total > 0 ? (online / total) * 100 : 100
+  const cpuScore = Math.max(0, 100 - cpu)
+  const memScore = Math.max(0, 100 - mem)
+  const diskScore = Math.max(0, 100 - disk)
+  const alertScore = Math.max(0, 100 - firingCount.value * 10)
+  return Math.round((onlineScore + cpuScore + memScore + diskScore + alertScore) / 5)
+})
+
+const healthScoreColor = computed(() => {
+  if (healthScore.value >= 90) return 'var(--chart-green)'
+  if (healthScore.value >= 70) return 'var(--accent)'
+  if (healthScore.value >= 50) return 'var(--warn)'
+  return 'var(--danger)'
+})
+
+// 工具函数
 function fmtShort(ts) {
   if (!ts) return '--'
   const d = new Date(ts)
   const p = (x) => String(x).padStart(2, '0')
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
+
 function goNode(name) {
   if (name) router.push('/node/' + encodeURIComponent(name))
 }
@@ -261,103 +211,28 @@ function toggleFullscreen() {
   if (!document.fullscreenElement) el.requestFullscreen && el.requestFullscreen()
   else document.exitFullscreen && document.exitFullscreen()
 }
+
 function exitFullscreen() {
   if (document.fullscreenElement && document.exitFullscreen) {
     return document.exitFullscreen().catch(() => {})
   }
   return Promise.resolve()
 }
+
 function goBack() {
   exitFullscreen().finally(() => router.push({ name: 'overview' }))
 }
 
-// 模块配置
-async function loadScreenConfig() {
-  try {
-    const res = await http.get('/api/v1/screen/config')
-    if (res && res.modules) cfg.modules = { ...cfg.modules, ...res.modules }
-  } catch (e) {
-    /* 默认全开 */
-  }
-}
-async function saveScreenConfig() {
-  savingCfg.value = true
-  try {
-    await http.put('/api/v1/screen/config', { modules: { ...cfg.modules } })
-    ElMessage.success('大屏配置已保存')
-    settingOpen.value = false
-  } catch (e) {
-    ElMessage.error('保存失败')
-  } finally {
-    savingCfg.value = false
-  }
-}
-
-// ==================== 数据加载 ====================
-async function loadBase() {
-  if (!visible) return
-  try {
-    const [nd, ad, md] = await Promise.all([
-      http.get('/api/v1/nodes').catch(() => ({ nodes: [] })),
-      http.get('/api/v1/alerts?state=active').catch(() => ({ alerts: [] })),
-      http.get('/api/v1/nodes/latest').catch(() => ({ metrics: {} })),
-    ])
-    nodes.value = nd.nodes || []
-    alerts.value = ad.alerts || []
-    metrics.value = md.metrics || {}
-  } catch (e) {
-    /* ignore */
-  }
-}
-
-// 加载中间件实例（聚合各类型）
-const MW_TYPES = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s']
-const MW_LABELS = {
-  redis: 'Redis', mysql: 'MySQL', postgres: 'PG', nginx: 'Nginx',
-  kafka: 'Kafka', docker: 'Docker', rocketmq: 'MQ', k8s: 'K8s',
-}
-async function loadMiddleware() {
-  const results = await Promise.all(
-    MW_TYPES.map((t) =>
-      t === 'docker'
-        ? http.get('/api/v1/middleware/docker/containers').catch(() => ({ containers: [] }))
-        : http.get(`/api/v1/middleware/${t}/instances`).catch(() => ({ instances: [] }))
-    )
-  )
-  const list = []
-  results.forEach((res, i) => {
-    const type = MW_TYPES[i]
-    const items = type === 'docker' ? res?.containers || [] : res?.instances || []
-    items.forEach((it) => {
-      list.push({
-        type: MW_LABELS[type] || type,
-        name: it.name || it.container || it.ip || it.instance || '-',
-        node: it.node || '-',
-        status: it.up || it.online ? '在线' : '离线',
-      })
-    })
-  })
-  mwInstances.value = list
-}
-
-async function loadNginx() {
-  try {
-    nginxSummary.value = await http.get('/api/v1/middleware/nginx/access/summary')
-  } catch (e) {
-    nginxSummary.value = null
-  }
-}
-
-async function refreshAll() {
-  await Promise.all([loadBase(), loadMiddleware(), loadNginx()])
-  countdown.value = REFRESH_INTERVAL
-}
-
+// 可见性
 function onVis() {
   visible = document.visibilityState === 'visible'
   if (visible) {
     refreshAll()
-    if (!dataTimer) dataTimer = setInterval(refreshAll, REFRESH_INTERVAL * 1000)
+    resetCountdown()
+    if (!dataTimer) dataTimer = setInterval(() => {
+      refreshAll()
+      resetCountdown()
+    }, REFRESH_INTERVAL * 1000)
   } else if (dataTimer) {
     clearInterval(dataTimer)
     dataTimer = null
@@ -367,19 +242,19 @@ function onVis() {
 onMounted(async () => {
   tickClock()
   clockTimer = setInterval(tickClock, 1000)
-  // 倒计时
-  countTimer = setInterval(() => {
-    if (countdown.value > 0) countdown.value--
-  }, 1000)
+  startCountdown()
   await loadScreenConfig()
   await refreshAll()
-  dataTimer = setInterval(refreshAll, REFRESH_INTERVAL * 1000)
-  ws = connectWS('alerts', null, { onMessage: () => loadBase() })
+  dataTimer = setInterval(() => {
+    refreshAll()
+    resetCountdown()
+  }, REFRESH_INTERVAL * 1000)
+  ws = connectWS('alerts', null, { onMessage: () => refreshAll() })
   document.addEventListener('visibilitychange', onVis)
 })
+
 onUnmounted(() => {
   clockTimer && clearInterval(clockTimer)
-  countTimer && clearInterval(countTimer)
   dataTimer && clearInterval(dataTimer)
   ws && ws.close()
   document.removeEventListener('visibilitychange', onVis)
@@ -393,8 +268,13 @@ onUnmounted(() => {
   height: 100vh;
   overflow: hidden;
   display: grid;
-  grid-template-areas: 'top' 'main' 'bottom';
-  grid-template-rows: 64px 1fr 48px;
+  grid-template-areas:
+    'top'
+    'tab'
+    'kpi'
+    'main'
+    'bottom';
+  grid-template-rows: 64px 44px 48px 1fr 48px;
   gap: 8px;
   padding: 8px 12px;
   color: var(--text);
@@ -403,6 +283,7 @@ onUnmounted(() => {
     radial-gradient(900px 420px at 90% 110%, rgba(168, 85, 247, 0.07), transparent 60%),
     linear-gradient(160deg, #060b16 0%, #0d1526 55%, #060b16 100%);
 }
+
 .screen-view::before {
   content: '';
   position: absolute;
@@ -424,12 +305,14 @@ onUnmounted(() => {
   position: relative;
   z-index: 2;
 }
+
 .hud-side {
   width: 280px;
   display: flex;
   align-items: center;
   gap: 8px;
 }
+
 .hud-clock {
   display: flex;
   align-items: center;
@@ -438,18 +321,22 @@ onUnmounted(() => {
   color: var(--text-dim);
   letter-spacing: 0.08em;
 }
+
 .clock-text {
   white-space: nowrap;
 }
+
 .hud-actions {
   justify-content: flex-end;
 }
+
 .hud-center {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
 }
+
 .hud-btn {
   width: 34px;
   height: 34px;
@@ -463,15 +350,18 @@ onUnmounted(() => {
   cursor: pointer;
   transition: all 0.2s;
 }
+
 .hud-btn:hover {
   color: var(--accent);
   border-color: var(--accent);
   box-shadow: 0 0 12px var(--accent-glow);
 }
+
 .hud-btn svg {
   width: 17px;
   height: 17px;
 }
+
 .hud-title {
   display: flex;
   align-items: center;
@@ -479,6 +369,7 @@ onUnmounted(() => {
   margin: 0;
   user-select: none;
 }
+
 .ht-en {
   font-size: 22px;
   font-weight: 800;
@@ -489,11 +380,13 @@ onUnmounted(() => {
   color: transparent;
   filter: drop-shadow(0 0 14px rgba(34, 211, 238, 0.45));
 }
+
 .ht-sep {
   width: 1px;
   height: 20px;
   background: linear-gradient(180deg, transparent, rgba(34, 211, 238, 0.7), transparent);
 }
+
 .ht-cn {
   font-size: 17px;
   font-weight: 700;
@@ -513,11 +406,13 @@ onUnmounted(() => {
   border: 1px solid rgba(34, 211, 238, 0.2);
   transition: all 0.3s;
 }
+
 .cd-label {
   font-size: 10px;
   color: var(--text-muted);
   letter-spacing: 0.1em;
 }
+
 .cd-num {
   font-size: 18px;
   font-weight: 800;
@@ -526,45 +421,112 @@ onUnmounted(() => {
   min-width: 22px;
   text-align: center;
 }
+
 .cd-unit {
   font-size: 11px;
   color: var(--text-muted);
 }
+
 .countdown.urgent {
   background: rgba(239, 68, 68, 0.1);
   border-color: rgba(239, 68, 68, 0.4);
 }
+
 .countdown.urgent .cd-num {
   color: var(--danger);
   text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
   animation: cd-pulse 0.8s infinite;
 }
+
 @keyframes cd-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
 }
 
-/* 五面板主区 */
-.panel-main {
-  grid-area: main;
-  display: grid;
-  grid-template-columns: 1fr 1.5fr 1fr;
-  gap: 10px;
-  min-height: 0;
+/* Tab 导航栏 */
+.hud-tab-row {
+  grid-area: tab;
   position: relative;
   z-index: 2;
 }
-.side-col {
-  display: grid;
-  grid-template-rows: 1fr 1fr;
-  gap: 10px;
-  min-height: 0;
+
+/* 持久 KPI 条 */
+.hud-kpi-bar {
+  grid-area: kpi;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 16px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  position: relative;
+  z-index: 2;
 }
-.side-panel {
-  min-height: 0;
+
+.kpi-bar-item {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 12px;
+  position: relative;
 }
-.center-col {
+
+.kpi-bar-item + .kpi-bar-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 25%;
+  height: 50%;
+  width: 1px;
+  background: var(--border);
+}
+
+.kpi-bar-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.kpi-bar-value {
+  font-size: 20px;
+  font-weight: 800;
+  font-family: var(--mono);
+  text-shadow: 0 0 10px currentColor;
+  line-height: 1;
+}
+
+.kpi-bar-unit {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+
+/* Tab 内容区 */
+.tab-content {
+  grid-area: main;
   min-height: 0;
+  position: relative;
+  z-index: 2;
+  overflow: hidden;
+}
+
+/* Tab 切换动画 */
+.tab-fade-enter-active,
+.tab-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.tab-fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.tab-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 
 /* 底部告警 */
@@ -581,6 +543,7 @@ onUnmounted(() => {
   position: relative;
   z-index: 2;
 }
+
 .ab-label {
   flex-shrink: 0;
   display: flex;
@@ -590,9 +553,11 @@ onUnmounted(() => {
   color: var(--text-dim);
   letter-spacing: 0.06em;
 }
+
 .ab-label.warn {
   color: var(--danger);
 }
+
 .ab-dot {
   width: 8px;
   height: 8px;
@@ -600,26 +565,31 @@ onUnmounted(() => {
   background: var(--chart-green);
   box-shadow: 0 0 8px var(--chart-green);
 }
+
 .ab-label.warn .ab-dot {
   background: var(--danger);
   box-shadow: 0 0 8px var(--danger);
   animation: kpi-pulse 1s infinite;
 }
+
 .ab-marquee {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
 }
+
 .ab-track {
   display: inline-flex;
   gap: 28px;
   padding-left: 100%;
   animation: marquee 32s linear infinite;
 }
+
 .ab-track:hover {
   animation-play-state: paused;
 }
+
 .ab-item {
   display: inline-flex;
   align-items: center;
@@ -629,34 +599,42 @@ onUnmounted(() => {
   cursor: pointer;
   white-space: nowrap;
 }
+
 .ab-item:hover {
   color: var(--accent);
 }
+
 .ab-lv {
   width: 7px;
   height: 7px;
   border-radius: 50%;
 }
+
 .ab-item.critical .ab-lv {
   background: var(--danger);
   box-shadow: 0 0 6px var(--danger);
   animation: kpi-pulse 1s infinite;
 }
+
 .ab-item.warning .ab-lv {
   background: var(--warn);
   box-shadow: 0 0 6px var(--warn);
 }
+
 .ab-item.info .ab-lv {
   background: var(--info);
 }
+
 .ab-none {
   color: var(--chart-green);
   font-size: 12px;
 }
+
 @keyframes marquee {
   from { transform: translateX(0); }
   to { transform: translateX(-100%); }
 }
+
 @keyframes kpi-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
@@ -675,7 +653,7 @@ onUnmounted(() => {
   .screen-view {
     padding: 14px 24px;
     gap: 14px;
-    grid-template-rows: 84px 1fr 68px;
+    grid-template-rows: 84px 56px 64px 1fr 68px;
   }
   .hud-side { width: 360px; }
   .hud-clock { font-size: 18px; }
@@ -687,8 +665,9 @@ onUnmounted(() => {
   .cd-label { font-size: 13px; }
   .cd-num { font-size: 24px; }
   .cd-unit { font-size: 14px; }
-  .panel-main { gap: 16px; }
-  .side-col { gap: 16px; }
+  .kpi-bar-label { font-size: 14px; }
+  .kpi-bar-value { font-size: 26px; }
+  .kpi-bar-unit { font-size: 13px; }
   .ab-label { font-size: 16px; gap: 9px; }
   .ab-item { font-size: 16px; gap: 8px; }
   .ab-none { font-size: 16px; }
@@ -698,7 +677,7 @@ onUnmounted(() => {
   .screen-view {
     padding: 20px 34px;
     gap: 20px;
-    grid-template-rows: 104px 1fr 84px;
+    grid-template-rows: 104px 68px 80px 1fr 84px;
   }
   .hud-side { width: 440px; }
   .hud-clock { font-size: 22px; }
@@ -710,8 +689,9 @@ onUnmounted(() => {
   .cd-label { font-size: 16px; }
   .cd-num { font-size: 30px; }
   .cd-unit { font-size: 17px; }
-  .panel-main { gap: 22px; }
-  .side-col { gap: 22px; }
+  .kpi-bar-label { font-size: 17px; }
+  .kpi-bar-value { font-size: 32px; }
+  .kpi-bar-unit { font-size: 16px; }
   .ab-label { font-size: 20px; gap: 11px; }
   .ab-item { font-size: 20px; gap: 10px; }
   .ab-none { font-size: 20px; }

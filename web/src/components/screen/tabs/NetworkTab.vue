@@ -1,0 +1,662 @@
+<template>
+  <div class="network-tab">
+    <!-- 顶部 KPI 条 -->
+    <div class="nt-kpi-row">
+      <div class="glass nt-kpi" v-for="k in topKpis" :key="k.key">
+        <div class="ntk-label">{{ k.label }}</div>
+        <div class="ntk-value" :style="{ color: k.color }">{{ k.value }}</div>
+        <div class="ntk-sub" v-if="k.sub">{{ k.sub }}</div>
+      </div>
+    </div>
+
+    <!-- 主体：左侧排行 + 右侧地图 -->
+    <div class="nt-body">
+      <!-- 左侧列 -->
+      <div class="nt-left">
+        <!-- 接口访问 Top 10 -->
+        <div class="glass nt-card">
+          <div class="ntc-head">
+            <span>接口访问 Top 10</span>
+            <span class="ntc-stat" v-if="totalRequests">{{ totalRequests }} 次</span>
+          </div>
+          <div class="rank-list">
+            <div class="rank-row" v-for="(u, i) in uriList" :key="u.name">
+              <span class="rk-idx" :class="{ top: i < 3 }">{{ i + 1 }}</span>
+              <span class="rk-name" :title="u.name">{{ u.name }}</span>
+              <span class="rk-bar"><i :style="{ width: uriPct(u) }"></i></span>
+              <span class="rk-val">{{ fmtNum(u.count) }}</span>
+            </div>
+            <div class="nc-empty" v-if="!uriList.length">暂无数据</div>
+          </div>
+        </div>
+
+        <!-- 来源 IP Top 10 -->
+        <div class="glass nt-card">
+          <div class="ntc-head">
+            <span>来源 IP Top 10</span>
+          </div>
+          <div class="rank-list">
+            <div class="rank-row" v-for="(ip, i) in ipList" :key="ip.name">
+              <span class="rk-idx" :class="{ top: i < 3 }">{{ i + 1 }}</span>
+              <span class="rk-name" :title="ip.name">{{ ip.name }}</span>
+              <span class="rk-bar"><i :style="{ width: ipPct(ip) }"></i></span>
+              <span class="rk-val">{{ fmtNum(ip.count) }}</span>
+            </div>
+            <div class="nc-empty" v-if="!ipList.length">暂无数据</div>
+          </div>
+        </div>
+
+        <!-- 请求趋势 -->
+        <div class="glass nt-card">
+          <div class="ntc-head">
+            <span>请求趋势</span>
+            <span class="ntc-stat" v-if="totalRate">{{ rateShort(totalRate) }}/s</span>
+          </div>
+          <div ref="trendChart" class="ntc-chart"></div>
+        </div>
+
+        <!-- 状态码分布 -->
+        <div class="glass nt-card">
+          <div class="ntc-head">
+            <span>状态码分布</span>
+          </div>
+          <div ref="statusChart" class="ntc-chart"></div>
+        </div>
+      </div>
+
+      <!-- 右侧地图 -->
+      <div class="nt-right">
+        <div class="glass nt-map">
+          <div class="ntm-head">
+            <span class="ntm-title">请求来源地理分布</span>
+            <div class="ntm-scope">
+              <button :class="{ on: geoScope === 'cn' }" @click="changeScope('cn')">中国</button>
+              <button :class="{ on: geoScope === 'world' }" @click="changeScope('world')">世界</button>
+            </div>
+          </div>
+          <div ref="mapChart" class="ntm-chart"></div>
+        </div>
+        <!-- 来源地排名 -->
+        <div class="glass nt-sources">
+          <div class="ntc-head">
+            <span>来源地 Top · {{ geoScope === 'cn' ? '省份' : '国家' }}</span>
+          </div>
+          <div class="rank-list src">
+            <div class="rank-row" v-for="(s, i) in sourceList" :key="s.name">
+              <span class="rk-idx" :class="{ top: i < 3 }">{{ i + 1 }}</span>
+              <span class="rk-name">{{ s.name }}</span>
+              <span class="rk-bar"><i :style="{ width: srcPct(s) }"></i></span>
+              <span class="rk-val">{{ fmtNum(s.requests) }}</span>
+            </div>
+            <div class="nc-empty" v-if="!sourceList.length">暂无数据</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import http from '../../../api/http'
+import { initChart, monitorOption, COLORS, rateShort, mapGeoOption } from '../../../charts/echarts'
+import { registerMaps, mapName } from '../../../charts/geoData'
+import { queryClusterTrend } from '../useTrend'
+
+const props = defineProps({
+  nodes: { type: Array, default: () => [] },
+})
+
+// 图表 refs
+const trendChart = ref(null)
+const statusChart = ref(null)
+const mapChart = ref(null)
+let trend = null
+let status = null
+let map = null
+let ro = null
+let timer = null
+
+const summary = ref(null)
+const geoData = ref({ cn: null, world: null })
+const geoScope = ref('cn')
+const nginxInstances = ref([])
+const totalRequests = ref(0)
+const totalRate = ref(0)
+
+// 是否已启用访问日志
+const accessEnabled = computed(() => {
+  const s = summary.value || {}
+  return !!((s.topUris && s.topUris.length) || (s.topIps && s.topIps.length) || s.totalRequests)
+})
+
+// 顶部 KPI 条
+const topKpis = computed(() => {
+  const s = summary.value || {}
+  const geo = geoData.value[geoScope.value]
+  const points = geo?.points || []
+  const maxSrc = points.length ? points.reduce((a, b) => (a.requests > b.requests ? a : b)) : null
+  const isWorld = geoScope.value === 'world'
+
+  return [
+    {
+      key: 'total',
+      label: '总访问量',
+      value: s.totalRequests ? fmtNum(s.totalRequests) : '--',
+      color: COLORS.cyan,
+      sub: '累计请求',
+    },
+    {
+      key: 'regions',
+      label: isWorld ? '在线国家' : '在线省份',
+      value: points.length || '--',
+      color: COLORS.blue,
+      sub: isWorld ? '个来源国家' : '个来源省份',
+    },
+    {
+      key: 'maxSrc',
+      label: '最大来源',
+      value: maxSrc ? maxSrc.name : '--',
+      color: COLORS.amber,
+      sub: maxSrc ? `${((maxSrc.requests / (s.totalRequests || 1)) * 100).toFixed(1)}%` : '',
+    },
+    {
+      key: 'peak',
+      label: '请求峰值',
+      value: s.totalRate ? fmtNum(s.totalRate) + '/s' : '--',
+      color: COLORS.purple,
+      sub: '实时 QPS',
+    },
+  ]
+})
+
+// 排行列表数据
+const topUris = computed(() => summary.value?.topUris || [])
+const topIps = computed(() => summary.value?.topIps || [])
+const uriList = computed(() => topUris.value.slice(0, 10))
+const ipList = computed(() => topIps.value.slice(0, 10))
+
+const maxUri = computed(() => Math.max(...uriList.value.map((u) => u.count || 0), 1))
+const maxIp = computed(() => Math.max(...ipList.value.map((i) => i.count || 0), 1))
+
+function uriPct(u) {
+  return ((u.count / maxUri.value) * 100).toFixed(1) + '%'
+}
+function ipPct(ip) {
+  return ((ip.count / maxIp.value) * 100).toFixed(1) + '%'
+}
+
+// 来源地排名
+const sourceList = computed(() => {
+  const points = geoData.value[geoScope.value]?.points || []
+  return points.slice(0, 10).map((p) => ({ name: p.name, requests: p.requests }))
+})
+const maxSrc = computed(() => Math.max(...sourceList.value.map((s) => s.requests || 0), 1))
+
+function srcPct(s) {
+  return ((s.requests / maxSrc.value) * 100).toFixed(1) + '%'
+}
+
+function fmtNum(v) {
+  if (v == null) return '-'
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M'
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + 'k'
+  return String(Math.round(v))
+}
+
+// 状态码分布
+const statusCounts = computed(() => {
+  const m = summary.value?.statusCounts || {}
+  return Object.keys(m)
+    .map((k) => ({ code: k, count: m[k] }))
+    .sort((a, b) => a.code.localeCompare(b.code))
+})
+
+// 数据加载
+async function loadSummary() {
+  try {
+    const data = await http.get('/api/v1/middleware/nginx/access/summary')
+    summary.value = data
+    totalRequests.value = data?.totalRequests || 0
+    totalRate.value = data?.totalRate || 0
+  } catch (e) {
+    console.error('nginx access summary 加载失败', e)
+  }
+}
+
+async function loadInstances() {
+  try {
+    nginxInstances.value = await http.get('/api/v1/middleware/nginx/instances')
+  } catch (e) {
+    nginxInstances.value = []
+  }
+}
+
+async function loadGeo(scope) {
+  try {
+    const data = await http.get(`/api/v1/middleware/nginx/access/geo?scope=${scope}`)
+    geoData.value[scope] = data
+  } catch (e) {
+    console.error('nginx access geo 加载失败', scope, e)
+  }
+}
+
+async function loadTrends() {
+  const list = props.nodes || []
+  if (!list.length || !trend) return
+  const [req] = await Promise.all([
+    queryClusterTrend(list, 'nginx_access_requests', 'sum'),
+  ])
+  trend.setOption(
+    monitorOption({
+      yMin: 0,
+      yFormatter: (v) => fmtNum(v),
+      series: [{ name: '请求数', color: COLORS.cyan, data: req }],
+    }),
+    true
+  )
+}
+
+function renderStatus() {
+  if (!status) return
+  const data = statusCounts.value
+  const colorMap = { '2': COLORS.green, '3': COLORS.blue, '4': COLORS.amber, '5': COLORS.red }
+  status.setOption(
+    {
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: 'rgba(11,17,32,0.92)',
+        borderColor: 'rgba(34,211,238,0.3)',
+        textStyle: { color: '#e5edf7', fontSize: 12 },
+      },
+      grid: { top: 24, left: 44, right: 12, bottom: 26 },
+      xAxis: {
+        type: 'category',
+        data: data.map((d) => d.code),
+        axisLine: { lineStyle: { color: 'rgba(159,179,200,0.35)' } },
+        axisLabel: { color: 'rgba(159,179,200,0.8)', fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        axisLabel: { color: 'rgba(159,179,200,0.8)', fontSize: 11, formatter: (v) => fmtNum(v) },
+        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+      },
+      series: [
+        {
+          name: '数量',
+          type: 'bar',
+          barMaxWidth: 32,
+          data: data.map((d) => ({
+            value: d.count,
+            itemStyle: {
+              borderRadius: [4, 4, 0, 0],
+              color: {
+                type: 'linear',
+                x: 0, y: 0, x2: 0, y2: 1,
+                colorStops: [
+                  { offset: 0, color: colorMap[d.code.charAt(0)] || COLORS.cyan },
+                  { offset: 1, color: (colorMap[d.code.charAt(0)] || COLORS.cyan) + '22' },
+                ],
+              },
+            },
+          })),
+        },
+      ],
+    },
+    true
+  )
+}
+
+function renderMap() {
+  if (!map) return
+  const d = geoData.value[geoScope.value]
+  const hasData = !!(d && (d.points?.length || d.lines?.length || d.deployPoints?.length))
+  if (hasData) {
+    const toGeo = {
+      points: (d.points || []).map((p) => ({ name: mapName(geoScope.value, p), requests: p.requests, bytes: p.bytes })),
+      deployPoints: (d.deployPoints || []).map((p) => ({ name: mapName(geoScope.value, p), requests: p.requests })),
+      lines: (d.lines || []).map((l) => ({
+        fromName: mapName(geoScope.value, { name: l.from, countryEn: l.fromEn }),
+        toName: mapName(geoScope.value, { name: l.to, countryEn: l.toEn }),
+        value: l.value,
+      })),
+    }
+    map.setOption(mapGeoOption(geoScope.value, toGeo), true)
+  } else {
+    map.setOption(mapGeoOption(geoScope.value, {}), true)
+  }
+}
+
+function changeScope(s) {
+  if (s === geoScope.value) return
+  geoScope.value = s
+  loadGeo(s)
+}
+
+async function refresh() {
+  await loadSummary()
+  await loadInstances()
+  await loadTrends()
+  renderStatus()
+  await Promise.all([loadGeo('cn'), loadGeo('world')])
+}
+
+// 监听 geo 数据变化，更新地图
+watch(() => geoData.value[geoScope.value], () => {
+  renderMap()
+}, { deep: false })
+
+onMounted(async () => {
+  await registerMaps()
+  trend = initChart(trendChart.value)
+  status = initChart(statusChart.value)
+  map = initChart(mapChart.value)
+  await refresh()
+  timer = setInterval(refresh, 30000)
+  ro = new ResizeObserver(() => {
+    trend && trend.resize()
+    status && status.resize()
+    map && map.resize()
+  })
+  ro.observe(trendChart.value)
+  ro.observe(statusChart.value)
+  ro.observe(mapChart.value)
+})
+
+onUnmounted(() => {
+  clearInterval(timer)
+  ro && ro.disconnect()
+  trend && trend.dispose()
+  status && status.dispose()
+  map && map.dispose()
+  trend = null
+  status = null
+  map = null
+})
+</script>
+
+<style scoped>
+.network-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+}
+
+/* 顶部 KPI 条 */
+.nt-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.nt-kpi {
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ntk-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ntk-value {
+  font-size: 24px;
+  font-weight: 800;
+  font-family: var(--mono);
+  text-shadow: 0 0 14px currentColor;
+  line-height: 1.2;
+}
+
+.ntk-sub {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+
+/* 主体 */
+.nt-body {
+  display: grid;
+  grid-template-columns: 34% 1fr;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.nt-left {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 10px;
+  min-height: 0;
+}
+
+.nt-card {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ntc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.ntc-stat {
+  font-family: var(--mono);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ntc-chart {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+/* 排行列表 */
+.rank-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.rank-row {
+  display: grid;
+  grid-template-columns: 18px 1fr 64px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 2px;
+  font-size: 11px;
+}
+
+.rank-row + .rank-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.rk-idx {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 10px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.rk-idx.top {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.rk-name {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rk-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.rk-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.4), #22d3ee);
+}
+
+.rk-val {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  text-align: right;
+  min-width: 44px;
+}
+
+.nc-empty {
+  padding: 16px 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* 右侧地图 */
+.nt-right {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.nt-map {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px 6px;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.ntm-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  flex-shrink: 0;
+}
+
+.ntm-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ntm-scope {
+  display: flex;
+  gap: 6px;
+}
+
+.ntm-scope button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 3px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.ntm-scope button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ntm-scope button.on {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ntm-chart {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.nt-sources {
+  flex-shrink: 0;
+  padding: 10px 12px;
+  max-height: 160px;
+  display: flex;
+  flex-direction: column;
+}
+
+.nt-sources .rank-list {
+  overflow-y: auto;
+}
+
+/* 4K 适配 */
+@media (min-width: 2400px) {
+  .network-tab { gap: 14px; }
+  .nt-kpi-row { gap: 14px; }
+  .ntk-label { font-size: 14px; }
+  .ntk-value { font-size: 32px; }
+  .ntk-sub { font-size: 14px; }
+  .nt-body { gap: 14px; }
+  .nt-left { gap: 14px; }
+  .nt-right { gap: 14px; }
+  .nt-card { padding: 14px 16px 8px; }
+  .ntc-head { font-size: 15px; }
+  .ntc-stat { font-size: 16px; }
+  .rank-row { font-size: 14px; padding: 5px 2px; }
+  .rk-idx { width: 20px; height: 20px; font-size: 12px; }
+  .rk-val { font-size: 14px; }
+  .ntm-title { font-size: 16px; }
+  .ntm-scope button { font-size: 14px; padding: 4px 16px; }
+  .nt-sources { max-height: 200px; }
+}
+
+@media (min-width: 3440px) {
+  .network-tab { gap: 20px; }
+  .nt-kpi-row { gap: 20px; }
+  .ntk-label { font-size: 17px; }
+  .ntk-value { font-size: 40px; }
+  .ntk-sub { font-size: 17px; }
+  .nt-body { gap: 20px; }
+  .nt-left { gap: 20px; }
+  .nt-right { gap: 20px; }
+  .nt-card { padding: 18px 22px 10px; }
+  .ntc-head { font-size: 18px; }
+  .ntc-stat { font-size: 20px; }
+  .rank-row { font-size: 17px; padding: 6px 2px; }
+  .rk-idx { width: 24px; height: 24px; font-size: 14px; }
+  .rk-val { font-size: 17px; }
+  .ntm-title { font-size: 20px; }
+  .ntm-scope button { font-size: 17px; padding: 5px 20px; }
+  .nt-sources { max-height: 240px; }
+}
+</style>

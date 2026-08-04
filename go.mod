@@ -3,16 +3,17 @@ module github.com/nebula/monitor
 go 1.24.0
 
 require (
+	github.com/IBM/sarama v1.43.0
 	github.com/go-sql-driver/mysql v1.7.0
 	github.com/golang/snappy v0.0.4
 	github.com/gorilla/websocket v1.5.3
 	github.com/lib/pq v1.12.3
+	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260801005304-2955431edb26
 	github.com/shirou/gopsutil/v4 v4.24.10
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/IBM/sarama v1.43.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/eapache/go-resiliency v1.6.0 // indirect
 	github.com/eapache/go-xerial-snappy v0.0.0-20230731223053-c322873962e3 // indirect
@@ -28,7 +29,6 @@ require (
 	github.com/jcmturner/gokrb5/v8 v8.4.4 // indirect
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
 	github.com/klauspost/compress v1.17.7 // indirect
-	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260801005304-2955431edb26 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
