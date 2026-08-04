@@ -3,10 +3,10 @@
     <!-- 左列：TopologyMap + CenterPanel -->
     <div class="ot-left">
       <div class="ot-topo">
-        <TopologyMap :nodes="nodeCards" :health-score="healthScore" :health-level="healthLevel" />
+        <TopologyMap :nodes="nodeCards" :health-level="healthLevel" />
       </div>
       <div class="ot-center">
-        <CenterPanel :nodes="nodeCards" :alerts="alerts" />
+        <CenterPanel :nodes="nodeCards" :alerts="alerts" :health-score="healthScore" :health-level="healthLevel" />
       </div>
     </div>
     <!-- 右列：HealthScore + 主机列表 -->

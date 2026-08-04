@@ -51,6 +51,8 @@ import { queryClusterTrend } from './useTrend'
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
   alerts: { type: Array, default: () => [] },
+  healthScore: { type: Number, default: 0 },
+  healthLevel: { type: String, default: 'green' }, // green | amber | red
 })
 
 const trendChart = ref(null)
@@ -81,12 +83,24 @@ function usageColor(v) {
   if (v >= 70) return COLORS.amber
   return COLORS.cyan
 }
+function healthColor(v) {
+  if (v >= 80) return COLORS.green
+  if (v >= 60) return COLORS.amber
+  return COLORS.red
+}
+
+const healthLevelText = computed(() => {
+  if (props.healthLevel === 'green') return '优秀'
+  if (props.healthLevel === 'amber') return '一般'
+  return '告警'
+})
 
 const kpis = computed(() => {
   const cpu = avg('cpu')
   const mem = avg('mem')
   const disk = avg('disk')
   return [
+    { key: 'health', label: '健康评分', value: props.healthScore, unit: '', color: healthColor(props.healthScore), sub: healthLevelText.value },
     { key: 'hosts', label: '监控主机', value: props.nodes.length, unit: '台', color: COLORS.cyan, sub: `在线 ${onlineCount.value} / 离线 ${props.nodes.length - onlineCount.value}` },
     { key: 'cpu', label: 'CPU 均值', value: cpu.toFixed(1), unit: '%', color: usageColor(cpu), sub: `峰值 ${Math.max(...onlineNodes.value.map((n) => n.cpu || 0), 0).toFixed(0)}%` },
     { key: 'mem', label: '内存均值', value: mem.toFixed(1), unit: '%', color: usageColor(mem), sub: `峰值 ${Math.max(...onlineNodes.value.map((n) => n.mem || 0), 0).toFixed(0)}%` },
@@ -210,7 +224,7 @@ watch(() => props.nodes, loadTrends, { deep: false })
 /* 顶部大KPI */
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 10px;
   flex-shrink: 0;
 }
