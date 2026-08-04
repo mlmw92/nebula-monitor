@@ -36,11 +36,11 @@
             <span>来源 IP Top 10</span>
           </div>
           <div class="rank-list">
-            <div class="rank-row" v-for="(ip, i) in ipList" :key="ip.name">
+            <div class="rank-row" v-for="(ip, i) in ipList" :key="ip.ip">
               <span class="rk-idx" :class="{ top: i < 3 }">{{ i + 1 }}</span>
-              <span class="rk-name" :title="ip.name">{{ ip.name }}</span>
+              <span class="rk-name" :title="ipTitle(ip)">{{ ip.ip }}</span>
               <span class="rk-bar"><i :style="{ width: ipPct(ip) }"></i></span>
-              <span class="rk-val">{{ fmtNum(ip.count) }}</span>
+              <span class="rk-val">{{ fmtNum(ip.requests) }}</span>
             </div>
             <div class="nc-empty" v-if="!ipList.length">暂无数据</div>
           </div>
@@ -210,7 +210,7 @@ const uriList = computed(() => topUris.value.slice(0, 10))
 const ipList = computed(() => topIps.value.slice(0, 10))
 
 const maxUri = computed(() => Math.max(...uriList.value.map((u) => u.count || 0), 1))
-const maxIp = computed(() => Math.max(...ipList.value.map((i) => i.count || 0), 1))
+const maxIp = computed(() => Math.max(...ipList.value.map((i) => i.requests || 0), 1))
 
 function uriPct(u) {
   return ((u.count / maxUri.value) * 100).toFixed(1) + '%'
@@ -238,6 +238,13 @@ function fmtNum(v) {
   if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M'
   if (v >= 1e3) return (v / 1e3).toFixed(1) + 'k'
   return String(Math.round(v))
+}
+
+function ipTitle(ip) {
+  let t = ip.ip || ''
+  if (ip.province) t += ' · ' + ip.province
+  if (ip.country) t += ' · ' + ip.country
+  return t
 }
 
 // 状态码分布
@@ -528,7 +535,7 @@ onUnmounted(() => {
 
 .rank-row {
   display: grid;
-  grid-template-columns: 18px 1fr 64px;
+  grid-template-columns: 18px 1fr 1fr 44px;
   align-items: center;
   gap: 8px;
   padding: 3px 2px;

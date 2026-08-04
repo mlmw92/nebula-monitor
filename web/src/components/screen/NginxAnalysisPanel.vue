@@ -36,11 +36,11 @@
       <div class="glass na-card na-list">
         <div class="nc-head"><span>{{ accessEnabled ? 'Top IP 来源' : '实例 Top · 请求数' }}</span></div>
         <div class="rank-list">
-          <div class="rank-row" v-for="(ip, i) in ipList" :key="ip.name">
+          <div class="rank-row" v-for="(ip, i) in ipList" :key="ip.ip || ip.instance">
             <span class="rk-idx" :class="{ top: i < 3 }">{{ i + 1 }}</span>
-            <span class="rk-name" :title="ip.name">{{ ip.name }}</span>
+            <span class="rk-name" :title="ipTitle(ip)">{{ accessEnabled ? ip.ip : ip.name }}</span>
             <span class="rk-bar"><i :style="{ width: ipPct(ip) }"></i></span>
-            <span class="rk-val">{{ fmtNum(ip.count) }}</span>
+            <span class="rk-val">{{ fmtNum(accessEnabled ? ip.requests : ip.count) }}</span>
           </div>
           <div class="nc-empty" v-if="!ipList.length">暂无数据</div>
         </div>
@@ -86,6 +86,13 @@ import http from '../../api/http'
 import { initChart, monitorOption, COLORS, rateShort } from '../../charts/echarts'
 import { queryClusterTrend } from './useTrend'
 import GeoMap from './GeoMap.vue'
+
+function ipTitle(ip) {
+  let t = ip.ip || ip.name || ''
+  if (ip.province) t += ' · ' + ip.province
+  if (ip.country) t += ' · ' + ip.country
+  return t
+}
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] }, // 在线节点名数组，用于趋势查询
@@ -161,7 +168,12 @@ function fmtNum(v) {
 }
 
 const maxUri = computed(() => Math.max(...uriList.value.map((u) => u.count || 0), 1))
-const maxIp = computed(() => Math.max(...ipList.value.map((i) => i.count || 0), 1))
+const maxIp = computed(() =>
+  Math.max(
+    ...ipList.value.map((i) => (accessEnabled.value ? i.requests || 0 : i.count || 0)),
+    1
+  )
+)
 const maxSrc = computed(() => Math.max(...sourceList.value.map((s) => s.requests || 0), 1))
 
 function uriPct(u) {
@@ -381,7 +393,7 @@ onUnmounted(() => {
 }
 .rank-row {
   display: grid;
-  grid-template-columns: 18px 1fr 64px;
+  grid-template-columns: 18px 1fr 1fr 44px;
   align-items: center;
   gap: 8px;
   padding: 4px 2px;
