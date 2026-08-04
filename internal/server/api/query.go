@@ -264,19 +264,20 @@ func (a *API) handleNodes(w http.ResponseWriter, r *http.Request) {
 // 返回结构：metrics[node] = { cpu, mem, disk, load1, netIn, netOut, diskRead, diskWrite }。
 func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
 	type nodeMetric struct {
-		CPU      float64 `json:"cpu"`
-		Mem      float64 `json:"mem"`
-		Disk     float64 `json:"disk"`
-		Load1    float64 `json:"load1"`
-		NetIn    float64 `json:"netIn"`
-		NetOut   float64 `json:"netOut"`
-		DiskRead float64 `json:"diskRead"`
-		DiskWr   float64 `json:"diskWr"`
+		CPU       float64 `json:"cpu"`
+		Mem       float64 `json:"mem"`
+		Disk      float64 `json:"disk"`
+		Load1     float64 `json:"load1"`
+		NetIn     float64 `json:"netIn"`
+		NetOut    float64 `json:"netOut"`
+		DiskRead  float64 `json:"diskRead"`
+		DiskWr    float64 `json:"diskWr"`
+		MemTotal  float64 `json:"memTotal"`
 	}
 	out := map[string]*nodeMetric{}
 
-	// 通用取值（每节点一个样本）：cpu_usage / mem_used_percent / load1
-	for _, name := range []string{"cpu_usage", "mem_used_percent", "load1"} {
+	// 通用取值（每节点一个样本）：cpu_usage / mem_used_percent / load1 / mem_total_bytes
+	for _, name := range []string{"cpu_usage", "mem_used_percent", "load1", "mem_total_bytes"} {
 		series, err := a.store.QueryAllLatest(name, nil)
 		if err != nil {
 			slog.Warn("聚合指标查询失败", "metric", name, "err", err, "query", name)
@@ -301,6 +302,8 @@ func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
 				m.Mem = round2(v)
 			case "load1":
 				m.Load1 = round2(v)
+			case "mem_total_bytes":
+				m.MemTotal = v
 			}
 		}
 	}
