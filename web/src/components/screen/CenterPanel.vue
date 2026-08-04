@@ -135,12 +135,13 @@ function formatBytes(b) {
 
 async function loadTrends() {
   const list = onlineNodes.value.map((n) => n.hostname)
-  const [cpu, mem, disk, netIn, netOut] = await Promise.all([
+  const [cpu, mem, disk, netIn, netOut, nginxRate] = await Promise.all([
     queryClusterTrend(list, 'cpu_usage', 'avg'),
     queryClusterTrend(list, 'mem_used_percent', 'avg'),
     queryClusterTrend(list, 'disk_used_percent', 'avg'),
     queryClusterTrend(list, 'network_recv_rate', 'sum'),
     queryClusterTrend(list, 'network_sent_rate', 'sum'),
+    queryClusterTrend(list, 'nginx_access_bytes_rate', 'sum'),
   ])
   trendSeries.value = [
     { name: 'CPU', color: COLORS.cyan, data: cpu },
@@ -150,6 +151,7 @@ async function loadTrends() {
   netSeries.value = [
     { name: '入', color: COLORS.cyan, data: netIn },
     { name: '出', color: COLORS.purple, data: netOut },
+    { name: 'Nginx', color: COLORS.amber, data: nginxRate },
   ]
   renderTrend()
   renderNet()
@@ -158,7 +160,8 @@ async function loadTrends() {
   trendCur.value = `CPU ${lastCpu.toFixed(1)}% / 内存 ${lastMem.toFixed(1)}%`
   const li = netIn.length ? netIn[netIn.length - 1][1] : 0
   const lo = netOut.length ? netOut[netOut.length - 1][1] : 0
-  netCur.value = `↓ ${rateShort(li)} / ↑ ${rateShort(lo)}`
+  const ln = nginxRate.length ? nginxRate[nginxRate.length - 1][1] : 0
+  netCur.value = `↓ ${rateShort(li)} / ↑ ${rateShort(lo)} / Nginx ${rateShort(ln)}`
 }
 
 function renderTrend() {

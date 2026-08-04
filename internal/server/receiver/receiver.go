@@ -151,6 +151,14 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 				model.Metric{Node: payload.Node, Name: "nginx_access_requests", Labels: cloneLabels(base), Value: st.Requests, Timestamp: payload.ReportAt},
 				model.Metric{Node: payload.Node, Name: "nginx_access_bytes", Labels: cloneLabels(base), Value: st.Bytes, Timestamp: payload.ReportAt},
 			)
+			// 派生指标：把每周期累计的 请求数/字节数 换算成 每秒速率，
+			// 使其与 network_recv_rate / network_sent_rate 同量纲，便于大屏按 Nginx 拆分网络流量。
+			if st.PeriodSec > 0 {
+				accessMets = append(accessMets,
+					model.Metric{Node: payload.Node, Name: "nginx_access_requests_rate", Labels: cloneLabels(base), Value: st.Requests / st.PeriodSec, Timestamp: payload.ReportAt},
+					model.Metric{Node: payload.Node, Name: "nginx_access_bytes_rate", Labels: cloneLabels(base), Value: st.Bytes / st.PeriodSec, Timestamp: payload.ReportAt},
+				)
+			}
 			if st.AvgLatency > 0 {
 				accessMets = append(accessMets, model.Metric{Node: payload.Node, Name: "nginx_access_avg_latency", Labels: cloneLabels(base), Value: st.AvgLatency, Timestamp: payload.ReportAt})
 			}
