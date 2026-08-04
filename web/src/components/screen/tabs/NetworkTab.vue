@@ -256,12 +256,20 @@ async function loadTrends() {
   const list = props.nodes || []
   if (!list.length || !trend) return
   const [req] = await Promise.all([
-    queryClusterTrend(list, 'nginx_access_requests', 'sum'),
+    queryClusterTrend(list, 'nginx_access_requests', 'sum', {
+      minutes: 245 * 60, // 最近 245 小时
+      step: 3600 * 1000, // 1 小时一个采样点
+    }),
   ])
   trend.setOption(
     monitorOption({
       yMin: 0,
       yFormatter: (v) => fmtNum(v),
+      xFormatter: (ts) => {
+        const d = new Date(ts)
+        const pad = (n) => String(n).padStart(2, '0')
+        return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`
+      },
       series: [{ name: '请求数', color: COLORS.cyan, data: req }],
     }),
     true

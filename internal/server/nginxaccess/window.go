@@ -135,7 +135,9 @@ func (w *Window) Add(stats []model.NginxAccessStat) {
 			}
 			agg.Requests += ip.Requests
 			agg.Bytes += ip.Bytes
-			if agg.Province != "" {
+			// 仅国内 IP（国家=中国）才计入中国省份地图，
+			// 避免外国 IP 把城市名（如 Dronten）误当作省份聚合进来。
+			if agg.Country == "中国" && agg.Province != "" {
 				p := w.point("cn|"+agg.Province, "")
 				p.Requests += ip.Requests
 				p.Bytes += ip.Bytes
