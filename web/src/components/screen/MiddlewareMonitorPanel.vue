@@ -222,13 +222,17 @@ function ringDash(t) {
   const C = 2 * Math.PI * 18
   return `${(C * onlineRate(t)) / 100} ${C}`
 }
+// 入参可能是数字、数字字符串或空串（无可用指标时 primaryMetric 返回 ''），
+// 统一转成 Number 后再格式化，避免对字符串调用 toFixed 抛错。
 function fmt(v) {
-  if (v == null || isNaN(v)) return '0'
-  const a = Math.abs(v)
-  if (a >= 1e9) return (v / 1e9).toFixed(1) + 'B'
-  if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M'
-  if (a >= 1e3) return (v / 1e3).toFixed(1) + 'k'
-  return Number.isInteger(v) ? String(v) : v.toFixed(1)
+  if (v == null || v === '') return '—'
+  const n = typeof v === 'number' ? v : Number(v)
+  if (!Number.isFinite(n)) return '—'
+  const a = Math.abs(n)
+  if (a >= 1e9) return (n / 1e9).toFixed(1) + 'B'
+  if (a >= 1e6) return (n / 1e6).toFixed(1) + 'M'
+  if (a >= 1e3) return (n / 1e3).toFixed(1) + 'k'
+  return Number.isInteger(n) ? String(n) : n.toFixed(1)
 }
 
 // P1#6/P1#7 实例列表辅助

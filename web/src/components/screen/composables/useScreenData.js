@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import http from '../../../api/http'
 import { rateShort } from '../../../charts/echarts'
+import { buildNodeCards } from './useNodeCards'
 
 const MW_TYPES = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s']
 const MW_LABELS = {
@@ -19,22 +20,7 @@ export function useScreenData() {
   const activeAlerts = computed(() => alerts.value.filter((a) => a.state === 'firing'))
   const firingCount = computed(() => activeAlerts.value.length)
 
-  const nodeCards = computed(() =>
-    nodes.value.map((n) => ({
-      name: n.hostname,
-      ip: n.ip || '-',
-      online: n.status === 'online',
-      cpu: metrics.value[n.hostname]?.cpu || 0,
-      mem: metrics.value[n.hostname]?.mem || 0,
-      disk: metrics.value[n.hostname]?.disk || 0,
-      load1: metrics.value[n.hostname]?.load1 || 0,
-      load: metrics.value[n.hostname]?.load1 || 0,
-      netIn: metrics.value[n.hostname]?.netIn || 0,
-      netOut: metrics.value[n.hostname]?.netOut || 0,
-      memTotal: metrics.value[n.hostname]?.memTotal || 0,
-      procCount: metrics.value[n.hostname]?.procCount || 0,
-    }))
-  )
+  const nodeCards = computed(() => buildNodeCards(nodes.value, metrics.value))
 
   async function loadBase() {
     if (!document.visibilityState || document.visibilityState === 'visible') {

@@ -276,7 +276,8 @@ func (m *Manager) Apply(operator string) (*Task, error) {
 			continue
 		}
 		if _, err := os.Stat(serverBin); err == nil {
-			if err := copyFile(serverBin, filepath.Join(backupDir, "monitor-server")); err != nil {
+			// 备份保留可执行权限，否则回退后恢复出来的二进制无法执行
+			if err := copyFileMode(serverBin, filepath.Join(backupDir, "monitor-server"), 0o755); err != nil {
 				applyErrors = append(applyErrors, "备份 server 失败: "+err.Error())
 			}
 		}
@@ -407,7 +408,9 @@ func (m *Manager) Rollback(operator string) error {
 	var errs []string
 	serverBin := filepath.Join(m.cfg.BinDir, "monitor-server")
 	if _, err := os.Stat(filepath.Join(latest, "monitor-server")); err == nil {
-		if err := copyFile(filepath.Join(latest, "monitor-server"), serverBin); err != nil {
+		// 必须用原子替换：回退时 server 自身正在运行，直接覆盖会报 ETXTBSY（text file busy）。
+		// 同时显式指定 0755，保证恢复出来的二进制可执行。
+		if err := replaceFileAtomic(filepath.Join(latest, "monitor-server"), serverBin, 0o755); err != nil {
 			errs = append(errs, "恢复 server 失败: "+err.Error())
 		}
 	}

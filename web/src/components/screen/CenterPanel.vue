@@ -26,7 +26,7 @@
       <div class="glass chart-block">
         <div class="cb-head">
           <i class="cb-bar"></i>
-          <span>网络总流量</span>
+          <span>网络流量（按主机）</span>
           <span class="cb-cur" :style="{ color: COLORS.purple }">{{ netCur }}</span>
         </div>
         <div ref="netChart" class="cb-chart"></div>
@@ -37,7 +37,7 @@
     <div class="mini-row">
       <div class="glass mini-card" v-for="m in minis" :key="m.key">
         <div class="mini-label">{{ m.label }}</div>
-        <div class="mini-value" :style="{ color: m.color }">{{ m.value }}</div>
+        <div class="mini-value" :class="{ wide: String(m.value).length > 8 }" :style="{ color: m.color }">{{ m.value }}</div>
       </div>
     </div>
   </div>
@@ -46,7 +46,10 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { initChart, monitorOption, COLORS, rateShort } from '../../charts/echarts'
-import { queryClusterTrend } from './useTrend'
+import { queryClusterTrend, queryPerNodeTrend } from './useTrend'
+
+// 多主机折线配色：主机数量不定，按索引循环取色，保证同一主机在同一次渲染内颜色稳定
+const NODE_COLORS = [COLORS.cyan, COLORS.purple, COLORS.amber, COLORS.green, COLORS.blue, COLORS.red, '#14b8a6', '#f472b6']
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
@@ -75,8 +78,9 @@ function avg(key) {
   if (!list.length) return 0
   return list.reduce((s, n) => s + (n[key] || 0), 0) / list.length
 }
-function sum(key) {
-  return props.nodes.reduce((s, n) => s + (n[key] || 0), 0)
+// 仅累加在线主机：离线主机的最后一次上报值不代表当前状态，计入会虚增总量
+function sumOnline(key) {
+  return onlineNodes.value.reduce((s, n) => s + (n[key] || 0), 0)
 }
 function usageColor(v) {
   if (v >= 90) return COLORS.red
@@ -109,59 +113,92 @@ const kpis = computed(() => {
 })
 
 const minis = computed(() => {
-  const netIn = sum('netIn')
-  const netOut = sum('netOut')
-  const totalMem = sum('memTotal')
+  const netIn = sumOnline('netIn')
+  const netOut = sumOnline('netOut')
+  const totalMem = sumOnline('memTotal')
+  const usedMem = sumOnline('memUsed')
   const load = avg('load')
-  const procCount = sum('procCount')
-  const activeAlerts = (props.alerts || []).filter((a) => a.state !== 'resolved').length
+  const procCount = sumOnline('procCount')
+  const activeAlerts = (props.alerts || []).filter((a) => a.state === 'firing').length
   return [
     { key: 'netIn', label: '实时入流量', value: rateShort(netIn), color: COLORS.cyan },
     { key: 'netOut', label: '实时出流量', value: rateShort(netOut), color: COLORS.purple },
     { key: 'load', label: '平均负载', value: load.toFixed(2), color: COLORS.blue },
-    { key: 'memTotal', label: '内存总量', value: formatBytes(totalMem), color: COLORS.amber },
-    { key: 'proc', label: '进程总数', value: procCount, color: COLORS.green },
+    {
+      key: 'memTotal',
+      label: '内存已用 / 总量',
+      value: `${formatBytes(usedMem, true)} / ${formatBytes(totalMem, true)}`,
+      color: COLORS.amber,
+    },
+    { key: 'proc', label: '进程总数', value: Math.round(procCount), color: COLORS.green },
     { key: 'alert', label: '活跃告警', value: activeAlerts, color: activeAlerts > 0 ? COLORS.red : COLORS.green },
   ]
 })
 
-function formatBytes(b) {
+// compact=true 时省略单位后缀（用于「已用 / 总量」并排展示，仅在末位保留单位）
+function formatBytes(b, compact = false) {
   const v = Number(b || 0)
-  if (v >= 1 << 30) return (v / (1 << 30)).toFixed(1) + ' GB'
-  if (v >= 1 << 20) return (v / (1 << 20)).toFixed(0) + ' MB'
-  if (v >= 1 << 10) return (v / (1 << 10)).toFixed(0) + ' KB'
-  return v + ' B'
+  const unit = (u) => (compact ? u.trim() : u)
+  if (v >= 1 << 30) return (v / (1 << 30)).toFixed(1) + unit(' G')
+  if (v >= 1 << 20) return (v / (1 << 20)).toFixed(0) + unit(' M')
+  if (v >= 1 << 10) return (v / (1 << 10)).toFixed(0) + unit(' K')
+  return v + unit(' B')
 }
 
 async function loadTrends() {
-  const list = onlineNodes.value.map((n) => n.hostname)
-  const [cpu, mem, disk, netIn, netOut, nginxRate] = await Promise.all([
+  // 节点对象由 OverviewTab 组装，主机名字段为 name（兼容可能存在的 hostname 写法）
+  const list = onlineNodes.value.map((n) => n.name || n.hostname).filter(Boolean)
+  if (!list.length) {
+    trendSeries.value = []
+    netSeries.value = []
+    trendCur.value = '暂无在线主机'
+    netCur.value = '--'
+    renderTrend()
+    renderNet()
+    return
+  }
+  const labelOf = (host) => {
+    const n = onlineNodes.value.find((x) => (x.name || x.hostname) === host)
+    return n?.displayName || host
+  }
+  const [cpu, mem, disk, perNodeIn, perNodeOut] = await Promise.all([
     queryClusterTrend(list, 'cpu_usage', 'avg'),
     queryClusterTrend(list, 'mem_used_percent', 'avg'),
-    queryClusterTrend(list, 'disk_used_percent', 'avg'),
-    queryClusterTrend(list, 'network_recv_rate', 'sum'),
-    queryClusterTrend(list, 'network_sent_rate', 'sum'),
-    queryClusterTrend(list, 'nginx_access_bytes_rate', 'sum'),
+    queryClusterTrend(list, 'disk_used_percent', 'avg', { byNode: true }),
+    queryPerNodeTrend(list, 'network_recv_rate'),
+    queryPerNodeTrend(list, 'network_sent_rate'),
   ])
   trendSeries.value = [
     { name: 'CPU', color: COLORS.cyan, data: cpu },
     { name: '内存', color: COLORS.purple, data: mem },
     { name: '磁盘', color: COLORS.amber, data: disk },
   ]
-  netSeries.value = [
-    { name: '入', color: COLORS.cyan, data: netIn },
-    { name: '出', color: COLORS.purple, data: netOut },
-    { name: 'Nginx', color: COLORS.amber, data: nginxRate },
-  ]
+
+  // 网络流量按主机分别成线：多套高可用集群（如两组 Nginx）汇总成一条线时无法区分来源，
+  // 这里每台主机一条「入+出」合计曲线，并按当前流量从高到低取前 8 台，避免图例过密。
+  const outMap = new Map(perNodeOut.map((r) => [r.node, r.points]))
+  const perHost = perNodeIn.map((r) => {
+    const acc = new Map()
+    for (const [ts, v] of r.points) acc.set(ts, (acc.get(ts) || 0) + v)
+    for (const [ts, v] of outMap.get(r.node) || []) acc.set(ts, (acc.get(ts) || 0) + v)
+    const data = [...acc.entries()].sort((a, b) => a[0] - b[0])
+    return { node: r.node, data, last: data.length ? data[data.length - 1][1] : 0 }
+  })
+  perHost.sort((a, b) => b.last - a.last)
+  netSeries.value = perHost.slice(0, 8).map((h, i) => ({
+    name: labelOf(h.node),
+    color: NODE_COLORS[i % NODE_COLORS.length],
+    data: h.data,
+  }))
+
   renderTrend()
   renderNet()
   const lastCpu = cpu.length ? cpu[cpu.length - 1][1] : 0
   const lastMem = mem.length ? mem[mem.length - 1][1] : 0
-  trendCur.value = `CPU ${lastCpu.toFixed(1)}% / 内存 ${lastMem.toFixed(1)}%`
-  const li = netIn.length ? netIn[netIn.length - 1][1] : 0
-  const lo = netOut.length ? netOut[netOut.length - 1][1] : 0
-  const ln = nginxRate.length ? nginxRate[nginxRate.length - 1][1] : 0
-  netCur.value = `↓ ${rateShort(li)} / ↑ ${rateShort(lo)} / Nginx ${rateShort(ln)}`
+  const lastDisk = disk.length ? disk[disk.length - 1][1] : 0
+  trendCur.value = `CPU ${lastCpu.toFixed(1)}% / 内存 ${lastMem.toFixed(1)}% / 磁盘 ${lastDisk.toFixed(1)}%`
+  const totalNow = perHost.reduce((s, h) => s + h.last, 0)
+  netCur.value = `合计 ${rateShort(totalNow)} · ${perHost.length} 台`
 }
 
 function renderTrend() {
@@ -183,6 +220,8 @@ function renderNet() {
   nChart.setOption(
     monitorOption({
       yMin: 0,
+      // 按主机拆分后曲线较多，关闭面积填充避免互相遮挡
+      area: netSeries.value.length <= 2,
       yFormatter: (v) => rateShort(v),
       tipFormatter: (v) => (v == null ? '-' : rateShort(v)),
       series: netSeries.value.map((s) => ({ name: s.name, color: s.color, data: s.data })),
@@ -212,7 +251,11 @@ onUnmounted(() => {
   nChart = null
 })
 
-watch(() => props.nodes, loadTrends, { deep: false })
+// nodes 每次指标轮询都会重建数组，只在「在线主机名集合」变化时才重新拉取趋势，避免高频重复查询
+watch(
+  () => onlineNodes.value.map((n) => n.name || n.hostname).sort().join(','),
+  () => loadTrends()
+)
 </script>
 
 <style scoped>
@@ -347,6 +390,11 @@ watch(() => props.nodes, loadTrends, { deep: false })
   font-size: 20px;
   font-weight: 700;
   font-family: var(--mono);
+  white-space: nowrap;
   text-shadow: 0 0 12px currentColor;
+}
+/* 「已用 / 总量」这类较长文本缩小字号，避免在 1/6 宽度的小卡里溢出 */
+.mini-value.wide {
+  font-size: 15px;
 }
 </style>

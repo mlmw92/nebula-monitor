@@ -12,12 +12,14 @@ import (
 // topN 取资源占用最高的 N 个进程。
 const topN = 10
 
-// collectProcessTop 采集进程总数与资源占用 Top 进程。
-func collectProcessTop() []model.ProcessStat {
+// collectProcessTop 采集资源占用 Top 进程，并返回当前系统进程总数。
+// total 为本机全部进程数量（不受 topN 截断影响），用于 process_total 指标。
+func collectProcessTop() (top []model.ProcessStat, total int) {
 	procs, err := process.Processes()
 	if err != nil {
-		return nil
+		return nil, 0
 	}
+	total = len(procs)
 	// 预热一次 CPU 采样，使第二次 CPUPercent 能计算时间窗增量（否则首次恒为 0）
 	for _, p := range procs {
 		_, _ = p.CPUPercent()
@@ -44,9 +46,9 @@ func collectProcessTop() []model.ProcessStat {
 	copy(byCPU, stats)
 	sort.Slice(byCPU, func(i, j int) bool { return byCPU[i].CPU > byCPU[j].CPU })
 
-	top := byCPU
+	top = byCPU
 	if len(top) > topN {
 		top = top[:topN]
 	}
-	return top
+	return top, total
 }

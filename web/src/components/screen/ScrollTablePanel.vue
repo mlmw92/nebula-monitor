@@ -44,13 +44,22 @@ const props = defineProps({
 
 const bodyRef = ref(null)
 const paused = ref(false)
+const bodyHeight = ref(0)
 let offset = 0
 let raf = null
+let ro = null
+
+// 行数装不满可视区域时无需滚动；此时若仍复制一份数据，用户会直接看到重复的行
+const needScroll = computed(() => {
+  const n = (props.rows || []).length
+  return bodyHeight.value > 0 && n * props.rowHeight > bodyHeight.value + 1
+})
 
 const displayRows = computed(() => {
   const r = props.rows || []
   if (!r.length) return []
-  return [...r, ...r]
+  // 仅在需要无缝滚动时复制一份，用于首尾衔接
+  return needScroll.value ? [...r, ...r] : r
 })
 
 const gridStyle = computed(() => ({
@@ -89,21 +98,40 @@ function barStyle(row, col) {
 }
 
 function tick() {
-  if (!paused.value && bodyRef.value) {
-    const el = bodyRef.value
-    const half = el.scrollHeight / 2
-    offset += props.speed
-    if (offset >= half) offset = 0
-    el.scrollTop = offset
+  const el = bodyRef.value
+  if (el) {
+    if (!needScroll.value) {
+      // 不滚动时保持在顶部，避免数据变少后残留滚动偏移
+      if (offset !== 0) {
+        offset = 0
+        el.scrollTop = 0
+      }
+    } else if (!paused.value) {
+      const half = el.scrollHeight / 2
+      offset += props.speed
+      if (offset >= half) offset = 0
+      el.scrollTop = offset
+    }
   }
   raf = requestAnimationFrame(tick)
 }
 
 onMounted(() => {
+  if (bodyRef.value) {
+    bodyHeight.value = bodyRef.value.clientHeight
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => {
+        bodyHeight.value = bodyRef.value?.clientHeight || 0
+      })
+      ro.observe(bodyRef.value)
+    }
+  }
   raf = requestAnimationFrame(tick)
 })
 onUnmounted(() => {
   raf && cancelAnimationFrame(raf)
+  ro && ro.disconnect()
+  ro = null
 })
 
 watch(

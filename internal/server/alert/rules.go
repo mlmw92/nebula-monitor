@@ -58,15 +58,85 @@ func DefaultTemplates() []model.AlertRule {
 	}
 }
 
-// SeedDefaults 仅当规则文件不存在（全新安装）时写入推荐规则，
-// 不覆盖用户主动清空规则后的空状态。
-func (s *RulesStore) SeedDefaults() {
-	if _, err := os.Stat(s.path); err == nil {
+// seedMarkerPath 返回播种记录文件路径，记录已经播种过的内置规则名。
+func (s *RulesStore) seedMarkerPath() string { return s.path + ".seeded" }
+
+// loadSeedMarker 读取已播种的内置规则名集合。文件不存在时返回空集合。
+func (s *RulesStore) loadSeedMarker() map[string]bool {
+	seeded := map[string]bool{}
+	data, err := os.ReadFile(s.seedMarkerPath())
+	if err != nil {
+		return seeded
+	}
+	var names []string
+	if err := yaml.Unmarshal(data, &names); err != nil {
+		slog.Warn("解析告警规则播种记录失败", "path", s.seedMarkerPath(), "err", err)
+		return seeded
+	}
+	for _, n := range names {
+		seeded[n] = true
+	}
+	return seeded
+}
+
+// saveSeedMarker 记录当前版本全部内置规则名，表示它们均已播种过。
+// 之后用户删除其中任何一条都不会被重新写回。
+func (s *RulesStore) saveSeedMarker(names []string) {
+	data, err := yaml.Marshal(names)
+	if err != nil {
 		return
 	}
-	for _, t := range DefaultTemplates() {
-		s.Create(t)
+	if err := os.MkdirAll(dirOf(s.path), 0o755); err != nil {
+		return
 	}
+	if err := os.WriteFile(s.seedMarkerPath(), data, 0o644); err != nil {
+		slog.Warn("写入告警规则播种记录失败", "err", err, "path", s.seedMarkerPath())
+	}
+}
+
+// SeedDefaults 播种开箱即用的推荐规则。
+//
+// 播种以「规则名」为准做增量处理，并用一个独立的播种记录文件记住哪些内置规则已经播种过：
+//   - 全新安装：全部写入；
+//   - 版本升级：只补写本次版本新增、且此前从未播种过的内置规则（例如「主机离线」等场景化规则），
+//     老版本已存在的规则不会重复创建；
+//   - 用户主动删除过的内置规则不会被重新写回，因为它已记录在播种记录中。
+func (s *RulesStore) SeedDefaults() {
+	templates := DefaultTemplates()
+	names := make([]string, 0, len(templates))
+	for _, t := range templates {
+		names = append(names, t.Name)
+	}
+
+	_, statErr := os.Stat(s.path)
+	freshInstall := os.IsNotExist(statErr)
+
+	seeded := s.loadSeedMarker()
+	if freshInstall {
+		// 全新安装：规则文件尚不存在，忽略可能残留的播种记录，全部写入
+		seeded = map[string]bool{}
+	}
+
+	// 已存在的规则名，避免与用户自建的同名规则重复
+	s.mu.RLock()
+	existing := make(map[string]bool, len(s.rules))
+	for _, r := range s.rules {
+		existing[r.Name] = true
+	}
+	s.mu.RUnlock()
+
+	added := 0
+	for _, t := range templates {
+		if seeded[t.Name] || existing[t.Name] {
+			continue
+		}
+		s.Create(t)
+		added++
+	}
+	if added > 0 {
+		slog.Info("已补充内置告警规则", "count", added)
+	}
+	s.saveSeedMarker(names)
 }
 
 // sortRulesByCreatedDesc 按创建时间倒序排列（新建在前）；

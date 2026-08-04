@@ -36,6 +36,7 @@ import CenterPanel from '../CenterPanel.vue'
 import ScreenHealthScore from '../ScreenHealthScore.vue'
 import ScrollTablePanel from '../ScrollTablePanel.vue'
 import { rateShort } from '../../../charts/echarts'
+import { buildNodeCards } from '../composables/useNodeCards'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
@@ -45,25 +46,12 @@ const props = defineProps({
 
 const topoHasNodes = ref(false)
 
-const nodeCards = computed(() =>
-  props.nodes.map((n) => ({
-    name: n.hostname,
-    ip: n.ip || '-',
-    online: n.status === 'online',
-    cpu: props.metrics[n.hostname]?.cpu || 0,
-    mem: props.metrics[n.hostname]?.mem || 0,
-    disk: props.metrics[n.hostname]?.disk || 0,
-    load1: props.metrics[n.hostname]?.load1 || 0,
-    load: props.metrics[n.hostname]?.load1 || 0,
-    netIn: props.metrics[n.hostname]?.netIn || 0,
-    netOut: props.metrics[n.hostname]?.netOut || 0,
-    memTotal: props.metrics[n.hostname]?.memTotal || 0,
-    procCount: props.metrics[n.hostname]?.procCount || 0,
-  }))
-)
+const nodeCards = computed(() => buildNodeCards(props.nodes, props.metrics))
 
 const onlineNodes = computed(() => nodeCards.value.filter((n) => n.online !== false))
 const onlineCount = computed(() => onlineNodes.value.length)
+// 主机总数按去重后的卡片数统计，与列表展示保持一致
+const totalCount = computed(() => nodeCards.value.length)
 
 function avg(key) {
   const list = onlineNodes.value
@@ -76,7 +64,7 @@ const healthScore = computed(() => {
   const cpu = avg('cpu')
   const mem = avg('mem')
   const disk = avg('disk')
-  const total = props.nodes.length
+  const total = totalCount.value
   const online = onlineCount.value
   const firing = (props.alerts || []).filter((a) => a.state === 'firing').length
   const onlineScore = total > 0 ? (online / total) * 100 : 100
@@ -94,8 +82,8 @@ const healthLevel = computed(() => {
 })
 
 const onlineRate = computed(() => {
-  return props.nodes.length > 0
-    ? Math.round((onlineCount.value / props.nodes.length) * 100)
+  return totalCount.value > 0
+    ? Math.round((onlineCount.value / totalCount.value) * 100)
     : 100
 })
 
@@ -109,16 +97,21 @@ const diskHeadroom = computed(() => Math.round(Math.max(0, 100 - avg('disk'))))
 
 // 主机列表
 const hostColumns = [
-  { key: 'name', label: '主机名', width: '1.4fr' },
-  { key: 'cpu', label: 'CPU', width: '1fr', type: 'bar', align: 'right', max: (rows) => Math.max(...rows.map((r) => r.cpu), 100) },
-  { key: 'mem', label: '内存', width: '1fr', type: 'bar', align: 'right', max: (rows) => Math.max(...rows.map((r) => r.mem), 100) },
-  { key: 'disk', label: '磁盘', width: '1fr', type: 'bar', align: 'right', max: (rows) => Math.max(...rows.map((r) => r.disk), 100) },
+  { key: 'name', label: '主机名', width: '1.3fr' },
+  { key: 'ip', label: 'IP', width: '1.1fr' },
+  { key: 'group', label: '分组', width: '0.9fr' },
+  { key: 'cpu', label: 'CPU', width: '0.9fr', type: 'bar', align: 'right', max: (rows) => Math.max(...rows.map((r) => r.cpu), 100) },
+  { key: 'mem', label: '内存', width: '0.9fr', type: 'bar', align: 'right', max: (rows) => Math.max(...rows.map((r) => r.mem), 100) },
+  { key: 'disk', label: '磁盘', width: '0.9fr', type: 'bar', align: 'right', max: (rows) => Math.max(...rows.map((r) => r.disk), 100) },
   { key: 'netIn', label: '入流量', width: '0.9fr', type: 'num', align: 'right', fmt: (v) => rateShort(v) },
-  { key: 'status', label: '状态', width: '0.7fr', type: 'badge', align: 'center' },
+  { key: 'status', label: '状态', width: '0.6fr', type: 'badge', align: 'center' },
 ]
 const hostRows = computed(() =>
   nodeCards.value.map((n) => ({
-    name: n.name,
+    key: n.hostname,
+    name: n.label,
+    ip: n.ip,
+    group: n.group,
     cpu: n.cpu,
     mem: n.mem,
     disk: n.disk,

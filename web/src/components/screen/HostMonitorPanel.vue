@@ -42,7 +42,7 @@
       <ScreenTrend title="磁盘集群均值" :series="diskSeries" unit="%" :color="COLORS.green" />
       <div class="glass trend-net">
         <div class="trend-head">
-          <span class="trend-title">网络流量（入 / 出）</span>
+          <span class="trend-title">网络流量（按主机）</span>
           <span class="trend-cur" :style="{ color: COLORS.purple }">{{ netCur }}</span>
         </div>
         <div ref="netChart" class="trend-chart"></div>
@@ -57,7 +57,10 @@ import { useRouter } from 'vue-router'
 import { initChart, monitorOption, COLORS, rateShort } from '../../charts/echarts'
 import ScreenGauges from './ScreenGauges.vue'
 import ScreenTrend from './ScreenTrend.vue'
-import { queryClusterTrend } from './useTrend'
+import { queryClusterTrend, queryPerNodeTrend } from './useTrend'
+
+// 多主机折线配色：按索引循环取色
+const NODE_COLORS = [COLORS.cyan, COLORS.purple, COLORS.amber, COLORS.green, COLORS.blue, COLORS.red, '#14b8a6', '#f472b6']
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
@@ -137,28 +140,54 @@ const diskSeries = ref([])
 const netSeries = ref([])
 const netCur = ref('--')
 
-const onlineNodes = computed(() => props.nodes.filter((n) => n.online !== false).map((n) => n.hostname))
+const onlineNodes = computed(() => props.nodes.filter((n) => n.online !== false))
+const onlineHosts = computed(() => onlineNodes.value.map((n) => n.hostname || n.name).filter(Boolean))
 
 async function loadTrends() {
-  const list = onlineNodes.value
-  const [cpu, mem, disk, netIn, netOut] = await Promise.all([
+  const list = onlineHosts.value
+  if (!list.length) {
+    cpuSeries.value = []
+    memSeries.value = []
+    diskSeries.value = []
+    netSeries.value = []
+    netCur.value = '暂无在线主机'
+    renderNet()
+    return
+  }
+  const labelOf = (host) => {
+    const n = onlineNodes.value.find((x) => (x.hostname || x.name) === host)
+    return n?.displayName || host
+  }
+  const [cpu, mem, disk, perNodeIn, perNodeOut] = await Promise.all([
     queryClusterTrend(list, 'cpu_usage', 'avg'),
     queryClusterTrend(list, 'mem_used_percent', 'avg'),
     queryClusterTrend(list, 'disk_used_percent', 'avg', { byNode: true }),
-    queryClusterTrend(list, 'network_recv_rate', 'sum'),
-    queryClusterTrend(list, 'network_sent_rate', 'sum'),
+    queryPerNodeTrend(list, 'network_recv_rate'),
+    queryPerNodeTrend(list, 'network_sent_rate'),
   ])
   cpuSeries.value = [{ name: 'CPU', color: COLORS.cyan, data: cpu }]
   memSeries.value = [{ name: '内存', color: COLORS.blue, data: mem }]
   diskSeries.value = [{ name: '磁盘', color: COLORS.green, data: disk }]
-  netSeries.value = [
-    { name: '入', color: COLORS.cyan, data: netIn },
-    { name: '出', color: COLORS.purple, data: netOut },
-  ]
+
+  // 网络按主机分列：同一角色的多台主机（如两套高可用 Nginx）汇总成一条线时无法区分来源
+  const outMap = new Map(perNodeOut.map((r) => [r.node, r.points]))
+  const perHost = perNodeIn.map((r) => {
+    const acc = new Map()
+    for (const [ts, v] of r.points) acc.set(ts, (acc.get(ts) || 0) + v)
+    for (const [ts, v] of outMap.get(r.node) || []) acc.set(ts, (acc.get(ts) || 0) + v)
+    const data = [...acc.entries()].sort((a, b) => a[0] - b[0])
+    return { node: r.node, data, last: data.length ? data[data.length - 1][1] : 0 }
+  })
+  perHost.sort((a, b) => b.last - a.last)
+  netSeries.value = perHost.slice(0, 8).map((h, i) => ({
+    name: labelOf(h.node),
+    color: NODE_COLORS[i % NODE_COLORS.length],
+    data: h.data,
+  }))
+
   renderNet()
-  const lastIn = netIn.length ? netIn[netIn.length - 1][1] : 0
-  const lastOut = netOut.length ? netOut[netOut.length - 1][1] : 0
-  netCur.value = `↓ ${rateShort(lastIn)} / ↑ ${rateShort(lastOut)}`
+  const total = perHost.reduce((s, h) => s + h.last, 0)
+  netCur.value = `合计 ${rateShort(total)} · ${perHost.length} 台`
 }
 
 function renderNet() {
@@ -166,6 +195,8 @@ function renderNet() {
   chart.setOption(
     monitorOption({
       yMin: 0,
+      // 多主机曲线叠加时关闭面积填充，避免互相遮挡
+      area: netSeries.value.length <= 2,
       yFormatter: (v) => rateShort(v),
       tipFormatter: (v) => (v == null ? '-' : rateShort(v)),
       series: netSeries.value.map((s) => ({ name: s.name, color: s.color, data: s.data })),
@@ -188,7 +219,11 @@ onUnmounted(() => {
   chart = null
 })
 
-watch(() => props.nodes, loadTrends, { deep: false })
+// nodes 每次指标轮询都会重建数组，只在「在线主机名集合」变化时才重新拉取，避免高频重复查询
+watch(
+  () => onlineHosts.value.slice().sort().join(','),
+  () => loadTrends()
+)
 </script>
 
 <style scoped>

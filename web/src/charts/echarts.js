@@ -34,18 +34,18 @@ function baseGrid(extra) {
   return Object.assign({ left: 48, right: 18, top: 24, bottom: 30, containLabel: true }, extra || {})
 }
 
-function gradientSeries(name, color, data) {
-  return {
+// area=false 时只画折线不填充：多序列（如按主机拆分的十余条曲线）叠加填充会互相遮挡
+function gradientSeries(name, color, data, area = true) {
+  const s = {
     name,
     type: 'line',
     smooth: true,
     showSymbol: false,
     lineStyle: { color, width: 2, shadowColor: color, shadowBlur: 10 },
-    areaStyle: {
-      color: cachedGradient(color),
-    },
     data: data || [],
   }
+  if (area) s.areaStyle = { color: cachedGradient(color) }
+  return s
 }
 
 // 单指标实时小图
@@ -157,7 +157,7 @@ export function monitorOption(opts) {
       axisLabel: { color: AXIS, fontSize: 11, formatter: o.yFormatter },
       splitLine: { show: true, lineStyle: { color: SPLIT } },
     },
-    series: series.map((s, i) => gradientSeries(s.name, s.color || (colors && colors[i]) || COLORS.cyan, s.data)),
+    series: series.map((s, i) => gradientSeries(s.name, s.color || (colors && colors[i]) || COLORS.cyan, s.data, o.area !== false)),
   }
 }
 

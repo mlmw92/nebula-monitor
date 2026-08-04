@@ -186,12 +186,19 @@ let visible = true
 // 节点名列表（用于趋势查询）
 const nodeNames = computed(() => nodeCards.value.filter((n) => n.online).map((n) => n.name))
 
+// 使用率类均值只统计在线主机：离线主机不再上报指标，计入会把均值拉低造成误判
+const onlineCards = computed(() => nodeCards.value.filter((n) => n.online !== false))
+function avgOnline(key) {
+  const list = onlineCards.value
+  return list.length > 0 ? list.reduce((s, n) => s + (n[key] || 0), 0) / list.length : 0
+}
+
 // 持久 KPI 条数据
 const kpiBar = computed(() => {
-  const online = nodeCards.value.filter((n) => n.online !== false).length
+  const online = onlineCards.value.length
   const total = nodeCards.value.length
-  const cpu = total > 0 ? nodeCards.value.reduce((s, n) => s + (n.cpu || 0), 0) / total : 0
-  const mem = total > 0 ? nodeCards.value.reduce((s, n) => s + (n.mem || 0), 0) / total : 0
+  const cpu = avgOnline('cpu')
+  const mem = avgOnline('mem')
 
   function usageColor(v) {
     if (v >= 90) return 'var(--danger)'
@@ -209,11 +216,11 @@ const kpiBar = computed(() => {
 })
 
 const healthScore = computed(() => {
-  const online = nodeCards.value.filter((n) => n.online !== false).length
+  const online = onlineCards.value.length
   const total = nodeCards.value.length
-  const cpu = total > 0 ? nodeCards.value.reduce((s, n) => s + (n.cpu || 0), 0) / total : 0
-  const mem = total > 0 ? nodeCards.value.reduce((s, n) => s + (n.mem || 0), 0) / total : 0
-  const disk = total > 0 ? nodeCards.value.reduce((s, n) => s + (n.disk || 0), 0) / total : 0
+  const cpu = avgOnline('cpu')
+  const mem = avgOnline('mem')
+  const disk = avgOnline('disk')
   const onlineScore = total > 0 ? (online / total) * 100 : 100
   const cpuScore = Math.max(0, 100 - cpu)
   const memScore = Math.max(0, 100 - mem)
