@@ -53,17 +53,14 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
   metrics: { type: Object, default: () => ({}) },
-  alerts: { type: Array, default: () => [] },
   redisStats: { type: Object, default: () => ({}) }, // { total, up, down, clusterCount, alertCount }
   dockerStats: { type: Object, default: () => ({}) }, // { total, running, stopped, abnormal }
 })
 const emit = defineEmits(['select-node', 'select-redis', 'select-docker'])
-const router = useRouter()
 
 // viewBox 逻辑坐标系（与 DOM 百分比定位共用同一比例）
 const VB = { w: 1000, h: 640 }
@@ -72,46 +69,9 @@ const CY = VB.h / 2
 
 const hover = ref(null)
 
-// 主机按 group 聚合
-const hostGroups = computed(() => {
-  const map = new Map()
-  for (const n of props.nodes) {
-    const g = n.group || '默认分组'
-    const item = map.get(g) || { name: g, total: 0, online: 0, offline: 0, alerting: 0 }
-    item.total += 1
-    if (n.status === 'online') item.online += 1
-    else item.offline += 1
-    if (props.alerts.some((a) => a.node === n.hostname && a.state === 'firing')) item.alerting += 1
-    map.set(g, item)
-  }
-  return [...map.values()]
-})
-
-const firing = computed(() => props.alerts.filter((a) => a.state === 'firing'))
-const critCount = computed(() => firing.value.filter((a) => a.severity === 'critical').length)
-const warnCount = computed(() => firing.value.filter((a) => a.severity === 'warning').length)
-
-// 组装环绕节点：主机组 + Redis + 告警，并按圆周均匀布点
+// 组装环绕节点：Redis + 容器集群，并按圆周均匀布点
 const placedNodes = computed(() => {
   const items = []
-
-  // 主机组（最多取 6 个，其余合并计数在最后一个上体现总量）
-  const groups = hostGroups.value.slice(0, 6)
-  groups.forEach((g, i) => {
-    let tone = 'ok'
-    if (g.offline > 0) tone = 'danger'
-    else if (g.alerting > 0) tone = 'warn'
-    items.push({
-      id: 'g' + i,
-      kind: 'group',
-      title: g.name,
-      meta: `在线 ${g.online} / 离线 ${g.offline}`,
-      tone,
-      alerting: g.alerting > 0,
-      tip: [`主机 ${g.total} 台`, `在线 ${g.online} · 离线 ${g.offline}`, g.alerting ? `告警 ${g.alerting}` : '无告警'],
-      onClick: () => router.push('/hosts'),
-    })
-  })
 
   // Redis 中间件节点
   const rs = props.redisStats || {}
@@ -148,19 +108,6 @@ const placedNodes = computed(() => {
       onClick: () => emit('select-docker'),
     })
   }
-
-  // 安全/告警节点
-  const alertTone = critCount.value > 0 ? 'danger' : warnCount.value > 0 ? 'warn' : 'ok'
-  items.push({
-    id: 'alerts',
-    kind: 'alerts',
-    title: '告警中心',
-    meta: `活跃 ${firing.value.length} 条`,
-    tone: alertTone,
-    alerting: firing.value.length > 0,
-    tip: [`活跃告警 ${firing.value.length} 条`, `严重 ${critCount.value} · 警告 ${warnCount.value}`],
-    onClick: () => router.push('/alerts'),
-  })
 
   // 圆周布点：椭圆半径，避免与四周面板重叠
   const rx = 360
