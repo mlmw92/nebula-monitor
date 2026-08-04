@@ -47,6 +47,10 @@ func (m *Manager) loadOrInit(initial config.ScreenConfig) error {
 				}
 			}
 		}
+		// 老配置缺省刷新间隔时回退到默认值
+		if c.RefreshInterval <= 0 {
+			c.RefreshInterval = initial.RefreshInterval
+		}
 		m.current = c
 		slog.Info("已加载大屏配置文件", "path", m.path)
 		return nil

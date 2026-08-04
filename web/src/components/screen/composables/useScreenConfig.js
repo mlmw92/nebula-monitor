@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import http from '../../../api/http'
 
 export function useScreenConfig() {
-  const cfg = reactive({ modules: { alerts: true } })
+  const cfg = reactive({ modules: { alerts: true }, refreshInterval: 30 })
   const settingOpen = ref(false)
   const savingCfg = ref(false)
 
@@ -12,6 +12,9 @@ export function useScreenConfig() {
     try {
       const res = await http.get('/api/v1/screen/config')
       if (res && res.modules) cfg.modules = { ...cfg.modules, ...res.modules }
+      if (res && res.refreshInterval && res.refreshInterval > 0) {
+        cfg.refreshInterval = res.refreshInterval
+      }
     } catch (e) {
       /* 默认全开 */
     }
@@ -20,11 +23,14 @@ export function useScreenConfig() {
   async function saveScreenConfig() {
     savingCfg.value = true
     try {
-      await http.put('/api/v1/screen/config', { modules: { ...cfg.modules } })
+      await http.put('/api/v1/screen/config', {
+        modules: { ...cfg.modules },
+        refreshInterval: cfg.refreshInterval,
+      })
       ElMessage.success('大屏配置已保存')
       settingOpen.value = false
     } catch (e) {
-      ElMessage.error('保存失败')
+      ElMessage.error(e?.message || '保存失败')
     } finally {
       savingCfg.value = false
     }

@@ -111,10 +111,22 @@
     <el-drawer v-model="settingOpen" title="大屏模块设置" size="300px" :append-to-body="true">
       <div class="cfg-list">
         <el-checkbox v-model="cfg.modules.alerts" label="底部告警滚动区" />
+        <div class="cfg-item">
+          <span class="cfg-label">刷新间隔（秒）</span>
+          <el-input-number
+            v-model="cfg.refreshInterval"
+            :min="5"
+            :max="600"
+            :step="5"
+            controls-position="right"
+            size="small"
+          />
+        </div>
+        <div class="cfg-tip">数据自动刷新周期，同时也是大屏右上角倒计时总时长（5~600 秒）。</div>
       </div>
       <template #footer>
         <el-button @click="settingOpen = false">取消</el-button>
-        <el-button type="primary" :loading="savingCfg" @click="saveScreenConfig">保存</el-button>
+        <el-button type="primary" :loading="savingCfg" @click="onSaveCfg">保存</el-button>
       </template>
     </el-drawer>
   </div>
@@ -141,10 +153,28 @@ import { useScreenConfig } from './composables/useScreenConfig'
 const router = useRouter()
 const { brand } = useBrand()
 const { nodes, metrics, alerts, activeAlerts, firingCount, nodeCards, refreshAll } = useScreenData()
-const { countdown, start: startCountdown, reset: resetCountdown } = useCountdown(30)
+const refreshInterval = ref(30)
+const { countdown, start: startCountdown, reset: resetCountdown } = useCountdown(refreshInterval)
 const { cfg, settingOpen, savingCfg, loadScreenConfig, saveScreenConfig } = useScreenConfig()
 
-const REFRESH_INTERVAL = 30
+// 应用刷新间隔：同步到倒计时并重启数据定时器
+function applyInterval() {
+  if (cfg.refreshInterval > 0) refreshInterval.value = cfg.refreshInterval
+  resetCountdown()
+  if (dataTimer) {
+    clearInterval(dataTimer)
+    dataTimer = setInterval(() => {
+      refreshAll()
+      resetCountdown()
+    }, refreshInterval.value * 1000)
+  }
+}
+
+// 保存大屏配置并应用刷新间隔
+async function onSaveCfg() {
+  await saveScreenConfig()
+  applyInterval()
+}
 const activeTab = ref('overview')
 const clock = ref('')
 const dateText = ref('')
@@ -249,7 +279,7 @@ function onVis() {
     if (!dataTimer) dataTimer = setInterval(() => {
       refreshAll()
       resetCountdown()
-    }, REFRESH_INTERVAL * 1000)
+    }, refreshInterval.value * 1000)
   } else if (dataTimer) {
     clearInterval(dataTimer)
     dataTimer = null
@@ -261,11 +291,12 @@ onMounted(async () => {
   clockTimer = setInterval(tickClock, 1000)
   startCountdown()
   await loadScreenConfig()
+  if (cfg.refreshInterval > 0) refreshInterval.value = cfg.refreshInterval
   await refreshAll()
   dataTimer = setInterval(() => {
     refreshAll()
     resetCountdown()
-  }, REFRESH_INTERVAL * 1000)
+  }, refreshInterval.value * 1000)
   ws = connectWS('alerts', null, { onMessage: () => refreshAll() })
   document.addEventListener('visibilitychange', onVis)
 })
@@ -530,12 +561,30 @@ onUnmounted(() => {
 .countdown.urgent .cd-num {
   color: var(--danger);
   text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
-  animation: cd-pulse 0.8s infinite;
 }
 
-@keyframes cd-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+/* 模块设置抽屉内的配置项 */
+.cfg-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.05);
+  border: 1px solid rgba(56, 189, 248, 0.15);
+}
+
+.cfg-label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.cfg-tip {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
 }
 
 /* 持久 KPI 条 */

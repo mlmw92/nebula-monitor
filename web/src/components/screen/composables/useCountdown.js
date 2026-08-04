@@ -1,13 +1,14 @@
 // useCountdown.js — 倒计时 composable
-import { ref, onUnmounted } from 'vue'
+// interval 可为数字或 ref（支持运行时动态修改刷新间隔）
+import { ref, unref, onUnmounted } from 'vue'
 
 export function useCountdown(interval = 30) {
-  const countdown = ref(interval)
+  const countdown = ref(unref(interval))
   let timer = null
 
   function start() {
     stop()
-    countdown.value = interval
+    countdown.value = unref(interval)
     timer = setInterval(() => {
       if (countdown.value > 0) countdown.value--
     }, 1000)
@@ -21,7 +22,7 @@ export function useCountdown(interval = 30) {
   }
 
   function reset() {
-    countdown.value = interval
+    countdown.value = unref(interval)
   }
 
   onUnmounted(() => {

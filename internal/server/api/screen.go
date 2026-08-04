@@ -28,6 +28,11 @@ func (a *API) handleScreenPut(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体解析失败: " + err.Error()})
 		return
 	}
+	// 刷新间隔校验：未传(0)则沿用默认值；传入则需落在合理区间
+	if incoming.RefreshInterval != 0 && (incoming.RefreshInterval < 5 || incoming.RefreshInterval > 600) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "刷新间隔需在 5~600 秒之间"})
+		return
+	}
 	if err := a.screenMgr.Save(incoming); err != nil {
 		slog.Error("保存大屏配置失败", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存失败: " + err.Error()})

@@ -38,20 +38,25 @@ type Config struct {
 
 // ScreenConfig 数据大屏模块显隐配置（全局单份，与 notify 一致）。
 // Modules 为模块开关表，key 见前端设置项：topology/gauges/risk/alerts/redis/trends/kpiTop。
+// RefreshInterval 为大屏数据自动刷新间隔（秒），同时也是倒计时总时长。
 type ScreenConfig struct {
-	Modules map[string]bool `yaml:"modules" json:"modules"`
+	Modules         map[string]bool `yaml:"modules" json:"modules"`
+	RefreshInterval int             `yaml:"refreshInterval" json:"refreshInterval"`
 }
 
 // DefaultScreenConfig 返回默认全开的大屏模块配置。
 // key 见前端设置项：kpiTop/hostMonitor/middlewareMonitor/nginxAnalysis/alerts。
 func DefaultScreenConfig() ScreenConfig {
-	return ScreenConfig{Modules: map[string]bool{
-		"kpiTop":            true,
-		"hostMonitor":       true,
-		"middlewareMonitor": true,
-		"nginxAnalysis":     true,
-		"alerts":            true,
-	}}
+	return ScreenConfig{
+		Modules: map[string]bool{
+			"kpiTop":            true,
+			"hostMonitor":       true,
+			"middlewareMonitor": true,
+			"nginxAnalysis":     true,
+			"alerts":            true,
+		},
+		RefreshInterval: 30,
+	}
 }
 
 // AuthConfig 登录认证配置（启用后访问需登录，token 有效期 24h）
