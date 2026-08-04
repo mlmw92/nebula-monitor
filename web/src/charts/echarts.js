@@ -1,5 +1,6 @@
 // echarts.js — ECharts 科技感图表封装（渐变面积线）。
 import * as echarts from 'echarts'
+import { geoCoord } from './geoCoords'
 
 export const COLORS = {
   cyan: '#22d3ee',
@@ -218,42 +219,75 @@ export function mapGeoOption(scope, data) {
   const map = isWorld ? 'world' : 'china'
   const series = []
 
+  // 访问动线（中心 → 来源地），geo 坐标系下 lines 需要经纬度 coords
   if (o.lines && o.lines.length) {
-    series.push({
-      name: '访问动线',
-      type: 'lines',
-      coordinateSystem: 'geo',
-      zlevel: 2,
-      effect: { show: true, period: 4, trailLength: 0.25, symbol: 'arrow', symbolSize: 4, color: '#22d3ee' },
-      lineStyle: { color: 'rgba(34,211,238,0.45)', width: 1, curveness: 0.3 },
-      data: o.lines,
-    })
+    const lineData = o.lines
+      .map((l) => {
+        const f = geoCoord(scope, { name: l.from, countryEn: l.fromEn })
+        const t = geoCoord(scope, { name: l.to, countryEn: l.toEn })
+        if (!f || !t) return null
+        return { fromName: l.fromName, toName: l.toName, coords: [f, t], value: l.value }
+      })
+      .filter(Boolean)
+    if (lineData.length) {
+      series.push({
+        name: '访问动线',
+        type: 'lines',
+        coordinateSystem: 'geo',
+        zlevel: 2,
+        effect: { show: true, period: 4, trailLength: 0.25, symbol: 'arrow', symbolSize: 4, color: '#22d3ee' },
+        lineStyle: { color: 'rgba(34,211,238,0.45)', width: 1, curveness: 0.3 },
+        data: lineData,
+      })
+    }
   }
+
+  // 访问来源地理散点：value 前两位必须是经纬度，否则无法在 geo 上定位
   if (o.points && o.points.length) {
-    series.push({
-      name: '访问来源',
-      type: 'effectScatter',
-      coordinateSystem: 'geo',
-      zlevel: 2,
-      rippleEffect: { brushType: 'stroke', scale: 3 },
-      symbolSize: (val) => Math.max(6, Math.min(28, Math.sqrt(val[1] || 1) * 3)),
-      itemStyle: { color: '#f59e0b', shadowBlur: 14, shadowColor: '#f59e0b' },
-      label: { show: false },
-      data: o.points.map((p) => ({ name: p.name, value: [p.name, p.requests, p.bytes] })),
-    })
+    const pts = o.points
+      .map((p) => {
+        const c = geoCoord(scope, p)
+        if (!c) return null
+        return { name: p.name, value: [...c, p.requests, p.bytes] }
+      })
+      .filter(Boolean)
+    if (pts.length) {
+      series.push({
+        name: '访问来源',
+        type: 'effectScatter',
+        coordinateSystem: 'geo',
+        zlevel: 2,
+        rippleEffect: { brushType: 'stroke', scale: 3 },
+        symbolSize: (val) => Math.max(6, Math.min(28, Math.sqrt(val[2] || 1) * 3)),
+        itemStyle: { color: '#f59e0b', shadowBlur: 14, shadowColor: '#f59e0b' },
+        label: { show: false },
+        data: pts,
+      })
+    }
   }
+
+  // 数据中心/部署点
   if (o.deployPoints && o.deployPoints.length) {
-    series.push({
-      name: '数据中心',
-      type: 'scatter',
-      coordinateSystem: 'geo',
-      zlevel: 2,
-      symbol: 'diamond',
-      symbolSize: 14,
-      itemStyle: { color: '#22c55e', shadowBlur: 16, shadowColor: '#22c55e' },
-      label: { show: true, formatter: '{b}', color: '#e5edf7', fontSize: 11, position: 'top' },
-      data: o.deployPoints.map((p) => ({ name: p.name, value: [p.name, p.requests || 0] })),
-    })
+    const dps = o.deployPoints
+      .map((p) => {
+        const c = geoCoord(scope, p)
+        if (!c) return null
+        return { name: p.name, value: [...c, p.requests || 0] }
+      })
+      .filter(Boolean)
+    if (dps.length) {
+      series.push({
+        name: '数据中心',
+        type: 'scatter',
+        coordinateSystem: 'geo',
+        zlevel: 2,
+        symbol: 'diamond',
+        symbolSize: 14,
+        itemStyle: { color: '#22c55e', shadowBlur: 16, shadowColor: '#22c55e' },
+        label: { show: true, formatter: '{b}', color: '#e5edf7', fontSize: 11, position: 'top' },
+        data: dps,
+      })
+    }
   }
 
   return {
@@ -267,11 +301,11 @@ export function mapGeoOption(scope, data) {
           return `${p.data.fromName} → ${p.data.toName}<br/>请求量: ${p.data.value}`
         }
         if (p.seriesType === 'scatter' && p.data.name) {
-          return `${p.data.name}<br/>请求量: ${p.data.value[1] || 0}`
+          return `${p.data.name}<br/>请求量: ${p.data.value[2] || 0}`
         }
         if (p.seriesType === 'effectScatter') {
           const v = p.data.value || []
-          return `${p.name}<br/>请求量: ${v[1] || 0}<br/>流量: ${rateShort(v[2] || 0)}`
+          return `${p.name}<br/>请求量: ${v[2] || 0}<br/>流量: ${rateShort(v[3] || 0)}`
         }
         return p.name || ''
       },

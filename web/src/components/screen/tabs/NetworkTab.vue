@@ -107,7 +107,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import http from '../../../api/http'
 import { initChart, monitorOption, COLORS, rateShort, mapGeoOption } from '../../../charts/echarts'
-import { registerMaps, mapName } from '../../../charts/geoData'
+import { registerMaps } from '../../../charts/geoData'
 import { queryClusterTrend } from '../useTrend'
 
 const props = defineProps({
@@ -352,11 +352,15 @@ function renderMap() {
     const hasData = !!(points.length || d?.lines?.length || d?.deployPoints?.length)
     if (hasData) {
       const toGeo = {
-        points: points.map((p) => ({ name: mapName(geoScope.value, p), requests: p.requests, bytes: p.bytes })),
-        deployPoints: (d.deployPoints || []).map((p) => ({ name: mapName(geoScope.value, p), requests: p.requests })),
+        points: points.map((p) => ({ name: p.name, countryEn: p.countryEn, requests: p.requests, bytes: p.bytes })),
+        deployPoints: (d.deployPoints || []).map((p) => ({ name: p.name, countryEn: p.countryEn, requests: p.requests })),
         lines: (d.lines || []).map((l) => ({
-          fromName: mapName(geoScope.value, { name: l.from, countryEn: l.fromEn }),
-          toName: mapName(geoScope.value, { name: l.to, countryEn: l.toEn }),
+          from: l.from,
+          fromEn: l.fromEn,
+          to: l.to,
+          toEn: l.toEn,
+          fromName: l.from,
+          toName: l.to,
           value: l.value,
         })),
       }

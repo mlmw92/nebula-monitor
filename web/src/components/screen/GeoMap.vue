@@ -15,7 +15,7 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { initChart, mapGeoOption } from '../../charts/echarts'
-import { registerMaps, mapName } from '../../charts/geoData'
+import { registerMaps } from '../../charts/geoData'
 
 const props = defineProps({
   scope: { type: String, default: 'cn' },
@@ -34,16 +34,20 @@ function isValidPoint(p) {
   return p && p.name && p.name !== 'Reserved' && p.name !== '0'
 }
 
-// 后端 geo 响应 → mapGeoOption 数据：名称按 scope 归一化（世界地图用英文国家名）
+// 后端 geo 响应 → mapGeoOption 数据：保留原始 name/countryEn/fromEn/toEn，由 geo 坐标表定位
 function toGeo(d) {
   if (!d) return {}
   const scope = props.scope
   return {
-    points: (d.points || []).filter(isValidPoint).map((p) => ({ name: mapName(scope, p), requests: p.requests, bytes: p.bytes })),
-    deployPoints: (d.deployPoints || []).map((p) => ({ name: mapName(scope, p), requests: p.requests })),
+    points: (d.points || []).filter(isValidPoint).map((p) => ({ name: p.name, countryEn: p.countryEn, requests: p.requests, bytes: p.bytes })),
+    deployPoints: (d.deployPoints || []).map((p) => ({ name: p.name, countryEn: p.countryEn, requests: p.requests })),
     lines: (d.lines || []).map((l) => ({
-      fromName: mapName(scope, { name: l.from, countryEn: l.fromEn }),
-      toName: mapName(scope, { name: l.to, countryEn: l.toEn }),
+      from: l.from,
+      fromEn: l.fromEn,
+      to: l.to,
+      toEn: l.toEn,
+      fromName: l.from,
+      toName: l.to,
       value: l.value,
     })),
   }
