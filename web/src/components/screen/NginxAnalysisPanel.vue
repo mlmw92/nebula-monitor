@@ -149,7 +149,7 @@ const statusData = computed(() =>
 )
 const sourceList = computed(() =>
   accessEnabled.value
-    ? (geoData.value[geoScope.value]?.points || []).slice(0, 10)
+    ? (geoData.value[geoScope.value]?.points || []).filter((p) => p.name && p.name !== 'Reserved' && p.name !== '0').slice(0, 10)
     : instByReqs.value.map((i) => ({ name: i.name || i.instance, requests: i.requests || 0 }))
 )
 

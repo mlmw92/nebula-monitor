@@ -29,12 +29,17 @@ let ro = null
 
 const hasData = ref(false)
 
+// ip2region 对内网/保留地址返回 Reserved，视为无效地理点
+function isValidPoint(p) {
+  return p && p.name && p.name !== 'Reserved' && p.name !== '0'
+}
+
 // 后端 geo 响应 → mapGeoOption 数据：名称按 scope 归一化（世界地图用英文国家名）
 function toGeo(d) {
   if (!d) return {}
   const scope = props.scope
   return {
-    points: (d.points || []).map((p) => ({ name: mapName(scope, p), requests: p.requests, bytes: p.bytes })),
+    points: (d.points || []).filter(isValidPoint).map((p) => ({ name: mapName(scope, p), requests: p.requests, bytes: p.bytes })),
     deployPoints: (d.deployPoints || []).map((p) => ({ name: mapName(scope, p), requests: p.requests })),
     lines: (d.lines || []).map((l) => ({
       fromName: mapName(scope, { name: l.from, countryEn: l.fromEn }),
@@ -47,7 +52,8 @@ function toGeo(d) {
 function render() {
   if (!chart) return
   const d = props.data
-  hasData.value = !!(d && (d.points?.length || d.lines?.length || d.deployPoints?.length))
+  const pts = (d?.points || []).filter(isValidPoint)
+  hasData.value = !!(d && (pts.length || d.lines?.length || d.deployPoints?.length))
   chart.setOption(mapGeoOption(props.scope, toGeo(d)), true)
 }
 
