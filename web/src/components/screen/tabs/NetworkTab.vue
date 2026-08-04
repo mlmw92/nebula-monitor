@@ -75,7 +75,7 @@
             </div>
           </div>
           <div ref="mapChart" class="ntm-chart"></div>
-          <div v-if="!validPoints.length" class="ntm-empty">
+          <div v-if="!displayPoints.length" class="ntm-empty">
             <div>暂无有效的地理位置数据</div>
             <div class="ntm-empty-sub">当前来源多为内网 / 保留地址</div>
           </div>
@@ -83,12 +83,15 @@
         <!-- 来源地排名 -->
         <div class="glass nt-sources">
           <div class="ntc-head">
-            <span>来源地 Top · {{ geoScope === 'cn' ? '省份' : '国家' }}</span>
+            <span>来源地 Top · {{ geoScope === 'cn' ? '省份 / 国家' : '国家' }}</span>
           </div>
           <div class="rank-list src">
             <div class="rank-row" v-for="(s, i) in sourceList" :key="s.name">
               <span class="rk-idx" :class="{ top: i < 3 }">{{ i + 1 }}</span>
-              <span class="rk-name">{{ s.name }}</span>
+              <span class="rk-name">
+                {{ s.name }}
+                <em v-if="s.foreign" class="rk-foreign">国外</em>
+              </span>
               <span class="rk-bar"><i :style="{ width: srcPct(s) }"></i></span>
               <span class="rk-val">{{ fmtNum(s.requests) }}</span>
             </div>
@@ -128,6 +131,24 @@ const validPoints = computed(() => {
   const points = geoData.value[geoScope.value]?.points || []
   return points.filter(isValidPoint)
 })
+// 国外国家来源（来自 world 视图数据，排除国内），用于在 cn 视图按国家标注国外流量
+const foreignCountryPoints = computed(() => {
+  const pts = geoData.value.world?.points || []
+  return pts
+    .filter((p) => isValidPoint(p) && p.name !== '中国')
+    .map((p) => ({ name: p.name, requests: p.requests, foreign: true }))
+})
+// 来源地排行 / 最大来源展示用的合并列表：
+// cn 视图 = 国内省份 + 国外国家（按国家标注）；world 视图 = 国家
+const displayPoints = computed(() => {
+  if (geoScope.value === 'world') {
+    return validPoints.value.map((p) => ({ name: p.name, requests: p.requests, foreign: false }))
+  }
+  const provinces = (geoData.value.cn?.points || [])
+    .filter(isValidPoint)
+    .map((p) => ({ name: p.name, requests: p.requests, foreign: false }))
+  return [...provinces, ...foreignCountryPoints.value]
+})
 const nginxInstances = ref([])
 const totalRequests = ref(0)
 const totalRate = ref(0)
@@ -146,7 +167,7 @@ function isValidPoint(p) {
 // 顶部 KPI 条
 const topKpis = computed(() => {
   const s = summary.value || {}
-  const points = validPoints.value
+  const points = displayPoints.value
   const maxSrc = points.length ? points.reduce((a, b) => (a.requests > b.requests ? a : b)) : null
   const isWorld = geoScope.value === 'world'
 
@@ -163,12 +184,12 @@ const topKpis = computed(() => {
       label: isWorld ? '在线国家' : '在线省份',
       value: points.length || '--',
       color: COLORS.blue,
-      sub: isWorld ? '个来源国家' : '个来源省份',
+      sub: isWorld ? '个来源国家' : '个来源地区',
     },
     {
       key: 'maxSrc',
       label: '最大来源',
-      value: maxSrc ? maxSrc.name : '--',
+      value: maxSrc ? (maxSrc.foreign ? '国外·' + maxSrc.name : maxSrc.name) : '--',
       color: COLORS.amber,
       sub: maxSrc ? `${Math.min((maxSrc.requests / (s.totalRequests || 1)) * 100, 100).toFixed(1)}%` : '',
     },
@@ -198,9 +219,13 @@ function ipPct(ip) {
   return ((ip.count / maxIp.value) * 100).toFixed(1) + '%'
 }
 
-// 来源地排名
+// 来源地排名（cn 视图下合并国内省份与国外国家，按请求量排序）
 const sourceList = computed(() => {
-  return validPoints.value.slice(0, 10).map((p) => ({ name: p.name, requests: p.requests }))
+  return displayPoints.value
+    .slice()
+    .sort((a, b) => b.requests - a.requests)
+    .slice(0, 10)
+    .map((p) => ({ name: p.name, requests: p.requests, foreign: p.foreign }))
 })
 const maxSrc = computed(() => Math.max(...sourceList.value.map((s) => s.requests || 0), 1))
 
@@ -532,6 +557,20 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.rk-foreign {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 15px;
+  border-radius: 3px;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  vertical-align: middle;
 }
 
 .rk-bar {
