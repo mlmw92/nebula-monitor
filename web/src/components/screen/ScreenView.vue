@@ -10,12 +10,10 @@
           <span class="clock-text">{{ clock }}</span>
           <!-- 实时倒计时 -->
           <div class="countdown" :class="{ urgent: countdown <= 5 }">
-            <span class="cd-label">刷新</span>
             <span class="cd-num mono">{{ countdown }}</span>
-            <span class="cd-unit">s</span>
+            <span class="cd-unit">s 后刷新</span>
           </div>
         </div>
-        <span class="weekday-text">{{ weekday }}</span>
       </div>
 
       <div class="hud-center">
@@ -180,7 +178,6 @@ async function onSaveCfg() {
 }
 const activeTab = ref('overview')
 const clock = ref('')
-const weekday = ref('')
 let dataTimer = null
 let clockTimer = null
 let ws = null
@@ -248,9 +245,9 @@ function goNode(name) {
 function tickClock() {
   const d = new Date()
   const p = (x) => String(x).padStart(2, '0')
-  clock.value = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
   const days = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
-  weekday.value = days[d.getDay()]
+  const wd = days[d.getDay()]
+  clock.value = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${wd} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
 // 全屏
@@ -405,12 +402,6 @@ onUnmounted(() => {
   color: var(--text);
 }
 
-.weekday-text {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-left: 2px;
-}
-
 .hud-actions {
   justify-content: flex-end;
 }
@@ -505,30 +496,23 @@ onUnmounted(() => {
   max-width: 90%;
 }
 
-/* 倒计时 */
+/* 倒计时（弱化显示） */
 .countdown {
   display: flex;
   align-items: baseline;
-  gap: 3px;
-  padding: 2px 10px;
-  border-radius: 16px;
-  background: rgba(56, 189, 248, 0.06);
-  border: 1px solid rgba(56, 189, 268, 0.2);
-  transition: all 0.3s;
-}
-
-.cd-label {
-  font-size: 10px;
+  gap: 2px;
+  margin-left: 10px;
+  font-size: 12px;
   color: var(--text-muted);
-  letter-spacing: 0.1em;
+  transition: color 0.3s;
 }
 
 .cd-num {
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--accent);
-  text-shadow: 0 0 10px var(--accent-glow);
-  min-width: 22px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-shadow: none;
+  min-width: 16px;
   text-align: center;
 }
 
@@ -538,13 +522,12 @@ onUnmounted(() => {
 }
 
 .countdown.urgent {
-  background: rgba(239, 68, 68, 0.1);
-  border-color: rgba(239, 68, 68, 0.4);
+  color: var(--warn);
 }
 
 .countdown.urgent .cd-num {
-  color: var(--danger);
-  text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+  color: var(--warn);
+  text-shadow: none;
 }
 
 /* 模块设置抽屉内的配置项 */
@@ -785,10 +768,7 @@ onUnmounted(() => {
   .title-deco { margin-top: 8px; }
   .td-line { width: 110px; }
   .hud-tabs { margin-top: 8px; }
-  .weekday-text { font-size: 14px; }
-  .cd-label { font-size: 13px; }
-  .cd-num { font-size: 24px; }
-  .cd-unit { font-size: 14px; }
+  .cd-unit { font-size: 12px; }
   .kpi-bar-label { font-size: 14px; }
   .kpi-bar-value { font-size: 26px; }
   .kpi-bar-unit { font-size: 13px; }
@@ -812,10 +792,7 @@ onUnmounted(() => {
   .title-deco { margin-top: 10px; }
   .td-line { width: 140px; }
   .hud-tabs { margin-top: 10px; }
-  .weekday-text { font-size: 17px; }
-  .cd-label { font-size: 16px; }
-  .cd-num { font-size: 30px; }
-  .cd-unit { font-size: 17px; }
+  .cd-unit { font-size: 13px; }
   .kpi-bar-label { font-size: 17px; }
   .kpi-bar-value { font-size: 32px; }
   .kpi-bar-unit { font-size: 16px; }
