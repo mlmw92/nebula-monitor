@@ -14,7 +14,7 @@
 
     <!-- 中部图表区 -->
     <div class="chart-area">
-      <div class="glass chart-block big">
+      <div class="glass chart-block">
         <div class="cb-head">
           <i class="cb-bar"></i>
           <span>集群资源趋势</span>
@@ -265,7 +265,8 @@ watch(() => props.nodes, loadTrends, { deep: false })
 /* 中部图表 */
 .chart-area {
   display: grid;
-  grid-template-columns: 1.6fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 10px;
   flex: 1;
   min-height: 0;
@@ -275,6 +276,7 @@ watch(() => props.nodes, loadTrends, { deep: false })
   flex-direction: column;
   padding: 10px 14px;
   min-height: 0;
+  overflow: hidden;
 }
 .cb-head {
   display: flex;

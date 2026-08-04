@@ -5,19 +5,21 @@
 
     <!-- 顶栏 -->
     <header class="hud-top">
-      <div class="hud-side hud-clock mono">{{ clock }}</div>
+      <div class="hud-side hud-clock mono">
+        <span class="clock-text">{{ clock }}</span>
+        <!-- 实时倒计时 -->
+        <div class="countdown" :class="{ urgent: countdown <= 5 }">
+          <span class="cd-label">刷新</span>
+          <span class="cd-num mono">{{ countdown }}</span>
+          <span class="cd-unit">s</span>
+        </div>
+      </div>
       <div class="hud-center">
         <h1 class="hud-title">
           <span class="ht-en">{{ brand.name }}</span>
           <span class="ht-sep"></span>
           <span class="ht-cn">监控指挥中心</span>
         </h1>
-        <!-- 实时倒计时 -->
-        <div class="countdown" :class="{ urgent: countdown <= 5 }">
-          <span class="cd-label">下次刷新</span>
-          <span class="cd-num mono">{{ countdown }}</span>
-          <span class="cd-unit">s</span>
-        </div>
       </div>
       <div class="hud-side hud-actions">
         <button class="hud-btn" title="全屏" @click="toggleFullscreen"><FullScreen /></button>
@@ -429,9 +431,15 @@ onUnmounted(() => {
   gap: 8px;
 }
 .hud-clock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 14px;
   color: var(--text-dim);
   letter-spacing: 0.08em;
+}
+.clock-text {
+  white-space: nowrap;
 }
 .hud-actions {
   justify-content: flex-end;
@@ -439,9 +447,8 @@ onUnmounted(() => {
 .hud-center {
   flex: 1;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
 }
 .hud-btn {
   width: 34px;
@@ -499,8 +506,8 @@ onUnmounted(() => {
 .countdown {
   display: flex;
   align-items: baseline;
-  gap: 4px;
-  padding: 2px 14px;
+  gap: 3px;
+  padding: 2px 10px;
   border-radius: 16px;
   background: rgba(34, 211, 238, 0.06);
   border: 1px solid rgba(34, 211, 238, 0.2);
