@@ -316,9 +316,12 @@ func (c *NginxAccessCollector) collectFile(cfg model.NginxInstanceConfig, state 
 		if rows > nginxAccessMaxRows {
 			break
 		}
+		// 去除行尾 \r\n 后再匹配：Go 的 regexp（RE2）引擎中 $ 锚点不匹配行尾换行符，
+		// 若不裁剪，带 \n 的整行会全部解析失败（误报"日志格式不符"）。
+		matchLine := strings.TrimRight(line, "\r\n")
 		// 逐行尝试所有已知格式，兼容同一文件混合多种日志格式。
 		for _, p := range parsers {
-			if m := p.re.FindStringSubmatch(line); m != nil {
+			if m := p.re.FindStringSubmatch(matchLine); m != nil {
 				p.parse(m, ipStats, statusCount, uriCount, &totalRequests, &totalBytes, &latencySum, &latencyN)
 				break
 			}
