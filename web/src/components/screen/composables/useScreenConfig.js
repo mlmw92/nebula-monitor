@@ -3,6 +3,9 @@ import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import http from '../../../api/http'
 
+// 大屏刷新间隔可选档位（秒），与后端 config.ScreenRefreshIntervals 保持一致
+export const REFRESH_INTERVALS = [10, 20, 30, 60]
+
 export function useScreenConfig() {
   const cfg = reactive({ modules: { alerts: true }, refreshInterval: 30 })
   const settingOpen = ref(false)
@@ -12,7 +15,8 @@ export function useScreenConfig() {
     try {
       const res = await http.get('/api/v1/screen/config')
       if (res && res.modules) cfg.modules = { ...cfg.modules, ...res.modules }
-      if (res && res.refreshInterval && res.refreshInterval > 0) {
+      // 仅接受预设档位，历史遗留的其它值回退默认 30 秒
+      if (res && REFRESH_INTERVALS.includes(res.refreshInterval)) {
         cfg.refreshInterval = res.refreshInterval
       }
     } catch (e) {

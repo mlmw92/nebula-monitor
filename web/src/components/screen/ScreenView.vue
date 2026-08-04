@@ -112,17 +112,12 @@
       <div class="cfg-list">
         <el-checkbox v-model="cfg.modules.alerts" label="底部告警滚动区" />
         <div class="cfg-item">
-          <span class="cfg-label">刷新间隔（秒）</span>
-          <el-input-number
-            v-model="cfg.refreshInterval"
-            :min="5"
-            :max="600"
-            :step="5"
-            controls-position="right"
-            size="small"
-          />
+          <span class="cfg-label">刷新间隔</span>
+          <el-select v-model="cfg.refreshInterval" size="small" style="width: 110px">
+            <el-option v-for="s in intervalOptions" :key="s" :value="s" :label="`${s} 秒`" />
+          </el-select>
         </div>
-        <div class="cfg-tip">数据自动刷新周期，同时也是大屏右上角倒计时总时长（5~600 秒）。</div>
+        <div class="cfg-tip">数据自动刷新周期，同时也是大屏右上角倒计时总时长。</div>
       </div>
       <template #footer>
         <el-button @click="settingOpen = false">取消</el-button>
@@ -148,12 +143,13 @@ import AlertsTab from './tabs/AlertsTab.vue'
 import { useBrand } from '../../composables/useBrand'
 import { useScreenData } from './composables/useScreenData'
 import { useCountdown } from './composables/useCountdown'
-import { useScreenConfig } from './composables/useScreenConfig'
+import { useScreenConfig, REFRESH_INTERVALS } from './composables/useScreenConfig'
 
 const router = useRouter()
 const { brand } = useBrand()
 const { nodes, metrics, alerts, activeAlerts, firingCount, nodeCards, refreshAll } = useScreenData()
 const refreshInterval = ref(30)
+const intervalOptions = REFRESH_INTERVALS
 const { countdown, start: startCountdown, reset: resetCountdown } = useCountdown(refreshInterval)
 const { cfg, settingOpen, savingCfg, loadScreenConfig, saveScreenConfig } = useScreenConfig()
 

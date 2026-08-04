@@ -44,6 +44,19 @@ type ScreenConfig struct {
 	RefreshInterval int             `yaml:"refreshInterval" json:"refreshInterval"`
 }
 
+// ScreenRefreshIntervals 大屏刷新间隔可选档位（秒），与前端下拉选项保持一致。
+var ScreenRefreshIntervals = []int{10, 20, 30, 60}
+
+// IsValidScreenRefreshInterval 判断刷新间隔是否为受支持的档位。
+func IsValidScreenRefreshInterval(v int) bool {
+	for _, s := range ScreenRefreshIntervals {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
 // DefaultScreenConfig 返回默认全开的大屏模块配置。
 // key 见前端设置项：kpiTop/hostMonitor/middlewareMonitor/nginxAnalysis/alerts。
 func DefaultScreenConfig() ScreenConfig {

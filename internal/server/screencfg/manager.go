@@ -47,8 +47,8 @@ func (m *Manager) loadOrInit(initial config.ScreenConfig) error {
 				}
 			}
 		}
-		// 老配置缺省刷新间隔时回退到默认值
-		if c.RefreshInterval <= 0 {
+		// 老配置缺省或非预设档位时回退到默认值
+		if !config.IsValidScreenRefreshInterval(c.RefreshInterval) {
 			c.RefreshInterval = initial.RefreshInterval
 		}
 		m.current = c
