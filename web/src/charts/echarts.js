@@ -311,6 +311,7 @@ export function mapGeoOption(scope, data) {
       backgroundColor: 'rgba(11,17,32,0.92)',
       borderColor: 'rgba(34,211,238,0.3)',
       textStyle: { color: '#e5edf7', fontSize: 12 },
+      confine: true,
       formatter: (p) => {
         if (p.seriesType === 'lines') {
           return `${p.data.fromName} → ${p.data.toName}<br/>请求量: ${p.data.value}`
@@ -329,9 +330,9 @@ export function mapGeoOption(scope, data) {
     geo: {
       map,
       roam: false,
-      zoom: isWorld ? 1.18 : 1.28,
-      layoutCenter: ['50%', '52%'],
-      layoutSize: isWorld ? '96%' : '100%',
+      zoom: isWorld ? 1.18 : 1.0,
+      layoutCenter: ['50%', '50%'],
+      layoutSize: isWorld ? '96%' : '92%',
       itemStyle: {
         areaColor: 'rgba(59,130,246,0.12)',
         borderColor: 'rgba(34,211,238,0.35)',
