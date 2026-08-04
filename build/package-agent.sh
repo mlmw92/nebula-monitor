@@ -105,6 +105,10 @@ collectors:
 #   - name: "nginx-01"
 #     addr: "127.0.0.1:80"
 #     statusPath: "/nginx_status"
+#     # 采集访问日志（Top IP / URI / 状态码 / QPS）需配置以下两项，
+#     # 并开启 collectors.nginxLog；未配置则访问分析无数据。
+#     accessLog: "/var/log/nginx/access.log"
+#     logFormat: "combined"        # combined | combined_timed
 #   - name: "nginx-vts"
 #     addr: "127.0.0.1:80"
 #     statusPath: "/nginx_status"

@@ -524,6 +524,10 @@ $( [[ -n "$LABELS_YAML" ]] && printf 'labels:\n%s' "$LABELS_YAML" )
 #   - name: "nginx-01"
 #     addr: "127.0.0.1:80"
 #     statusPath: "/nginx_status"
+#     # 采集访问日志（Top IP / URI / 状态码 / QPS）需配置以下两项，
+#     # 并开启 collectors.nginxLog；未配置则访问分析无数据。
+#     accessLog: "/var/log/nginx/access.log"
+#     logFormat: "combined"        # combined | combined_timed
 # kafkaInstances:
 #   - name: "kafka-cluster"
 #     addr: "127.0.0.1:9092"
@@ -815,9 +819,23 @@ redis_config() {
 # 通用中间件配置函数，通过参数区分 MySQL/PostgreSQL/Nginx/Kafka/RocketMQ。
 # 用法: middleware_config <type>
 #   type: mysql|postgres|nginx|kafka|rocketmq
+# enable_collector 在 agent.yaml 的 collectors 段开启指定采集器（幂等）。
+enable_collector() {
+  local cfg="$1" key="$2"
+  if grep -qE "^[[:space:]]*${key}:" "$cfg" 2>/dev/null; then
+    sed -i -E "s/^([[:space:]]*)${key}:[[:space:]]*.*/\\1${key}: true/" "$cfg"
+  elif grep -qE '^[[:space:]]*collectors:' "$cfg" 2>/dev/null; then
+    sed -i -E "/^[[:space:]]*collectors:/a\\  ${key}: true" "$cfg"
+  else
+    printf "\ncollectors:\n  %s: true\n" "$key" >> "$cfg"
+  fi
+}
+
 middleware_config() {
   local mw_type="$1"
   local mw_name mw_collector mw_instances_key
+  # 附加采集器（如 Nginx 访问日志需额外开启 nginxLog）
+  local extra_collector=""
   case "$mw_type" in
     mysql)    mw_name="MySQL";       mw_collector="mysql";    mw_instances_key="mysqlInstances" ;;
     postgres) mw_name="PostgreSQL";  mw_collector="postgres"; mw_instances_key="postgresInstances" ;;
@@ -852,6 +870,7 @@ middleware_config() {
     echo "--- 配置第 $idx 个 ${mw_name} 实例（留空名称跳过结束）---"
 
     local name addr user password exporter_url extra_fields=""
+    local access_log="" log_format=""
     prompt name "实例别名（如 ${mw_type}-primary）" ""
     [[ -z "$name" ]] && { echo "已结束实例添加。"; break; }
 
@@ -887,6 +906,20 @@ middleware_config() {
         local status_path
         prompt status_path "stub_status 路径（如 /nginx_status）" "/nginx_status"
         extra_fields="statusPath: \"${status_path}\""
+        # 访问日志采集：提供 Top IP / Top URI / 状态码分布 / QPS 等分析数据。
+        # 未配置 accessLog 的实例不会采集访问日志，Web 端访问分析将无数据。
+        if confirm "是否采集该实例的访问日志（Top IP / URI / 状态码 / QPS）？" "yes"; then
+          prompt access_log "access.log 路径" "/var/log/nginx/access.log"
+          if [[ ! -r "$access_log" ]]; then
+            c_warn "当前无法读取 $access_log，请确认路径正确（agent 以 root 运行时通常可读）"
+          fi
+          choose "nginx log_format" 1 "combined（nginx 默认）" "combined_timed（末尾带 request_time）"
+          case "$CHOICE_VAL" in
+            combined_timed*) log_format="combined_timed" ;;
+            *)               log_format="combined" ;;
+          esac
+          extra_collector="nginxLog"
+        fi
         ;;
       kafka)
         local version
@@ -909,6 +942,10 @@ middleware_config() {
     fi
     if [[ "$mw_type" == "nginx" && -n "$status_path" ]]; then
       instances_yaml+="    statusPath: \"${status_path}\""$'\n'
+    fi
+    if [[ "$mw_type" == "nginx" && -n "$access_log" ]]; then
+      instances_yaml+="    accessLog: \"${access_log}\""$'\n'
+      instances_yaml+="    logFormat: \"${log_format}\""$'\n'
     fi
     if [[ "$mw_type" == "postgres" ]]; then
       instances_yaml+="    database: \"${database}\""$'\n'
@@ -940,7 +977,12 @@ middleware_config() {
   echo
   c_info "即将写入以下 ${mw_name} 配置到 $cfg："
   echo "----------------------------------------"
-  printf 'collectors:\n  %s: true\n\n%s:\n%s' "$mw_collector" "$mw_instances_key" "$instances_yaml"
+  if [[ -n "$extra_collector" ]]; then
+    printf 'collectors:\n  %s: true\n  %s: true\n\n%s:\n%s' \
+      "$mw_collector" "$extra_collector" "$mw_instances_key" "$instances_yaml"
+  else
+    printf 'collectors:\n  %s: true\n\n%s:\n%s' "$mw_collector" "$mw_instances_key" "$instances_yaml"
+  fi
   echo "----------------------------------------"
 
   if ! confirm "确认写入并重启 agent？" "yes"; then
@@ -949,14 +991,12 @@ middleware_config() {
   fi
 
   # 步骤1：开启 collectors
-  if grep -qE "^[[:space:]]*${mw_collector}:" "$cfg" 2>/dev/null; then
-    sed -i -E "s/^([[:space:]]*)${mw_collector}:[[:space:]]*.*/\\1${mw_collector}: true/" "$cfg"
-  elif grep -qE '^[[:space:]]*collectors:' "$cfg" 2>/dev/null; then
-    sed -i -E "/^[[:space:]]*collectors:/a\  ${mw_collector}: true" "$cfg"
-  else
-    printf "\ncollectors:\n  %s: true\n" "$mw_collector" >> "$cfg"
-  fi
+  enable_collector "$cfg" "$mw_collector"
   c_ok "已开启 collectors.${mw_collector}"
+  if [[ -n "$extra_collector" ]]; then
+    enable_collector "$cfg" "$extra_collector"
+    c_ok "已开启 collectors.${extra_collector}"
+  fi
 
   # 步骤2：写入 instances 段
   local tmp_file

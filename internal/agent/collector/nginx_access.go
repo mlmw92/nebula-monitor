@@ -205,8 +205,14 @@ func NewNginxAccessCollector(node, group string, instances []model.NginxInstance
 		group: group,
 		files: make(map[string]*accessFileState),
 	}
+	skipped := 0
 	for _, cfg := range instances {
 		if strings.TrimSpace(cfg.AccessLog) == "" {
+			// 未配置日志路径的实例无法采集访问日志：显式告警，避免静默无数据难以排查。
+			skipped++
+			slog.Warn("Nginx 实例未配置 accessLog，跳过访问日志采集",
+				"instance", cfg.Name, "addr", cfg.Addr,
+				"hint", `在 agent.yaml 的 nginxInstances 下为该实例添加 accessLog: "/var/log/nginx/access.log"`)
 			continue
 		}
 		key := normalizeRemoteAddr(cfg.Addr, "")
@@ -216,11 +222,18 @@ func NewNginxAccessCollector(node, group string, instances []model.NginxInstance
 				state.offset = st.Size() // 启动不回溯历史日志
 			}
 			_ = f.Close()
+			slog.Info("Nginx 访问日志已纳管",
+				"instance", cfg.Name, "path", cfg.AccessLog,
+				"startOffset", state.offset, "logFormat", cfg.LogFormat)
 		} else {
 			slog.Warn("Nginx access.log 打开失败，等待文件出现", "path", cfg.AccessLog, "err", err)
 		}
 		c.files[key] = state
 		c.instances = append(c.instances, cfg)
+	}
+	if len(c.files) == 0 {
+		slog.Warn("collectors.nginxLog 已开启，但没有任何 Nginx 实例配置 accessLog，访问日志采集不会产生数据",
+			"nginxInstances", len(instances), "skipped", skipped)
 	}
 	return c
 }
@@ -288,6 +301,13 @@ func (c *NginxAccessCollector) collectFile(cfg model.NginxInstanceConfig, state 
 			// 末尾残行（日志正在写入，尚无换行）：不解析，offset 不推进该行
 			break
 		}
+		if len(line) == 0 {
+			// 读到 EOF 且无内容：不计入行数，避免"无新日志"被误判为"解析失败"
+			if err != nil {
+				break
+			}
+			continue
+		}
 		readBytes += int64(len(line))
 		if readBytes > nginxAccessMaxBytes {
 			break
@@ -310,7 +330,13 @@ func (c *NginxAccessCollector) collectFile(cfg model.NginxInstanceConfig, state 
 	state.offset += readBytes // 推进到实际读取位置（超限时下次从断点续读）
 
 	if totalRequests == 0 {
-		slog.Debug("Nginx access.log 解析结果为空", "path", state.path, "rows", rows, "readBytes", readBytes)
+		if rows > 0 {
+			// 读到了新行却一行都没解析出来：几乎可以断定 log_format 与内置格式不匹配。
+			slog.Warn("Nginx access.log 读到新日志但全部解析失败，请检查 nginx log_format 是否为 combined 系列",
+				"path", state.path, "rows", rows, "readBytes", readBytes, "logFormat", cfg.LogFormat)
+		} else {
+			slog.Debug("Nginx access.log 本周期无新增日志", "path", state.path, "offset", state.offset)
+		}
 		return nil
 	}
 
