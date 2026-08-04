@@ -2,8 +2,12 @@
   <div class="overview-tab">
     <!-- 左列：TopologyMap + CenterPanel -->
     <div class="ot-left">
-      <TopologyMap :nodes="nodeCards" :health-score="healthScore" :health-level="healthLevel" />
-      <CenterPanel :nodes="nodeCards" :alerts="alerts" />
+      <div class="ot-topo">
+        <TopologyMap :nodes="nodeCards" :health-score="healthScore" :health-level="healthLevel" />
+      </div>
+      <div class="ot-center">
+        <CenterPanel :nodes="nodeCards" :alerts="alerts" />
+      </div>
     </div>
     <!-- 右列：HealthScore + 主机列表 -->
     <div class="ot-right">
@@ -136,6 +140,19 @@ const hostRows = computed(() =>
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+}
+
+.ot-topo {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.ot-center {
+  flex: 1.25;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .ot-right {
