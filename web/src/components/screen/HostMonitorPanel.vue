@@ -9,11 +9,11 @@
           <span>主机</span><span>CPU</span><span>内存</span><span>磁盘</span><span>流量</span>
         </div>
         <div class="hl-body">
-          <div class="hl-row" v-for="n in nodes" :key="n.name" @click="drillNode(n.name)">
+          <div class="hl-row" v-for="n in nodes" :key="n.hostname" @click="drillNode(n.hostname)">
             <span class="hl-name">
               <i class="dot" :class="n.online ? 'on' : 'off'"></i>
               <span class="host-text">
-                <span class="host-text-name" :title="n.name">{{ n.name }}</span>
+                <span class="host-text-name" :title="n.displayName || n.hostname">{{ n.displayName || n.hostname }}</span>
                 <span class="host-text-ip" :title="n.ip">{{ n.ip }}</span>
               </span>
             </span>
@@ -104,7 +104,7 @@ const diskSeries = ref([])
 const netSeries = ref([])
 const netCur = ref('--')
 
-const onlineNodes = computed(() => props.nodes.filter((n) => n.online !== false).map((n) => n.name))
+const onlineNodes = computed(() => props.nodes.filter((n) => n.online !== false).map((n) => n.hostname))
 
 async function loadTrends() {
   const list = onlineNodes.value

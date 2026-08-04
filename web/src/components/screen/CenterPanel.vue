@@ -17,7 +17,7 @@
       <div class="glass chart-block">
         <div class="cb-head">
           <i class="cb-bar"></i>
-          <span>集群资源趋势</span>
+          <span>集群资源平均趋势</span>
           <span class="cb-cur">{{ trendCur }}</span>
         </div>
         <div ref="trendChart" class="cb-chart"></div>
@@ -134,7 +134,7 @@ function formatBytes(b) {
 }
 
 async function loadTrends() {
-  const list = onlineNodes.value.map((n) => n.name)
+  const list = onlineNodes.value.map((n) => n.hostname)
   const [cpu, mem, disk, netIn, netOut] = await Promise.all([
     queryClusterTrend(list, 'cpu_usage', 'avg'),
     queryClusterTrend(list, 'mem_used_percent', 'avg'),
