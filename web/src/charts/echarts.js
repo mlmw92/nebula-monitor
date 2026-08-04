@@ -216,7 +216,23 @@ export function mapGeoOption(scope, data) {
   const o = data || {}
   const isWorld = scope === 'world'
   const map = isWorld ? 'world' : 'china'
-  const series = []
+  const series = [
+    // 基础地图图层：确保无散点数据时轮廓仍可显示
+    {
+      type: 'map',
+      map,
+      roam: false,
+      zlevel: 1,
+      silent: true,
+      itemStyle: {
+        areaColor: 'rgba(59,130,246,0.12)',
+        borderColor: 'rgba(34,211,238,0.35)',
+        borderWidth: 0.8,
+      },
+      emphasis: { disabled: true },
+      data: [],
+    },
+  ]
 
   if (o.lines && o.lines.length) {
     series.push({

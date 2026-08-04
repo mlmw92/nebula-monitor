@@ -113,9 +113,10 @@ var countryMap = map[string]string{
 }
 
 // countryCN 将国家名规范为中文（世界地图 GeoJSON 的 name）。
+// ip2region 对保留/内网段返回 "Reserved"，视为无效归属地。
 func countryCN(name string) string {
 	name = strings.TrimSpace(name)
-	if name == "" || name == "0" {
+	if name == "" || name == "0" || strings.EqualFold(name, "Reserved") {
 		return ""
 	}
 	if cn, ok := countryMap[name]; ok {
@@ -130,9 +131,10 @@ var provinceSuffixes = []string{
 }
 
 // normProvince 将省份规范为中文简称（对齐中国地图 GeoJSON 的 name）。
+// ip2region 对保留/内网段返回 "Reserved"，视为无效归属地。
 func normProvince(s string) string {
 	s = strings.TrimSpace(s)
-	if s == "" || s == "0" {
+	if s == "" || s == "0" || strings.EqualFold(s, "Reserved") {
 		return ""
 	}
 	for _, suf := range provinceSuffixes {

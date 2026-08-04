@@ -75,6 +75,10 @@
             </div>
           </div>
           <div ref="mapChart" class="ntm-chart"></div>
+          <div v-if="!validPoints.length" class="ntm-empty">
+            <div>暂无有效的地理位置数据</div>
+            <div class="ntm-empty-sub">当前来源多为内网 / 保留地址</div>
+          </div>
         </div>
         <!-- 来源地排名 -->
         <div class="glass nt-sources">
@@ -120,6 +124,10 @@ let timer = null
 const summary = ref(null)
 const geoData = ref({ cn: null, world: null })
 const geoScope = ref('cn')
+const validPoints = computed(() => {
+  const points = geoData.value[geoScope.value]?.points || []
+  return points.filter(isValidPoint)
+})
 const nginxInstances = ref([])
 const totalRequests = ref(0)
 const totalRate = ref(0)
@@ -130,11 +138,15 @@ const accessEnabled = computed(() => {
   return !!((s.topUris && s.topUris.length) || (s.topIps && s.topIps.length) || s.totalRequests)
 })
 
+// 过滤无效地理点（ip2region 对内网/保留地址返回 Reserved）
+function isValidPoint(p) {
+  return p && p.name && p.name !== 'Reserved' && p.name !== '0'
+}
+
 // 顶部 KPI 条
 const topKpis = computed(() => {
   const s = summary.value || {}
-  const geo = geoData.value[geoScope.value]
-  const points = geo?.points || []
+  const points = validPoints.value
   const maxSrc = points.length ? points.reduce((a, b) => (a.requests > b.requests ? a : b)) : null
   const isWorld = geoScope.value === 'world'
 
@@ -158,7 +170,7 @@ const topKpis = computed(() => {
       label: '最大来源',
       value: maxSrc ? maxSrc.name : '--',
       color: COLORS.amber,
-      sub: maxSrc ? `${((maxSrc.requests / (s.totalRequests || 1)) * 100).toFixed(1)}%` : '',
+      sub: maxSrc ? `${Math.min((maxSrc.requests / (s.totalRequests || 1)) * 100, 100).toFixed(1)}%` : '',
     },
     {
       key: 'peak',
@@ -188,8 +200,7 @@ function ipPct(ip) {
 
 // 来源地排名
 const sourceList = computed(() => {
-  const points = geoData.value[geoScope.value]?.points || []
-  return points.slice(0, 10).map((p) => ({ name: p.name, requests: p.requests }))
+  return validPoints.value.slice(0, 10).map((p) => ({ name: p.name, requests: p.requests }))
 })
 const maxSrc = computed(() => Math.max(...sourceList.value.map((s) => s.requests || 0), 1))
 
@@ -310,21 +321,26 @@ function renderStatus() {
 
 function renderMap() {
   if (!map) return
-  const d = geoData.value[geoScope.value]
-  const hasData = !!(d && (d.points?.length || d.lines?.length || d.deployPoints?.length))
-  if (hasData) {
-    const toGeo = {
-      points: (d.points || []).map((p) => ({ name: mapName(geoScope.value, p), requests: p.requests, bytes: p.bytes })),
-      deployPoints: (d.deployPoints || []).map((p) => ({ name: mapName(geoScope.value, p), requests: p.requests })),
-      lines: (d.lines || []).map((l) => ({
-        fromName: mapName(geoScope.value, { name: l.from, countryEn: l.fromEn }),
-        toName: mapName(geoScope.value, { name: l.to, countryEn: l.toEn }),
-        value: l.value,
-      })),
+  try {
+    const d = geoData.value[geoScope.value]
+    const points = (d?.points || []).filter(isValidPoint)
+    const hasData = !!(points.length || d?.lines?.length || d?.deployPoints?.length)
+    if (hasData) {
+      const toGeo = {
+        points: points.map((p) => ({ name: mapName(geoScope.value, p), requests: p.requests, bytes: p.bytes })),
+        deployPoints: (d.deployPoints || []).map((p) => ({ name: mapName(geoScope.value, p), requests: p.requests })),
+        lines: (d.lines || []).map((l) => ({
+          fromName: mapName(geoScope.value, { name: l.from, countryEn: l.fromEn }),
+          toName: mapName(geoScope.value, { name: l.to, countryEn: l.toEn }),
+          value: l.value,
+        })),
+      }
+      map.setOption(mapGeoOption(geoScope.value, toGeo), true)
+    } else {
+      map.setOption(mapGeoOption(geoScope.value, {}), true)
     }
-    map.setOption(mapGeoOption(geoScope.value, toGeo), true)
-  } else {
-    map.setOption(mapGeoOption(geoScope.value, {}), true)
+  } catch (e) {
+    console.error('地图渲染失败', e)
   }
 }
 
@@ -348,7 +364,11 @@ watch(() => geoData.value[geoScope.value], () => {
 }, { deep: false })
 
 onMounted(async () => {
-  await registerMaps()
+  try {
+    await registerMaps()
+  } catch (e) {
+    console.error('地图 GeoJSON 注册失败', e)
+  }
   trend = initChart(trendChart.value)
   status = initChart(statusChart.value)
   map = initChart(mapChart.value)
@@ -605,6 +625,25 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   width: 100%;
+}
+
+.ntm-empty {
+  position: absolute;
+  inset: 36px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+  gap: 6px;
+}
+.ntm-empty-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.8;
 }
 
 .nt-sources {
