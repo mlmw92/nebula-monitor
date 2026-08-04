@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 )
 
@@ -131,8 +132,14 @@ func (a *API) handleNginxAccessGeo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp.Points = a.ngx.Points(scope)
-	// 部署点：数据中心位置（内网场景无真实地理，固定取地图中心；中国=北京，世界=中国）
-	deployName := "北京"
+	// 部署点：服务器（数据中心）所在地，取大屏配置的省级行政区；
+	// 世界地图上省份无对应区域，统一落到国家中心。
+	deployName := config.DefaultDeployLocation
+	if a.screenMgr != nil {
+		if loc := a.screenMgr.Get().DeployLocation; config.IsValidDeployLocation(loc) {
+			deployName = loc
+		}
+	}
 	center := nginxaccess.Point{Name: deployName}
 	if scope == "world" {
 		deployName = "中国"

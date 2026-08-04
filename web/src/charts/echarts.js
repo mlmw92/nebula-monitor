@@ -278,13 +278,28 @@ export function mapGeoOption(scope, data) {
     if (dps.length) {
       series.push({
         name: '数据中心',
-        type: 'scatter',
+        type: 'effectScatter',
         coordinateSystem: 'geo',
-        zlevel: 2,
-        symbol: 'diamond',
-        symbolSize: 14,
-        itemStyle: { color: '#22c55e', shadowBlur: 16, shadowColor: '#22c55e' },
-        label: { show: true, formatter: '{b}', color: '#e5edf7', fontSize: 11, position: 'top' },
+        zlevel: 3,
+        symbol: 'pin',
+        symbolSize: 26,
+        symbolOffset: [0, '-50%'],
+        rippleEffect: { brushType: 'stroke', scale: 3.5, period: 3 },
+        itemStyle: { color: '#22c55e', shadowBlur: 18, shadowColor: '#22c55e' },
+        label: {
+          show: true,
+          formatter: '{b}',
+          position: 'top',
+          distance: 8,
+          color: '#d1fae5',
+          fontSize: 12,
+          fontWeight: 600,
+          backgroundColor: 'rgba(6,32,20,0.75)',
+          borderColor: 'rgba(34,197,94,0.6)',
+          borderWidth: 1,
+          borderRadius: 3,
+          padding: [3, 6],
+        },
         data: dps,
       })
     }
@@ -300,8 +315,9 @@ export function mapGeoOption(scope, data) {
         if (p.seriesType === 'lines') {
           return `${p.data.fromName} → ${p.data.toName}<br/>请求量: ${p.data.value}`
         }
-        if (p.seriesType === 'scatter' && p.data.name) {
-          return `${p.data.name}<br/>请求量: ${p.data.value[2] || 0}`
+        if (p.seriesName === '数据中心') {
+          const v = p.data.value || []
+          return `${p.name}<br/>服务器所在地<br/>本地请求量: ${v[2] || 0}`
         }
         if (p.seriesType === 'effectScatter') {
           const v = p.data.value || []
@@ -325,8 +341,14 @@ export function mapGeoOption(scope, data) {
         label: { show: false },
         itemStyle: { areaColor: 'rgba(34,211,238,0.25)' },
       },
+      // 部署点所在区域底色高亮；世界地图的 GeoJSON 区域名为英文，需用 countryEn
       regions: o.deployPoints && o.deployPoints[0]
-        ? [{ name: o.deployPoints[0].name, itemStyle: { areaColor: 'rgba(34,197,94,0.18)' } }]
+        ? [{
+            name: isWorld
+              ? o.deployPoints[0].countryEn || o.deployPoints[0].name
+              : o.deployPoints[0].name,
+            itemStyle: { areaColor: 'rgba(34,197,94,0.18)' },
+          }]
         : [],
     },
     series,

@@ -126,6 +126,9 @@ export const WORLD_COUNTRY_COORDS = {
   法国: [2.35, 48.85],
 }
 
+// CN_PROVINCES 省级行政区名称列表，与后端 config.CNProvinces 保持一致，供设置项下拉使用。
+export const CN_PROVINCES = Object.keys(CN_PROVINCE_COORDS)
+
 // geoCoord 根据 scope 与数据点返回 [lng, lat]，查不到返回 null。
 // p 需含 name（中文）与 world 下可选 countryEn（英文）。
 export function geoCoord(scope, p) {

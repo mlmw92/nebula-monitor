@@ -51,6 +51,10 @@ func (m *Manager) loadOrInit(initial config.ScreenConfig) error {
 		if !config.IsValidScreenRefreshInterval(c.RefreshInterval) {
 			c.RefreshInterval = initial.RefreshInterval
 		}
+		// 老配置未设置服务器所在地时回退到默认值
+		if !config.IsValidDeployLocation(c.DeployLocation) {
+			c.DeployLocation = initial.DeployLocation
+		}
 		m.current = c
 		slog.Info("已加载大屏配置文件", "path", m.path)
 		return nil

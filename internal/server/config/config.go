@@ -39,9 +39,11 @@ type Config struct {
 // ScreenConfig 数据大屏模块显隐配置（全局单份，与 notify 一致）。
 // Modules 为模块开关表，key 见前端设置项：topology/gauges/risk/alerts/redis/trends/kpiTop。
 // RefreshInterval 为大屏数据自动刷新间隔（秒），同时也是倒计时总时长。
+// DeployLocation 为服务器（数据中心）所在省级行政区，用于网络地图上标注部署点并绘制访问动线。
 type ScreenConfig struct {
 	Modules         map[string]bool `yaml:"modules" json:"modules"`
 	RefreshInterval int             `yaml:"refreshInterval" json:"refreshInterval"`
+	DeployLocation  string          `yaml:"deployLocation" json:"deployLocation"`
 }
 
 // ScreenRefreshIntervals 大屏刷新间隔可选档位（秒），与前端下拉选项保持一致。
@@ -51,6 +53,30 @@ var ScreenRefreshIntervals = []int{10, 20, 30, 60}
 func IsValidScreenRefreshInterval(v int) bool {
 	for _, s := range ScreenRefreshIntervals {
 		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
+// DefaultDeployLocation 默认服务器所在地。
+const DefaultDeployLocation = "北京"
+
+// CNProvinces 省级行政区名称，与前端地图 GeoJSON、经纬度表的键保持一致。
+var CNProvinces = []string{
+	"北京", "天津", "上海", "重庆",
+	"河北", "山西", "辽宁", "吉林", "黑龙江",
+	"江苏", "浙江", "安徽", "福建", "江西", "山东",
+	"河南", "湖北", "湖南", "广东", "海南",
+	"四川", "贵州", "云南", "陕西", "甘肃", "青海",
+	"内蒙古", "广西", "西藏", "宁夏", "新疆",
+	"台湾", "香港", "澳门",
+}
+
+// IsValidDeployLocation 判断服务器所在地是否为受支持的省级行政区。
+func IsValidDeployLocation(v string) bool {
+	for _, p := range CNProvinces {
+		if p == v {
 			return true
 		}
 	}
@@ -69,6 +95,7 @@ func DefaultScreenConfig() ScreenConfig {
 			"alerts":            true,
 		},
 		RefreshInterval: 30,
+		DeployLocation:  DefaultDeployLocation,
 	}
 }
 

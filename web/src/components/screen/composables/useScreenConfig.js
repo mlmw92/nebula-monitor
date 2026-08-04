@@ -2,12 +2,13 @@
 import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import http from '../../../api/http'
+import { CN_PROVINCES } from '../../../charts/geoCoords'
 
 // 大屏刷新间隔可选档位（秒），与后端 config.ScreenRefreshIntervals 保持一致
 export const REFRESH_INTERVALS = [10, 20, 30, 60]
 
 export function useScreenConfig() {
-  const cfg = reactive({ modules: { alerts: true }, refreshInterval: 30 })
+  const cfg = reactive({ modules: { alerts: true }, refreshInterval: 30, deployLocation: '北京' })
   const settingOpen = ref(false)
   const savingCfg = ref(false)
 
@@ -18,6 +19,9 @@ export function useScreenConfig() {
       // 仅接受预设档位，历史遗留的其它值回退默认 30 秒
       if (res && REFRESH_INTERVALS.includes(res.refreshInterval)) {
         cfg.refreshInterval = res.refreshInterval
+      }
+      if (res && CN_PROVINCES.includes(res.deployLocation)) {
+        cfg.deployLocation = res.deployLocation
       }
     } catch (e) {
       /* 默认全开 */
@@ -30,6 +34,7 @@ export function useScreenConfig() {
       await http.put('/api/v1/screen/config', {
         modules: { ...cfg.modules },
         refreshInterval: cfg.refreshInterval,
+        deployLocation: cfg.deployLocation,
       })
       ElMessage.success('大屏配置已保存')
       settingOpen.value = false

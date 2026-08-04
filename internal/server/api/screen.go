@@ -33,6 +33,13 @@ func (a *API) handleScreenPut(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "刷新间隔仅支持 10/20/30/60 秒"})
 		return
 	}
+	// 服务器所在地校验：未传则沿用默认值；传入则必须是省级行政区
+	if incoming.DeployLocation == "" {
+		incoming.DeployLocation = config.DefaultDeployLocation
+	} else if !config.IsValidDeployLocation(incoming.DeployLocation) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "服务器所在地需为省级行政区名称"})
+		return
+	}
 	if err := a.screenMgr.Save(incoming); err != nil {
 		slog.Error("保存大屏配置失败", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存失败: " + err.Error()})
