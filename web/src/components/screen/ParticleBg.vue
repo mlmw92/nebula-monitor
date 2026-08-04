@@ -41,7 +41,24 @@ function resize() {
   canvasRef.value.style.width = w + 'px'
   canvasRef.value.style.height = h + 'px'
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  refreshAccent()
   if (particles.length === 0) initParticles()
+}
+
+let accentRGB = { r: 56, g: 189, b: 248 }
+
+function refreshAccent() {
+  const el = canvasRef.value?.parentElement || document.body
+  const color = getComputedStyle(el).getPropertyValue('--accent').trim() || '#38bdf8'
+  // hex / rgb / named -> rgb
+  const div = document.createElement('div')
+  div.style.color = color
+  div.style.display = 'none'
+  document.body.appendChild(div)
+  const rgbStr = getComputedStyle(div).color
+  document.body.removeChild(div)
+  const m = rgbStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+  if (m) accentRGB = { r: +m[1], g: +m[2], b: +m[3] }
 }
 
 function draw() {
@@ -71,11 +88,13 @@ function draw() {
     }
   }
 
+  const { r, g, b } = accentRGB
+
   // 绘制连线
   for (const l of lines) {
     const p1 = particles[l.i]
     const p2 = particles[l.j]
-    ctx.strokeStyle = `rgba(34,211,238,${l.alpha})`
+    ctx.strokeStyle = `rgba(${r},${g},${b},${l.alpha})`
     ctx.lineWidth = 0.6
     ctx.beginPath()
     ctx.moveTo(p1.x, p1.y)
@@ -85,7 +104,7 @@ function draw() {
 
   // 绘制粒子
   for (const p of particles) {
-    ctx.fillStyle = `rgba(34,211,238,${p.a})`
+    ctx.fillStyle = `rgba(${r},${g},${b},${p.a})`
     ctx.beginPath()
     ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
     ctx.fill()

@@ -97,21 +97,25 @@ onMounted(() => {
   position: relative;
   display: flex;
   align-items: center;
-  height: 44px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  justify-content: center;
+  height: 36px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   z-index: 2;
   overflow: visible;
 }
 
 .tab-inner {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 0 4px;
-  width: 100%;
+  gap: 4px;
+  padding: 4px;
   height: 100%;
+  background: rgba(10, 22, 42, 0.55);
+  border: 1px solid rgba(80, 140, 220, 0.18);
+  border-radius: 18px;
+  backdrop-filter: blur(4px);
 }
 
 .tab-item {
@@ -123,32 +127,35 @@ onMounted(() => {
   height: 100%;
   background: transparent;
   border: none;
+  border-radius: 14px;
   color: var(--text-dim);
   font-size: 13px;
   font-family: var(--font);
   letter-spacing: 0.06em;
   cursor: pointer;
-  transition: color 0.2s, background 0.2s;
+  transition: all 0.25s;
   white-space: nowrap;
   user-select: none;
-  border-radius: 8px;
   z-index: 1;
 }
 
 .tab-item:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(56, 189, 248, 0.08);
 }
 
 .tab-item.active {
-  color: var(--accent);
+  color: #050a14;
+  background: linear-gradient(180deg, rgba(56,189,248,0.95) 0%, rgba(14,165,233,0.95) 100%);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.35);
+  font-weight: 700;
 }
 
 .tab-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.7;
+  opacity: 0.8;
 }
 
 .tab-item.active .tab-icon {
@@ -156,14 +163,14 @@ onMounted(() => {
 }
 
 .tab-icon :deep(svg) {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
 }
 
 .tab-badge {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: -4px;
+  right: 2px;
   min-width: 16px;
   height: 16px;
   padding: 0 5px;
@@ -181,33 +188,23 @@ onMounted(() => {
 }
 
 .tab-indicator {
-  position: absolute;
-  bottom: 0;
-  height: 2px;
-  background: var(--accent);
-  border-radius: 1px;
-  box-shadow: 0 0 8px var(--accent-glow), 0 0 16px var(--accent-glow);
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  z-index: 2;
+  display: none;
 }
 
 /* 4K 适配 */
 @media (min-width: 2400px) {
-  .screen-tab-bar {
-    height: 56px;
-  }
+  .screen-tab-bar { height: 46px; }
+  .tab-inner { border-radius: 23px; }
   .tab-item {
     font-size: 16px;
     padding: 0 24px;
     gap: 8px;
+    border-radius: 18px;
   }
-  .tab-icon :deep(svg) {
-    width: 20px;
-    height: 20px;
-  }
+  .tab-icon :deep(svg) { width: 18px; height: 18px; }
   .tab-badge {
-    top: 8px;
-    right: 8px;
+    top: -5px;
+    right: 4px;
     min-width: 20px;
     height: 20px;
     font-size: 12px;
@@ -215,21 +212,18 @@ onMounted(() => {
 }
 
 @media (min-width: 3440px) {
-  .screen-tab-bar {
-    height: 68px;
-  }
+  .screen-tab-bar { height: 58px; }
+  .tab-inner { border-radius: 29px; }
   .tab-item {
     font-size: 20px;
     padding: 0 32px;
     gap: 10px;
+    border-radius: 24px;
   }
-  .tab-icon :deep(svg) {
-    width: 24px;
-    height: 24px;
-  }
+  .tab-icon :deep(svg) { width: 22px; height: 22px; }
   .tab-badge {
-    top: 10px;
-    right: 10px;
+    top: -6px;
+    right: 6px;
     min-width: 24px;
     height: 24px;
     font-size: 14px;

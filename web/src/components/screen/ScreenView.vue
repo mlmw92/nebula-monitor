@@ -5,33 +5,45 @@
 
     <!-- 顶栏 -->
     <header class="hud-top">
-      <div class="hud-side hud-clock mono">
-        <span class="clock-text">{{ clock }}</span>
-        <!-- 实时倒计时 -->
-        <div class="countdown" :class="{ urgent: countdown <= 5 }">
-          <span class="cd-label">刷新</span>
-          <span class="cd-num mono">{{ countdown }}</span>
-          <span class="cd-unit">s</span>
+      <div class="hud-side hud-left">
+        <div class="hud-clock mono">
+          <span class="clock-text">{{ clock }}</span>
+          <!-- 实时倒计时 -->
+          <div class="countdown" :class="{ urgent: countdown <= 5 }">
+            <span class="cd-label">刷新</span>
+            <span class="cd-num mono">{{ countdown }}</span>
+            <span class="cd-unit">s</span>
+          </div>
         </div>
       </div>
+
       <div class="hud-center">
         <h1 class="hud-title">
-          <span class="ht-en">{{ brand.name }}</span>
-          <span class="ht-sep"></span>
-          <span class="ht-cn">监控指挥中心</span>
+          <span class="ht-sub">{{ brand.name }}</span>
+          <span class="ht-main">监控指挥中心</span>
         </h1>
+        <div class="title-deco">
+          <span class="td-line"></span>
+          <span class="td-dot"></span>
+          <span class="td-line"></span>
+        </div>
+        <div class="hud-tabs">
+          <ScreenTabBar :active="activeTab" :firingCount="firingCount" @update:active="activeTab = $event" />
+        </div>
       </div>
-      <div class="hud-side hud-actions">
-        <button class="hud-btn" title="全屏" @click="toggleFullscreen"><FullScreen /></button>
-        <button class="hud-btn" title="模块设置" @click="settingOpen = true"><Setting /></button>
-        <button class="hud-btn" title="返回概览" @click="goBack"><Back /></button>
+
+      <div class="hud-side hud-right">
+        <div class="hud-date">
+          <div class="hd-time">{{ timeOnly }}</div>
+          <div class="hd-date">{{ dateText }}</div>
+        </div>
+        <div class="hud-actions">
+          <button class="hud-btn" title="全屏" @click="toggleFullscreen"><FullScreen /></button>
+          <button class="hud-btn" title="模块设置" @click="settingOpen = true"><Setting /></button>
+          <button class="hud-btn" title="返回概览" @click="goBack"><Back /></button>
+        </div>
       </div>
     </header>
-
-    <!-- Tab 导航栏 -->
-    <div class="hud-tab-row">
-      <ScreenTabBar :active="activeTab" :firingCount="firingCount" @update:active="activeTab = $event" />
-    </div>
 
     <!-- 持久 KPI 条 -->
     <div class="hud-kpi-bar">
@@ -135,6 +147,8 @@ const { cfg, settingOpen, savingCfg, loadScreenConfig, saveScreenConfig } = useS
 const REFRESH_INTERVAL = 30
 const activeTab = ref('overview')
 const clock = ref('')
+const dateText = ref('')
+const timeOnly = ref('')
 let dataTimer = null
 let clockTimer = null
 let ws = null
@@ -203,6 +217,9 @@ function tickClock() {
   const d = new Date()
   const p = (x) => String(x).padStart(2, '0')
   clock.value = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  timeOnly.value = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  const days = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+  dateText.value = `${p(d.getMonth() + 1)}月${p(d.getDate())}日 ${days[d.getDay()]}`
 }
 
 // 全屏
@@ -263,6 +280,25 @@ onUnmounted(() => {
 
 <style scoped>
 .screen-view {
+  /* 大屏专用：深蓝 + 青蓝科技光 + 金黄数据高亮 */
+  --accent: #38bdf8;
+  --accent-dim: rgba(56, 189, 248, 0.14);
+  --accent-glow: rgba(56, 189, 248, 0.22);
+  --warn: #f5c542;
+  --warn-dim: rgba(245, 197, 66, 0.16);
+  --warn-glow: rgba(245, 197, 66, 0.25);
+  --danger: #ff5d6c;
+  --danger-dim: rgba(255, 93, 108, 0.16);
+  --text: #e8f1ff;
+  --text-dim: #6e8bb8;
+  --text-muted: #455670;
+  --border: rgba(80, 140, 220, 0.12);
+  --border-strong: rgba(80, 140, 220, 0.22);
+  --bg-card: rgba(10, 22, 42, 0.92);
+  --chart-green: #22c55e;
+  --chart-amber: #f5c542;
+  --chart-red: #ef4444;
+
   position: relative;
   width: 100vw;
   height: 100vh;
@@ -270,18 +306,19 @@ onUnmounted(() => {
   display: grid;
   grid-template-areas:
     'top'
-    'tab'
     'kpi'
     'main'
     'bottom';
-  grid-template-rows: 64px 44px 48px 1fr 48px;
+  grid-template-rows: auto 48px 1fr 48px;
   gap: 8px;
   padding: 8px 12px;
   color: var(--text);
   background:
-    radial-gradient(1200px 500px at 50% -10%, rgba(34, 211, 238, 0.08), transparent 60%),
-    radial-gradient(900px 420px at 90% 110%, rgba(168, 85, 247, 0.07), transparent 60%),
-    linear-gradient(160deg, #060b16 0%, #0d1526 55%, #060b16 100%);
+    radial-gradient(1200px 520px at 50% -8%, rgba(56, 189, 248, 0.10), transparent 60%),
+    radial-gradient(900px 420px at 10% 0%, rgba(245, 197, 66, 0.06), transparent 55%),
+    radial-gradient(900px 420px at 90% 0%, rgba(56, 189, 248, 0.06), transparent 55%),
+    radial-gradient(1000px 360px at 50% 110%, rgba(56, 189, 248, 0.05), transparent 55%),
+    linear-gradient(160deg, #040811 0%, #081426 55%, #040811 100%);
 }
 
 .screen-view::before {
@@ -290,8 +327,8 @@ onUnmounted(() => {
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(34, 211, 238, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(34, 211, 238, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(56, 189, 248, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.03) 1px, transparent 1px);
   background-size: 44px 44px;
   z-index: 0;
 }
@@ -304,26 +341,36 @@ onUnmounted(() => {
   justify-content: space-between;
   position: relative;
   z-index: 2;
+  padding: 6px 0 4px;
 }
 
 .hud-side {
-  width: 280px;
+  width: 300px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+
+.hud-left {
+  justify-content: flex-start;
+}
+
+.hud-right {
+  justify-content: flex-end;
 }
 
 .hud-clock {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-dim);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
 }
 
 .clock-text {
   white-space: nowrap;
+  color: var(--text);
 }
 
 .hud-actions {
@@ -333,17 +380,19 @@ onUnmounted(() => {
 .hud-center {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  position: relative;
 }
 
 .hud-btn {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-card);
+  background: rgba(10, 22, 42, 0.6);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text-dim);
@@ -358,41 +407,87 @@ onUnmounted(() => {
 }
 
 .hud-btn svg {
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
 }
 
 .hud-title {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: 2px;
   margin: 0;
   user-select: none;
+  position: relative;
 }
 
-.ht-en {
-  font-size: 22px;
+.ht-sub {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.35em;
+  color: var(--warn);
+  text-shadow: 0 0 10px var(--warn-glow);
+}
+
+.ht-main {
+  font-size: 32px;
   font-weight: 800;
-  letter-spacing: 0.5em;
-  background: linear-gradient(90deg, #22d3ee, #3b82f6, #a855f7);
+  letter-spacing: 0.28em;
+  background: linear-gradient(180deg, #e8f1ff 0%, #38bdf8 60%, #0ea5e9 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 0 14px rgba(34, 211, 238, 0.45));
+  filter: drop-shadow(0 0 18px rgba(56, 189, 248, 0.55));
 }
 
-.ht-sep {
-  width: 1px;
-  height: 20px;
-  background: linear-gradient(180deg, transparent, rgba(34, 211, 238, 0.7), transparent);
+.title-deco {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
 }
 
-.ht-cn {
-  font-size: 17px;
+.td-line {
+  width: 80px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.7), transparent);
+}
+
+.td-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow), 0 0 20px var(--accent-glow);
+}
+
+.hud-tabs {
+  margin-top: 6px;
+  width: fit-content;
+  max-width: 90%;
+}
+
+.hud-date {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-right: 10px;
+  letter-spacing: 0.06em;
+}
+
+.hd-time {
+  font-size: 20px;
   font-weight: 700;
+  font-family: var(--mono);
   color: var(--text);
-  letter-spacing: 0.3em;
-  text-shadow: 0 0 18px rgba(34, 211, 238, 0.35);
+  text-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+  line-height: 1;
+}
+
+.hd-date {
+  font-size: 12px;
+  color: var(--text-dim);
 }
 
 /* 倒计时 */
@@ -402,8 +497,8 @@ onUnmounted(() => {
   gap: 3px;
   padding: 2px 10px;
   border-radius: 16px;
-  background: rgba(34, 211, 238, 0.06);
-  border: 1px solid rgba(34, 211, 238, 0.2);
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px solid rgba(56, 189, 268, 0.2);
   transition: all 0.3s;
 }
 
@@ -441,13 +536,6 @@ onUnmounted(() => {
 @keyframes cd-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
-}
-
-/* Tab 导航栏 */
-.hud-tab-row {
-  grid-area: tab;
-  position: relative;
-  z-index: 2;
 }
 
 /* 持久 KPI 条 */
@@ -653,15 +741,19 @@ onUnmounted(() => {
   .screen-view {
     padding: 14px 24px;
     gap: 14px;
-    grid-template-rows: 84px 56px 64px 1fr 68px;
+    grid-template-rows: auto 64px 1fr 68px;
   }
-  .hud-side { width: 360px; }
-  .hud-clock { font-size: 18px; }
-  .hud-btn { width: 42px; height: 42px; }
-  .hud-btn svg { width: 21px; height: 21px; }
-  .ht-en { font-size: 30px; letter-spacing: 0.42em; }
-  .ht-cn { font-size: 23px; letter-spacing: 0.24em; }
-  .ht-sep { height: 28px; }
+  .hud-side { width: 380px; }
+  .hud-clock { font-size: 16px; }
+  .hud-btn { width: 40px; height: 40px; }
+  .hud-btn svg { width: 20px; height: 20px; }
+  .ht-sub { font-size: 15px; letter-spacing: 0.3em; }
+  .ht-main { font-size: 40px; letter-spacing: 0.24em; }
+  .title-deco { margin-top: 8px; }
+  .td-line { width: 110px; }
+  .hud-tabs { margin-top: 8px; }
+  .hd-time { font-size: 26px; }
+  .hd-date { font-size: 14px; }
   .cd-label { font-size: 13px; }
   .cd-num { font-size: 24px; }
   .cd-unit { font-size: 14px; }
@@ -677,15 +769,19 @@ onUnmounted(() => {
   .screen-view {
     padding: 20px 34px;
     gap: 20px;
-    grid-template-rows: 104px 68px 80px 1fr 84px;
+    grid-template-rows: auto 80px 1fr 84px;
   }
-  .hud-side { width: 440px; }
-  .hud-clock { font-size: 22px; }
-  .hud-btn { width: 50px; height: 50px; }
-  .hud-btn svg { width: 25px; height: 25px; }
-  .ht-en { font-size: 40px; letter-spacing: 0.38em; }
-  .ht-cn { font-size: 31px; letter-spacing: 0.2em; }
-  .ht-sep { height: 36px; }
+  .hud-side { width: 460px; }
+  .hud-clock { font-size: 20px; }
+  .hud-btn { width: 48px; height: 48px; }
+  .hud-btn svg { width: 24px; height: 24px; }
+  .ht-sub { font-size: 18px; letter-spacing: 0.28em; }
+  .ht-main { font-size: 52px; letter-spacing: 0.2em; }
+  .title-deco { margin-top: 10px; }
+  .td-line { width: 140px; }
+  .hud-tabs { margin-top: 10px; }
+  .hd-time { font-size: 34px; }
+  .hd-date { font-size: 17px; }
   .cd-label { font-size: 16px; }
   .cd-num { font-size: 30px; }
   .cd-unit { font-size: 17px; }
