@@ -38,13 +38,11 @@
         </circle>
       </g>
 
-      <!-- 中心健康核 -->
+      <!-- 中心健康核（装饰光晕，KPI 卡片覆盖其上） -->
       <g :transform="`translate(${CX} ${CY})`">
-        <circle r="62" fill="url(#coreFill)" />
-        <circle r="42" fill="none" :stroke="coreHex" stroke-width="1.5" opacity="0.5" filter="url(#coreGlow)" class="core-ring" />
-        <circle r="30" fill="none" :stroke="coreHex" stroke-width="2.5" opacity="0.85" filter="url(#coreGlow)" />
-        <text class="core-score" text-anchor="middle" dy="-2" :fill="coreHex">{{ healthScore }}</text>
-        <text class="core-label" text-anchor="middle" dy="16">健康评分</text>
+        <circle r="72" fill="url(#coreFill)" />
+        <circle r="58" fill="none" :stroke="coreHex" stroke-width="1.5" opacity="0.45" filter="url(#coreGlow)" class="core-ring" />
+        <circle r="44" fill="none" :stroke="coreHex" stroke-width="2" opacity="0.7" filter="url(#coreGlow)" />
       </g>
     </svg>
 
@@ -66,8 +64,13 @@
       <div class="tn-meta">{{ n.meta }}</div>
     </div>
 
-    <!-- 中心标题 -->
-    <div class="topo-center-cap" :style="{ left: '50%', top: (CY / VB.h * 100) + '%' }">云平台</div>
+    <!-- 中心 KPI 健康评分 -->
+    <div class="topo-core glass" :class="healthLevel" :style="{ left: '50%', top: (CY / VB.h * 100) + '%' }">
+      <div class="tc-cap">云平台</div>
+      <div class="tc-score" :style="{ color: coreHex }">{{ healthScore }}</div>
+      <div class="tc-label">健康评分</div>
+      <div class="tc-level" :style="{ color: coreHex }">{{ levelText }}</div>
+    </div>
 
     <!-- hover 提示 -->
     <div v-if="hover" class="topo-tip glass" :style="{ left: hover.px + '%', top: hover.py + '%' }">
@@ -103,6 +106,12 @@ const hover = ref(null)
 // 蓝色科技风：健康核颜色（green 为亮蓝，amber/red 保留预警/故障）
 const COLOR = { green: '#38bdf8', amber: '#f59e0b', red: '#f43f5e' }
 const coreHex = computed(() => COLOR[props.healthLevel] || COLOR.green)
+
+const levelText = computed(() => {
+  if (props.healthLevel === 'green') return '优秀'
+  if (props.healthLevel === 'amber') return '一般'
+  return '告警'
+})
 
 // 主机按 group 聚合
 const hostGroups = computed(() => {
@@ -259,14 +268,44 @@ function linkPath(n) {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
-.core-score {
-  font-size: 34px;
+
+/* 中心 KPI 健康评分卡片 */
+.topo-core {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 26px;
+  pointer-events: none;
+  z-index: 3;
+  text-align: center;
+  background: rgba(10, 18, 32, 0.35);
+}
+.tc-cap {
+  font-size: 12px;
+  color: var(--text-dim);
+  letter-spacing: 0.16em;
+  margin-bottom: 6px;
+}
+.tc-score {
+  font-size: 52px;
   font-weight: 800;
   font-family: var(--mono);
+  line-height: 1;
+  text-shadow: 0 0 22px currentColor;
 }
-.core-label {
-  font-size: 12px;
-  fill: var(--text-dim);
+.tc-label {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-dim);
+  letter-spacing: 0.12em;
+}
+.tc-level {
+  margin-top: 3px;
+  font-size: 13px;
+  font-weight: 700;
   letter-spacing: 0.1em;
 }
 
@@ -312,16 +351,6 @@ function linkPath(n) {
   color: var(--text-dim);
   margin-top: 3px;
   font-family: var(--mono);
-}
-
-.topo-center-cap {
-  position: absolute;
-  transform: translate(-50%, -140%);
-  font-size: 12px;
-  color: var(--text-dim);
-  letter-spacing: 0.12em;
-  pointer-events: none;
-  z-index: 2;
 }
 
 /* hover 提示 */
