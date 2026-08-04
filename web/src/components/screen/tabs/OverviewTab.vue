@@ -2,7 +2,7 @@
   <div class="overview-tab">
     <!-- 左列：TopologyMap + CenterPanel -->
     <div class="ot-left">
-      <TopologyMap :nodes="nodeCards" />
+      <TopologyMap :nodes="nodeCards" :health-score="healthScore" :health-level="healthLevel" />
       <CenterPanel :nodes="nodeCards" :alerts="alerts" />
     </div>
     <!-- 右列：HealthScore + 主机列表 -->
@@ -81,6 +81,12 @@ const healthScore = computed(() => {
   return Math.round((onlineScore + cpuScore + memScore + diskScore + alertScore) / 5)
 })
 
+const healthLevel = computed(() => {
+  if (healthScore.value >= 80) return 'green'
+  if (healthScore.value >= 60) return 'amber'
+  return 'red'
+})
+
 const onlineRate = computed(() => {
   return props.nodes.length > 0
     ? Math.round((onlineCount.value / props.nodes.length) * 100)
@@ -119,7 +125,7 @@ const hostRows = computed(() =>
 <style scoped>
 .overview-tab {
   display: grid;
-  grid-template-columns: 1.5fr 1fr;
+  grid-template-columns: 1.5fr minmax(260px, 1fr);
   gap: 12px;
   height: 100%;
   min-height: 0;

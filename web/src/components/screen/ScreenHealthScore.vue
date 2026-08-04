@@ -162,7 +162,11 @@ const bars = computed(() => [
 }
 .sh-bar-v {
   width: 28px;
+  flex-shrink: 0;
   text-align: right;
   color: var(--text);
+}
+.sh-bar-l {
+  white-space: nowrap;
 }
 </style>
