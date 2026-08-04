@@ -264,20 +264,26 @@ func (a *API) handleNodes(w http.ResponseWriter, r *http.Request) {
 // 返回结构：metrics[node] = { cpu, mem, disk, load1, netIn, netOut, diskRead, diskWrite }。
 func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
 	type nodeMetric struct {
-		CPU       float64 `json:"cpu"`
-		Mem       float64 `json:"mem"`
-		Disk      float64 `json:"disk"`
-		Load1     float64 `json:"load1"`
-		NetIn     float64 `json:"netIn"`
-		NetOut    float64 `json:"netOut"`
-		DiskRead  float64 `json:"diskRead"`
-		DiskWr    float64 `json:"diskWr"`
-		MemTotal  float64 `json:"memTotal"`
+		CPU        float64 `json:"cpu"`
+		Mem        float64 `json:"mem"`
+		Disk       float64 `json:"disk"`
+		Load1      float64 `json:"load1"`
+		Load5      float64 `json:"load5"`
+		Load15     float64 `json:"load15"`
+		NetIn      float64 `json:"netIn"`
+		NetOut     float64 `json:"netOut"`
+		DiskRead   float64 `json:"diskRead"`
+		DiskWr     float64 `json:"diskWr"`
+		DiskIopsR  float64 `json:"diskIopsR"`
+		DiskIopsW  float64 `json:"diskIopsW"`
+		NetDrop    float64 `json:"netDrop"`
+		TcpRetrans float64 `json:"tcpRetrans"`
+		MemTotal   float64 `json:"memTotal"`
 	}
 	out := map[string]*nodeMetric{}
 
-	// 通用取值（每节点一个样本）：cpu_usage / mem_used_percent / load1 / mem_total_bytes
-	for _, name := range []string{"cpu_usage", "mem_used_percent", "load1", "mem_total_bytes"} {
+	// 通用取值（每节点一个样本）：cpu_usage / mem_used_percent / load1 / load5 / load15 / mem_total_bytes / tcp_retransmit_rate
+	for _, name := range []string{"cpu_usage", "mem_used_percent", "load1", "load5", "load15", "mem_total_bytes", "tcp_retransmit_rate"} {
 		series, err := a.store.QueryAllLatest(name, nil)
 		if err != nil {
 			slog.Warn("聚合指标查询失败", "metric", name, "err", err, "query", name)
@@ -302,8 +308,14 @@ func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
 				m.Mem = round2(v)
 			case "load1":
 				m.Load1 = round2(v)
+			case "load5":
+				m.Load5 = round2(v)
+			case "load15":
+				m.Load15 = round2(v)
 			case "mem_total_bytes":
 				m.MemTotal = v
+			case "tcp_retransmit_rate":
+				m.TcpRetrans = round2(v)
 			}
 		}
 	}
@@ -321,8 +333,8 @@ func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
 		m.Disk = usage
 	}
 
-	// 跨标签聚合：network_*_rate 与 disk_*_rate 取 sum
-	for _, name := range []string{"network_recv_rate", "network_sent_rate", "disk_read_rate", "disk_write_rate"} {
+	// 跨标签聚合：network_*_rate 与 disk_*_rate 取 sum（单机多网卡/多设备求和）
+	for _, name := range []string{"network_recv_rate", "network_sent_rate", "network_drop_rate", "disk_read_rate", "disk_write_rate", "disk_read_iops", "disk_write_iops"} {
 		series, err := a.store.QueryAllLatest(name, nil)
 		if err != nil {
 			slog.Warn("聚合指标查询失败", "metric", name, "err", err)
@@ -344,10 +356,16 @@ func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
 				m.NetIn += v
 			case "network_sent_rate":
 				m.NetOut += v
+			case "network_drop_rate":
+				m.NetDrop += v
 			case "disk_read_rate":
 				m.DiskRead += v
 			case "disk_write_rate":
 				m.DiskWr += v
+			case "disk_read_iops":
+				m.DiskIopsR += v
+			case "disk_write_iops":
+				m.DiskIopsW += v
 			}
 		}
 	}

@@ -45,12 +45,16 @@ func (c *DiskCollector) Collect() []model.Metric {
 				if !ok {
 					continue
 				}
-				readRate := float64(cur.ReadBytes-prev.ReadBytes) / dt
-				writeRate := float64(cur.WriteBytes-prev.WriteBytes) / dt
-				out = append(out,
-					model.Metric{Name: "disk_read_rate", Value: round2(readRate), Labels: map[string]string{"device": dev}},
-					model.Metric{Name: "disk_write_rate", Value: round2(writeRate), Labels: map[string]string{"device": dev}},
-				)
+			readRate := float64(cur.ReadBytes-prev.ReadBytes) / dt
+			writeRate := float64(cur.WriteBytes-prev.WriteBytes) / dt
+			readIops := float64(cur.ReadCount-prev.ReadCount) / dt
+			writeIops := float64(cur.WriteCount-prev.WriteCount) / dt
+			out = append(out,
+				model.Metric{Name: "disk_read_rate", Value: round2(readRate), Labels: map[string]string{"device": dev}},
+				model.Metric{Name: "disk_write_rate", Value: round2(writeRate), Labels: map[string]string{"device": dev}},
+				model.Metric{Name: "disk_read_iops", Value: round2(readIops), Labels: map[string]string{"device": dev}},
+				model.Metric{Name: "disk_write_iops", Value: round2(writeIops), Labels: map[string]string{"device": dev}},
+			)
 			}
 		}
 		c.prevIO = ioCounters

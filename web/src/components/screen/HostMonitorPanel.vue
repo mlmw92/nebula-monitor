@@ -6,12 +6,13 @@
       <div class="glass host-list">
         <div class="hl-title">主机健康 · 点击下钻</div>
         <div class="hl-head">
-          <span>主机</span><span>CPU</span><span>内存</span><span>磁盘</span><span>流量</span>
+          <span>主机</span><span>CPU</span><span>内存</span><span>磁盘</span><span>负载</span><span>流量</span>
         </div>
         <div class="hl-body">
-          <div class="hl-row" v-for="n in nodes" :key="n.hostname" @click="drillNode(n.hostname)">
+          <div class="hl-row" v-for="n in nodes" :key="n.hostname" :class="{ offline: !n.online }" @click="drillNode(n.hostname)">
             <span class="hl-name">
               <i class="dot" :class="n.online ? 'on' : 'off'"></i>
+              <span v-if="!n.online" class="offline-badge">🔴离线</span>
               <span class="host-text">
                 <span class="host-text-name" :title="n.displayName || n.hostname">{{ n.displayName || n.hostname }}</span>
                 <span class="host-text-ip" :title="n.ip">{{ n.ip }}</span>
@@ -19,8 +20,15 @@
             </span>
             <span class="hl-val" :style="pctStyle(n.cpu)">{{ fmtPct(n.cpu) }}</span>
             <span class="hl-val" :style="pctStyle(n.mem)">{{ fmtPct(n.mem) }}</span>
-            <span class="hl-val" :style="pctStyle(n.disk)">{{ fmtPct(n.disk) }}</span>
-            <span class="hl-val dim">{{ rateShort((n.netIn || 0) + (n.netOut || 0)) }}</span>
+            <span class="hl-cell-sub">
+              <span class="hl-val" :style="pctStyle(n.disk)">{{ fmtPct(n.disk) }}</span>
+              <span class="hl-sub" :title="'读/写 IOPS（gopsutil 暂不提供磁盘 await 延迟）'">{{ iopsText(n) }}</span>
+            </span>
+            <span class="hl-val" :class="loadClass(n)" :title="loadTitle(n)">{{ fmtLoad(n.load1) }}</span>
+            <span class="hl-cell-sub">
+              <span class="hl-val dim">{{ rateShort((n.netIn || 0) + (n.netOut || 0)) }}</span>
+              <span class="hl-sub" :title="'丢包 / TCP重传（每秒）'">{{ netText(n) }}</span>
+            </span>
           </div>
           <div class="hl-empty" v-if="!nodes.length">暂无主机数据</div>
         </div>
@@ -67,6 +75,9 @@ function avg(key) {
   if (!list.length) return 0
   return list.reduce((s, n) => s + (n[key] || 0), 0) / list.length
 }
+// 存在离线主机时，集群均值仅统计在线主机，标签同步标注
+const hasOffline = computed(() => props.nodes.some((n) => n.online === false))
+const avgSuffix = computed(() => (hasOffline.value ? '（仅在线）' : ''))
 function usageColor(v) {
   if (v >= 90) return 'var(--danger)'
   if (v >= 70) return 'var(--warn)'
@@ -78,9 +89,9 @@ const gaugeItems = computed(() => {
   const disk = avg('disk')
   const netIn = props.nodes.reduce((s, n) => s + (n.netIn || 0), 0)
   return [
-    { key: 'cpu', label: 'CPU 使用率', value: cpu, text: cpu.toFixed(1) + '%', color: usageColor(cpu) },
-    { key: 'mem', label: '内存使用率', value: mem, text: mem.toFixed(1) + '%', color: usageColor(mem) },
-    { key: 'disk', label: '磁盘使用率', value: disk, text: disk.toFixed(1) + '%', color: usageColor(disk) },
+    { key: 'cpu', label: 'CPU 使用率' + avgSuffix.value, value: cpu, text: cpu.toFixed(1) + '%', color: usageColor(cpu) },
+    { key: 'mem', label: '内存使用率' + avgSuffix.value, value: mem, text: mem.toFixed(1) + '%', color: usageColor(mem) },
+    { key: 'disk', label: '磁盘使用率' + avgSuffix.value, value: disk, text: disk.toFixed(1) + '%', color: usageColor(disk) },
     { key: 'net', label: '实时入流量', type: 'text', text: rateShort(netIn), color: 'var(--info)' },
   ]
 })
@@ -97,6 +108,28 @@ function drillNode(name) {
   router.push('/node/' + encodeURIComponent(name))
 }
 
+// ---- 列表单元格辅助展示 ----
+function fmtLoad(v) {
+  return v == null ? '--' : (Math.round(v * 100) / 100).toFixed(2)
+}
+function loadTitle(n) {
+  return `1分钟: ${(n.load1 || 0).toFixed(2)} / 5分钟: ${(n.load5 || 0).toFixed(2)} / 15分钟: ${(n.load15 || 0).toFixed(2)}`
+}
+function loadClass(n) {
+  const v = n.load1 || 0
+  if (v >= 10) return { color: 'var(--danger)', fontWeight: 700 }
+  if (v >= 5) return { color: 'var(--warn)' }
+  return {}
+}
+function iopsText(n) {
+  return `${Math.round(n.diskIopsR || 0)}/${Math.round(n.diskIopsW || 0)} IOPS`
+}
+function netText(n) {
+  const drop = n.netDrop || 0
+  const retrans = n.tcpRetrans || 0
+  return `丢${drop < 0.05 ? '0' : drop.toFixed(1)} 重${retrans < 0.05 ? '0' : retrans.toFixed(1)}`
+}
+
 // ---- 集群趋势 ----
 const cpuSeries = ref([])
 const memSeries = ref([])
@@ -111,7 +144,7 @@ async function loadTrends() {
   const [cpu, mem, disk, netIn, netOut] = await Promise.all([
     queryClusterTrend(list, 'cpu_usage', 'avg'),
     queryClusterTrend(list, 'mem_used_percent', 'avg'),
-    queryClusterTrend(list, 'disk_used_percent', 'avg'),
+    queryClusterTrend(list, 'disk_used_percent', 'avg', { byNode: true }),
     queryClusterTrend(list, 'network_recv_rate', 'sum'),
     queryClusterTrend(list, 'network_sent_rate', 'sum'),
   ])
@@ -191,7 +224,7 @@ watch(() => props.nodes, loadTrends, { deep: false })
 .hl-head,
 .hl-row {
   display: grid;
-  grid-template-columns: 1.6fr 0.7fr 0.7fr 0.7fr 0.9fr;
+  grid-template-columns: 1.6fr 0.6fr 0.6fr 0.8fr 0.55fr 0.9fr;
   gap: 6px;
   align-items: center;
   font-size: 12px;
@@ -263,6 +296,37 @@ watch(() => props.nodes, loadTrends, { deep: false })
 .hl-val.dim {
   color: var(--text-dim);
   font-size: 11px;
+}
+.hl-row.offline {
+  background: rgba(239, 68, 68, 0.12);
+}
+.hl-row.offline:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+.hl-row.offline .host-text-name {
+  color: var(--text-muted);
+}
+.offline-badge {
+  font-size: 10px;
+  color: #fff;
+  background: var(--danger, #ef4444);
+  border-radius: 4px;
+  padding: 0 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.hl-cell-sub {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  line-height: 1.15;
+}
+.hl-sub {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  white-space: nowrap;
 }
 .hl-empty {
   padding: 18px 0;
