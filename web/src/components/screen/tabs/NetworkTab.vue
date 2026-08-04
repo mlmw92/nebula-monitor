@@ -623,14 +623,30 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  min-height: 28px;
   margin-bottom: 4px;
+  padding-bottom: 4px;
   flex-shrink: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .ntm-title {
   font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
+  font-weight: 700;
+  color: var(--text, #fff);
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.4;
+}
+
+.ntm-title::before {
+  content: '';
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--accent, #22d3ee);
 }
 
 .ntm-scope {
@@ -668,7 +684,7 @@ onUnmounted(() => {
 
 .ntm-empty {
   position: absolute;
-  inset: 36px 0 0;
+  inset: 44px 0 0;
   display: flex;
   flex-direction: column;
   align-items: center;
