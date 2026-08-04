@@ -88,13 +88,14 @@ type API struct {
 	acks      *alert.AckStore
 	inhibit   *alert.InhibitStore
 	grouping  *alert.GroupingStore
-	ngx       *nginxaccess.Window // Nginx access log 地理聚合窗口（可空）
-	uiMgr     *uicfg.Manager      // 系统 UI 品牌配置（系统名称/Logo）
+	ngx            *nginxaccess.Window // Nginx access log 地理聚合窗口（可空）
+	uiMgr          *uicfg.Manager      // 系统 UI 品牌配置（系统名称/Logo）
+	serverProvince string              // server 自动探测到的所在地（省级行政区）
 }
 
 // New 创建 API。
 func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr}
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince()}
 }
 
 // RegisterRoutes 注册所有路由到 mux。

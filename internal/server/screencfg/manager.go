@@ -51,8 +51,8 @@ func (m *Manager) loadOrInit(initial config.ScreenConfig) error {
 		if !config.IsValidScreenRefreshInterval(c.RefreshInterval) {
 			c.RefreshInterval = initial.RefreshInterval
 		}
-		// 老配置未设置服务器所在地时回退到默认值
-		if !config.IsValidDeployLocation(c.DeployLocation) {
+		// 老配置显式填写但非省级行政区时回退（留空表示自动探测，保持不变）
+		if c.DeployLocation != "" && !config.IsValidDeployLocation(c.DeployLocation) {
 			c.DeployLocation = initial.DeployLocation
 		}
 		m.current = c

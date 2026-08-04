@@ -40,6 +40,8 @@ type Config struct {
 // Modules 为模块开关表，key 见前端设置项：topology/gauges/risk/alerts/redis/trends/kpiTop。
 // RefreshInterval 为大屏数据自动刷新间隔（秒），同时也是倒计时总时长。
 // DeployLocation 为服务器（数据中心）所在省级行政区，用于网络地图上标注部署点并绘制访问动线。
+// 留空表示由 server 启动时自动探测（基于本机出口 IP 经内置 ip2region 解析）；
+// 仅在需要强制指定所在地时才显式填写，自动探测失败也可通过此字段兜底。
 type ScreenConfig struct {
 	Modules         map[string]bool `yaml:"modules" json:"modules"`
 	RefreshInterval int             `yaml:"refreshInterval" json:"refreshInterval"`
@@ -95,7 +97,7 @@ func DefaultScreenConfig() ScreenConfig {
 			"alerts":            true,
 		},
 		RefreshInterval: 30,
-		DeployLocation:  DefaultDeployLocation,
+		DeployLocation:  "", // 空表示由 server 自动探测所在地
 	}
 }
 

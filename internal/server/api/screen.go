@@ -33,10 +33,8 @@ func (a *API) handleScreenPut(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "刷新间隔仅支持 10/20/30/60 秒"})
 		return
 	}
-	// 服务器所在地校验：未传则沿用默认值；传入则必须是省级行政区
-	if incoming.DeployLocation == "" {
-		incoming.DeployLocation = config.DefaultDeployLocation
-	} else if !config.IsValidDeployLocation(incoming.DeployLocation) {
+	// 服务器所在地校验：留空表示由 server 自动探测；显式填写则必须是省级行政区
+	if incoming.DeployLocation != "" && !config.IsValidDeployLocation(incoming.DeployLocation) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "服务器所在地需为省级行政区名称"})
 		return
 	}

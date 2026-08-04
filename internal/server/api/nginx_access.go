@@ -132,9 +132,10 @@ func (a *API) handleNginxAccessGeo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp.Points = a.ngx.Points(scope)
-	// 部署点：服务器（数据中心）所在地，取大屏配置的省级行政区；
+	// 部署点：服务器（数据中心）所在地。默认取 server 自动探测到的省级行政区；
+	// 若大屏配置显式指定了所在地（自动探测失败兜底），则以配置为准。
 	// 世界地图上省份无对应区域，统一落到国家中心。
-	deployName := config.DefaultDeployLocation
+	deployName := a.serverProvince
 	if a.screenMgr != nil {
 		if loc := a.screenMgr.Get().DeployLocation; config.IsValidDeployLocation(loc) {
 			deployName = loc

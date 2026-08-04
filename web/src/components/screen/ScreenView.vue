@@ -115,13 +115,6 @@
           </el-select>
         </div>
         <div class="cfg-tip">数据自动刷新周期，同时也是大屏右上角倒计时总时长。</div>
-        <div class="cfg-item">
-          <span class="cfg-label">服务器所在地</span>
-          <el-select v-model="cfg.deployLocation" size="small" filterable style="width: 110px">
-            <el-option v-for="p in provinceOptions" :key="p" :value="p" :label="p" />
-          </el-select>
-        </div>
-        <div class="cfg-tip">网络地图上标注的数据中心位置，访问动线由各来源地指向该点。</div>
       </div>
       <template #footer>
         <el-button @click="settingOpen = false">取消</el-button>
@@ -148,14 +141,12 @@ import { useBrand } from '../../composables/useBrand'
 import { useScreenData } from './composables/useScreenData'
 import { useCountdown } from './composables/useCountdown'
 import { useScreenConfig, REFRESH_INTERVALS } from './composables/useScreenConfig'
-import { CN_PROVINCES } from '../../charts/geoCoords'
 
 const router = useRouter()
 const { brand } = useBrand()
 const { nodes, metrics, alerts, activeAlerts, firingCount, nodeCards, refreshAll } = useScreenData()
 const refreshInterval = ref(30)
 const intervalOptions = REFRESH_INTERVALS
-const provinceOptions = CN_PROVINCES
 const { countdown, start: startCountdown, reset: resetCountdown } = useCountdown(refreshInterval)
 const { cfg, settingOpen, savingCfg, loadScreenConfig, saveScreenConfig } = useScreenConfig()
 
