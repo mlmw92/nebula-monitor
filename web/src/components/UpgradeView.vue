@@ -127,6 +127,17 @@
           </template>
         </el-table-column>
         <el-table-column prop="detail" label="详情" />
+        <el-table-column label="回退" width="100" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              size="small"
+              type="warning"
+              plain
+              :disabled="!canRollbackTo(row.version) || rollingBack"
+              @click="rollbackTo(row.version)"
+            >回退</el-button>
+          </template>
+        </el-table-column>
       </el-table>
       <el-pagination
         v-if="history.length"
@@ -354,6 +365,12 @@ async function loadArchive() {
     archiveVersions.value = r.versions || []
   } catch (e) { /* ignore */ }
   archiveLoading.value = false
+}
+
+// 该版本是否可回退：必须是已归档版本、且不是当前运行版本。
+function canRollbackTo(version) {
+  if (!version || version === currentVersion.value.server) return false
+  return archiveVersions.value.some(a => a.version === version)
 }
 
 async function rollbackTo(version) {
