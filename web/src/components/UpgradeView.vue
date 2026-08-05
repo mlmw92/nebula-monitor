@@ -158,37 +158,6 @@
       </div>
     </div>
 
-    <!-- 可回退版本（归档） -->
-    <div class="glass panel">
-      <div class="panel-title-row">
-        <span class="panel-title">可回退版本（归档）</span>
-        <el-button size="small" link :loading="archiveLoading" @click="loadArchive">刷新</el-button>
-      </div>
-      <el-table :data="archiveVersions" v-loading="archiveLoading" empty-text="暂无已归档版本">
-        <el-table-column prop="version" label="版本" width="140" />
-        <el-table-column label="归档时间" min-width="180">
-          <template #default="{ row }">{{ fmtTime(row.uploadedAt) }}</template>
-        </el-table-column>
-        <el-table-column label="大小" width="120">
-          <template #default="{ row }">{{ fmtSize(row.size) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="120">
-          <template #default="{ row }">
-            <el-button
-              size="small"
-              type="warning"
-              plain
-              :disabled="row.version === currentVersion.server || rollingBack"
-              @click="rollbackTo(row.version)"
-            >切换</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div class="rollback-note">
-        仅保留最近 {{ archiveKeep }} 个已上传版本；切换会按该版本重新替换 Server / Web / Agent 并重启（同样生成备份，可继续向后切换或回退）。
-      </div>
-    </div>
-
     <!-- IP 地理库（独立入口：只替换归属地数据，不影响 Server/Web/Agent，不重启服务） -->
     <div class="glass panel">
       <div class="panel-title-row">
@@ -352,8 +321,7 @@ async function loadHistory() {
   loadingHistory.value = false
 }
 
-// 已归档（可回退）版本；archiveKeep 与后端 upgrade.archiveKeep 默认值保持一致。
-const archiveKeep = 5
+// 已归档版本列表（供升级历史表格判断哪些版本可切换）。
 const archiveVersions = ref([])
 const archiveLoading = ref(false)
 const rollingBack = ref(false)
