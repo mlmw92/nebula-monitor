@@ -697,7 +697,7 @@ acquire_binary() {
 # ============================ 生成配置 ============================
 generate_config() {
   c_info "生成配置文件"
-  mkdir -p "$CONFIG_DIR" "$DATA_DIR"
+  mkdir -p "$CONFIG_DIR" "$DATA_DIR" "$DATA_DIR/geoip"
 
   # 升级模式：已有配置则备份保留，不覆盖（避免丢失用户改动）
   if (( UPGRADE )) && [[ -f "$CONFIG_DIR/server.yaml" ]]; then
@@ -794,6 +794,10 @@ agentScriptPath: "$AGENT_SCRIPT_PATH"
 
 # 前端静态资源目录（磁盘读取，改前端只需替换文件+重启，无需重编二进制）
 webDir: "$WEB_DIR"
+
+# IP 地理库（ip2region v4 xdb）存放路径。文件不存在时使用内置库；
+# 在 Web 端「系统升级 → IP 地理库」上传新库会写入该文件并即时生效。
+geoipFile: "$DATA_DIR/geoip/ip2region_v4.xdb"
 
 # 登录认证（Web 仪表盘访问控制，启用后需登录）
 auth:

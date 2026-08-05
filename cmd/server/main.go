@@ -92,6 +92,12 @@ func main() {
 	// 用加载后的配置同步内存通知器（若文件存在则覆盖初始 cfg.Notify）。
 	engine.SetNotifiers(alert.BuildNotifiers(notifyMgr.Get()))
 
+	// IP 地理库：优先加载磁盘上的覆盖文件（Web 端「IP 地理库」入口上传更新），
+	// 文件缺失或损坏时回退到随程序内置的库，不影响启动。
+	if err := nginxaccess.SetGeoOverridePath(cfg.GeoIPFile); err != nil {
+		slog.Warn("加载 IP 地理库覆盖文件失败，已回退内置库", "path", cfg.GeoIPFile, "err", err)
+	}
+
 	// 上报接收（Nginx access log 地理聚合窗口：TTL 1h，实时大屏场景）
 	ngxWin := nginxaccess.NewWindow(nginxaccess.NewGeo(), time.Hour)
 	recv := receiver.New(store, nodeMgr, cfg.AgentAuth, ngxWin)

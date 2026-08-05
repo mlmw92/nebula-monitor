@@ -151,6 +151,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/system/upgrade/rollback", a.handleSystemUpgradeRollback)
 	mux.HandleFunc("GET /api/v1/system/upgrade/history", a.handleSystemUpgradeHistory)
 
+	// IP 地理库更新（独立于系统升级：只替换 ip2region 库文件并热加载，不重启服务）
+	mux.HandleFunc("GET /api/v1/system/geoip", a.handleGeoIPStatus)
+	mux.HandleFunc("POST /api/v1/system/geoip/upload", a.handleGeoIPUpload)
+	mux.HandleFunc("POST /api/v1/system/geoip/reset", a.handleGeoIPReset)
+	mux.HandleFunc("GET /api/v1/system/geoip/test", a.handleGeoIPTest)
+
 	mux.HandleFunc("POST /api/v1/login", a.handleLogin)
 	mux.HandleFunc("POST /api/v1/logout", a.handleLogout)
 	mux.HandleFunc("GET /api/v1/auth-info", a.handleAuthInfo)

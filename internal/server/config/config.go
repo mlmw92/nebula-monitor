@@ -34,6 +34,7 @@ type Config struct {
 	ReportDir       string          `yaml:"reportDir"`       // 报告存储目录
 	ScreenFile      string          `yaml:"screenFile"`      // 数据大屏模块显隐配置文件（Web 端设置写入）
 	UIFile          string          `yaml:"uiFile"`          // 系统 UI 品牌配置（系统名称/Logo，Web 端设置写入）
+	GeoIPFile       string          `yaml:"geoipFile"`       // IP 地理库（ip2region v4 xdb）存放路径，Web 端上传后覆盖此文件；缺失时用内置库
 }
 
 // ScreenConfig 数据大屏模块显隐配置（全局单份，与 notify 一致）。
@@ -235,6 +236,7 @@ func Default() *Config {
 		ReportDir:       "/var/lib/monitor-server/reports",
 		ScreenFile:      "/etc/monitor-server/screen.yaml",
 		UIFile:          "/etc/monitor-server/ui.yaml",
+		GeoIPFile:       "/var/lib/monitor-server/geoip/ip2region_v4.xdb",
 		Auth:            AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: ""},
 		Upgrade: UpgradeConfig{
 			Enabled:    true,

@@ -4,22 +4,12 @@
 package nginxaccess
 
 import (
-	_ "embed"
 	"strings"
-	"sync"
-
-	"github.com/lionsoul2014/ip2region/binding/golang/xdb"
 )
 
-//go:embed data/ip2region_v4.xdb
-var ipDB []byte
-
-// Geo 提供 IP 归属地查询（全内存加载，并发安全，首次查询时惰性初始化）。
-type Geo struct {
-	searcher *xdb.Searcher
-	once     sync.Once
-	err      error
-}
+// Geo 提供 IP 归属地查询（全内存加载，并发安全）。
+// 底层共享全局库数据源，库文件被替换后所有 Geo 实例立即使用新库。
+type Geo struct{}
 
 // NewGeo 创建 Geo 查询器。
 func NewGeo() *Geo { return &Geo{} }
@@ -27,14 +17,8 @@ func NewGeo() *Geo { return &Geo{} }
 // Search 查询 IP 归属地，返回国家（中文名）、国家（英文原名，用于世界地图匹配）、
 // 省份（中文简称，去行政后缀）、城市。查询失败或无法识别时返回空字符串。
 func (g *Geo) Search(ip string) (country, countryEn, province, city string) {
-	g.once.Do(func() {
-		g.searcher, g.err = xdb.NewWithBuffer(xdb.IPv4, ipDB)
-	})
-	if g.err != nil || g.searcher == nil {
-		return "", "", "", ""
-	}
-	region, err := g.searcher.Search(ip)
-	if err != nil {
+	region := defaultDB.search(ip)
+	if region == "" {
 		return "", "", "", ""
 	}
 	parts := strings.Split(region, "|")

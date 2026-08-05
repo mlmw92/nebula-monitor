@@ -146,6 +146,120 @@
         </el-button>
       </div>
     </div>
+
+    <!-- IP 地理库（独立入口：只替换归属地数据，不影响 Server/Web/Agent，不重启服务） -->
+    <div class="glass panel">
+      <div class="panel-title-row">
+        <span class="panel-title">IP 地理库</span>
+        <el-button size="small" link @click="loadGeoip">刷新</el-button>
+      </div>
+      <div class="pending-grid" v-loading="geoipLoading">
+        <div class="pending-row">
+          <span class="r-label">当前库</span>
+          <span class="r-val">
+            <el-tag :type="geoip.source === 'custom' ? 'success' : 'info'" size="small" effect="plain">
+              {{ geoip.source === 'custom' ? '已更新的库' : '程序内置库' }}
+            </el-tag>
+            <el-tag v-if="geoip.loaded === false" type="danger" size="small" effect="dark" style="margin-left: 6px">未加载</el-tag>
+          </span>
+        </div>
+        <div class="pending-row">
+          <span class="r-label">大小</span>
+          <span class="r-val">{{ fmtSize(geoip.size) }}</span>
+        </div>
+        <div class="pending-row">
+          <span class="r-label">更新时间</span>
+          <span class="r-val">{{ geoip.updatedAt ? fmtTime(geoip.updatedAt) : '-' }}</span>
+        </div>
+        <div class="pending-row">
+          <span class="r-label">存放路径</span>
+          <span class="r-val mono small">{{ geoip.path || '未配置' }}</span>
+        </div>
+        <div class="pending-row">
+          <span class="r-label">SHA256</span>
+          <span class="r-val mono small">{{ geoip.sha256 || '-' }}</span>
+        </div>
+      </div>
+
+      <el-alert
+        v-if="geoip.error"
+        :title="geoip.error"
+        type="error"
+        show-icon
+        :closable="false"
+        style="margin: 12px 0"
+      />
+      <el-alert
+        v-else-if="geoip.editable === false"
+        title="未配置 IP 地理库存放路径（server.yaml 的 geoipFile），当前仅能使用程序内置库"
+        type="warning"
+        show-icon
+        :closable="false"
+        style="margin: 12px 0"
+      />
+
+      <el-upload
+        drag
+        :show-file-list="false"
+        :http-request="onGeoipUpload"
+        :before-upload="beforeGeoipUpload"
+        :disabled="geoipUploading || geoip.editable === false"
+        accept=".xdb"
+        class="upload-area"
+        style="margin-top: 12px"
+      >
+        <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+        <div class="el-upload__text">拖拽 ip2region 库文件到此，或<em>点击上传</em></div>
+        <template #tip>
+          <div class="el-upload__tip">
+            支持 ip2region v4（IPv4）的 .xdb 文件；上传后立即生效，无需重启服务或重新升级系统
+          </div>
+        </template>
+      </el-upload>
+      <div v-if="geoipUploading" class="upload-progress">
+        <el-progress
+          :percentage="geoipProgress"
+          :stroke-width="14"
+          :status="geoipProgress >= 100 ? 'success' : undefined"
+        />
+        <div class="upload-progress-text">
+          {{ geoipProgress >= 100 ? '服务端校验中…' : '上传中 ' + geoipProgress + '%' }}
+        </div>
+      </div>
+
+      <div class="geo-test-row">
+        <el-input
+          v-model="geoipTestIP"
+          placeholder="输入 IP 验证归属地，如 114.114.114.114"
+          clearable
+          style="max-width: 320px"
+          @keyup.enter="doGeoipTest"
+        />
+        <el-button :loading="geoipTesting" @click="doGeoipTest">查询</el-button>
+        <span v-if="geoipTestResult" class="geo-test-result">
+          {{ geoipTestResult }}
+        </span>
+      </div>
+
+      <el-table
+        v-if="geoip.samples && geoip.samples.length"
+        :data="geoip.samples"
+        size="small"
+        style="margin-top: 12px"
+      >
+        <el-table-column prop="ip" label="样本 IP" width="160" />
+        <el-table-column prop="country" label="国家" width="120" />
+        <el-table-column prop="province" label="省份" width="120" />
+        <el-table-column prop="city" label="城市" width="120" />
+        <el-table-column prop="region" label="原始记录" />
+      </el-table>
+
+      <div class="rollback-row" v-if="geoip.source === 'custom'">
+        <el-button type="warning" plain :disabled="geoipUploading" @click="doGeoipReset">
+          恢复程序内置库
+        </el-button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -302,6 +416,88 @@ function fmtSize(b) {
   return b.toFixed(1) + ' ' + u[i]
 }
 
+// ===== IP 地理库（独立于系统升级：只替换归属地数据文件并热加载） =====
+const geoip = ref({})
+const geoipLoading = ref(false)
+const geoipUploading = ref(false)
+const geoipProgress = ref(0)
+const geoipTestIP = ref('')
+const geoipTesting = ref(false)
+const geoipTestResult = ref('')
+
+async function loadGeoip() {
+  geoipLoading.value = true
+  try {
+    geoip.value = await http.get('/api/v1/system/geoip')
+  } catch (e) { /* ignore */ }
+  geoipLoading.value = false
+}
+
+function beforeGeoipUpload(file) {
+  if (!file.name.toLowerCase().endsWith('.xdb')) {
+    ElMessage.error('仅支持 ip2region 的 .xdb 文件')
+    return false
+  }
+  if (file.size > 64 * 1024 * 1024) {
+    ElMessage.error('文件超过 64MB')
+    return false
+  }
+  return true
+}
+
+async function onGeoipUpload(option) {
+  const fd = new FormData()
+  fd.append('file', option.file)
+  geoipUploading.value = true
+  geoipProgress.value = 0
+  try {
+    const r = await http.upload('/api/v1/system/geoip/upload', fd, (pct) => {
+      geoipProgress.value = pct
+    })
+    geoipProgress.value = 100
+    geoip.value = r
+    ElMessage.success('IP 地理库已更新并生效')
+    option.onSuccess && option.onSuccess(r)
+  } catch (e) {
+    ElMessage.error('更新失败：' + e.message)
+    option.onError && option.onError(e)
+  } finally {
+    geoipUploading.value = false
+  }
+}
+
+async function doGeoipReset() {
+  try {
+    await ElMessageBox.confirm('将删除已上传的地理库并恢复为程序内置库，是否继续？', '恢复内置库', {
+      type: 'warning',
+    })
+  } catch { return }
+  try {
+    geoip.value = await http.post('/api/v1/system/geoip/reset', {})
+    ElMessage.success('已恢复为程序内置库')
+  } catch (e) {
+    ElMessage.error('恢复失败：' + e.message)
+  }
+}
+
+async function doGeoipTest() {
+  const ip = (geoipTestIP.value || '').trim()
+  if (!ip) {
+    ElMessage.warning('请输入 IP')
+    return
+  }
+  geoipTesting.value = true
+  geoipTestResult.value = ''
+  try {
+    const r = await http.get('/api/v1/system/geoip/test?ip=' + encodeURIComponent(ip))
+    geoipTestResult.value = [r.country, r.province, r.city].filter(Boolean).join(' / ') || r.region || '无结果'
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    geoipTesting.value = false
+  }
+}
+
 function startCooldown(sec) {
   clearInterval(cooldownTimer)
   cooldown.value = sec
@@ -318,6 +514,7 @@ onMounted(async () => {
   await loadCurrentVersion()
   await loadPending()
   await loadHistory()
+  await loadGeoip()
 })
 
 onUnmounted(() => {
@@ -416,5 +613,17 @@ onUnmounted(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 12px;
+}
+.geo-test-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.geo-test-result {
+  font-size: 13px;
+  color: var(--accent);
+  font-family: var(--mono);
 }
 </style>
