@@ -453,6 +453,8 @@ curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- nginx
 curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- kafka
 curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- rocketmq
 curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- k8s
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- mongodb
+curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- fastdfs
 
 # 或直接调用本机已安装的脚本
 bash /etc/monitor-agent/agent-install.sh redis
@@ -462,6 +464,8 @@ bash /etc/monitor-agent/agent-install.sh nginx
 bash /etc/monitor-agent/agent-install.sh kafka
 bash /etc/monitor-agent/agent-install.sh rocketmq
 bash /etc/monitor-agent/agent-install.sh k8s
+bash /etc/monitor-agent/agent-install.sh mongodb
+bash /etc/monitor-agent/agent-install.sh fastdfs
 ```
 
 向导会引导你逐个填写对应中间件的实例信息（别名、地址、账号/密码、拓扑类型等），完成后自动写入 `agent.yaml`、开启对应的 `collectors` 开关并重启 Agent。**密码仅存本机，不上报 Server。**
