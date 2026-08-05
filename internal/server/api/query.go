@@ -37,6 +37,7 @@ type RulesProvider interface {
 	Create(r model.AlertRule) model.AlertRule
 	Update(r model.AlertRule) error
 	Delete(id string) error
+	ImportRules(rules []model.AlertRule, replace bool) (int, int, error)
 }
 
 // AlertStore 提供告警事件查询（由 alert 包实现）。
@@ -134,6 +135,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/alerts/acks", a.handleAlertAcks)
 	mux.HandleFunc("POST /api/v1/alerts/ack", a.handleAlertAck)
 	mux.HandleFunc("GET /api/v1/rules", a.handleRulesList)
+	mux.HandleFunc("GET /api/v1/rules/export", a.handleRulesExport)
+	mux.HandleFunc("POST /api/v1/rules/import", a.handleRulesImport)
 	mux.HandleFunc("GET /api/v1/rules/templates", a.handleRuleTemplates)
 	mux.HandleFunc("POST /api/v1/rules", a.handleRuleCreate)
 	mux.HandleFunc("PUT /api/v1/rules/{id}", a.handleRuleUpdate)

@@ -89,7 +89,11 @@
     <div class="glass panel" style="margin-bottom: 16px">
       <div class="panel-title-row">
         <span class="panel-title" style="margin-bottom: 0">告警规则</span>
-        <el-dropdown split-button type="primary" size="small" @command="onTemplateCmd">
+        <div style="display: flex; gap: 8px; align-items: center">
+          <el-button size="small" @click="exportRules">导出</el-button>
+          <el-button size="small" @click="fileInput.click()">导入</el-button>
+          <input ref="fileInput" type="file" accept="application/json,.json" style="display: none" @change="onFileChange" />
+          <el-dropdown split-button type="primary" size="small" @command="onTemplateCmd">
           <span @click="newRule">新建规则</span>
           <template #dropdown>
             <el-dropdown-menu>
@@ -98,6 +102,7 @@
             </el-dropdown-menu>
           </template>
         </el-dropdown>
+        </div>
       </div>
       <el-table :data="pagedRules" stripe style="width: 100%" empty-text="暂无规则">
         <el-table-column prop="name" label="名称" min-width="140" />
@@ -176,6 +181,24 @@
         />
       </div>
     </div>
+
+    <!-- 告警规则导入 -->
+    <el-dialog v-model="importDialog" title="导入告警规则" width="440px">
+      <div v-if="pendingImport">
+        <p>文件：<b>{{ pendingImport.name }}</b>，共 {{ pendingImport.list.length }} 条规则。</p>
+        <el-radio-group v-model="importMode" style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px">
+          <el-radio label="merge">合并导入（按 ID 更新已有规则、新增没有的规则）</el-radio>
+          <el-radio label="replace">覆盖导入（先清空当前所有规则再导入）</el-radio>
+        </el-radio-group>
+        <p class="muted" style="font-size: 12px; margin-top: 10px">
+          覆盖导入会删除当前全部规则，请谨慎操作。
+        </p>
+      </div>
+      <template #footer>
+        <el-button @click="importDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmImport">开始导入</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 高级：抑制与分组（P4） -->
     <div class="glass panel" style="margin-bottom: 16px">
@@ -378,7 +401,7 @@ import { useRouter } from 'vue-router'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
-import http from '../api/http'
+import http, { getToken } from '../api/http'
 import RuleModal from './RuleModal.vue'
 
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -567,6 +590,81 @@ function newRule() {
   // 设为空对象（truthy）以触发 RuleModal 渲染（v-if="editing"）
   editing.value = {}
 }
+
+// 告警规则导出 / 导入
+const fileInput = ref(null)
+const importDialog = ref(false)
+const importMode = ref('merge') // merge | replace
+const pendingImport = ref(null) // { list, name }
+
+async function exportRules() {
+  try {
+    const token = getToken()
+    const headers = {}
+    if (token) headers['Authorization'] = 'Bearer ' + token
+    const resp = await fetch('/api/v1/rules/export', { headers })
+    if (!resp.ok) {
+      ElMessage.error('导出失败（HTTP ' + resp.status + '）')
+      return
+    }
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const disp = resp.headers.get('Content-Disposition')
+    let fname = 'alert-rules.json'
+    if (disp && disp.includes('filename=')) {
+      fname = decodeURIComponent(disp.split('filename=')[1].replace(/^"|"$/g, ''))
+    }
+    a.href = url
+    a.download = fname
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success('已导出告警规则')
+  } catch (e) {
+    ElMessage.error('导出失败：' + (e.message || e))
+  }
+}
+
+async function onFileChange(e) {
+  const input = e.target
+  const file = input.files && input.files[0]
+  if (!file) return
+  try {
+    const text = await file.text()
+    const parsed = JSON.parse(text)
+    const list = Array.isArray(parsed) ? parsed : parsed.rules
+    if (!Array.isArray(list) || list.length === 0) {
+      ElMessage.error('文件格式不正确（缺少 rules 数组或为空）')
+      return
+    }
+    pendingImport.value = { list, name: file.name }
+    importMode.value = 'merge'
+    importDialog.value = true
+  } catch (err) {
+    ElMessage.error('解析失败：' + (err.message || err))
+  } finally {
+    input.value = '' // 允许重复选择同一文件
+  }
+}
+
+async function confirmImport() {
+  if (!pendingImport.value) return
+  try {
+    const res = await http.post('/api/v1/rules/import', {
+      rules: pendingImport.value.list,
+      replace: importMode.value === 'replace',
+    })
+    ElMessage.success('导入成功：新增 ' + (res.created || 0) + ' 条，更新 ' + (res.updated || 0) + ' 条')
+    importDialog.value = false
+    pendingImport.value = null
+    await load()
+  } catch (err) {
+    ElMessage.error('导入失败：' + (err.message || err))
+  }
+}
+
 function onTemplateCmd(cmd) {
   if (cmd === '__blank') {
     newRule()

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/alert"
@@ -129,4 +130,44 @@ type ruleStat struct {
 	Name   string `json:"name"`
 	Total  int    `json:"total"`
 	Firing int    `json:"firing"`
+}
+
+// handleRulesExport 导出全部告警规则为 JSON 文件（浏览器下载）。
+func (a *API) handleRulesExport(w http.ResponseWriter, r *http.Request) {
+	rules := a.rules.List()
+	data, err := json.MarshalIndent(map[string]any{
+		"version": 1,
+		"kind":    "nebula-alert-rules",
+		"rules":   rules,
+	}, "", "  ")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	ts := time.Now().Format("20060102-150405")
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", `attachment; filename="alert-rules-`+ts+`.json"`)
+	_, _ = w.Write(data)
+}
+
+// handleRulesImport 从 JSON 导入告警规则，支持合并（默认）或覆盖模式。
+func (a *API) handleRulesImport(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Rules   []model.AlertRule `json:"rules"`
+		Replace bool              `json:"replace"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(body.Rules) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "created": 0, "updated": 0})
+		return
+	}
+	created, updated, err := a.rules.ImportRules(body.Rules, body.Replace)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "created": created, "updated": updated})
 }

@@ -210,6 +210,41 @@ func (s *RulesStore) Delete(id string) error {
 	return nil
 }
 
+// ImportRules 从外部导入规则。replace=true 时先清空现有规则再逐条创建；
+// 否则按 ID 合并：已存在的规则更新其字段并保留原 CreatedAt，不存在的规则创建。
+// 返回新增数与更新数，导入完成后一次性持久化。调用方无需持锁。
+func (s *RulesStore) ImportRules(rules []model.AlertRule, replace bool) (created, updated int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if replace {
+		s.rules = map[string]model.AlertRule{}
+	}
+	now := model.NowMillis()
+	for _, r := range rules {
+		if r.Name == "" {
+			return created, updated, fmt.Errorf("存在名称为空的规则，已取消导入")
+		}
+		if r.ID == "" {
+			r.ID = "r-" + strconv.FormatInt(now, 36)
+		}
+		if existing, ok := s.rules[r.ID]; ok {
+			r.CreatedAt = existing.CreatedAt
+			r.UpdatedAt = now
+			s.rules[r.ID] = r
+			updated++
+		} else {
+			if r.CreatedAt == 0 {
+				r.CreatedAt = now
+			}
+			r.UpdatedAt = now
+			s.rules[r.ID] = r
+			created++
+		}
+	}
+	s.persistLocked()
+	return created, updated, nil
+}
+
 func (s *RulesStore) load() {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
