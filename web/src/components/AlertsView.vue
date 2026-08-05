@@ -256,7 +256,7 @@
         </div>
       </div>
       <el-table
-        :data="filteredAlerts"
+        :data="pagedAlerts"
         stripe
         style="width: 100%"
         empty-text="暂无告警事件"
@@ -295,6 +295,16 @@
           </template>
         </el-table-column>
       </el-table>
+      <div style="margin-top: 12px; display: flex; justify-content: flex-end">
+        <el-pagination
+          v-model:current-page="evCurrentPage"
+          v-model:page-size="evPageSize"
+          :total="filteredAlerts.length"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+        />
+      </div>
     </div>
 
     <RuleModal v-if="editing" :rule="editing" :groups="groups" :channels="channelOptions" @close="editing = null" @saved="onSaved" />
@@ -385,6 +395,9 @@ watch(rules, () => {
   const max = Math.max(1, Math.ceil(rules.value.length / pageSize.value))
   if (currentPage.value > max) currentPage.value = max
 })
+watch(pageSize, () => {
+  currentPage.value = 1
+})
 const alerts = ref([])
 const groups = ref([])
 const templates = ref([])
@@ -427,6 +440,21 @@ const warningCount = computed(() => alerts.value.filter((a) => a.state === 'firi
 const filteredAlerts = computed(() => {
   if (!eventFilter.value) return alerts.value
   return alerts.value.filter((a) => a.state === eventFilter.value)
+})
+
+// 告警事件前端分页
+const evCurrentPage = ref(1)
+const evPageSize = ref(10)
+const pagedAlerts = computed(() => {
+  const start = (evCurrentPage.value - 1) * evPageSize.value
+  return filteredAlerts.value.slice(start, start + evPageSize.value)
+})
+watch(filteredAlerts, () => {
+  const max = Math.max(1, Math.ceil(filteredAlerts.value.length / evPageSize.value))
+  if (evCurrentPage.value > max) evCurrentPage.value = max
+})
+watch([evPageSize, eventFilter], () => {
+  evCurrentPage.value = 1
 })
 
 function ackKey(e) {
