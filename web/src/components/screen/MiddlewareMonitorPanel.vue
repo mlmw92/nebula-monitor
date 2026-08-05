@@ -84,7 +84,7 @@
                 </div>
                 <div class="srt-tree">
                   <div v-for="(m, idx) in grp.masters" :key="'cm-'+m.instance" class="srt-unit">
-                    <div class="srt-node srt-master" :class="{ 'is-down': !m.up }" @click="drillHost(m)">
+                    <div class="srt-node srt-master" :class="{ 'is-down': !m.up }" @click="openDetail(m)">
                       <span class="srt-badge srt-badge-m">M</span>
                       <span class="srt-name" :title="m.instance">{{ m.instance }}</span>
                       <span :class="['srt-dot', m.up ? 'up' : 'down']"></span>
@@ -93,7 +93,7 @@
                     <div v-if="(grp.slavesByMaster[m.instance] || []).length" class="srt-branch">
                       <div class="srt-slaves">
                         <div v-for="s in grp.slavesByMaster[m.instance]" :key="'cs-'+s.instance"
-                             class="srt-node srt-slave" :class="{ 'is-down': !s.up }" @click.stop="drillHost(s)">
+                             class="srt-node srt-slave" :class="{ 'is-down': !s.up }" @click.stop="openDetail(s)">
                           <span class="srt-badge srt-badge-s">S</span>
                           <span class="srt-name" :title="s.instance">{{ s.instance }}</span>
                           <span :class="['srt-dot', s.up ? 'up' : 'down']"></span>
@@ -112,7 +112,7 @@
                 </div>
                 <div class="srt-tree">
                   <div v-for="(m, idx) in grp.masters" :key="'rm-'+idx" class="srt-unit">
-                    <div class="srt-node srt-master" :class="{ 'is-down': !m.up }" @click="drillHost(m)">
+                    <div class="srt-node srt-master" :class="{ 'is-down': !m.up }" @click="openDetail(m)">
                       <span class="srt-badge srt-badge-m">M</span>
                       <span class="srt-name" :title="m.instance">{{ m.instance }}</span>
                       <span :class="['srt-dot', m.up ? 'up' : 'down']"></span>
@@ -121,7 +121,7 @@
                     <div v-if="grp.slaves.filter(s => s.replicaOf === m.instance).length" class="srt-branch">
                       <div class="srt-slaves">
                         <div v-for="s in grp.slaves.filter(ss => ss.replicaOf === m.instance)" :key="s.instance"
-                             class="srt-node srt-slave" :class="{ 'is-down': !s.up }" @click.stop="drillHost(s)">
+                             class="srt-node srt-slave" :class="{ 'is-down': !s.up }" @click.stop="openDetail(s)">
                           <span class="srt-badge srt-badge-s">S</span>
                           <span class="srt-name" :title="s.instance">{{ s.instance }}</span>
                           <span :class="['srt-dot', s.up ? 'up' : 'down']"></span>
@@ -140,7 +140,7 @@
                 </div>
                 <div class="srt-grid">
                   <div v-for="(i, idx) in redisTopoGroups.standalones" :key="'sa-'+idx"
-                       class="srt-node srt-standalone" :class="{ 'is-down': !i.up }" @click="drillHost(i)">
+                       class="srt-node srt-standalone" :class="{ 'is-down': !i.up }" @click="openDetail(i)">
                     <span class="srt-name" :title="i.instance">{{ i.instance }}</span>
                     <span :class="['srt-dot', i.up ? 'up' : 'down']"></span>
                   </div>
@@ -166,13 +166,13 @@
       </div>
 
       <div class="glass mw-instances">
-        <div class="mi-title">实例列表 · 按内存使用率降序 · 点击名称跳转主机</div>
+        <div class="mi-title">实例列表 · 按内存使用率降序 · 点击查看详情</div>
         <div class="mi-body">
           <div class="mi-row" v-for="it in sortedInstances" :key="rowKey(it)"
-            @click="drillHost(it)">
+            @click="openDetail(it)">
             <i class="mi-dot" :class="it.up || it.online ? 'on' : 'off'"></i>
             <span class="mi-role" :class="roleClass(it.role)">{{ roleText(it.role) }}</span>
-            <span class="mi-name" @click.stop="drillHost(it)">{{ it.name || it.container || it.instance || it.ip }}</span>
+            <span class="mi-name" @click.stop="openDetail(it)">{{ it.name || it.container || it.instance || it.ip }}</span>
             <span class="mi-metric" :class="{ warn: memWarn(it) }">{{ metricLabel(it) }}<b>{{ metricVal(it) }}</b><em v-if="metricUnit(it)">{{ metricUnit(it) }}</em></span>
             <span class="mi-tag" v-if="it.group || it.businessTag">{{ it.businessTag || it.group }}</span>
             <span class="mi-node">{{ it.node }}</span>
@@ -182,16 +182,18 @@
       </div>
     </div>
   </div>
-</template>
+
+    <!-- 实例详情弹窗（大屏相对独立，点击实例内弹窗展示，不跳转主机监控） -->
+    <InstanceDetailDialog v-model:visible="detailVisible" :instance="detailInstance" />
+  </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
 import http from '../../api/http'
+import InstanceDetailDialog from './InstanceDetailDialog.vue'
 import { initChart, monitorOption, COLORS } from '../../charts/echarts'
 import { queryClusterTrend } from './useTrend'
 
-const router = useRouter()
 const paramChart = ref(null)
 let chart = null
 let ro = null
@@ -362,8 +364,14 @@ const sortedInstances = computed(() =>
 )
 
 // P1#7 跳转主机详情
-function drillHost(it) {
-  if (it && it.node) router.push({ name: 'node', params: { name: it.node } })
+// 大屏相对独立：点击实例用弹窗展示详情，不跳转主机监控
+const detailVisible = ref(false)
+const detailInstance = ref(null)
+function openDetail(it) {
+  if (it) {
+    detailInstance.value = it
+    detailVisible.value = true
+  }
 }
 
 // P2#9 慢查询 Top3（依赖实例 slow 字段，暂无采集时为空）
