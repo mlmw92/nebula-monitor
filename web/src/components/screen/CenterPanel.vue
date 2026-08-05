@@ -118,7 +118,6 @@ const minis = computed(() => {
   const totalMem = sumOnline('memTotal')
   const usedMem = sumOnline('memUsed')
   const load = avg('load')
-  const procCount = sumOnline('procCount')
   const activeAlerts = (props.alerts || []).filter((a) => a.state === 'firing').length
   return [
     { key: 'netIn', label: '实时入流量', value: rateShort(netIn), color: COLORS.cyan },
@@ -130,7 +129,6 @@ const minis = computed(() => {
       value: `${formatBytes(usedMem, true)} / ${formatBytes(totalMem, true)}`,
       color: COLORS.amber,
     },
-    { key: 'proc', label: '进程总数', value: Math.round(procCount), color: COLORS.green },
     { key: 'alert', label: '活跃告警', value: activeAlerts, color: activeAlerts > 0 ? COLORS.red : COLORS.green },
   ]
 })

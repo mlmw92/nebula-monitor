@@ -16,12 +16,6 @@ export const metricGroups = [
     ],
   },
   {
-    category: '进程',
-    metrics: [
-      { name: 'process_total', label: '进程总数', unit: '个', description: '主机当前运行的进程数量' },
-    ],
-  },
-  {
     category: '内存',
     metrics: [
       { name: 'mem_used_percent', label: '内存使用率', unit: '%', description: '物理内存已用占比' },

@@ -278,14 +278,13 @@ func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
 		DiskIopsW  float64 `json:"diskIopsW"`
 		NetDrop    float64 `json:"netDrop"`
 		TcpRetrans float64 `json:"tcpRetrans"`
-		MemTotal   float64 `json:"memTotal"`
-		MemUsed    float64 `json:"memUsed"`
-		ProcCount  float64 `json:"procCount"`
+	MemTotal   float64 `json:"memTotal"`
+	MemUsed    float64 `json:"memUsed"`
 	}
 	out := map[string]*nodeMetric{}
 
-	// 通用取值（每节点一个样本）：cpu_usage / mem_used_percent / load1 / load5 / load15 / mem_total_bytes / mem_used_bytes / process_total / tcp_retransmit_rate
-	for _, name := range []string{"cpu_usage", "mem_used_percent", "load1", "load5", "load15", "mem_total_bytes", "mem_used_bytes", "process_total", "tcp_retransmit_rate"} {
+	// 通用取值（每节点一个样本）：cpu_usage / mem_used_percent / load1 / load5 / load15 / mem_total_bytes / mem_used_bytes / tcp_retransmit_rate
+	for _, name := range []string{"cpu_usage", "mem_used_percent", "load1", "load5", "load15", "mem_total_bytes", "mem_used_bytes", "tcp_retransmit_rate"} {
 		series, err := a.store.QueryAllLatest(name, nil)
 		if err != nil {
 			slog.Warn("聚合指标查询失败", "metric", name, "err", err, "query", name)
@@ -316,11 +315,9 @@ func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
 				m.Load15 = round2(v)
 			case "mem_total_bytes":
 				m.MemTotal = v
-			case "mem_used_bytes":
-				m.MemUsed = v
-			case "process_total":
-				m.ProcCount = v
-			case "tcp_retransmit_rate":
+		case "mem_used_bytes":
+			m.MemUsed = v
+		case "tcp_retransmit_rate":
 				m.TcpRetrans = round2(v)
 			}
 		}

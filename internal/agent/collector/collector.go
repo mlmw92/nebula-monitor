@@ -130,10 +130,7 @@ func (c *Collector) Collect() ([]model.Metric, []model.ProcessStat) {
 
 	var procs []model.ProcessStat
 	if c.cfg.Process {
-		var total int
-		procs, total = collectProcessTop()
-		// 进程总数单独上报为时序指标，供大屏「进程总数」等聚合展示使用
-		add("process_total", float64(total), nil)
+		procs = collectProcessTop()
 	}
 	return metrics, procs
 }
