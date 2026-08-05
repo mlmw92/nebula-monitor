@@ -810,12 +810,11 @@ k8sInstances:
     # exporterURL: "http://127.0.0.1:8080/metrics"  # 可选 kube-state-metrics
 ```
 
-**MongoDB / FastDFS 示例**
+**MongoDB 配置示例**
 
 ```yaml
 collectors:
   mongodb: true
-  fastdfs: true
 
 mongoInstances:
   - name: "prod-mongo"              # 副本集多成员请使用相同 name 归为同一副本集
@@ -826,20 +825,9 @@ mongoInstances:
     database: "appdb"               # 采集 dbStats 的库；留空则不采集库存储/对象统计
     topology: "replicaset"          # standalone / replicaset / sharded
     # exporterURL: "http://127.0.0.1:9216/metrics"  # 可选；填了走 exporter，不再直连
-
-fastdfsInstances:
-  - name: "tracker-1"
-    role: "tracker"                 # tracker / storage
-    addr: "10.0.0.20:22122"
-    group: ""                       # tracker 留空
-    # exporterURL: "http://127.0.0.1:9300/metrics"  # 推荐；完整指标依赖 fastdfs_exporter
-  - name: "storage-1"
-    role: "storage"
-    addr: "10.0.0.21:23000"
-    group: "group1"
 ```
 
-**MongoDB / FastDFS 字段说明**
+**MongoDB 字段说明**
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
@@ -851,13 +839,38 @@ fastdfsInstances:
 | `mongoInstances[].database` | 否 | 采集 `dbStats` 的库名；留空则不采集库存储/对象统计 |
 | `mongoInstances[].topology` | 否 | `standalone` / `replicaset` / `sharded`；影响角色判定展示 |
 | `mongoInstances[].exporterURL` | 否 | mongodb_exporter 的 `/metrics` 地址；填了走 exporter，不再直连 |
+
+> **提示**：MongoDB 直连模式下建议为监控账号授予 `clusterMonitor` 角色（副本集）或 `readAnyDatabase`，以保证 `serverStatus` / `dbStats` / `replSetGetStatus` 可读取。
+
+**FastDFS 配置示例**
+
+```yaml
+collectors:
+  fastdfs: true
+
+fastdfsInstances:
+  - name: "tracker-1"
+    role: "tracker"                 # tracker / storage
+    addr: "10.0.0.20:22122"
+    group: ""                       # tracker 留空
+    # exporterURL: "http://127.0.0.1:9300/metrics"  # 建议；完整指标依赖 fastdfs_exporter
+  - name: "storage-1"
+    role: "storage"
+    addr: "10.0.0.21:23000"
+    group: "group1"
+```
+
+**FastDFS 字段说明**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
 | `fastdfsInstances[].name` | 是 | 实例别名 |
 | `fastdfsInstances[].role` | 是 | `tracker` / `storage` |
 | `fastdfsInstances[].addr` | 是 | FastDFS 地址 `host:port`（tracker 22122 / storage 23000） |
 | `fastdfsInstances[].group` | 否 | storage 所属 group 名称；tracker 留空 |
 | `fastdfsInstances[].exporterURL` | 否 | fastdfs_exporter 的 `/metrics` 地址；完整空间/IO/Storage 状态依赖它，未配置时仅做端口存活探测 |
 
-> **提示**：FastDFS 无标准直连接口，推荐部署社区 `fastdfs_exporter` 并填写 `exporterURL` 以获取 Group/Storage 数量、空间使用、磁盘读写、网络收发等完整指标；仅做 TCP 存活探测时只能看到在线/离线状态。MongoDB 直连模式下建议为监控账号授予 `clusterMonitor` 角色（副本集）或 `readAnyDatabase`，以保证 `serverStatus` / `dbStats` / `replSetGetStatus` 可读取。
+> **提示**：FastDFS 无标准直连接口，建议部署社区 `fastdfs_exporter` 并填写 `exporterURL` 以获取 Group/Storage 数量、空间使用、磁盘读写、网络收发等完整指标；仅做 TCP 存活探测时只能看到在线/离线状态。
 
 **Kubernetes 字段说明**
 
