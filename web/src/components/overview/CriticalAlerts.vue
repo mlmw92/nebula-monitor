@@ -4,7 +4,7 @@
       <span class="dot" :class="'sev-' + (a.severity || '').toLowerCase()"></span>
       <div class="crit-body">
         <div class="crit-title">{{ a.ruleName }}</div>
-        <div class="crit-sub">{{ a.node }} · {{ timeAgo(a.startsAt) }}</div>
+        <div class="crit-sub">{{ a.node }}<template v-if="a.nodeIp"> ({{ a.nodeIp }})</template> · {{ timeAgo(a.startsAt) }}</div>
       </div>
     </div>
     <div v-if="!alerts || alerts.length === 0" class="crit-empty">
