@@ -5,9 +5,10 @@
 
     <div class="login-card glass">
       <div class="brand">
-        <div class="logo-mark"></div>
+        <img v-if="brand.logo" :src="brand.logo" class="logo-img" alt="logo" />
+        <div v-else class="logo-mark"></div>
         <div class="brand-text">
-          <h1>NebulaEye</h1>
+          <h1>{{ brand.name || 'NebulaEye' }}</h1>
           <p>服务器监控系统</p>
         </div>
       </div>
@@ -70,7 +71,9 @@ import http, { setToken } from '../api/http'
 import { useBrand } from '../composables/useBrand'
 
 const router = useRouter()
-const { brand } = useBrand()
+const { brand, loadBrand } = useBrand()
+// 拉取最新品牌配置（含系统名称、Logo、页脚），确保登录页即时反映设置
+loadBrand()
 
 const username = ref('admin')
 const password = ref('')
@@ -161,6 +164,14 @@ async function doLogin() {
   border-top-color: transparent;
   border-right-color: transparent;
   transform: rotate(-45deg);
+}
+.logo-img {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  object-fit: contain;
+  background: var(--card-bg);
+  box-shadow: 0 0 24px var(--accent-glow);
 }
 .brand-text h1 {
   font-size: 20px;
