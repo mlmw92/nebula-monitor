@@ -72,19 +72,82 @@
           <div ref="paramChart" class="mp-chart"></div>
         </div>
 
-        <!-- P2#8 Redis 拓扑缩略图 -->
-        <div class="glass mw-topo" v-if="activeType === 'redis' && topology.nodes.length">
+        <!-- P2#8 Redis 拓扑（参考 RedisTab 树形结构） -->
+        <div class="glass mw-topo" v-if="activeType === 'redis' && redisInstances.length">
           <div class="mt-title">Redis 拓扑（主从/集群）</div>
-          <svg class="mt-svg" :viewBox="topoViewBox" preserveAspectRatio="xMidYMin meet">
-            <line v-for="(e, i) in topology.edges" :key="'e' + i"
-              :x1="e.x1" :y1="e.y1" :x2="e.x2" :y2="e.y2" :class="['mt-edge', { bad: e.bad }]" />
-            <g v-for="(n, i) in topology.nodes" :key="'n' + i" :transform="`translate(${n.x - topoNodeW / 2},${n.y - topoNodeH / 2})`">
-              <rect :width="topoNodeW" :height="topoNodeH" rx="7"
-                :class="['mt-node', n.role, { down: !n.up }]" @click="drillHost({ node: n.node })" />
-              <text :x="topoNodeW / 2" :y="topoNodeH / 2 - 2" class="mt-node-t1">{{ n.name }}</text>
-              <text :x="topoNodeW / 2" :y="topoNodeH / 2 + 13" class="mt-node-t2">{{ roleText(n.role) }}</text>
-            </g>
-          </svg>
+          <div class="screen-redis-topo">
+            <template v-if="redisTopoGroups.clusters.length">
+              <div v-for="grp in redisTopoGroups.clusters" :key="'c-'+grp.name" class="srt-group">
+                <div class="srt-group-head">
+                  <span class="srt-group-name">集群 {{ grp.name }}</span>
+                  <span class="srt-group-meta dim">M:{{ grp.masters.length }} S:{{ grp.slaves.length }}</span>
+                </div>
+                <div class="srt-tree">
+                  <div v-for="(m, idx) in grp.masters" :key="'cm-'+m.instance" class="srt-unit">
+                    <div class="srt-node srt-master" :class="{ 'is-down': !m.up }" @click="drillHost(m)">
+                      <span class="srt-badge srt-badge-m">M</span>
+                      <span class="srt-name" :title="m.instance">{{ m.instance }}</span>
+                      <span :class="['srt-dot', m.up ? 'up' : 'down']"></span>
+                      <span class="srt-status">{{ m.up ? '在线' : '离线' }}</span>
+                    </div>
+                    <div v-if="(grp.slavesByMaster[m.instance] || []).length" class="srt-branch">
+                      <div class="srt-slaves">
+                        <div v-for="s in grp.slavesByMaster[m.instance]" :key="'cs-'+s.instance"
+                             class="srt-node srt-slave" :class="{ 'is-down': !s.up }" @click.stop="drillHost(s)">
+                          <span class="srt-badge srt-badge-s">S</span>
+                          <span class="srt-name" :title="s.instance">{{ s.instance }}</span>
+                          <span :class="['srt-dot', s.up ? 'up' : 'down']"></span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <template v-if="redisTopoGroups.replications.length">
+              <div v-for="grp in redisTopoGroups.replications" :key="'r-'+grp.name" class="srt-group">
+                <div class="srt-group-head">
+                  <span class="srt-group-name">主从 {{ grp.name }}</span>
+                  <span class="srt-group-meta dim">M:{{ grp.masters.length }} S:{{ grp.slaves.length }}</span>
+                </div>
+                <div class="srt-tree">
+                  <div v-for="(m, idx) in grp.masters" :key="'rm-'+idx" class="srt-unit">
+                    <div class="srt-node srt-master" :class="{ 'is-down': !m.up }" @click="drillHost(m)">
+                      <span class="srt-badge srt-badge-m">M</span>
+                      <span class="srt-name" :title="m.instance">{{ m.instance }}</span>
+                      <span :class="['srt-dot', m.up ? 'up' : 'down']"></span>
+                      <span class="srt-status">{{ m.up ? '在线' : '离线' }}</span>
+                    </div>
+                    <div v-if="grp.slaves.filter(s => s.replicaOf === m.instance).length" class="srt-branch">
+                      <div class="srt-slaves">
+                        <div v-for="s in grp.slaves.filter(ss => ss.replicaOf === m.instance)" :key="s.instance"
+                             class="srt-node srt-slave" :class="{ 'is-down': !s.up }" @click.stop="drillHost(s)">
+                          <span class="srt-badge srt-badge-s">S</span>
+                          <span class="srt-name" :title="s.instance">{{ s.instance }}</span>
+                          <span :class="['srt-dot', s.up ? 'up' : 'down']"></span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <template v-if="redisTopoGroups.standalones.length">
+              <div class="srt-group">
+                <div class="srt-group-head">
+                  <span class="srt-group-name">独立实例</span>
+                  <span class="srt-group-meta dim">{{ redisTopoGroups.standalones.length }} 个</span>
+                </div>
+                <div class="srt-grid">
+                  <div v-for="(i, idx) in redisTopoGroups.standalones" :key="'sa-'+idx"
+                       class="srt-node srt-standalone" :class="{ 'is-down': !i.up }" @click="drillHost(i)">
+                    <span class="srt-name" :title="i.instance">{{ i.instance }}</span>
+                    <span :class="['srt-dot', i.up ? 'up' : 'down']"></span>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
         </div>
 
         <!-- P2#9 慢查询 Top3 -->
@@ -312,49 +375,36 @@ const slowList = computed(() => {
   return list.slice(0, 3)
 })
 
-// P2#8 Redis 拓扑
-const topoNodeW = 120
-const topoNodeH = 38
-const topology = computed(() => {
-  if (activeType.value !== 'redis') return { nodes: [], edges: [], w: 0, h: 0 }
-  const list = instances.value
-  const isMaster = (i) => i.role === 'master' || (i.role !== 'slave' && !i.replicaOf)
-  const isReplica = (i) => (i.role === 'slave' || !!i.replicaOf) && i.role !== 'master'
-  const masters = list.filter(isMaster)
-  const replicas = list.filter(isReplica)
-  const colW = topoNodeW + 30
-  const nodes = []
-  const edges = []
-  let maxY = topoNodeH
-  const attached = new Set()
-  masters.forEach((m, c) => {
-    const mx = c * colW + topoNodeW / 2 + 12
-    const my = topoNodeH / 2 + 14
-    nodes.push({ key: m.node + '|' + m.instance, node: m.node, name: m.name || m.instance, role: m.role || 'master', up: m.up, x: mx, y: my })
-    const myReps = replicas.filter((r) => r.name === m.name)
-    myReps.forEach((r, k) => {
-      const rx = mx
-      const ry = my + (k + 1) * (topoNodeH + 24)
-      nodes.push({ key: r.node + '|' + r.instance, node: r.node, name: r.name || r.instance, role: r.role || 'slave', up: r.up, x: rx, y: ry })
-      edges.push({ x1: mx, y1: my + topoNodeH / 2, x2: rx, y2: ry - topoNodeH / 2, bad: !m.up || !r.up })
-      attached.add(r.node + '|' + r.instance)
-      maxY = Math.max(maxY, ry + topoNodeH / 2)
-    })
-    maxY = Math.max(maxY, my + topoNodeH / 2)
-  })
-  // 未能关联到主节点的从节点单独展示
-  replicas
-    .filter((r) => !attached.has(r.node + '|' + r.instance))
-    .forEach((r, k) => {
-      const rx = k * colW + topoNodeW / 2 + 12
-      const ry = topoNodeH / 2 + 14
-      nodes.push({ key: r.node + '|' + r.instance, node: r.node, name: r.name || r.instance, role: r.role || 'slave', up: r.up, x: rx, y: ry })
-      maxY = Math.max(maxY, ry + topoNodeH / 2)
-    })
-  const w = Math.max(masters.length, 1) * colW + topoNodeW / 2 + 12
-  return { nodes, edges, w, h: maxY + 16 }
+// P2#8 Redis 拓扑 —— 参考 RedisTab 的 topologyGroups 分组逻辑
+const redisInstances = computed(() => {
+  if (activeType.value !== 'redis') return []
+  return instances.value
 })
-const topoViewBox = computed(() => `0 0 ${topology.value.w} ${topology.value.h}`)
+const redisTopoGroups = computed(() => {
+  const clusters = {}, replications = {}, standalones = []
+  for (const i of redisInstances.value) {
+    const g = i.group || i.name || i.instance
+    if (i.topology === 'cluster') {
+      clusters[g] = clusters[g] || { name: g, masters: [], slaves: [], slavesByMaster: {}, unlinkedSlaves: [] }
+      if (i.role === 'slave' || i.role === 'replica') {
+        clusters[g].slaves.push(i)
+        if (i.replicaOf) {
+          clusters[g].slavesByMaster[i.replicaOf] = clusters[g].slavesByMaster[i.replicaOf] || []
+          clusters[g].slavesByMaster[i.replicaOf].push(i)
+        } else {
+          clusters[g].unlinkedSlaves.push(i)
+        }
+      } else clusters[g].masters.push(i)
+    } else if (i.topology === 'replication' || (i.replicaOf && i.topology !== 'cluster')) {
+      replications[g] = replications[g] || { name: g, masters: [], slaves: [] }
+      if (i.role === 'slave' || i.role === 'replica') replications[g].slaves.push(i)
+      else replications[g].masters.push(i)
+    } else {
+      standalones.push(i)
+    }
+  }
+  return { clusters: Object.values(clusters), replications: Object.values(replications), standalones }
+})
 
 async function loadOverview() {
   try {
@@ -732,9 +782,11 @@ onUnmounted(() => {
   width: 100%;
 }
 
-/* P2#8 拓扑 */
+/* P2#8 Redis 拓扑（HTML/CSS 树形结构，参考 RedisTab） */
 .mw-topo {
   flex-shrink: 0;
+  max-height: 280px;
+  overflow-y: auto;
 }
 .mt-title,
 .ms-title {
@@ -743,51 +795,161 @@ onUnmounted(() => {
   color: var(--text);
   margin-bottom: 8px;
 }
-.mt-svg {
-  width: 100%;
-  height: auto;
-  max-height: 240px;
+
+/* 大屏 Redis 拓扑容器 */
+.screen-redis-topo {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.mt-edge {
-  stroke: var(--chart-blue);
-  stroke-width: 1.5;
-  opacity: 0.6;
+.srt-group {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 10px 12px;
 }
-.mt-edge.bad {
-  stroke: var(--danger);
+.srt-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  gap: 8px;
 }
-.mt-node {
-  fill: var(--accent-dim);
-  stroke: var(--accent);
-  stroke-width: 1.5;
+.srt-group-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.srt-group-meta {
+  font-size: 11px;
+}
+.srt-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.srt-unit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 节点卡片 */
+.srt-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 6px 10px;
   cursor: pointer;
+  transition: all 0.15s ease;
+  max-width: 100%;
 }
-.mt-node.master {
-  fill: rgba(76, 175, 80, 0.18);
-  stroke: var(--chart-green);
+.srt-node:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(99, 179, 237, 0.35);
 }
-.mt-node.sentinel {
-  fill: rgba(255, 193, 7, 0.18);
-  stroke: var(--chart-yellow);
+.srt-node.is-down {
+  opacity: 0.5;
 }
-.mt-node.cluster {
-  fill: rgba(33, 150, 243, 0.18);
-  stroke: var(--chart-blue);
+
+/* Master 节点 */
+.srt-master {
+  border-left: 3px solid var(--chart-green);
 }
-.mt-node.down {
-  fill: rgba(244, 67, 54, 0.18);
-  stroke: var(--danger);
+.srt-master:hover {
+  border-color: rgba(74, 222, 128, 0.5);
 }
-.mt-node-t1 {
-  fill: var(--text);
+
+/* Slave 节点 */
+.srt-slave {
+  margin-left: 14px;
+  border-left: 3px solid var(--chart-blue);
+}
+.srt-slave:hover {
+  border-color: rgba(96, 165, 250, 0.5);
+}
+
+/* 独立实例 */
+.srt-standalone {
+  display: inline-flex;
+}
+
+/* 角色徽章 */
+.srt-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.srt-badge-m {
+  background: rgba(220, 56, 45, 0.2);
+  color: #ff8a80;
+  border: 1px solid rgba(220, 56, 45, 0.35);
+}
+.srt-badge-s {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+/* 节点名（截断长名） */
+.srt-name {
   font-size: 11px;
   font-weight: 600;
-  text-anchor: middle;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
-.mt-node-t2 {
-  fill: var(--text-dim);
+
+/* 状态指示 */
+.srt-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.srt-dot.up {
+  background: var(--chart-green);
+  box-shadow: 0 0 4px var(--chart-green);
+}
+.srt-dot.down {
+  background: var(--danger);
+}
+.srt-status {
   font-size: 10px;
-  text-anchor: middle;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+/* 从节点分支 */
+.srt-branch {
+  display: flex;
+  gap: 0;
+  margin-left: 6px;
+}
+.srt-slaves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+/* 独立实例网格 */
+.srt-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* P2#9 慢查询 */
