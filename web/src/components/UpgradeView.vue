@@ -147,6 +147,37 @@
       </div>
     </div>
 
+    <!-- 可回退版本（归档） -->
+    <div class="glass panel">
+      <div class="panel-title-row">
+        <span class="panel-title">可回退版本（归档）</span>
+        <el-button size="small" link :loading="archiveLoading" @click="loadArchive">刷新</el-button>
+      </div>
+      <el-table :data="archiveVersions" v-loading="archiveLoading" empty-text="暂无已归档版本">
+        <el-table-column prop="version" label="版本" width="140" />
+        <el-table-column label="归档时间" min-width="180">
+          <template #default="{ row }">{{ fmtTime(row.uploadedAt) }}</template>
+        </el-table-column>
+        <el-table-column label="大小" width="120">
+          <template #default="{ row }">{{ fmtSize(row.size) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="120">
+          <template #default="{ row }">
+            <el-button
+              size="small"
+              type="warning"
+              plain
+              :disabled="row.version === currentVersion.server || rollingBack"
+              @click="rollbackTo(row.version)"
+            >回退</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="rollback-note">
+        仅保留最近 {{ archiveKeep }} 个已上传版本；回退会按该版本重新替换 Server / Web / Agent 并重启（同样生成备份，可继续向后回退）。
+      </div>
+    </div>
+
     <!-- IP 地理库（独立入口：只替换归属地数据，不影响 Server/Web/Agent，不重启服务） -->
     <div class="glass panel">
       <div class="panel-title-row">
@@ -310,6 +341,42 @@ async function loadHistory() {
   loadingHistory.value = false
 }
 
+// 已归档（可回退）版本；archiveKeep 与后端 upgrade.archiveKeep 默认值保持一致。
+const archiveKeep = 5
+const archiveVersions = ref([])
+const archiveLoading = ref(false)
+const rollingBack = ref(false)
+
+async function loadArchive() {
+  archiveLoading.value = true
+  try {
+    const r = await http.get('/api/v1/system/upgrade/archive')
+    archiveVersions.value = r.versions || []
+  } catch (e) { /* ignore */ }
+  archiveLoading.value = false
+}
+
+async function rollbackTo(version) {
+  try {
+    await ElMessageBox.confirm(
+      `确认回退到版本 v${version}？将按该版本重新替换 Server / Web / Agent 并重启 monitor-server，期间服务短暂不可用。该操作同样会生成备份，可继续向后回退。`,
+      '回退到指定版本',
+      { type: 'warning', confirmButtonText: '回退', cancelButtonText: '取消' }
+    )
+  } catch { return }
+  rollingBack.value = true
+  try {
+    await http.post('/api/v1/system/upgrade/rollback-to', { version, operator: 'web' })
+    ElMessage.success(`已回退到 v${version}，server 即将重启。请稍候刷新页面。`)
+    setTimeout(() => window.location.reload(), 8000)
+  } catch (e) {
+    ElMessage.error('回退失败：' + e.message)
+    await loadArchive()
+  } finally {
+    rollingBack.value = false
+  }
+}
+
 function beforeUpload(file) {
   if (file.size > 500 * 1024 * 1024) {
     ElMessage.error('文件超过 500MB')
@@ -366,6 +433,7 @@ async function doApply() {
     ElMessage.error('升级失败：' + e.message)
     await loadPending()
     await loadHistory()
+    await loadArchive()
   } finally {
     applying.value = false
   }
@@ -519,6 +587,7 @@ onMounted(async () => {
   await loadCurrentVersion()
   await loadPending()
   await loadHistory()
+  await loadArchive()
   await loadGeoip()
 })
 

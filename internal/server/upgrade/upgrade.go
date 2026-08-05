@@ -86,18 +86,31 @@ type Config struct {
 	AgentBinDir     string // agent 自带 CDN 根目录（含 agent/linux/<arch>/agent）
 	AgentScriptPath string // Agent 安装脚本目标路径（apply 时写入，如 dataDir/agent-dist/agent-install.sh）
 	BackupKeep      int    // 保留备份份数
+	ArchiveKeep     int    // 保留已上传升级包（版本归档）的份数；默认 5
 	UseSystemd  bool   // 是否用 systemd 重启 server
 	Service     string // systemd 服务名
 }
 
+// ArchiveEntry 已归档（已上传）升级包的记录，用于 Web 端选择回退到指定版本。
+type ArchiveEntry struct {
+	ID         string    `json:"id"`
+	Version    string    `json:"version"`
+	UploadedAt time.Time `json:"uploadedAt"`
+	Size       int64     `json:"size"`
+	Notes      string    `json:"notes,omitempty"`
+}
+
 // Manager 升级管理器。
 type Manager struct {
-	mu       sync.Mutex
-	cfg      Config
-	nodeMgr  *node.Manager
-	current  *Task
-	history  []HistoryEntry
-	histPath string
+	mu         sync.Mutex
+	cfg        Config
+	nodeMgr    *node.Manager
+	current    *Task
+	history    []HistoryEntry
+	histPath   string
+	archive    []ArchiveEntry
+	archiveDir string
+	archivePth string
 }
 
 // New 创建升级管理器并确保工作子目录存在。
@@ -108,6 +121,9 @@ func New(cfg Config, nodeMgr *node.Manager) (*Manager, error) {
 	if cfg.BackupKeep <= 0 {
 		cfg.BackupKeep = 3
 	}
+	if cfg.ArchiveKeep <= 0 {
+		cfg.ArchiveKeep = 5
+	}
 	if cfg.Service == "" {
 		cfg.Service = "monitor-server.service"
 	}
@@ -115,17 +131,21 @@ func New(cfg Config, nodeMgr *node.Manager) (*Manager, error) {
 		filepath.Join(cfg.Dir, "incoming"),
 		filepath.Join(cfg.Dir, "unpacked"),
 		filepath.Join(cfg.Dir, "backups"),
+		filepath.Join(cfg.Dir, "archive"),
 	} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("创建升级目录失败 %s: %w", d, err)
 		}
 	}
 	m := &Manager{
-		cfg:      cfg,
-		nodeMgr:  nodeMgr,
-		histPath: filepath.Join(cfg.Dir, "history.json"),
+		cfg:        cfg,
+		nodeMgr:    nodeMgr,
+		histPath:   filepath.Join(cfg.Dir, "history.json"),
+		archiveDir: filepath.Join(cfg.Dir, "archive"),
+		archivePth: filepath.Join(cfg.Dir, "archive.json"),
 	}
 	m.loadHistory()
+	m.loadArchive()
 	return m, nil
 }
 
@@ -164,16 +184,18 @@ func (m *Manager) Upload(r *http.Request, maxBytes int64) (*Task, error) {
 		os.Remove(incoming)
 		return nil, fmt.Errorf("解压失败: %w", err)
 	}
-	os.Remove(incoming) // 节省空间
+	// 保留 incoming 原始包，待解析出版本后归档（见下方成功分支）
 
 	mfData, err := os.ReadFile(filepath.Join(unpackDir, "manifest.json"))
 	if err != nil {
 		os.RemoveAll(unpackDir)
+		os.Remove(incoming)
 		return nil, errors.New("包内缺少 manifest.json")
 	}
 	var mf Manifest
 	if err := json.Unmarshal(mfData, &mf); err != nil {
 		os.RemoveAll(unpackDir)
+		os.Remove(incoming)
 		return nil, fmt.Errorf("manifest.json 解析失败: %w", err)
 	}
 	if mf.Version == "" {
@@ -186,6 +208,7 @@ func (m *Manager) Upload(r *http.Request, maxBytes int64) (*Task, error) {
 		fi, err := os.Stat(src)
 		if err != nil {
 			os.RemoveAll(unpackDir)
+			os.Remove(incoming)
 			return nil, fmt.Errorf("manifest 声明的 %s 不存在: %w", c.Source, err)
 		}
 		if fi.IsDir() {
@@ -196,6 +219,7 @@ func (m *Manager) Upload(r *http.Request, maxBytes int64) (*Task, error) {
 		sum, err := fileSHA256(src)
 		if err != nil {
 			os.RemoveAll(unpackDir)
+			os.Remove(incoming)
 			return nil, fmt.Errorf("计算 sha256 失败 %s: %w", c.Source, err)
 		}
 		c.Checksum = "sha256:" + sum
@@ -229,6 +253,12 @@ func (m *Manager) Upload(r *http.Request, maxBytes int64) (*Task, error) {
 		}
 	}
 
+	// 归档原始包（按版本保留，便于 Web 端回退到指定版本）；归档失败不影响本次上传。
+	if err := m.archivePackage(mf.Version, incoming); err != nil {
+		slog.Warn("归档升级包失败（不影响本次上传）", "err", err)
+	}
+	os.Remove(incoming)
+
 	m.mu.Lock()
 	if m.current != nil && m.current.ID != "" {
 		os.RemoveAll(filepath.Join(m.cfg.Dir, "unpacked", m.current.ID))
@@ -240,7 +270,7 @@ func (m *Manager) Upload(r *http.Request, maxBytes int64) (*Task, error) {
 	return task, nil
 }
 
-// Apply 执行升级：备份当前 server/web → 替换 server → 替换 web → 复制新 agent 到 agentBinDir → 重启。
+// Apply 执行升级：基于当前待应用任务（m.current）备份并替换组件后重启。
 func (m *Manager) Apply(operator string) (*Task, error) {
 	m.mu.Lock()
 	t := m.current
@@ -253,25 +283,65 @@ func (m *Manager) Apply(operator string) (*Task, error) {
 		return nil, errors.New("升级正在进行中")
 	}
 	t.Status = "applying"
+	unpackRoot := filepath.Join(m.cfg.Dir, "unpacked", t.ID)
 	m.mu.Unlock()
+
+	res, err := m.applyCore(t.ID, t.Version, t.Components, unpackRoot, operator, "apply")
+
+	m.mu.Lock()
+	if m.current != nil && m.current.ID == t.ID {
+		m.current.Status = res.Status
+		m.current.Error = res.Error
+	}
+	m.mu.Unlock()
+	return res, err
+}
+
+// applyCore 是升级/回退的公共核心：备份当前 server/web/agent → 替换组件 → 重启 → 记录历史。
+// id/version 用于历史与响应；components 为待应用的组件清单；unpackRoot 为解压后的根目录。
+func (m *Manager) applyCore(id, version string, components []Component, unpackRoot, operator, action string) (*Task, error) {
+	t := &Task{
+		ID:         id,
+		Version:    version,
+		Status:     "applying",
+		Components: components,
+	}
+	for _, c := range components {
+		switch c.Name {
+		case "server":
+			if c.Arch == runtime.GOARCH {
+				t.ServerArch = c.Arch
+				if sz, err := pathSize(filepath.Join(unpackRoot, c.Source)); err == nil {
+					t.ServerSize = sz
+				}
+			}
+		case "web":
+			if sz, err := pathSize(filepath.Join(unpackRoot, c.Source)); err == nil {
+				t.WebSize = sz
+			}
+		case "agent":
+			if c.Arch != "" {
+				t.AgentArches = append(t.AgentArches, c.Arch)
+			}
+		}
+	}
 
 	ts := time.Now().Format("20060102-150405")
 	backupDir := filepath.Join(m.cfg.Dir, "backups", ts)
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		t.Status = "failed"
 		t.Error = err.Error()
-		m.recordHistory(t.ID, t.Version, "apply", operator, "failed", err.Error(), false)
+		m.recordHistory(id, version, action, operator, "failed", err.Error(), false)
 		return t, err
 	}
 
 	serverBin := filepath.Join(m.cfg.BinDir, "monitor-server")
-	unpackRoot := filepath.Join(m.cfg.Dir, "unpacked", t.ID)
 	agentUpdated := false
 	var serverApplied, webApplied bool
 	var applyErrors []string
 
 	// 1) 替换 server（仅当前架构）
-	for _, c := range t.Components {
+	for _, c := range components {
 		if c.Name != "server" || c.Arch != runtime.GOARCH {
 			continue
 		}
@@ -300,7 +370,7 @@ func (m *Manager) Apply(operator string) (*Task, error) {
 	}
 
 	// 2) 替换 web
-	for _, c := range t.Components {
+	for _, c := range components {
 		if c.Name != "web" || c.Action != "sync_dir" {
 			continue
 		}
@@ -319,7 +389,7 @@ func (m *Manager) Apply(operator string) (*Task, error) {
 	}
 
 	// 3) 把新 agent 复制到 agentBinDir（自带 CDN）；不主动推送主机升级
-	for _, c := range t.Components {
+	for _, c := range components {
 		if c.Name != "agent" || c.Arch == "" {
 			continue
 		}
@@ -342,7 +412,7 @@ func (m *Manager) Apply(operator string) (*Task, error) {
 
 	// 3b) 把新 agent-install.sh 复制到 AgentScriptPath（自带 CDN 对外脚本，跟随 server 版本）
 	if m.cfg.AgentScriptPath != "" {
-		for _, c := range t.Components {
+		for _, c := range components {
 			if c.Name != "agent-script" {
 				continue
 			}
@@ -379,21 +449,160 @@ func (m *Manager) Apply(operator string) (*Task, error) {
 	if len(applyErrors) > 0 {
 		result = "failed"
 		detail = strings.Join(applyErrors, "; ")
-		t.Status = "failed"
-		t.Error = detail
-	} else {
-		t.Status = "applied"
 	}
+	t.Status = result
+	t.Error = detail
 
-	m.recordHistory(t.ID, t.Version, "apply", operator, result, detail, agentUpdated)
+	m.recordHistory(id, version, action, operator, result, detail, agentUpdated)
 
-	slog.Info("升级已应用", "id", t.ID, "version", t.Version,
+	slog.Info("升级已应用", "id", id, "version", version,
 		"server", serverApplied, "web", webApplied, "agent", agentUpdated, "result", result)
 
 	if result == "failed" {
 		return t, errors.New(detail)
 	}
 	return t, nil
+}
+
+// RollbackTo 从归档中回退到指定版本：解压该版本的归档包，执行与升级相同的替换流程。
+// 回退同样会生成备份，因此可继续向后回退。
+func (m *Manager) RollbackTo(version, operator string) (*Task, error) {
+	m.mu.Lock()
+	var entry *ArchiveEntry
+	for i := range m.archive {
+		if m.archive[i].Version == version {
+			entry = &m.archive[i]
+			break
+		}
+	}
+	if entry == nil {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("未找到版本 %s 的归档包，无法回退", version)
+	}
+	m.mu.Unlock()
+
+	srcTar := filepath.Join(m.archiveDir, sanitizeVersion(version)+".tar.gz")
+	if _, err := os.Stat(srcTar); err != nil {
+		return nil, fmt.Errorf("版本 %s 的归档包文件缺失: %w", version, err)
+	}
+
+	id := fmt.Sprintf("rb-%d-%s", time.Now().UnixNano(), randHex(4))
+	unpackDir := filepath.Join(m.cfg.Dir, "unpacked", id)
+	if err := os.MkdirAll(unpackDir, 0o755); err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(unpackDir) // 临时解压，回退完成后清理
+
+	if err := untarGz(srcTar, unpackDir); err != nil {
+		return nil, fmt.Errorf("解压归档包失败: %w", err)
+	}
+	mfData, err := os.ReadFile(filepath.Join(unpackDir, "manifest.json"))
+	if err != nil {
+		return nil, errors.New("归档包缺少 manifest.json")
+	}
+	var mf Manifest
+	if err := json.Unmarshal(mfData, &mf); err != nil {
+		return nil, fmt.Errorf("归档包 manifest 解析失败: %w", err)
+	}
+	if mf.Version == "" {
+		mf.Version = version
+	}
+
+	return m.applyCore(id, mf.Version, mf.Components, unpackDir, operator, "rollback_to")
+}
+
+// Archive 返回已归档（已上传）的升级包列表，按上传时间倒序，供 Web 端选择回退。
+func (m *Manager) Archive() []ArchiveEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]ArchiveEntry, len(m.archive))
+	copy(out, m.archive)
+	sort.Slice(out, func(i, j int) bool { return out[i].UploadedAt.After(out[j].UploadedAt) })
+	return out
+}
+
+// archivePackage 把上传的原始 tar.gz 按版本归档，并保留最近 ArchiveKeep 个版本。
+func (m *Manager) archivePackage(version, srcTar string) error {
+	dst := filepath.Join(m.archiveDir, sanitizeVersion(version)+".tar.gz")
+	if err := copyFile(srcTar, dst); err != nil {
+		return err
+	}
+	sz, _ := pathSize(dst)
+
+	m.mu.Lock()
+	replaced := false
+	for i := range m.archive {
+		if m.archive[i].Version == version {
+			m.archive[i].UploadedAt = time.Now()
+			m.archive[i].Size = sz
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		m.archive = append(m.archive, ArchiveEntry{
+			ID:         randHex(8),
+			Version:    version,
+			UploadedAt: time.Now(),
+			Size:       sz,
+		})
+	}
+	m.pruneArchive()
+	m.saveArchive()
+	m.mu.Unlock()
+	return nil
+}
+
+// pruneArchive 仅保留最近 ArchiveKeep 个归档版本，删除更旧的归档文件。
+func (m *Manager) pruneArchive() {
+	if m.cfg.ArchiveKeep <= 0 || len(m.archive) <= m.cfg.ArchiveKeep {
+		return
+	}
+	sort.Slice(m.archive, func(i, j int) bool { return m.archive[i].UploadedAt.After(m.archive[j].UploadedAt) })
+	for _, e := range m.archive[m.cfg.ArchiveKeep:] {
+		_ = os.Remove(filepath.Join(m.archiveDir, sanitizeVersion(e.Version)+".tar.gz"))
+	}
+	m.archive = m.archive[:m.cfg.ArchiveKeep]
+}
+
+func (m *Manager) saveArchive() {
+	data, err := json.MarshalIndent(m.archive, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp := m.archivePth + ".tmp"
+	_ = os.WriteFile(tmp, data, 0o644)
+	_ = os.Rename(tmp, m.archivePth)
+}
+
+func (m *Manager) loadArchive() {
+	data, err := os.ReadFile(m.archivePth)
+	if err != nil {
+		return // 无归档记录属正常
+	}
+	var list []ArchiveEntry
+	if err := json.Unmarshal(data, &list); err != nil {
+		slog.Warn("解析归档记录失败，将忽略", "path", m.archivePth, "err", err)
+		return
+	}
+	// 仅保留归档文件仍存在的条目，避免 Web 端列出已丢失的版本
+	kept := list[:0]
+	for _, e := range list {
+		if _, err := os.Stat(filepath.Join(m.archiveDir, sanitizeVersion(e.Version)+".tar.gz")); err == nil {
+			kept = append(kept, e)
+		}
+	}
+	m.archive = kept
+}
+
+// sanitizeVersion 把版本号转成安全的文件名片段。
+func sanitizeVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "unknown"
+	}
+	repl := strings.NewReplacer("/", "_", "\\", "_", ":", "_", " ", "_", "..", "_")
+	return repl.Replace(v)
 }
 
 // Rollback 从最近一次备份恢复 server + web，并重启。

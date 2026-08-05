@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 )
 
@@ -72,4 +73,50 @@ func (a *API) handleSystemUpgradeHistory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"history": a.upgrader.History()})
+}
+
+// handleSystemUpgradeArchive 返回已上传（已归档）的升级包列表，供回退到指定版本。
+func (a *API) handleSystemUpgradeArchive(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	if a.upgrader == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"versions": []string{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"versions": a.upgrader.Archive()})
+}
+
+// handleSystemUpgradeRollbackTo 回退到指定的已归档版本。
+func (a *API) handleSystemUpgradeRollbackTo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	if a.upgrader == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "升级功能未启用"})
+		return
+	}
+	var body struct {
+		Version  string `json:"version"`
+		Operator string `json:"operator"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体解析失败: " + err.Error()})
+		return
+	}
+	if body.Version == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "缺少 version 参数"})
+		return
+	}
+	if body.Operator == "" {
+		body.Operator = "web"
+	}
+	task, err := a.upgrader.RollbackTo(body.Version, body.Operator)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"task": task, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
 }
