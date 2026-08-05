@@ -110,12 +110,12 @@ func DefaultScreenConfig() ScreenConfig {
 type AuthConfig struct {
 	Enabled  bool   `yaml:"enabled"`  // 是否启用登录认证
 	Username string `yaml:"username"` // 登录用户名
-	Password string `yaml:"password"` // 登录密码（bcrypt 哈希，形如 $2a$；旧明文配置会在启动时自动迁移为哈希）
+	Password string `yaml:"password"` // 登录密码（国密 SM3 加盐哈希，形如 sm3:<salt>:<hash>；旧明文配置会在启动时自动迁移为哈希）
 	Secret   string `yaml:"secret"`   // token 签名密钥（留空时启动自动生成）
 }
 
-// MigratePasswordIfNeeded 在登录密码仍为旧明文（非 bcrypt 哈希）时，
-// 将其转为 bcrypt 哈希并写回原配置文件（先备份为 .bak），实现平滑迁移。
+// MigratePasswordIfNeeded 在登录密码仍为旧明文（非国密 SM3 哈希前缀）时，
+// 将其转为国密 SM3 加盐哈希并写回原配置文件（先备份为 .bak），实现平滑迁移。
 // 返回 true 表示发生了迁移。path 为空或密码已为哈希/为空时不做任何操作。
 func (a *AuthConfig) MigratePasswordIfNeeded(path string) (bool, error) {
 	if path == "" || a.Password == "" || crypto.IsHashed(a.Password) {
@@ -133,13 +133,13 @@ func (a *AuthConfig) MigratePasswordIfNeeded(path string) (bool, error) {
 	return true, nil
 }
 
-// PatchAuthPassword 将配置文件中 auth.password 字段更新为给定值（应为 bcrypt 哈希）。
+// PatchAuthPassword 将配置文件中 auth.password 字段更新为给定值（应为国密 SM3 哈希）。
 // 供「修改密码」接口在用户重置密码后持久化使用；其余段落与注释保持原样。
 func PatchAuthPassword(path, value string) error {
 	return patchYAMLPassword(path, value)
 }
 
-// patchYAMLPassword 仅将配置文件中 auth.password 字段更新为 bcrypt 哈希，
+// patchYAMLPassword 仅将配置文件中 auth.password 字段更新为国密 SM3 哈希，
 // 其余段落与注释保持原样（基于 yaml.Node 定位修改，避免整文件重写丢失注释/顺序）。
 func patchYAMLPassword(path, hashed string) error {
 	data, err := os.ReadFile(path)

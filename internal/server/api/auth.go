@@ -182,7 +182,7 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userOK := subtle.ConstantTimeCompare([]byte(body.Username), []byte(a.auth.Username)) == 1
-	// 密码校验走 servercrypto.VerifyPassword：优先 bcrypt 哈希比对，
+	// 密码校验走 servercrypto.VerifyPassword：优先国密 SM3 哈希比对，
 	// 对未迁移的旧明文配置自动按明文常量时间比较兜底（与启动时迁移互补）。
 	passOK := servercrypto.VerifyPassword(a.auth.Password, body.Password)
 	if !userOK || !passOK {
@@ -222,7 +222,7 @@ type changePasswordRequest struct {
 }
 
 // handleChangePassword 修改登录密码。要求已登录（authRequired 中间件保证）。
-// 校验旧密码 -> bcrypt 哈希新密码 -> 更新内存并持久化到 server.yaml。
+// 校验旧密码 -> 国密 SM3 哈希新密码 -> 更新内存并持久化到 server.yaml。
 func (a *API) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if !a.auth.Enabled {
 		writeJSON(w, 400, map[string]string{"error": "未启用登录认证，无需修改密码"})

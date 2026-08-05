@@ -4,7 +4,7 @@
       <div class="card-head">
         <div>
           <span class="title">修改登录密码</span>
-          <span class="sub">密码以 bcrypt 哈希存储，服务端不会保存明文</span>
+          <span class="sub">密码以国密 SM3 加盐哈希存储，服务端不会保存明文</span>
         </div>
       </div>
     </template>
