@@ -197,6 +197,27 @@ func (a *API) handlePostgresInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 配置清单补充：对已在注册表中但当前 up 指标因 agent 离线而缺失的实例，
+	// 补列出来并标记为离线，避免误判为"尚未配置 PostgreSQL 监控"。
+	for _, pi := range instancereg.Default.PostgresInstances() {
+		key := pi.Node + "|" + pi.Instance
+		if _, ok := instances[key]; ok {
+			continue
+		}
+		instances[key] = &postgresInstanceInfo{
+			Node:     pi.Node,
+			Instance: pi.Instance,
+			Name:     pi.Name,
+			Role:     pi.Role,
+			Topology: pi.Topology,
+			Version:  pi.Version,
+			Database: pi.Database,
+			Group:    pi.Group,
+			Up:       false,
+		}
+		keys = append(keys, key)
+	}
+
 	metricMap := map[string]func(ri *postgresInstanceInfo, v float64){
 		"postgres_numbackends":           func(ri *postgresInstanceInfo, v float64) { ri.Numbackends = round2(v) },
 		"postgres_max_connections":       func(ri *postgresInstanceInfo, v float64) { ri.MaxConnections = round2(v) },
@@ -288,6 +309,25 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 			}
 			keys = append(keys, key)
 		}
+	}
+
+	// 配置清单补充：对已在注册表中但当前 up 指标因 agent 离线而缺失的实例，
+	// 补列出来并标记为离线，避免误判为"尚未配置 Nginx 监控"。
+	for _, ni := range instancereg.Default.NginxInstances() {
+		key := ni.Node + "|" + ni.Instance
+		if _, ok := instances[key]; ok {
+			continue
+		}
+		instances[key] = &nginxInstanceInfo{
+			Node:     ni.Node,
+			NodeIP:   a.nodeIP(ni.Node),
+			Instance: ni.Instance,
+			Name:     ni.Name,
+			Version:  ni.Version,
+			Group:    ni.Group,
+			Up:       false,
+		}
+		keys = append(keys, key)
 	}
 
 	metricMap := map[string]func(ri *nginxInstanceInfo, v float64){
@@ -586,6 +626,25 @@ func (a *API) handleKafkaInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 配置清单补充：对已在注册表中但当前 up 指标因 agent 离线而缺失的实例，
+	// 补列出来并标记为离线，避免误判为"尚未配置 Kafka 监控"。
+	for _, ki := range instancereg.Default.KafkaInstances() {
+		key := ki.Node + "|" + ki.Instance
+		if _, ok := instances[key]; ok {
+			continue
+		}
+		instances[key] = &kafkaInstanceInfo{
+			Node:     ki.Node,
+			Instance: ki.Instance,
+			Name:     ki.Name,
+			Role:     ki.Role,
+			Version:  ki.Version,
+			Group:    ki.Group,
+			Up:       false,
+		}
+		keys = append(keys, key)
+	}
+
 	metricMap := map[string]func(ri *kafkaInstanceInfo, v float64){
 		"kafka_broker_count":                func(ri *kafkaInstanceInfo, v float64) { ri.BrokerCount = round2(v) },
 		"kafka_topic_count":                 func(ri *kafkaInstanceInfo, v float64) { ri.TopicCount = round2(v) },
@@ -697,6 +756,25 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 			instances[key] = ri
 			keys = append(keys, key)
 		}
+	}
+
+	// 配置清单补充：对已在注册表中但当前 up 指标因 agent 离线而缺失的容器，
+	// 补列出来并标记为离线，避免误判为"尚未接入 Docker 监控"。
+	for _, di := range instancereg.Default.DockerInstances() {
+		key := di.Node + "|" + di.Instance
+		if _, ok := instances[key]; ok {
+			continue
+		}
+		instances[key] = &dockerContainerInfo{
+			Node:     di.Node,
+			Instance: di.Instance,
+			Name:     di.Name,
+			Image:    di.Image,
+			Status:   di.Status,
+			Group:    di.Group,
+			Up:       false,
+		}
+		keys = append(keys, key)
 	}
 
 	metricMap := map[string]func(ri *dockerContainerInfo, v float64){
@@ -863,6 +941,25 @@ func (a *API) handleRocketMQInstances(w http.ResponseWriter, r *http.Request) {
 			}
 			keys = append(keys, key)
 		}
+	}
+
+	// 配置清单补充：对已在注册表中但当前 up 指标因 agent 离线而缺失的实例，
+	// 补列出来并标记为离线，避免误判为"尚未配置 RocketMQ 监控"。
+	for _, rmi := range instancereg.Default.RocketMQInstances() {
+		key := rmi.Node + "|" + rmi.Instance
+		if _, ok := instances[key]; ok {
+			continue
+		}
+		instances[key] = &rocketmqInstanceInfo{
+			Node:     rmi.Node,
+			Instance: rmi.Instance,
+			Name:     rmi.Name,
+			Role:     rmi.Role,
+			Version:  rmi.Version,
+			Group:    rmi.Group,
+			Up:       false,
+		}
+		keys = append(keys, key)
 	}
 
 	metricMap := map[string]func(ri *rocketmqInstanceInfo, v float64){
@@ -1124,6 +1221,24 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 			clusters[key] = ci
 			keys = append(keys, key)
 		}
+	}
+
+	// 配置清单补充：对已在注册表中但当前 up 指标因 agent 离线而缺失的集群，
+	// 补列出来并标记为离线，避免误判为"尚未配置 Kubernetes 监控"。
+	for _, ki := range instancereg.Default.K8sInstances() {
+		key := ki.Node + "|" + ki.Instance
+		if _, ok := clusters[key]; ok {
+			continue
+		}
+		clusters[key] = &k8sClusterInfo{
+			Node:     ki.Node,
+			Instance: ki.Instance,
+			Name:     ki.Name,
+			Version:  ki.Version,
+			Group:    ki.Group,
+			Up:       false,
+		}
+		keys = append(keys, key)
 	}
 
 	metricMap := map[string]func(ci *k8sClusterInfo, v float64){

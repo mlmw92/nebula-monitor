@@ -133,9 +133,16 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		})
 	}
 
-	// 将本次上报的 MySQL 实例配置写入注册表：即使 Agent 离线（时序指标 stale），
-	// Web 仍可从注册表枚举到"已配置但离线"的实例，避免误判为"尚未配置 MySQL 监控"。
+	// 将本次上报的中间件实例配置写入注册表：即使 Agent 离线（时序指标 stale），
+	// Web 仍可从注册表枚举到"已配置但离线"的实例，避免误判为"尚未配置 Xxx 监控"。
 	instancereg.Default.SetMySQL(payload.Node, payload.MySQLInstances)
+	instancereg.Default.SetRedis(payload.Node, payload.RedisInstances)
+	instancereg.Default.SetPostgres(payload.Node, payload.PostgresInstances)
+	instancereg.Default.SetNginx(payload.Node, payload.NginxInstances)
+	instancereg.Default.SetKafka(payload.Node, payload.KafkaInstances)
+	instancereg.Default.SetDocker(payload.Node, payload.DockerInstances)
+	instancereg.Default.SetRocketMQ(payload.Node, payload.RocketMQInstances)
+	instancereg.Default.SetK8s(payload.Node, payload.K8sInstances)
 
 	if err := r.storage.Write(metrics); err != nil {
 		slog.Error("写入 VM 失败", "node", payload.Node, "err", err)

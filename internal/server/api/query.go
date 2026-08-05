@@ -18,6 +18,7 @@ import (
 	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/dialtest"
+	"github.com/nebula/monitor/internal/server/instancereg"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
@@ -964,6 +965,28 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 			keys = append(keys, key)
 		}
 		latestTs[key] = ts
+	}
+
+	// 配置清单补充：对已在注册表中但当前 up 指标因 agent 离线而缺失的实例，
+	// 补列出来并标记为离线，避免误判为"尚未配置 Redis 监控"。
+	for _, ri := range instancereg.Default.RedisInstances() {
+		key := ri.Node + "|" + ri.Instance
+		if _, ok := instances[key]; ok {
+			continue
+		}
+		instances[key] = &redisInstanceInfo{
+			Node:      ri.Node,
+			NodeIP:    a.nodeIP(ri.Node),
+			Instance:  ri.Instance,
+			Name:      ri.Name,
+			Role:      ri.Role,
+			Topology:  ri.Topology,
+			Version:   ri.Version,
+			Group:     ri.Group,
+			ReplicaOf: ri.ReplicaOf,
+			Up:        false,
+		}
+		keys = append(keys, key)
 	}
 
 	// 2. 批量查询关键指标，按 instance 标签填充到实例
