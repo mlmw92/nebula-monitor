@@ -70,7 +70,7 @@ type Task struct {
 type HistoryEntry struct {
 	ID              string    `json:"id"`
 	Version         string    `json:"version,omitempty"`
-	Action          string    `json:"action"` // apply | rollback | upload_failed
+	Action          string    `json:"action"` // apply | upload_failed
 	At              time.Time `json:"at"`
 	Operator        string    `json:"operator"`
 	Result          string    `json:"result"` // success | failed
@@ -603,46 +603,6 @@ func sanitizeVersion(v string) string {
 	}
 	repl := strings.NewReplacer("/", "_", "\\", "_", ":", "_", " ", "_", "..", "_")
 	return repl.Replace(v)
-}
-
-// Rollback 从最近一次备份恢复 server + web，并重启。
-func (m *Manager) Rollback(operator string) error {
-	backups, err := filepath.Glob(filepath.Join(m.cfg.Dir, "backups", "*"))
-	if err != nil || len(backups) == 0 {
-		return errors.New("没有可用的备份")
-	}
-	sort.Slice(backups, func(i, j int) bool { return backups[i] > backups[j] })
-	latest := backups[0]
-
-	var errs []string
-	serverBin := filepath.Join(m.cfg.BinDir, "monitor-server")
-	if _, err := os.Stat(filepath.Join(latest, "monitor-server")); err == nil {
-		// 必须用原子替换：回退时 server 自身正在运行，直接覆盖会报 ETXTBSY（text file busy）。
-		// 同时显式指定 0755，保证恢复出来的二进制可执行。
-		if err := replaceFileAtomic(filepath.Join(latest, "monitor-server"), serverBin, 0o755); err != nil {
-			errs = append(errs, "恢复 server 失败: "+err.Error())
-		}
-	}
-	if _, err := os.Stat(filepath.Join(latest, "web")); err == nil {
-		if err := syncDir(filepath.Join(latest, "web"), m.cfg.WebDir); err != nil {
-			errs = append(errs, "恢复 web 失败: "+err.Error())
-		}
-	}
-	if err := m.restart(); err != nil {
-		errs = append(errs, "重启 server 失败: "+err.Error())
-	}
-
-	result := "success"
-	detail := ""
-	if len(errs) > 0 {
-		result = "failed"
-		detail = strings.Join(errs, "; ")
-	}
-	m.recordHistory(filepath.Base(latest), "", "rollback", operator, result, detail, false)
-	if result == "failed" {
-		return errors.New(detail)
-	}
-	return nil
 }
 
 // Current 返回当前待应用任务的快照（深拷贝）。

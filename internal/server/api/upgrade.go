@@ -52,20 +52,6 @@ func (a *API) handleSystemUpgradeApply(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, task)
 }
 
-// handleSystemUpgradeRollback 回滚到最近一次备份。
-func (a *API) handleSystemUpgradeRollback(w http.ResponseWriter, r *http.Request) {
-	if a.upgrader == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "升级功能未启用"})
-		return
-	}
-	operator := r.URL.Query().Get("operator")
-	if err := a.upgrader.Rollback(operator); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
 // handleSystemUpgradeHistory 返回升级历史记录（最新在前）。
 func (a *API) handleSystemUpgradeHistory(w http.ResponseWriter, r *http.Request) {
 	if a.upgrader == nil {

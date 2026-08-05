@@ -148,7 +148,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/system/upgrade/upload", a.handleSystemUpgradeUpload)
 	mux.HandleFunc("GET /api/v1/system/upgrade/current", a.handleSystemUpgradeCurrent)
 	mux.HandleFunc("POST /api/v1/system/upgrade/apply", a.handleSystemUpgradeApply)
-	mux.HandleFunc("POST /api/v1/system/upgrade/rollback", a.handleSystemUpgradeRollback)
 	mux.HandleFunc("GET /api/v1/system/upgrade/history", a.handleSystemUpgradeHistory)
 	mux.HandleFunc("GET /api/v1/system/upgrade/archive", a.handleSystemUpgradeArchive)
 	mux.HandleFunc("POST /api/v1/system/upgrade/rollback-to", a.handleSystemUpgradeRollbackTo)

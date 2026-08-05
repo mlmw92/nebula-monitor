@@ -85,7 +85,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 - **数据大屏**：`/screen` 全屏自适应数据分析视图，三大板块 Tab 切换：主机监控（CPU/内存/磁盘/网络实时仪表盘 + 集群趋势 + 主机健康列表）、中间件监控（8 类组件健康度总览 + 关键参数趋势 + 实例下钻）、Nginx 分析（访问量/流量趋势、状态码分布、Top URI/Top IP 排行、请求来源地理分布中国/世界地图热力散点与动线）；顶部 KPI 指标卡、底部实时告警滚动区，模块显隐可配置并持久化。主机 Tab 已支持离线主机整行高亮标识、磁盘集群均值（仅统计在线主机）与磁盘读写 IOPS、load1/5/15、网络丢包率、TCP 重传率展示；上述新增指标（磁盘 IOPS、网络丢包率、TCP 重传率、load5/load15）需先将各节点 Agent 升级到相同版本并重分发二进制后方可采集，未升级前对应字段显示为空或 0。
 - **服务拨测**：拨测任务管理页面（新增/编辑/删除/启用切换），实时展示拨测结果（在线状态/延迟/证书到期）。
 - **巡检报告**：报告生成页面（日报/周报/月报选择 + 即时生成 + 下载 + 历史记录）。
-- **系统升级**：Web 上传 upgrade 包 → 解析版本 → 立即升级（备份+替换+重启）/ 回滚 + 升级历史；Agent 不主动推送，由管理员在主机列表手动触发。页面另设独立的「IP 地理库」入口，可单独上传 ip2region 库文件即时生效，不重启服务、不影响其他组件
+- **系统升级**：Web 上传 upgrade 包 → 解析版本 → 立即升级（备份+替换+重启）/ 切换到指定版本 + 升级历史；Agent 不主动推送，由管理员在主机列表手动触发。页面另设独立的「IP 地理库」入口，可单独上传 ip2region 库文件即时生效，不重启服务、不影响其他组件
 - 升级按钮提交后 15 秒冷却（显示"请等待 Ns"并禁用），防止 server 重启期间重复点击
 - **Agent 部署引导**：`/setup` 页生成直连安装命令 + 网闸代理向导 + 代理节点状态表
 
@@ -278,10 +278,6 @@ sudo bash deploy/install-server.sh --upgrade --tsdb-addr http://<tsdb>:8428
 每次通过 Web 端上传的升级包都会被自动归档（保留最近 5 个版本，可在 `server.yaml` 的 `upgrade.archiveKeep` 调整）。在「系统升级」页「升级历史」表格中，凡是仍存在于归档且非当前运行版本的记录，其行尾都带有「切换」按钮：点击后服务端会解压该版本的归档包并按其 `manifest.json` 重新执行备份 → 替换 Server/Web/Agent → 重启，使运行版本变为该归档版本（既可切换回旧版本，也可从旧版本切换回较新的版本）。切换同样会生成备份，因此可继续向后切换或回退。当前运行版本对应的「切换」按钮为禁用状态。
 
 > 归档包位于升级目录下的 `archive/` 子目录，记录保存在 `archive.json`；归档文件缺失的版本不会在列表中展示。
-
-### 回滚到最近一次备份
-
-除切换到指定版本外，也可在「升级历史」区点击「回滚到上一次备份」，直接将 Server/Web 恢复到最近一次成功升级前备份的版本（不依赖归档包）。
 
 ### Agent 升级
 
@@ -1077,7 +1073,6 @@ journalctl -u monitor-proxy-hub -f
 | POST | `/api/v1/system/upgrade/upload` | 上传升级包（multipart） |
 | GET | `/api/v1/system/upgrade/current` | 当前待应用升级包 |
 | POST | `/api/v1/system/upgrade/apply` | 立即应用 |
-| POST | `/api/v1/system/upgrade/rollback` | 回滚到最近备份 |
 | GET | `/api/v1/system/upgrade/archive` | 已归档（可切换）版本列表 |
 | POST | `/api/v1/system/upgrade/rollback-to` | 切换到指定归档版本 |
 | GET | `/api/v1/system/upgrade/history` | 升级历史 |

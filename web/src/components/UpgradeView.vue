@@ -151,11 +151,6 @@
         @current-change="(p) => (historyPage = p)"
         @size-change="(s) => { historyPageSize = s; historyPage = 1 }"
       />
-      <div class="rollback-row" v-if="history.length">
-        <el-button type="warning" plain :disabled="applying" @click="doRollback">
-          回滚到上一次备份
-        </el-button>
-      </div>
     </div>
 
     <!-- IP 地理库（独立入口：只替换归属地数据，不影响 Server/Web/Agent，不重启服务） -->
@@ -419,26 +414,6 @@ async function doApply() {
     await loadPending()
     await loadHistory()
     await loadArchive()
-  } finally {
-    applying.value = false
-  }
-}
-
-async function doRollback() {
-  try {
-    await ElMessageBox.confirm(
-      '确认回滚到最近一次备份？将替换当前 server 与 web 并重启，期间服务短暂不可用。',
-      '回滚',
-      { type: 'warning' }
-    )
-  } catch { return }
-  applying.value = true
-  try {
-    await http.post('/api/v1/system/upgrade/rollback?operator=web', {})
-    ElMessage.success('回滚已提交，server 即将重启。请稍候刷新。')
-    setTimeout(() => window.location.reload(), 8000)
-  } catch (e) {
-    ElMessage.error('回滚失败：' + e.message)
   } finally {
     applying.value = false
   }
