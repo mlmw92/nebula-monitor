@@ -52,6 +52,7 @@ const nodeCards = computed(() =>
     netIn: props.metrics[n.hostname]?.netIn || 0,
     netOut: props.metrics[n.hostname]?.netOut || 0,
     memTotal: props.metrics[n.hostname]?.memTotal || 0,
+    procCount: props.metrics[n.hostname]?.procCount || 0,
   }))
 )
 

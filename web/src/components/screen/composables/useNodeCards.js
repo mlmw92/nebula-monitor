@@ -50,6 +50,7 @@ export function buildNodeCards(nodes, metrics) {
       tcpRetrans: x.tcpRetrans || 0,
       memTotal: x.memTotal || 0,
       memUsed: x.memUsed || 0,
+      procCount: x.procCount || 0,
     }
   })
 }
