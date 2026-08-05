@@ -613,10 +613,10 @@ onUnmounted(() => {
   font-size: 12px;
 }
 
-/* 右侧：地图 + 来源地 Top 水平并排 */
+/* 右侧：地图 + 来源地 Top 水平并排；地图占主区，来源列自适应收窄 */
 .nt-right {
   display: grid;
-  grid-template-columns: 1fr 300px;
+  grid-template-columns: 1fr minmax(200px, 20%);
   gap: 10px;
   min-height: 0;
   min-width: 0;
@@ -734,7 +734,7 @@ onUnmounted(() => {
   .ntk-sub { font-size: 14px; }
   .nt-body { gap: 14px; }
   .nt-left { gap: 14px; }
-  .nt-right { gap: 14px; grid-template-columns: 1fr 380px; }
+  .nt-right { gap: 14px; grid-template-columns: 1fr minmax(300px, 20%); }
   .nt-card { padding: 14px 16px 8px; }
   .ntc-head { font-size: 15px; }
   .ntc-stat { font-size: 16px; }
@@ -753,7 +753,7 @@ onUnmounted(() => {
   .ntk-sub { font-size: 17px; }
   .nt-body { gap: 20px; }
   .nt-left { gap: 20px; }
-  .nt-right { gap: 20px; grid-template-columns: 1fr 460px; }
+  .nt-right { gap: 20px; grid-template-columns: 1fr minmax(380px, 20%); }
   .nt-card { padding: 18px 22px 10px; }
   .ntc-head { font-size: 18px; }
   .ntc-stat { font-size: 20px; }
