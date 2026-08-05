@@ -214,6 +214,11 @@
           <div class="el-upload__tip">
             支持 ip2region v4（IPv4）的 .xdb 文件；上传后立即生效，无需重启服务或重新升级系统
           </div>
+          <div class="el-upload__tip" style="margin-top: 4px; color: #909399">
+            升级包下载：ip2region 官方仓库
+            <el-link type="primary" href="https://github.com/lionsoul2014/ip2region" target="_blank" :underline="false">github.com/lionsoul2014/ip2region</el-link>
+            的 data 目录下获取最新的 ip2region.xdb（需为 v4 格式），下载后将文件后缀/命名保留为 .xdb 即可上传
+          </div>
         </template>
       </el-upload>
       <div v-if="geoipUploading" class="upload-progress">

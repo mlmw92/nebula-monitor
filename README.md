@@ -257,8 +257,9 @@ sudo bash deploy/install-tsdb.sh --upgrade --vm-package victoria-metrics-linux-a
 Nginx 访问分析与数据大屏的「请求来源地理分布」依赖 IP 地理库（ip2region v4，IPv4）。程序内置一份库，可在不重新打包、不升级系统的前提下单独更新：
 
 1. 进入仪表盘「系统升级」页，找到底部的「IP 地理库」区块；
-2. 上传新的 `.xdb` 文件（拖拽或点击）；
-3. 上传后服务端会先校验文件格式与样本 IP 查询结果，通过后立即热加载生效，无需重启 `monitor-server`，也不影响 Server / Web / Agent 组件。
+2. 准备新的 `.xdb` 文件：从 ip2region 官方仓库（https://github.com/lionsoul2014/ip2region ）的 `data` 目录获取最新的 `ip2region.xdb`（需为 v4 格式），保留 `.xdb` 后缀即可上传；
+3. 上传该文件（拖拽或点击）；
+4. 上传后服务端会先校验文件格式与样本 IP 查询结果，通过后立即热加载生效，无需重启 `monitor-server`，也不影响 Server / Web / Agent 组件。
 
 该区块同时提供：
 
