@@ -99,7 +99,7 @@
           </template>
         </el-dropdown>
       </div>
-      <el-table :data="rules" stripe style="width: 100%" empty-text="暂无规则">
+      <el-table :data="pagedRules" stripe style="width: 100%" empty-text="暂无规则">
         <el-table-column prop="name" label="名称" min-width="140" />
         <el-table-column label="类型" width="120">
           <template #default="{ row }">
@@ -165,6 +165,16 @@
           </template>
         </el-table-column>
       </el-table>
+      <div style="margin-top: 12px; display: flex; justify-content: flex-end">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="rules.length"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+        />
+      </div>
     </div>
 
     <!-- 高级：抑制与分组（P4） -->
@@ -353,7 +363,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -364,6 +374,17 @@ import RuleModal from './RuleModal.vue'
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 const router = useRouter()
 const rules = ref([])
+// 告警规则前端分页
+const currentPage = ref(1)
+const pageSize = ref(10)
+const pagedRules = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return rules.value.slice(start, start + pageSize.value)
+})
+watch(rules, () => {
+  const max = Math.max(1, Math.ceil(rules.value.length / pageSize.value))
+  if (currentPage.value > max) currentPage.value = max
+})
 const alerts = ref([])
 const groups = ref([])
 const templates = ref([])
