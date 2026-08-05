@@ -10,6 +10,7 @@ import (
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/config"
+	"github.com/nebula/monitor/internal/server/instancereg"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/storage"
@@ -131,6 +132,10 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 			Node: payload.Node, Name: "k8s_cluster_up", Labels: labels, Value: upVal, Timestamp: payload.ReportAt,
 		})
 	}
+
+	// 将本次上报的 MySQL 实例配置写入注册表：即使 Agent 离线（时序指标 stale），
+	// Web 仍可从注册表枚举到"已配置但离线"的实例，避免误判为"尚未配置 MySQL 监控"。
+	instancereg.Default.SetMySQL(payload.Node, payload.MySQLInstances)
 
 	if err := r.storage.Write(metrics); err != nil {
 		slog.Error("写入 VM 失败", "node", payload.Node, "err", err)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/dialtest"
+	"github.com/nebula/monitor/internal/server/instancereg"
 	"github.com/nebula/monitor/internal/server/report"
 )
 
@@ -48,36 +49,45 @@ func (a *API) handleMySQLInstances(w http.ResponseWriter, r *http.Request) {
 		Uptime            float64 `json:"uptime"`
 	}
 
-	instances := map[string]*mysqlInstanceInfo{}
-	var keys []string
+	// 实时在线状态：以 node|instance 为键记录最新 up 值（>0 为在线）。
+	// 注意即时查询对超过 lookback-delta 的旧样本视为 stale 返回空，
+	// 因此离线的 Agent 不会出现在 liveUp 中——这正是需要注册表补充的部分。
+	liveUp := map[string]bool{}
 	for _, s := range upSeries {
 		node := s.Labels["node"]
 		instance := s.Labels["instance"]
 		if node == "" || instance == "" || len(s.Points) == 0 {
 			continue
 		}
-		key := node + "|" + instance
-		if ri, exists := instances[key]; exists {
-			// 已存在的实例：持续更新元数据（role/topology/version 等），确保 GR 切主后角色能刷新。
-			ri.Role = s.Labels["role"]
-			ri.Topology = s.Labels["topology"]
-			ri.Version = s.Labels["version"]
-			ri.Group = s.Labels["group"]
-			ri.ReplicaOf = s.Labels["replica_of"]
-			ri.Up = s.Points[len(s.Points)-1].Value > 0
-		} else {
-			instances[key] = &mysqlInstanceInfo{
-				Node:      node,
-				Instance:  instance,
-				Name:      s.Labels["name"],
-				Role:      s.Labels["role"],
-				Topology:  s.Labels["topology"],
-				Version:   s.Labels["version"],
-				Group:     s.Labels["group"],
-				ReplicaOf: s.Labels["replica_of"],
-				Up:        s.Points[len(s.Points)-1].Value > 0,
-			}
-			keys = append(keys, key)
+		liveUp[node+"|"+instance] = s.Points[len(s.Points)-1].Value > 0
+	}
+
+	// 配置清单（含离线实例）：来自实例注册表，保证 Agent 宕机后仍可枚举，
+	// 不会被误判为"尚未配置 MySQL 监控"。元数据取最后已知上报，Up 暂置 false。
+	instances := map[string]*mysqlInstanceInfo{}
+	var keys []string
+	for _, m := range instancereg.Default.MySQLInstances() {
+		key := m.Node + "|" + m.Instance
+		if _, exists := instances[key]; exists {
+			continue
+		}
+		instances[key] = &mysqlInstanceInfo{
+			Node:      m.Node,
+			Instance:  m.Instance,
+			Name:      m.Name,
+			Role:      m.Role,
+			Topology:  m.Topology,
+			Version:   m.Version,
+			Group:     m.Group,
+			ReplicaOf: m.ReplicaOf,
+			Up:        false,
+		}
+		keys = append(keys, key)
+	}
+	// 用实时在线状态覆盖（仅对注册表中已有的实例生效）
+	for key, up := range liveUp {
+		if ri, ok := instances[key]; ok {
+			ri.Up = up
 		}
 	}
 
