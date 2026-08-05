@@ -135,7 +135,7 @@
               plain
               :disabled="!canRollbackTo(row.version) || rollingBack"
               @click="rollbackTo(row.version)"
-            >回退</el-button>
+            >切换</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -180,12 +180,12 @@
               plain
               :disabled="row.version === currentVersion.server || rollingBack"
               @click="rollbackTo(row.version)"
-            >回退</el-button>
+            >切换</el-button>
           </template>
         </el-table-column>
       </el-table>
       <div class="rollback-note">
-        仅保留最近 {{ archiveKeep }} 个已上传版本；回退会按该版本重新替换 Server / Web / Agent 并重启（同样生成备份，可继续向后回退）。
+        仅保留最近 {{ archiveKeep }} 个已上传版本；切换会按该版本重新替换 Server / Web / Agent 并重启（同样生成备份，可继续向后切换或回退）。
       </div>
     </div>
 
@@ -376,18 +376,18 @@ function canRollbackTo(version) {
 async function rollbackTo(version) {
   try {
     await ElMessageBox.confirm(
-      `确认回退到版本 v${version}？将按该版本重新替换 Server / Web / Agent 并重启 monitor-server，期间服务短暂不可用。该操作同样会生成备份，可继续向后回退。`,
-      '回退到指定版本',
-      { type: 'warning', confirmButtonText: '回退', cancelButtonText: '取消' }
+      `确认切换到版本 v${version}？将按该版本重新替换 Server / Web / Agent 并重启 monitor-server，期间服务短暂不可用。该操作同样会生成备份，可继续向后切换或回退。`,
+      '切换到指定版本',
+      { type: 'warning', confirmButtonText: '切换', cancelButtonText: '取消' }
     )
   } catch { return }
   rollingBack.value = true
   try {
     await http.post('/api/v1/system/upgrade/rollback-to', { version, operator: 'web' })
-    ElMessage.success(`已回退到 v${version}，server 即将重启。请稍候刷新页面。`)
+    ElMessage.success(`已切换到 v${version}，server 即将重启。请稍候刷新页面。`)
     setTimeout(() => window.location.reload(), 8000)
   } catch (e) {
-    ElMessage.error('回退失败：' + e.message)
+    ElMessage.error('切换失败：' + e.message)
     await loadArchive()
   } finally {
     rollingBack.value = false

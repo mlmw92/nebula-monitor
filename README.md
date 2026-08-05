@@ -273,15 +273,15 @@ sudo bash deploy/uninstall.sh --all --yes
 sudo bash deploy/install-server.sh --upgrade --tsdb-addr http://<tsdb>:8428
 ```
 
-### 回退到指定版本
+### 切换到指定版本
 
-每次通过 Web 端上传的升级包都会被自动归档（保留最近 5 个版本，可在 `server.yaml` 的 `upgrade.archiveKeep` 调整），并在「系统升级」页下方的「可回退版本（归档）」列表中展示。点击某版本的「回退」按钮，服务端会解压该版本的归档包并按其 `manifest.json` 重新执行备份 → 替换 Server/Web/Agent → 重启，使运行版本回落到该归档版本。回退同样会生成备份，因此可继续向后回退。当前运行版本对应的「回退」按钮为禁用状态。
+每次通过 Web 端上传的升级包都会被自动归档（保留最近 5 个版本，可在 `server.yaml` 的 `upgrade.archiveKeep` 调整），并在「系统升级」页下方的「可回退版本（归档）」列表、以及「升级历史」表格每行的「切换」按钮中展示。点击某版本的「切换」按钮，服务端会解压该版本的归档包并按其 `manifest.json` 重新执行备份 → 替换 Server/Web/Agent → 重启，使运行版本变为该归档版本（既可切换回旧版本，也可从旧版本切换回较新的版本）。切换同样会生成备份，因此可继续向后切换或回退。当前运行版本对应的「切换」按钮为禁用状态。
 
 > 归档包位于升级目录下的 `archive/` 子目录，记录保存在 `archive.json`；归档文件缺失的版本不会在列表中展示。
 
 ### 回滚到最近一次备份
 
-除回退到指定版本外，也可在「升级历史」区点击「回滚到上一次备份」，直接将 Server/Web 恢复到最近一次成功升级前备份的版本（不依赖归档包）。
+除切换到指定版本外，也可在「升级历史」区点击「回滚到上一次备份」，直接将 Server/Web 恢复到最近一次成功升级前备份的版本（不依赖归档包）。
 
 ### Agent 升级
 
@@ -1078,8 +1078,8 @@ journalctl -u monitor-proxy-hub -f
 | GET | `/api/v1/system/upgrade/current` | 当前待应用升级包 |
 | POST | `/api/v1/system/upgrade/apply` | 立即应用 |
 | POST | `/api/v1/system/upgrade/rollback` | 回滚到最近备份 |
-| GET | `/api/v1/system/upgrade/archive` | 已归档（可回退）版本列表 |
-| POST | `/api/v1/system/upgrade/rollback-to` | 回退到指定归档版本 |
+| GET | `/api/v1/system/upgrade/archive` | 已归档（可切换）版本列表 |
+| POST | `/api/v1/system/upgrade/rollback-to` | 切换到指定归档版本 |
 | GET | `/api/v1/system/upgrade/history` | 升级历史 |
 | GET/POST/PUT/DELETE | `/api/v1/dialtest/tasks` | 拨测任务 CRUD |
 | GET | `/api/v1/dialtest/latest` | 最近拨测结果 |
