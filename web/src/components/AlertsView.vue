@@ -654,6 +654,7 @@ async function ackEvent(row) {
   try {
     await http.post('/api/v1/alerts/ack', { rule: row.ruleName, host: row.node, instance: row.instance || '' })
     ElMessage.success('已确认')
+    drawer.value = false
     await load()
   } catch (e) {
     ElMessage.error('确认失败')
