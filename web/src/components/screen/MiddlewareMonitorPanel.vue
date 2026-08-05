@@ -162,6 +162,8 @@ const TYPE_METRICS = {
   docker: [{ key: 'docker_container_cpu_percent', label: '容器 CPU %', mode: 'avg' }],
   rocketmq: [{ key: 'rocketmq_consumer_lag', label: '消费积压', mode: 'avg' }],
   k8s: [{ key: 'k8s_pods_pending', label: '待调度 Pod', mode: 'avg' }],
+  mongodb: [{ key: 'mongodb_connections_current', label: '当前连接', mode: 'avg' }],
+  fastdfs: [{ key: 'fastdfs_storage_online_count', label: '在线 Storage', mode: 'avg' }],
 }
 const RING_COLORS = [
   'var(--accent)', 'var(--chart-blue)', 'var(--chart-green)', 'var(--chart-yellow)',

@@ -28,6 +28,8 @@ type Collector struct {
 	rmq         *RocketMQCollector
 	k8s         *K8sCollector
 	port        *PortCollector
+	mongo       *MongoDBCollector
+	fastdfs     *FastDFSCollector
 }
 
 // New 创建 Collector。
@@ -40,6 +42,8 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	dockerInstances []model.DockerInstanceConfig,
 	rocketmqInstances []model.RocketMQInstanceConfig,
 	k8sInstances []model.K8sInstanceConfig,
+	mongoInstances []model.MongoDBInstanceConfig,
+	fastdfsInstances []model.FastDFSInstanceConfig,
 	portChecks []string,
 ) *Collector {
 	c := &Collector{
@@ -77,6 +81,12 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	}
 	if cfg.K8s {
 		c.k8s = NewK8sCollector(node, k8sInstances)
+	}
+	if cfg.MongoDB {
+		c.mongo = NewMongoDBCollector(node, mongoInstances)
+	}
+	if cfg.FastDFS {
+		c.fastdfs = NewFastDFSCollector(node, fastdfsInstances)
 	}
 	if cfg.Port {
 		c.port = NewPortCollector(node, portChecks)
@@ -209,6 +219,22 @@ func (c *Collector) CollectK8s() ([]model.Metric, []model.K8sInstance) {
 		return nil, nil
 	}
 	return c.k8s.Collect()
+}
+
+// CollectMongoDB 采集 MongoDB 指标。
+func (c *Collector) CollectMongoDB() ([]model.Metric, []model.MongoDBInstance) {
+	if c.mongo == nil {
+		return nil, nil
+	}
+	return c.mongo.Collect()
+}
+
+// CollectFastDFS 采集 FastDFS 指标。
+func (c *Collector) CollectFastDFS() ([]model.Metric, []model.FastDFSInstance) {
+	if c.fastdfs == nil {
+		return nil, nil
+	}
+	return c.fastdfs.Collect()
 }
 
 // HostInfo 返回主机静态信息（OS/Arch/IP），用于上报体。

@@ -4,7 +4,7 @@
     <div class="page-header">
       <div class="header-left">
         <h2 class="page-title">中间件监控</h2>
-        <p class="page-desc">Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes 实例监控与可视化</p>
+        <p class="page-desc">Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes / MongoDB / FastDFS 实例监控与可视化</p>
       </div>
     </div>
 
@@ -74,14 +74,21 @@
         </template>
         <K8sTab v-if="activeTab === 'k8s'" />
       </el-tab-pane>
-      <el-tab-pane label="MongoDB" name="mongo" disabled>
+      <el-tab-pane label="MongoDB" name="mongodb">
         <template #label>
-          <el-tooltip content="即将支持" placement="top">
-            <span class="tab-label disabled">
-              <img class="tab-icon" :src="mongodbIcon" alt="MongoDB" />MongoDB
-            </span>
-          </el-tooltip>
+          <span class="tab-label">
+            <img class="tab-icon" :src="mongodbIcon" alt="MongoDB" />MongoDB
+          </span>
         </template>
+        <MongoTab v-if="activeTab === 'mongodb'" />
+      </el-tab-pane>
+      <el-tab-pane label="FastDFS" name="fastdfs">
+        <template #label>
+          <span class="tab-label">
+            <img class="tab-icon" :src="fastdfsIcon" alt="FastDFS" />FastDFS
+          </span>
+        </template>
+        <FastDFSTab v-if="activeTab === 'fastdfs'" />
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -107,6 +114,8 @@ const KafkaTab = tabLoader(() => import('./kafka/KafkaTab.vue'))
 const DockerTab = tabLoader(() => import('./docker/DockerTab.vue'))
 const RocketMQTab = tabLoader(() => import('./rocketmq/RocketMQTab.vue'))
 const K8sTab = tabLoader(() => import('./k8s/K8sTab.vue'))
+const MongoTab = tabLoader(() => import('./mongo/MongoTab.vue'))
+const FastDFSTab = tabLoader(() => import('./fastdfs/FastDFSTab.vue'))
 import redisIcon from '../assets/img/redis.svg'
 import mysqlIcon from '../assets/img/mysql.svg'
 import postgresIcon from '../assets/img/postgresql.svg'
@@ -116,9 +125,10 @@ import dockerIcon from '../assets/img/docker.svg'
 import mongodbIcon from '../assets/img/mongoDB.svg'
 import rocketmqIcon from '../assets/img/rocketMQ.svg'
 import k8sIcon from '../assets/img/kubernetes.svg'
+import fastdfsIcon from '../assets/img/fastdfs.svg'
 
 const route = useRoute()
-const validTabs = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s']
+const validTabs = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s', 'mongodb', 'fastdfs']
 const activeTab = ref(validTabs.includes(route.query.tab) ? route.query.tab : 'redis')
 
 // 支持从首页等外部链接通过 ?tab= 深链跳转到指定中间件

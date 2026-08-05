@@ -120,6 +120,8 @@ usage() {
   kafka               配置 Kafka 中间件监控
   rocketmq            配置 RocketMQ 中间件监控
   k8s                 配置 Kubernetes 集群监控（填 apiserver/kubeconfig/token）
+  mongodb             配置 MongoDB 中间件监控
+  fastdfs             配置 FastDFS 中间件监控
 
 选项：
   --server <url>      上报的 Server 地址，如 http://10.0.0.1:8080
@@ -153,6 +155,8 @@ usage() {
   bash agent-install.sh kafka                # 配置 Kafka 监控
   bash agent-install.sh rocketmq             # 配置 RocketMQ 监控
   bash agent-install.sh k8s                  # 配置 Kubernetes 集群监控
+  bash agent-install.sh mongodb              # 配置 MongoDB 监控
+  bash agent-install.sh fastdfs              # 配置 FastDFS 监控
   # 网闸代理模式部署（详见 README 网闸代理章节）：
   bash agent-install.sh --mode hub --listen :8443 --tls-cert /path/hub.crt --tls-key /path/hub.key --tls-ca /path/ca.crt --server http://127.0.0.1:8080 --yes
   bash agent-install.sh --mode edge --listen :18080 --hub-addr 10.0.0.2:8443 --tls-cert /path/edge.crt --tls-key /path/edge.key --tls-ca /path/ca.crt --yes
@@ -165,21 +169,21 @@ EOF
 
 # ============================ 子命令分发 ============================
 # 首个参数为中间件子命令时进入配置流程（不安装/不覆盖 Agent 二进制）。
-# 支持的子命令: redis mysql postgres nginx kafka rocketmq k8s
+# 支持的子命令: redis mysql postgres nginx kafka rocketmq k8s mongodb fastdfs
 SUBCOMMAND=""
 if [[ $# -gt 0 ]]; then
   case "$1" in
-    redis|mysql|postgres|nginx|kafka|rocketmq|k8s)
+    redis|mysql|postgres|nginx|kafka|rocketmq|k8s|mongodb|fastdfs)
       SUBCOMMAND="$1"; shift ;;
     -h|--help) usage ;;
     --*) ;;  # 以 -- 开头的是选项，不是子命令
     *)
       local_lower="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
       case "$local_lower" in
-        redis|mysql|postgres|nginx|kafka|rocketmq|k8s)
+        redis|mysql|postgres|nginx|kafka|rocketmq|k8s|mongodb|fastdfs)
           SUBCOMMAND="$local_lower"; shift ;;
         *)
-          die "未知参数或子命令: $1（用 -h 查看帮助；支持的子命令: redis mysql postgres nginx kafka rocketmq k8s）"
+          die "未知参数或子命令: $1（用 -h 查看帮助；支持的子命令: redis mysql postgres nginx kafka rocketmq k8s mongodb fastdfs）"
           ;;
       esac
       ;;
@@ -842,6 +846,8 @@ middleware_config() {
     nginx)    mw_name="Nginx";       mw_collector="nginx";    mw_instances_key="nginxInstances" ;;
     kafka)    mw_name="Kafka";       mw_collector="kafka";    mw_instances_key="kafkaInstances" ;;
     rocketmq) mw_name="RocketMQ";    mw_collector="rocketmq"; mw_instances_key="rocketmqInstances" ;;
+    mongodb)  mw_name="MongoDB";     mw_collector="mongodb";  mw_instances_key="mongoInstances" ;;
+    fastdfs)  mw_name="FastDFS";     mw_collector="fastdfs";  mw_instances_key="fastdfsInstances" ;;
     *) die "不支持的中间件类型: $mw_type" ;;
   esac
 
@@ -929,6 +935,38 @@ middleware_config() {
       rocketmq)
         extra_fields=""
         ;;
+      mongodb)
+        prompt user "用户名（无认证留空）" ""
+        prompt password "密码（仅存本地不上报）" ""
+        prompt auth_source "认证库（如 admin）" "admin"
+        prompt database "采集 dbStats 的库名（留空不采集库统计）" ""
+        echo "请选择部署拓扑："
+        choose "拓扑类型" 1 "单机(standalone)" "副本集(replicaset)" "分片集群(sharded)" "exporter(Prometheus)"
+        local topo=""
+        case "$CHOICE_VAL" in
+          单机*) topo="standalone" ;;
+          副本集*) topo="replicaset" ;;
+          分片*) topo="sharded" ;;
+          exporter*) topo="standalone" ;;
+        esac
+        if [[ "$CHOICE_VAL" == exporter* ]]; then
+          prompt exporter_url "exporter /metrics URL" "http://127.0.0.1:9216/metrics"
+        fi
+        extra_fields="authSource: \"${auth_source}\""$'\n'"    database: \"${database}\""$'\n'"    topology: \"${topo}\""
+        ;;
+      fastdfs)
+        echo "请选择角色："
+        choose "角色" 1 "tracker" "storage"
+        local role=""
+        case "$CHOICE_VAL" in
+          tracker*) role="tracker" ;;
+          storage*) role="storage" ;;
+        esac
+        local group=""
+        [[ "$role" == "storage" ]] && prompt group "所属 group 名称（tracker 留空）" "group1"
+        prompt exporter_url "fastdfs_exporter /metrics URL（推荐；完整指标依赖它）" "http://127.0.0.1:9300/metrics"
+        extra_fields="role: \"${role}\""$'\n'"    group: \"${group}\""
+        ;;
     esac
 
     # 生成 YAML 片段
@@ -957,6 +995,15 @@ middleware_config() {
     fi
     if [[ "$mw_type" == "kafka" && -n "$version" ]]; then
       instances_yaml+="    version: \"${version}\""$'\n'
+    fi
+    if [[ "$mw_type" == "mongodb" ]]; then
+      instances_yaml+="    authSource: \"${auth_source}\""$'\n'
+      instances_yaml+="    database: \"${database}\""$'\n'
+      instances_yaml+="    topology: \"${topo}\""$'\n'
+    fi
+    if [[ "$mw_type" == "fastdfs" ]]; then
+      instances_yaml+="    role: \"${role}\""$'\n'
+      instances_yaml+="    group: \"${group}\""$'\n'
     fi
     if [[ -n "$exporter_url" ]]; then
       instances_yaml+="    exporterURL: \"${exporter_url}\""$'\n'

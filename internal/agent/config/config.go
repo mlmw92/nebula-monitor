@@ -36,6 +36,8 @@ type Config struct {
 	DockerInstances   []model.DockerInstanceConfig   `yaml:"dockerInstances"`   // Docker 连接配置
 	RocketMQInstances []model.RocketMQInstanceConfig `yaml:"rocketmqInstances"` // RocketMQ 实例连接配置
 	K8sInstances      []model.K8sInstanceConfig      `yaml:"k8sInstances"`      // Kubernetes 集群连接配置
+	MongoDBInstances  []model.MongoDBInstanceConfig  `yaml:"mongoInstances"`   // MongoDB 实例连接配置
+	FastDFSInstances  []model.FastDFSInstanceConfig  `yaml:"fastdfsInstances"` // FastDFS 实例连接配置
 	PortChecks        []string                  `yaml:"portChecks"`         // TCP 端口存活检测列表，如 ["80","443","3306"]
 	Proxy             ProxyConfig               `yaml:"proxy"`              // 代理模式配置，mode=edge/hub 时生效
 }
@@ -81,6 +83,8 @@ type CollectorToggle struct {
 	Docker   bool `yaml:"docker"`   // Docker 容器监控，默认关闭
 	RocketMQ bool `yaml:"rocketmq"` // RocketMQ 中间件监控，默认关闭
 	K8s      bool `yaml:"k8s"`      // Kubernetes 集群监控，默认关闭
+	MongoDB  bool `yaml:"mongodb"`  // MongoDB 中间件监控，默认关闭
+	FastDFS  bool `yaml:"fastdfs"`  // FastDFS 中间件监控，默认关闭
 	Port     bool `yaml:"port"`     // 端口存活检测，默认关闭
 }
 

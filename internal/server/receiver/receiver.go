@@ -143,6 +143,8 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 	instancereg.Default.SetDocker(payload.Node, payload.DockerInstances)
 	instancereg.Default.SetRocketMQ(payload.Node, payload.RocketMQInstances)
 	instancereg.Default.SetK8s(payload.Node, payload.K8sInstances)
+	instancereg.Default.SetMongoDB(payload.Node, payload.MongoDBInstances)
+	instancereg.Default.SetFastDFS(payload.Node, payload.FastDFSInstances)
 
 	if err := r.storage.Write(metrics); err != nil {
 		slog.Error("写入 VM 失败", "node", payload.Node, "err", err)

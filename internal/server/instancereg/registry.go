@@ -27,6 +27,8 @@ type Registry struct {
 	docker    map[string][]model.DockerInstance
 	rocketmq  map[string][]model.RocketMQInstance
 	k8s       map[string][]model.K8sInstance
+	mongodb   map[string][]model.MongoDBInstance
+	fastdfs   map[string][]model.FastDFSInstance
 }
 
 // Default 全局默认注册表，由 receiver 在每次上报时写入，API 在查询时读取。
@@ -42,6 +44,8 @@ func New() *Registry {
 		docker:   map[string][]model.DockerInstance{},
 		rocketmq: map[string][]model.RocketMQInstance{},
 		k8s:      map[string][]model.K8sInstance{},
+		mongodb:  map[string][]model.MongoDBInstance{},
+		fastdfs:  map[string][]model.FastDFSInstance{},
 	}
 }
 
@@ -193,6 +197,42 @@ func (r *Registry) K8sInstances() []model.K8sInstance {
 	defer r.mu.RUnlock()
 	var all []model.K8sInstance
 	for _, v := range r.k8s {
+		all = append(all, v...)
+	}
+	return all
+}
+
+// ---- MongoDB ----
+
+func (r *Registry) SetMongoDB(node string, instances []model.MongoDBInstance) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.mongodb[normalizeNode(node)] = instances
+}
+
+func (r *Registry) MongoDBInstances() []model.MongoDBInstance {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var all []model.MongoDBInstance
+	for _, v := range r.mongodb {
+		all = append(all, v...)
+	}
+	return all
+}
+
+// ---- FastDFS ----
+
+func (r *Registry) SetFastDFS(node string, instances []model.FastDFSInstance) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.fastdfs[normalizeNode(node)] = instances
+}
+
+func (r *Registry) FastDFSInstances() []model.FastDFSInstance {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var all []model.FastDFSInstance
+	for _, v := range r.fastdfs {
 		all = append(all, v...)
 	}
 	return all

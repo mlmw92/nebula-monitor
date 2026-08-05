@@ -15,7 +15,7 @@
 
 - **主机监控**：CPU / 内存 / 负载 / 磁盘 / 网络 / 进程 / 硬件信息采集，支持节点分组与离线告警
 - **多时序库后端**：默认 VictoriaMetrics，可对接 Mimir / Cortex / Thanos / Prometheus（`remote_write`）
-- **中间件监控**：Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes 八类组件（直连 + exporter 双模式）
+- **中间件监控**：Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes / MongoDB / FastDFS 十类组件（直连 + exporter 双模式）
 - **Web 仪表盘**：实时数据、历史趋势、数据大屏、Nginx 访问分析（含请求来源地理分布）
 - **服务拨测**：HTTP / HTTPS / TCP / ICMP 拨测，含 SSL 证书到期告警
 - **阈值告警**：邮件 / Webhook / 钉钉 / 飞书 / 企业微信，支持静默、维护窗口与告警升级
@@ -81,7 +81,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 **前端**
 
 - 登录、总览、主机列表（Agent 版本低于服务端时显示红点）、主机详情（含端口状态区块）、告警列表、规则新增/编辑（含静默设置）、分组管理
-- **中间件监控**：独立一级菜单，Tab 布局（一种中间件一个 Tab）。已实现 Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes 八个 Tab：统计概览卡片 + 实例列表表格 + 实例详情抽屉（多趋势图）。
+- **中间件监控**：独立一级菜单，Tab 布局（一种中间件一个 Tab）。已实现 Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes / MongoDB / FastDFS 十个 Tab：统计概览卡片 + 实例列表表格 + 实例详情抽屉（多趋势图）。
 - **数据大屏**：`/screen` 全屏自适应数据分析视图，三大板块 Tab 切换：主机监控（CPU/内存/磁盘/网络实时仪表盘 + 集群趋势 + 主机健康列表）、中间件监控（8 类组件健康度总览 + 关键参数趋势 + 实例下钻）、Nginx 分析（访问量/流量趋势、状态码分布、Top URI/Top IP 排行、请求来源地理分布中国/世界地图热力散点与动线）；顶部 KPI 指标卡、底部实时告警滚动区，模块显隐可配置并持久化。主机 Tab 已支持离线主机整行高亮标识、磁盘集群均值（仅统计在线主机）与磁盘读写 IOPS、load1/5/15、网络丢包率、TCP 重传率展示；上述新增指标（磁盘 IOPS、网络丢包率、TCP 重传率、load5/load15）需先将各节点 Agent 升级到相同版本并重分发二进制后方可采集，未升级前对应字段显示为空或 0。
 - **服务拨测**：拨测任务管理页面（新增/编辑/删除/启用切换），实时展示拨测结果（在线状态/延迟/证书到期）。
 - **巡检报告**：报告生成页面（日报/周报/月报选择 + 即时生成 + 下载 + 历史记录）。
@@ -155,6 +155,8 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 | Docker | Docker Engine API（`/var/run/docker.sock` Unix Socket）自动发现容器 + stats 资源采集；16 项指标（容器 CPU/内存/网络/磁盘 IO/运行状态/重启次数/镜像数） |
 | RocketMQ | 推荐 **exporter 模式**（RocketMQ Prometheus Exporter 拉取 `/metrics`，4.x/5.x 通用）；内置 HTTP API 直连模式仅在你环境将 `/rocketmq/httpapi/` 以标准 HTTP 暴露时可用（标准 5.x 的 NameServer/Proxy 为二进制协议，直连会 EOF）；18 项指标（Broker TPS/消息积压量/消费延迟/生产者消费者 TPS/今日生产消费总数等） |
 | Kubernetes | 标准库 net/http 直连 apiserver REST（kubeconfig/token 认证，不引入 client-go）+ kube-state-metrics/metrics-server exporter 双模式；基于标准 K8s API，兼容标准 K8s 与 k3s；采集单元为整个集群；集群健康/Node 状态与资源/Deployment・StatefulSet・DaemonSet 副本就绪/Pod 总数与异常统计；凭据仅存 Agent 本地不上报 |
+| MongoDB | 官方 Go Driver 直连（执行 `serverStatus` / `dbStats` / `hello` / `replSetGetStatus`）+ mongodb_exporter 双模式；密码仅存本地（经 `authSource` 认证）；支持 standalone / replicaset / sharded 拓扑；指标含连接数/内存/ OPS（insert·query·update·delete·command）/ 库数据·存储·对象·索引大小 / 副本集角色（PRIMARY·SECONDARY·ARBITER·MONGOS）/ 复制延迟等 |
+| FastDFS | 社区 fastdfs_exporter 拉取 `/metrics` + TCP 端口存活探测双模式；exporter 指标含 Group/Storage 数量、在线 Storage、总/空闲/已用空间、Trunk 空闲、磁盘读写、网络收发等；无 exporter 时仅提供 tracker（22122）/ storage（23000）端口存活状态 |
 
 **服务拨测**
 
@@ -179,7 +181,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 
 ### 路线图（未实现）
 
-- **更多中间件**：MongoDB
+- **更多中间件**：MariaDB、RabbitMQ 等
 - **告警增强**：告警抑制与分组
 - **可观测性增强**：自定义仪表盘、指标自动发现、历史数据导出
 - **多用户与权限**：SSO 登录、角色权限管理
@@ -412,10 +414,12 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `secret` | 接入授权密钥（与 Server 一致） |
 | `interval` | 采集间隔（秒）；代理模式下用于自监控指标上报周期 |
 | `proxy` | 代理模式配置（mode=edge/hub 时生效），见下表 |
-| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / nginxLog / kafka / docker / rocketmq / k8s / port） |
+| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / nginxLog / kafka / docker / rocketmq / k8s / mongodb / fastdfs / port） |
 | `redisInstances` | Redis 实例连接配置列表（数组，密码仅存本地不上报） |
 | `mysqlInstances` | MySQL 实例连接配置列表（数组，密码仅存本地不上报） |
 | `postgresInstances` | PostgreSQL 实例连接配置列表（数组，密码仅存本地不上报） |
+| `mongoInstances` | MongoDB 实例连接配置列表（数组，密码仅存本地不上报） |
+| `fastdfsInstances` | FastDFS 实例连接配置列表（数组，无密码） |
 | `nginxInstances` | Nginx 实例连接配置列表（数组） |
 | `kafkaInstances` | Kafka 实例连接配置列表（数组） |
 | `dockerInstances` | Docker 实例连接配置列表（数组） |
@@ -802,6 +806,55 @@ k8sInstances:
     # exporterURL: "http://127.0.0.1:8080/metrics"  # 可选 kube-state-metrics
 ```
 
+**MongoDB / FastDFS 示例**
+
+```yaml
+collectors:
+  mongodb: true
+  fastdfs: true
+
+mongoInstances:
+  - name: "prod-mongo"              # 副本集多成员请使用相同 name 归为同一副本集
+    addr: "10.0.0.10:27017"
+    user: "monitor"                 # 无认证时留空
+    password: "****"                # 仅存本地不上报
+    authSource: "admin"             # 认证库
+    database: "appdb"               # 采集 dbStats 的库；留空则不采集库存储/对象统计
+    topology: "replicaset"          # standalone / replicaset / sharded
+    # exporterURL: "http://127.0.0.1:9216/metrics"  # 可选；填了走 exporter，不再直连
+
+fastdfsInstances:
+  - name: "tracker-1"
+    role: "tracker"                 # tracker / storage
+    addr: "10.0.0.20:22122"
+    group: ""                       # tracker 留空
+    # exporterURL: "http://127.0.0.1:9300/metrics"  # 推荐；完整指标依赖 fastdfs_exporter
+  - name: "storage-1"
+    role: "storage"
+    addr: "10.0.0.21:23000"
+    group: "group1"
+```
+
+**MongoDB / FastDFS 字段说明**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `mongoInstances[].name` | 是 | 实例别名（replicaset 多成员请使用相同 `name` 归为同一副本集） |
+| `mongoInstances[].addr` | 是 | MongoDB 地址 `host:port` |
+| `mongoInstances[].user` | 否 | 认证用户名；无认证留空 |
+| `mongoInstances[].password` | 否 | 密码，仅存 Agent 本地不上报 |
+| `mongoInstances[].authSource` | 否 | 认证库（如 `admin`） |
+| `mongoInstances[].database` | 否 | 采集 `dbStats` 的库名；留空则不采集库存储/对象统计 |
+| `mongoInstances[].topology` | 否 | `standalone` / `replicaset` / `sharded`；影响角色判定展示 |
+| `mongoInstances[].exporterURL` | 否 | mongodb_exporter 的 `/metrics` 地址；填了走 exporter，不再直连 |
+| `fastdfsInstances[].name` | 是 | 实例别名 |
+| `fastdfsInstances[].role` | 是 | `tracker` / `storage` |
+| `fastdfsInstances[].addr` | 是 | FastDFS 地址 `host:port`（tracker 22122 / storage 23000） |
+| `fastdfsInstances[].group` | 否 | storage 所属 group 名称；tracker 留空 |
+| `fastdfsInstances[].exporterURL` | 否 | fastdfs_exporter 的 `/metrics` 地址；完整空间/IO/Storage 状态依赖它，未配置时仅做端口存活探测 |
+
+> **提示**：FastDFS 无标准直连接口，推荐部署社区 `fastdfs_exporter` 并填写 `exporterURL` 以获取 Group/Storage 数量、空间使用、磁盘读写、网络收发等完整指标；仅做 TCP 存活探测时只能看到在线/离线状态。MongoDB 直连模式下建议为监控账号授予 `clusterMonitor` 角色（副本集）或 `readAnyDatabase`，以保证 `serverStatus` / `dbStats` / `replSetGetStatus` 可读取。
+
 **Kubernetes 字段说明**
 
 | 字段 | 必填 | 说明 |
@@ -1063,7 +1116,9 @@ journalctl -u monitor-proxy-hub -f
 | GET | `/api/v1/middleware/docker/instances` | Docker 实例列表 |
 | GET | `/api/v1/middleware/rocketmq/instances` | RocketMQ 实例列表 |
 | GET | `/api/v1/middleware/k8s/instances` | Kubernetes 集群列表（集群聚合 + Node/异常 Pod 明细） |
-| GET | `/api/v1/middleware/overview` | 中间件健康度总览（8 类组件实例数 / 在线数 / 告警数聚合） |
+| GET | `/api/v1/middleware/mongodb/instances` | MongoDB 实例列表（聚合最新状态与指标） |
+| GET | `/api/v1/middleware/fastdfs/instances` | FastDFS 实例列表（聚合最新状态与指标） |
+| GET | `/api/v1/middleware/overview` | 中间件健康度总览（10 类组件实例数 / 在线数 / 告警数聚合） |
 | GET | `/api/v1/middleware/nginx/access/summary` | Nginx 访问日志汇总（总请求 / 速率 / 状态码分布 / Top URI / Top IP） |
 | GET | `/api/v1/middleware/nginx/access/geo?scope=cn\|world` | 请求来源地理分布（来源热力点 / 部署点 / 动线） |
 | GET | `/api/v1/alerts?state=active` | 告警事件 |

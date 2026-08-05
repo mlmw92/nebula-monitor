@@ -55,6 +55,8 @@ type ReportPayload struct {
 	DockerInstances   []DockerInstance   `json:"dockerInstances,omitempty"`   // Docker 容器元信息
 	RocketMQInstances []RocketMQInstance `json:"rocketmqInstances,omitempty"` // RocketMQ 实例元信息
 	K8sInstances      []K8sInstance      `json:"k8sInstances,omitempty"`      // Kubernetes 集群元信息
+	MongoDBInstances  []MongoDBInstance  `json:"mongoInstances,omitempty"`   // MongoDB 实例元信息
+	FastDFSInstances  []FastDFSInstance  `json:"fastdfsInstances,omitempty"` // FastDFS 实例元信息
 	NginxAccessStats  []NginxAccessStat  `json:"nginxAccessStats,omitempty"`  // Nginx access log 聚合统计
 	ReportAt          int64              `json:"reportAt"`                    // 上报时间（毫秒）
 }
@@ -135,6 +137,85 @@ type PostgresInstance struct {
 	Version   string `json:"version"`  // PostgreSQL 版本
 	Database  string `json:"database"` // 连接的数据库名
 	Up        bool   `json:"up"`
+}
+
+// ---- MongoDB ----
+
+// MongoDBInstanceConfig 是 Agent 本地配置的 MongoDB 实例连接信息。密码不上报。
+type MongoDBInstanceConfig struct {
+	Name       string `yaml:"name"`       // 实例别名
+	Addr       string `yaml:"addr"`       // MongoDB 地址 host:port
+	User       string `yaml:"user"`       // 用户名（auth 为 None 时留空）
+	Password   string `yaml:"password"`   // 密码（json:"-"）
+	AuthSource string `yaml:"authSource"` // 认证库（如 admin）
+	Database   string `yaml:"database"`   // 采集 dbStats 的数据库名（留空不采集库统计）
+	Topology   string `yaml:"topology"`   // standalone|replicaset|sharded
+	ExporterURL string `yaml:"exporterURL"` // exporter 模式的 /metrics URL（留空走直连）
+}
+
+// MongoDBInstance 是上报给 Server 的 MongoDB 实例元信息（不含密码）。
+type MongoDBInstance struct {
+	Instance      string  `json:"instance"`            // host:port
+	Name          string  `json:"name"`                // 实例别名
+	Node          string  `json:"node"`                // 采集 Agent 节点名
+	Role          string  `json:"role"`                // PRIMARY|SECONDARY|ARBITER|OTHER
+	Topology      string  `json:"topology"`            // standalone|replicaset|sharded
+	Group         string  `json:"group"`               // 副本集名称（replicaset 用 cfg.Name）
+	Version       string  `json:"version"`             // MongoDB 版本
+	Up            bool    `json:"up"`                  // 实例是否可达
+	Uptime        float64 `json:"uptime"`              // 运行时长（秒）
+	ConnCurrent   float64 `json:"connectionsCurrent"`  // 当前连接数
+	ConnAvailable float64 `json:"connectionsAvailable"` // 可用连接数
+	MemResident   float64 `json:"memResidentMB"`        // 常驻内存（MB）
+	MemVirtual    float64 `json:"memVirtualMB"`         // 虚拟内存（MB）
+	OpInsert      float64 `json:"opInsert"`             // 累计 insert 次数
+	OpQuery       float64 `json:"opQuery"`              // 累计 query 次数
+	OpUpdate      float64 `json:"opUpdate"`             // 累计 update 次数
+	OpDelete      float64 `json:"opDelete"`             // 累计 delete 次数
+	OpCommand     float64 `json:"opCommand"`            // 累计 command 次数
+	DbDataSize    float64 `json:"dbDataSizeMB"`         // 数据库数据大小（MB）
+	DbStorageSize float64 `json:"dbStorageSizeMB"`      // 数据库存储大小（MB）
+	DbObjects     float64 `json:"dbObjects"`            // 文档数
+	DbIndexes     float64 `json:"dbIndexes"`            // 索引数
+	DbIndexSize   float64 `json:"dbIndexSizeMB"`        // 索引大小（MB）
+	ReplState     float64 `json:"replState"`            // 副本集成员状态（0-10，1=PRIMARY）
+	ReplHealth    float64 `json:"replHealth"`           // 副本集健康（0/1）
+	ReplLag       float64 `json:"replLag"`              // 副本集复制延迟（秒）
+	CollectedAt   int64   `json:"collectedAt"`          // 采集时间戳（毫秒）
+}
+
+// ---- FastDFS ----
+
+// FastDFSInstanceConfig 是 Agent 本地配置的 FastDFS 实例连接信息。
+type FastDFSInstanceConfig struct {
+	Name       string `yaml:"name"`       // 实例别名
+	Role       string `yaml:"role"`       // tracker|storage
+	Addr       string `yaml:"addr"`       // 地址 host:port（tracker 22122 / storage 23000）
+	Group      string `yaml:"group"`      // storage 所属 group（tracker 留空）
+	ExporterURL string `yaml:"exporterURL"` // fastdfs_exporter 的 /metrics URL（留空走 TCP 存活探测）
+}
+
+// FastDFSInstance 是上报给 Server 的 FastDFS 实例元信息。
+type FastDFSInstance struct {
+	Instance      string  `json:"instance"`       // host:port
+	Name          string  `json:"name"`           // 实例别名
+	Node          string  `json:"node"`           // 采集 Agent 节点名
+	Role          string  `json:"role"`           // tracker|storage
+	Group         string  `json:"group"`          // 所属 group（storage）
+	Up            bool    `json:"up"`             // 实例是否可达
+	GroupTotal    float64 `json:"groupTotal"`     // 集群 group 总数
+	StorageTotal  float64 `json:"storageTotal"`   // storage 节点总数
+	StorageOnline float64 `json:"storageOnline"`  // 在线 storage 数
+	StorageOffline float64 `json:"storageOffline"` // 离线 storage 数
+	TotalSpaceMB  float64 `json:"totalSpaceMB"`   // 总空间（MB）
+	FreeSpaceMB   float64 `json:"freeSpaceMB"`    // 空闲空间（MB）
+	UsedSpaceMB   float64 `json:"usedSpaceMB"`    // 已用空间（MB）
+	TrunkFreeMB   float64 `json:"trunkFreeMB"`    // trunk 空闲空间（MB）
+	DiskReadMB    float64 `json:"diskReadMB"`     // 累计磁盘读（MB）
+	DiskWriteMB   float64 `json:"diskWriteMB"`    // 累计磁盘写（MB）
+	NetRecvMB     float64 `json:"netRecvMB"`      // 累计网络收（MB）
+	NetSentMB     float64 `json:"netSentMB"`      // 累计网络发（MB）
+	CollectedAt   int64   `json:"collectedAt"`    // 采集时间戳（毫秒）
 }
 
 // ---- Nginx ----

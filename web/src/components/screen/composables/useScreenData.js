@@ -4,10 +4,11 @@ import http from '../../../api/http'
 import { rateShort } from '../../../charts/echarts'
 import { buildNodeCards } from './useNodeCards'
 
-const MW_TYPES = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s']
+const MW_TYPES = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s', 'mongodb', 'fastdfs']
 const MW_LABELS = {
   redis: 'Redis', mysql: 'MySQL', postgres: 'PG', nginx: 'Nginx',
   kafka: 'Kafka', docker: 'Docker', rocketmq: 'MQ', k8s: 'K8s',
+  mongodb: 'MongoDB', fastdfs: 'FastDFS',
 }
 
 export function useScreenData() {

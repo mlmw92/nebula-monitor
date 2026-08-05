@@ -24,6 +24,8 @@ const MAP = {
   'control-plane': { label: 'Control-Plane', cls: 'sentinel' },
   broker: { label: 'Broker', cls: 'broker' },
   nameserver: { label: 'NameServer', cls: 'broker' },
+  arbiter: { label: 'Arbiter', cls: 'sentinel' },
+  mongos: { label: 'Mongos', cls: 'broker' },
   standalone: { label: '单机', cls: 'standalone' },
   node: { label: 'Node', cls: 'standalone' },
   worker: { label: 'Worker', cls: 'standalone' },
@@ -31,9 +33,9 @@ const MAP = {
 }
 
 const entry = computed(() => {
-  const r = (props.role || '').trim()
+  const r = (props.role || '').trim().toLowerCase()
   if (MAP[r]) return MAP[r]
-  return { label: r || '未知', cls: 'unknown' }
+  return { label: props.role || '未知', cls: 'unknown' }
 })
 </script>
 

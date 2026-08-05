@@ -100,7 +100,8 @@ func main() {
 	coll := collector.New(cfg.Node, cfg.Group, cfg.Labels, cfg.Collectors,
 		cfg.RedisInstances, cfg.MySQLInstances, cfg.PostgresInstances,
 		cfg.NginxInstances, cfg.KafkaInstances, cfg.DockerInstances,
-		cfg.RocketMQInstances, cfg.K8sInstances, cfg.PortChecks,
+		cfg.RocketMQInstances, cfg.K8sInstances, cfg.MongoDBInstances, cfg.FastDFSInstances,
+		cfg.PortChecks,
 	)
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
@@ -122,6 +123,8 @@ func main() {
 	if cs.Docker { enabledCollectors = append(enabledCollectors, "docker") }
 	if cs.RocketMQ { enabledCollectors = append(enabledCollectors, "rocketmq") }
 	if cs.K8s { enabledCollectors = append(enabledCollectors, "k8s") }
+	if cs.MongoDB { enabledCollectors = append(enabledCollectors, "mongodb") }
+	if cs.FastDFS { enabledCollectors = append(enabledCollectors, "fastdfs") }
 	if cs.Port { enabledCollectors = append(enabledCollectors, "port") }
 
 	slog.Info("Agent 启动", "node", cfg.Node, "server", cfg.ServerURL, "interval", cfg.Interval, "version", version.Version, "collectors", enabledCollectors)
@@ -241,6 +244,10 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 	metrics = append(metrics, rmqMetrics...)
 	k8sMetrics, k8sInstances := coll.CollectK8s()
 	metrics = append(metrics, k8sMetrics...)
+	mongoMetrics, mongoInstances := coll.CollectMongoDB()
+	metrics = append(metrics, mongoMetrics...)
+	fastdfsMetrics, fastdfsInstances := coll.CollectFastDFS()
+	metrics = append(metrics, fastdfsMetrics...)
 
 	osName, arch, ip := coll.HostInfo()
 	payload := model.ReportPayload{
@@ -263,6 +270,8 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 		DockerInstances:   dockerInstances,
 		RocketMQInstances: rmqInstances,
 		K8sInstances:      k8sInstances,
+		MongoDBInstances:  mongoInstances,
+		FastDFSInstances:  fastdfsInstances,
 		NginxAccessStats:  nginxAccessStats,
 		ReportAt:          model.NowMillis(),
 	}

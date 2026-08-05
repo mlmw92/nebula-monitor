@@ -35,6 +35,9 @@
         <div class="db-bd" v-if="stats.postgres">
           <span class="d pg"></span>PostgreSQL<b class="mono">{{ stats.postgres }}</b>
         </div>
+        <div class="db-bd" v-if="stats.mongo">
+          <span class="d mongo"></span>MongoDB<b class="mono">{{ stats.mongo }}</b>
+        </div>
       </div>
     </template>
   </div>
@@ -44,7 +47,7 @@
 import { reactive, computed, onMounted, onUnmounted } from 'vue'
 import http from '../../api/http'
 
-const stats = reactive({ current: 0, max: 0, instances: 0, mysql: 0, postgres: 0 })
+const stats = reactive({ current: 0, max: 0, instances: 0, mysql: 0, postgres: 0, mongo: 0 })
 let timer = null
 let visible = true
 
@@ -58,21 +61,26 @@ const usageTone = computed(() => {
 async function load() {
   if (!visible) return
   try {
-    const [my, pg] = await Promise.all([
+    const [my, pg, mongo] = await Promise.all([
       http.get('/api/v1/middleware/mysql/instances').catch(() => ({ instances: [] })),
       http.get('/api/v1/middleware/postgres/instances').catch(() => ({ instances: [] })),
+      http.get('/api/v1/middleware/mongodb/instances').catch(() => ({ instances: [] })),
     ])
     const myList = my.instances || []
     const pgList = pg.instances || []
+    const mongoList = mongo.instances || []
     const myConn = myList.reduce((s, i) => s + (i.threadsConnected || 0), 0)
     const pgConn = pgList.reduce((s, i) => s + (i.numbackends || 0), 0)
+    const mongoConn = mongoList.reduce((s, i) => s + (i.connectionsCurrent || 0), 0)
     const myMax = myList.reduce((s, i) => s + (i.maxConnections || 0), 0)
     const pgMax = pgList.reduce((s, i) => s + (i.maxConnections || 0), 0)
+    const mongoMax = mongoList.reduce((s, i) => s + (i.connectionsAvailable || 0), 0)
     stats.mysql = Math.round(myConn)
     stats.postgres = Math.round(pgConn)
-    stats.current = Math.round(myConn + pgConn)
-    stats.max = Math.round(myMax + pgMax)
-    stats.instances = myList.length + pgList.length
+    stats.mongo = Math.round(mongoConn)
+    stats.current = Math.round(myConn + pgConn + mongoConn)
+    stats.max = Math.round(myMax + pgMax + mongoMax)
+    stats.instances = myList.length + pgList.length + mongoList.length
   } catch (e) {
     /* ignore */
   }
@@ -181,6 +189,7 @@ onUnmounted(() => {
 }
 .db-bd .d.mysql { background: var(--info); }
 .db-bd .d.pg { background: var(--violet); }
+.db-bd .d.mongo { background: var(--chart-green); }
 .db-bd b {
   color: var(--text);
   margin-left: 2px;

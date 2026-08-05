@@ -256,6 +256,252 @@ func (a *API) handlePostgresInstances(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"instances": out})
 }
 
+// handleMongoDBInstances 返回 MongoDB 实例列表与运行摘要（来自实例注册表 + 最新指标）。
+func (a *API) handleMongoDBInstances(w http.ResponseWriter, r *http.Request) {
+	upSeries, err := a.store.QueryAllLatest("mongodb_up", nil)
+	if err != nil {
+		slog.Error("查询 MongoDB 实例失败", "err", err)
+		http.Error(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+
+	type mongoInstanceInfo struct {
+		Node               string  `json:"node"`
+		Instance           string  `json:"instance"`
+		Name               string  `json:"name"`
+		Role               string  `json:"role"`
+		Topology           string  `json:"topology"`
+		Version            string  `json:"version"`
+		Group              string  `json:"group"`
+		Up                 bool    `json:"up"`
+		ConnectionsCurrent float64 `json:"connectionsCurrent"`
+		ConnectionsAvail   float64 `json:"connectionsAvailable"`
+		MemResidentMB      float64 `json:"memResidentMB"`
+		MemVirtualMB       float64 `json:"memVirtualMB"`
+		OpInsert           float64 `json:"opInsert"`
+		OpQuery            float64 `json:"opQuery"`
+		OpUpdate           float64 `json:"opUpdate"`
+		OpDelete           float64 `json:"opDelete"`
+		OpCommand          float64 `json:"opCommand"`
+		DbDataSizeMB       float64 `json:"dbDataSizeMB"`
+		DbStorageSizeMB    float64 `json:"dbStorageSizeMB"`
+		DbObjects          float64 `json:"dbObjects"`
+		DbIndexes          float64 `json:"dbIndexes"`
+		DbIndexSizeMB      float64 `json:"dbIndexSizeMB"`
+		ReplState          float64 `json:"replState"`
+		ReplHealth         float64 `json:"replHealth"`
+		ReplLag            float64 `json:"replLag"`
+		Uptime             float64 `json:"uptime"`
+	}
+
+	instances := map[string]*mongoInstanceInfo{}
+	var keys []string
+	for _, s := range upSeries {
+		node := s.Labels["node"]
+		instance := s.Labels["instance"]
+		if node == "" || instance == "" || len(s.Points) == 0 {
+			continue
+		}
+		key := node + "|" + instance
+		if ri, exists := instances[key]; exists {
+			ri.Role = s.Labels["role"]
+			ri.Topology = s.Labels["topology"]
+			ri.Version = s.Labels["version"]
+			ri.Group = s.Labels["group"]
+			ri.Up = s.Points[len(s.Points)-1].Value > 0
+		} else {
+			instances[key] = &mongoInstanceInfo{
+				Node:     node,
+				Instance: instance,
+				Name:     s.Labels["name"],
+				Role:     s.Labels["role"],
+				Topology: s.Labels["topology"],
+				Version:  s.Labels["version"],
+				Group:    s.Labels["group"],
+				Up:       s.Points[len(s.Points)-1].Value > 0,
+			}
+			keys = append(keys, key)
+		}
+	}
+
+	for _, mi := range instancereg.Default.MongoDBInstances() {
+		key := mi.Node + "|" + mi.Instance
+		if _, ok := instances[key]; ok {
+			continue
+		}
+		instances[key] = &mongoInstanceInfo{
+			Node:     mi.Node,
+			Instance: mi.Instance,
+			Name:     mi.Name,
+			Role:     mi.Role,
+			Topology: mi.Topology,
+			Version:  mi.Version,
+			Group:    mi.Group,
+			Up:       false,
+		}
+		keys = append(keys, key)
+	}
+
+	metricMap := map[string]func(ri *mongoInstanceInfo, v float64){
+		"mongodb_uptime_seconds":         func(ri *mongoInstanceInfo, v float64) { ri.Uptime = round2(v) },
+		"mongodb_connections_current":    func(ri *mongoInstanceInfo, v float64) { ri.ConnectionsCurrent = round2(v) },
+		"mongodb_connections_available":  func(ri *mongoInstanceInfo, v float64) { ri.ConnectionsAvail = round2(v) },
+		"mongodb_mem_resident_bytes":     func(ri *mongoInstanceInfo, v float64) { ri.MemResidentMB = round2(v / 1024 / 1024) },
+		"mongodb_mem_virtual_bytes":      func(ri *mongoInstanceInfo, v float64) { ri.MemVirtualMB = round2(v / 1024 / 1024) },
+		"mongodb_opcounters_insert":      func(ri *mongoInstanceInfo, v float64) { ri.OpInsert = round2(v) },
+		"mongodb_opcounters_query":       func(ri *mongoInstanceInfo, v float64) { ri.OpQuery = round2(v) },
+		"mongodb_opcounters_update":      func(ri *mongoInstanceInfo, v float64) { ri.OpUpdate = round2(v) },
+		"mongodb_opcounters_delete":      func(ri *mongoInstanceInfo, v float64) { ri.OpDelete = round2(v) },
+		"mongodb_opcounters_command":     func(ri *mongoInstanceInfo, v float64) { ri.OpCommand = round2(v) },
+		"mongodb_db_dataSize_bytes":      func(ri *mongoInstanceInfo, v float64) { ri.DbDataSizeMB = round2(v / 1024 / 1024) },
+		"mongodb_db_storageSize_bytes":   func(ri *mongoInstanceInfo, v float64) { ri.DbStorageSizeMB = round2(v / 1024 / 1024) },
+		"mongodb_db_indexSize_bytes":     func(ri *mongoInstanceInfo, v float64) { ri.DbIndexSizeMB = round2(v / 1024 / 1024) },
+		"mongodb_db_objects":             func(ri *mongoInstanceInfo, v float64) { ri.DbObjects = round2(v) },
+		"mongodb_db_indexes":             func(ri *mongoInstanceInfo, v float64) { ri.DbIndexes = round2(v) },
+		"mongodb_repl_state":             func(ri *mongoInstanceInfo, v float64) { ri.ReplState = round2(v) },
+		"mongodb_repl_health":            func(ri *mongoInstanceInfo, v float64) { ri.ReplHealth = round2(v) },
+		"mongodb_repl_lag":               func(ri *mongoInstanceInfo, v float64) { ri.ReplLag = round2(v) },
+	}
+	for metricName, setter := range metricMap {
+		series, err := a.store.QueryAllLatest(metricName, nil)
+		if err != nil {
+			slog.Warn("聚合 MongoDB 指标查询失败", "metric", metricName, "err", err)
+			continue
+		}
+		for _, s := range series {
+			node := s.Labels["node"]
+			instance := s.Labels["instance"]
+			if node == "" || instance == "" || len(s.Points) == 0 {
+				continue
+			}
+			ri, ok := instances[node+"|"+instance]
+			if !ok {
+				continue
+			}
+			setter(ri, s.Points[len(s.Points)-1].Value)
+		}
+	}
+
+	out := make([]mongoInstanceInfo, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, *instances[k])
+	}
+	writeJSON(w, 200, map[string]interface{}{"instances": out})
+}
+
+// handleFastDFSInstances 返回 FastDFS 实例列表与运行摘要（来自实例注册表 + 最新指标）。
+func (a *API) handleFastDFSInstances(w http.ResponseWriter, r *http.Request) {
+	upSeries, err := a.store.QueryAllLatest("fastdfs_up", nil)
+	if err != nil {
+		slog.Error("查询 FastDFS 实例失败", "err", err)
+		http.Error(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+
+	type fastdfsInstanceInfo struct {
+		Node           string  `json:"node"`
+		Instance       string  `json:"instance"`
+		Name           string  `json:"name"`
+		Role           string  `json:"role"`
+		Group          string  `json:"group"`
+		Up             bool    `json:"up"`
+		GroupTotal     float64 `json:"groupTotal"`
+		StorageTotal   float64 `json:"storageTotal"`
+		StorageOnline  float64 `json:"storageOnline"`
+		StorageOffline float64 `json:"storageOffline"`
+		TotalSpaceMB   float64 `json:"totalSpaceMB"`
+		FreeSpaceMB    float64 `json:"freeSpaceMB"`
+		UsedSpaceMB    float64 `json:"usedSpaceMB"`
+		TrunkFreeMB    float64 `json:"trunkFreeMB"`
+		DiskReadMB     float64 `json:"diskReadMB"`
+		DiskWriteMB    float64 `json:"diskWriteMB"`
+		NetRecvMB      float64 `json:"netRecvMB"`
+		NetSentMB      float64 `json:"netSentMB"`
+	}
+
+	instances := map[string]*fastdfsInstanceInfo{}
+	var keys []string
+	for _, s := range upSeries {
+		node := s.Labels["node"]
+		instance := s.Labels["instance"]
+		if node == "" || instance == "" || len(s.Points) == 0 {
+			continue
+		}
+		key := node + "|" + instance
+		if ri, exists := instances[key]; exists {
+			ri.Role = s.Labels["role"]
+			ri.Group = s.Labels["group"]
+			ri.Up = s.Points[len(s.Points)-1].Value > 0
+		} else {
+			instances[key] = &fastdfsInstanceInfo{
+				Node:     node,
+				Instance: instance,
+				Name:     s.Labels["name"],
+				Role:     s.Labels["role"],
+				Group:    s.Labels["group"],
+				Up:       s.Points[len(s.Points)-1].Value > 0,
+			}
+			keys = append(keys, key)
+		}
+	}
+
+	for _, fi := range instancereg.Default.FastDFSInstances() {
+		key := fi.Node + "|" + fi.Instance
+		if _, ok := instances[key]; ok {
+			continue
+		}
+		instances[key] = &fastdfsInstanceInfo{
+			Node:     fi.Node,
+			Instance: fi.Instance,
+			Name:     fi.Name,
+			Role:     fi.Role,
+			Group:    fi.Group,
+			Up:       false,
+		}
+		keys = append(keys, key)
+	}
+
+	metricMap := map[string]func(ri *fastdfsInstanceInfo, v float64){
+		"fastdfs_group_count":          func(ri *fastdfsInstanceInfo, v float64) { ri.GroupTotal = round2(v) },
+		"fastdfs_storage_count":        func(ri *fastdfsInstanceInfo, v float64) { ri.StorageTotal = round2(v) },
+		"fastdfs_storage_online_count": func(ri *fastdfsInstanceInfo, v float64) { ri.StorageOnline = round2(v) },
+		"fastdfs_storage_offline_count": func(ri *fastdfsInstanceInfo, v float64) { ri.StorageOffline = round2(v) },
+		"fastdfs_total_space":          func(ri *fastdfsInstanceInfo, v float64) { ri.TotalSpaceMB = round2(v / 1024 / 1024) },
+		"fastdfs_free_space":           func(ri *fastdfsInstanceInfo, v float64) { ri.FreeSpaceMB = round2(v / 1024 / 1024) },
+		"fastdfs_used_space":           func(ri *fastdfsInstanceInfo, v float64) { ri.UsedSpaceMB = round2(v / 1024 / 1024) },
+		"fastdfs_trunk_free_space":     func(ri *fastdfsInstanceInfo, v float64) { ri.TrunkFreeMB = round2(v / 1024 / 1024) },
+		"fastdfs_disk_read_bytes":      func(ri *fastdfsInstanceInfo, v float64) { ri.DiskReadMB = round2(v / 1024 / 1024) },
+		"fastdfs_disk_write_bytes":     func(ri *fastdfsInstanceInfo, v float64) { ri.DiskWriteMB = round2(v / 1024 / 1024) },
+		"fastdfs_net_recv_bytes":       func(ri *fastdfsInstanceInfo, v float64) { ri.NetRecvMB = round2(v / 1024 / 1024) },
+		"fastdfs_net_sent_bytes":       func(ri *fastdfsInstanceInfo, v float64) { ri.NetSentMB = round2(v / 1024 / 1024) },
+	}
+	for metricName, setter := range metricMap {
+		series, err := a.store.QueryAllLatest(metricName, nil)
+		if err != nil {
+			slog.Warn("聚合 FastDFS 指标查询失败", "metric", metricName, "err", err)
+			continue
+		}
+		for _, s := range series {
+			node := s.Labels["node"]
+			instance := s.Labels["instance"]
+			if node == "" || instance == "" || len(s.Points) == 0 {
+				continue
+			}
+			ri, ok := instances[node+"|"+instance]
+			if !ok {
+				continue
+			}
+			setter(ri, s.Points[len(s.Points)-1].Value)
+		}
+	}
+
+	out := make([]fastdfsInstanceInfo, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, *instances[k])
+	}
+	writeJSON(w, 200, map[string]interface{}{"instances": out})
+}
+
 // ---- Nginx ----
 
 func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
@@ -438,6 +684,20 @@ var mwSummarySpecs = map[string][]mwSummarySpec{
 		{"k8s_pods_pending", "待调度Pod", "sum", "", 0},
 		{"k8s_nodes_ready", "就绪节点", "sum", "", 0},
 	},
+	"mongodb": {
+		{"mongodb_uptime_seconds", "运行时长", "avg", "s", 0},
+		{"mongodb_connections_current", "当前连接数", "avg", "", 0},
+		{"mongodb_mem_resident_bytes", "常驻内存", "avg", "MB", 0},
+		{"mongodb_opcounters_command", "命令数", "sum", "", 0},
+		{"mongodb_db_dataSize_bytes", "数据大小", "avg", "MB", 0},
+	},
+	"fastdfs": {
+		{"fastdfs_storage_total", "Storage节点", "sum", "", 0},
+		{"fastdfs_storage_online_count", "在线Storage", "sum", "", 0},
+		{"fastdfs_total_space", "总空间", "sum", "MB", 0},
+		{"fastdfs_free_space", "空闲空间", "sum", "MB", 0},
+		{"fastdfs_used_space", "已用空间", "sum", "MB", 0},
+	},
 }
 
 // mwAggregateLatest 对指定指标的「最新值」按 agg 方式跨所有序列聚合（sum/avg/max）。
@@ -480,7 +740,7 @@ type middlewareOverviewResp struct {
 	Types      []middlewareOverviewType `json:"types"`
 }
 
-// middlewareTypes 8 类中间件的 up 指标与展示名。
+// middlewareTypes 10 类中间件的 up 指标与展示名。
 var middlewareTypes = []struct{ typ, label, upMetric string }{
 	{"redis", "Redis", "redis_instance_up"},
 	{"mysql", "MySQL", "mysql_instance_up"},
@@ -490,6 +750,8 @@ var middlewareTypes = []struct{ typ, label, upMetric string }{
 	{"docker", "Docker", "docker_container_up"},
 	{"rocketmq", "RocketMQ", "rocketmq_instance_up"},
 	{"k8s", "Kubernetes", "k8s_cluster_up"},
+	{"mongodb", "MongoDB", "mongodb_up"},
+	{"fastdfs", "FastDFS", "fastdfs_up"},
 }
 
 // handleMiddlewareOverview 返回中间件健康度总览（各类型实例数/在线率/告警数），
