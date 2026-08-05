@@ -1,6 +1,26 @@
-# Nebula Monitor · 服务器监控系统
+# Nebula Monitor
 
-基于 Go 的 C/S 架构主机监控：轻量 Agent 部署于被监控节点，定时 HTTP 上报；无状态 Server 通过 Prometheus `remote_write` 写入、PromQL 读取时序库（**默认 VictoriaMetrics**，可对接 Mimir/Cortex/Thanos），提供多节点分组管理、Web 仪表盘（实时 + 历史趋势）、数据查询 API 与阈值告警（邮件 / Webhook）。
+<div align="center">
+
+**基于 Go 的 C/S 架构服务器监控系统**：轻量 Agent 部署于被监控节点，定时 HTTP 上报；无状态 Server 通过 Prometheus `remote_write` 写入、PromQL 读取时序库，提供多节点分组管理、Web 仪表盘（实时 + 历史趋势）、数据查询 API 与阈值告警。
+
+[![Go Report Card](https://goreportcard.com/badge/github.com/mlmw92/nebula-monitor)](https://goreportcard.com/report/github.com/mlmw92/nebula-monitor)
+[![License](https://img.shields.io/badge/license-Internal-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/mlmw92/nebula-monitor)](https://github.com/mlmw92/nebula-monitor/releases)
+[![Platform](https://img.shields.io/badge/platform-linux--amd64%20%7C%20arm64%20%7C%20arm-lightgrey.svg)](https://github.com/mlmw92/nebula-monitor/releases)
+
+</div>
+
+## 特性
+
+- **主机监控**：CPU / 内存 / 负载 / 磁盘 / 网络 / 进程 / 硬件信息采集，支持节点分组与离线告警
+- **多时序库后端**：默认 VictoriaMetrics，可对接 Mimir / Cortex / Thanos / Prometheus（`remote_write`）
+- **中间件监控**：Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes 八类组件（直连 + exporter 双模式）
+- **Web 仪表盘**：实时数据、历史趋势、数据大屏、Nginx 访问分析（含请求来源地理分布）
+- **服务拨测**：HTTP / HTTPS / TCP / ICMP 拨测，含 SSL 证书到期告警
+- **阈值告警**：邮件 / Webhook / 钉钉 / 飞书 / 企业微信，支持静默、维护窗口与告警升级
+- **网闸代理模式**：Edge / Hub mTLS 隧道穿透网闸，单端口、断线重连、内存缓冲
+- **一键部署与升级**：Server + Agent 离线 / 在线安装，Web 端系统升级与独立 IP 地理库热更新
 
 > **设计要点**：Server 完全无状态，时序库独立持久化，重启不丢数据；时序库与 Server 可分机部署。
 
@@ -172,16 +192,35 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 
 ---
 
+## 目录
+
+- [特性](#特性)
+- [架构](#架构)
+- [功能清单](#功能清单)
+- [快速开始](#快速开始)
+- [升级](#升级)
+- [构建与发布](#构建与发布)
+- [配置说明](#配置说明)
+- [网闸代理部署](#网闸代理部署)
+- [API](#api)
+- [目录结构](#目录结构)
+- [贡献](#贡献)
+- [问题反馈](#问题反馈)
+- [许可证](#许可证)
+
 ## 快速开始
 
 ### 首次部署（full 包）
 
 下载 full 包（首次部署用），解压后 `sudo ./install.sh` 进入交互菜单：
 
+> 最新发布包见 [GitHub Releases](https://github.com/mlmw92/nebula-monitor/releases)。
+
 ```bash
-curl -fsSL -O https://github.com/<org>/<repo>/releases/download/v<VERSION>/nebula-monitor-v<VERSION>-full.tar.gz
-tar -xzf nebula-monitor-v<VERSION>-full.tar.gz
-cd nebula-monitor-v<VERSION>-full
+VERSION=1.17.27
+curl -fsSL -O https://github.com/mlmw92/nebula-monitor/releases/download/v${VERSION}/nebula-monitor-v${VERSION}-full.tar.gz
+tar -xzf nebula-monitor-v${VERSION}-full.tar.gz
+cd nebula-monitor-v${VERSION}-full
 sudo ./install.sh
 
 # 菜单选项：【1】安装 server  【2】安装 agent  【3】安装 VictoriaMetrics
@@ -1078,6 +1117,25 @@ dist/                     编译产物（不入库）
 
 ---
 
+## 贡献
+
+欢迎参与本项目开发。
+
+- **问题反馈**：请通过 [GitHub Issues](https://github.com/mlmw92/nebula-monitor/issues) 提交 Bug 报告或功能建议；提交前请先检索是否已有相同或类似问题。
+- **代码贡献**：Fork 本仓库后从 `main` 分支切出特性分支，完成修改并自测（建议本地执行 `bash build/release.sh` 验证可正常出包）后提交 Pull Request，并在描述中说明改动目的与验证方式。
+- **提交规范**：提交信息建议以 `feat:` / `fix:` / `chore:` / `docs:` 等前缀开头，一句话概括本次改动。
+
+## 问题反馈
+
+使用中遇到问题，可先在本文档对应章节（部署、配置、网闸代理、故障排查）查找答案。仍无法解决时，请提供以下信息以便定位：
+
+1. 版本号（`VERSION` 文件或 Web 仪表盘「系统升级」页当前版本）；
+2. 部署方式（full 包安装 / 脚本安装）与组织架构（直连 / 网闸代理）；
+3. 关键日志（`journalctl -u monitor-server` / `journalctl -u monitor-agent`）；
+4. 复现步骤与预期 / 实际表现。
+
+---
+
 ## 许可证
 
-内部使用，遵循项目约定。
+本项目为内部使用，遵循项目约定。如需对外分发或二次开发，请先与维护者确认授权范围。
