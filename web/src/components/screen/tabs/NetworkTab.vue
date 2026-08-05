@@ -613,12 +613,13 @@ onUnmounted(() => {
   font-size: 12px;
 }
 
-/* 右侧地图 */
+/* 右侧：地图 + 来源地 Top 水平并排 */
 .nt-right {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr 300px;
   gap: 10px;
   min-height: 0;
+  min-width: 0;
 }
 
 .nt-map {
@@ -713,9 +714,9 @@ onUnmounted(() => {
 }
 
 .nt-sources {
-  flex-shrink: 0;
   padding: 10px 12px;
-  max-height: 132px;
+  min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -733,7 +734,7 @@ onUnmounted(() => {
   .ntk-sub { font-size: 14px; }
   .nt-body { gap: 14px; }
   .nt-left { gap: 14px; }
-  .nt-right { gap: 14px; }
+  .nt-right { gap: 14px; grid-template-columns: 1fr 380px; }
   .nt-card { padding: 14px 16px 8px; }
   .ntc-head { font-size: 15px; }
   .ntc-stat { font-size: 16px; }
@@ -742,7 +743,6 @@ onUnmounted(() => {
   .rk-val { font-size: 14px; }
   .ntm-title { font-size: 16px; }
   .ntm-scope button { font-size: 14px; padding: 4px 16px; }
-  .nt-sources { max-height: 200px; }
 }
 
 @media (min-width: 3440px) {
@@ -753,7 +753,7 @@ onUnmounted(() => {
   .ntk-sub { font-size: 17px; }
   .nt-body { gap: 20px; }
   .nt-left { gap: 20px; }
-  .nt-right { gap: 20px; }
+  .nt-right { gap: 20px; grid-template-columns: 1fr 460px; }
   .nt-card { padding: 18px 22px 10px; }
   .ntc-head { font-size: 18px; }
   .ntc-stat { font-size: 20px; }
@@ -762,6 +762,5 @@ onUnmounted(() => {
   .rk-val { font-size: 17px; }
   .ntm-title { font-size: 20px; }
   .ntm-scope button { font-size: 17px; padding: 5px 20px; }
-  .nt-sources { max-height: 240px; }
 }
 </style>
