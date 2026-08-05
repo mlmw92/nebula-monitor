@@ -26,7 +26,7 @@ const routes = [
       { path: 'report', name: 'report', component: () => import('../components/ReportView.vue') },
       { path: 'system/upgrade', name: 'system-upgrade', component: () => import('../components/UpgradeView.vue') },
       { path: 'notify', name: 'notify', component: () => import('../components/NotifyView.vue') },
-      { path: 'system/settings', name: 'system-settings', component: () => import('../components/settings/BrandSettingsSubView.vue') },
+      { path: 'system/settings', name: 'system-settings', component: () => import('../components/settings/SettingsView.vue') },
     ],
   },
 ]

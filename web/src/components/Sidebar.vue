@@ -117,6 +117,7 @@ const groups = [
     icon: Setting,
     items: [
       { key: 'settings', to: '/system/settings', label: '站点与品牌' },
+      { key: 'change-password', to: '/system/settings?tab=password', label: '修改密码' },
       { key: 'upgrade', to: '/system/upgrade', label: '系统升级' },
     ],
   },

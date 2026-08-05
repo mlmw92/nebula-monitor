@@ -3,9 +3,13 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/nebula/monitor/internal/server/crypto"
 )
 
 // Mode 部署模式（当前仅支持单机模式 standalone）。
@@ -106,8 +110,95 @@ func DefaultScreenConfig() ScreenConfig {
 type AuthConfig struct {
 	Enabled  bool   `yaml:"enabled"`  // 是否启用登录认证
 	Username string `yaml:"username"` // 登录用户名
-	Password string `yaml:"password"` // 登录密码（明文，建议配置后修改）
+	Password string `yaml:"password"` // 登录密码（bcrypt 哈希，形如 $2a$；旧明文配置会在启动时自动迁移为哈希）
 	Secret   string `yaml:"secret"`   // token 签名密钥（留空时启动自动生成）
+}
+
+// MigratePasswordIfNeeded 在登录密码仍为旧明文（非 bcrypt 哈希）时，
+// 将其转为 bcrypt 哈希并写回原配置文件（先备份为 .bak），实现平滑迁移。
+// 返回 true 表示发生了迁移。path 为空或密码已为哈希/为空时不做任何操作。
+func (a *AuthConfig) MigratePasswordIfNeeded(path string) (bool, error) {
+	if path == "" || a.Password == "" || crypto.IsHashed(a.Password) {
+		return false, nil
+	}
+	hashed, err := crypto.HashPassword(a.Password)
+	if err != nil {
+		return false, err
+	}
+	a.Password = hashed
+	// 重新读取并改写配置文件中 auth.password 字段，避免整文件重写破坏其它段落。
+	if err := patchYAMLPassword(path, hashed); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// PatchAuthPassword 将配置文件中 auth.password 字段更新为给定值（应为 bcrypt 哈希）。
+// 供「修改密码」接口在用户重置密码后持久化使用；其余段落与注释保持原样。
+func PatchAuthPassword(path, value string) error {
+	return patchYAMLPassword(path, value)
+}
+
+// patchYAMLPassword 仅将配置文件中 auth.password 字段更新为 bcrypt 哈希，
+// 其余段落与注释保持原样（基于 yaml.Node 定位修改，避免整文件重写丢失注释/顺序）。
+func patchYAMLPassword(path, hashed string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	if len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
+		return fmt.Errorf("配置文件根节点不是映射")
+	}
+	authNode := findMapValue(root.Content[0], "auth")
+	if authNode == nil || authNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("配置缺少 auth 段")
+	}
+	pwNode := findMapValue(authNode, "password")
+	if pwNode == nil {
+		return fmt.Errorf("配置缺少 auth.password")
+	}
+	pwNode.Value = hashed
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return err
+	}
+	// 先备份原文件，再原子写入。
+	bak := path + ".bak"
+	if err := copyFile(path, bak); err != nil {
+		slog.Warn("备份原配置文件失败，继续写入", "err", err)
+	}
+	return AtomicWrite(path, out)
+}
+
+// findMapValue 在 MappingNode 中按 key 取其 value 节点。
+func findMapValue(m *yaml.Node, key string) *yaml.Node {
+	if m.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// copyFile 复制文件内容（用于迁移前备份）。
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if dir := filepath.Dir(dst); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(dst, data, 0o644)
 }
 
 // TSDBConfig 时序库连接配置。

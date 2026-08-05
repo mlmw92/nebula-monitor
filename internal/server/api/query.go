@@ -93,11 +93,12 @@ type API struct {
 	ngx            *nginxaccess.Window // Nginx access log 地理聚合窗口（可空）
 	uiMgr          *uicfg.Manager      // 系统 UI 品牌配置（系统名称/Logo）
 	serverProvince string              // server 自动探测到的所在地（省级行政区）
+	configPath     string              // server.yaml 路径，用于改密码时持久化
 }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince()}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince(), configPath: configPath}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -166,6 +167,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/login", a.handleLogin)
 	mux.HandleFunc("POST /api/v1/logout", a.handleLogout)
 	mux.HandleFunc("GET /api/v1/auth-info", a.handleAuthInfo)
+	mux.HandleFunc("POST /api/v1/auth/change-password", a.handleChangePassword)
 
 	mux.HandleFunc("GET /api/v1/notify", a.handleNotifyGet)
 	mux.HandleFunc("PUT /api/v1/notify", a.handleNotifyPut)

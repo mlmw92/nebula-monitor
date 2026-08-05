@@ -120,11 +120,11 @@ const pageTitle = computed(() => {
 
 // 面包屑：系统设置分组下显示两级（系统设置 / 子菜单）
 const breadcrumb = computed(() => {
-  const groupMap = {
-    'system-settings': ['系统设置', '站点与品牌'],
-    'system-upgrade': ['系统设置', '系统升级'],
+  if (route.name === 'system-upgrade') return ['系统设置', '系统升级']
+  if (route.name === 'system-settings') {
+    const t = route.query.tab === 'password' ? '修改密码' : '站点与品牌'
+    return ['系统设置', t]
   }
-  if (groupMap[route.name]) return groupMap[route.name]
   const t = pageTitle.value
   return t ? [t] : []
 })

@@ -3,10 +3,12 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/nebula/monitor/internal/agent/crypto"
 	"github.com/nebula/monitor/internal/model"
 )
 
@@ -40,6 +42,7 @@ type Config struct {
 	FastDFSInstances  []model.FastDFSInstanceConfig  `yaml:"fastdfsInstances"` // FastDFS 实例连接配置
 	PortChecks        []string                  `yaml:"portChecks"`         // TCP 端口存活检测列表，如 ["80","443","3306"]
 	Proxy             ProxyConfig               `yaml:"proxy"`              // 代理模式配置，mode=edge/hub 时生效
+	CryptoKey         string                    `yaml:"cryptoKey"`          // 中间件密码 AES-GCM 主密钥（留空用内置默认密钥；配置密文以 enc: 前缀标识）
 }
 
 // ProxyConfig 是 Agent 代理模式（edge/hub）的配置。
@@ -148,5 +151,45 @@ func Load(path string) (*Config, error) {
 	if cfg.Mode == ModeHub && cfg.Proxy.Listen == "" {
 		cfg.Proxy.Listen = ":8443"
 	}
+	// 解密中间件连接密码：以 enc: 前缀的密文经 AES-GCM 解密为明文供采集器使用；
+	// 旧明文配置直接保留（向后兼容）。解密失败仅告警并保留原值，避免 agent 启动失败。
+	cipher, err := crypto.NewCipher([]byte(cfg.CryptoKey))
+	if err != nil {
+		slog.Warn("初始化密码解密器失败，中间件密码将保持原样", "err", err)
+	} else {
+		decryptInstancePasswords(cfg, cipher)
+	}
 	return cfg, nil
+}
+
+// decryptInstancePasswords 对含 Password 的中间件实例配置做解密后处理（写回内存明文）。
+func decryptInstancePasswords(cfg *Config, c *crypto.Cipher) {
+	for i := range cfg.RedisInstances {
+		if d, err := c.Decrypt(cfg.RedisInstances[i].Password); err != nil {
+			slog.Warn("Redis 密码解密失败，保留原值", "err", err)
+		} else {
+			cfg.RedisInstances[i].Password = d
+		}
+	}
+	for i := range cfg.MySQLInstances {
+		if d, err := c.Decrypt(cfg.MySQLInstances[i].Password); err != nil {
+			slog.Warn("MySQL 密码解密失败，保留原值", "err", err)
+		} else {
+			cfg.MySQLInstances[i].Password = d
+		}
+	}
+	for i := range cfg.PostgresInstances {
+		if d, err := c.Decrypt(cfg.PostgresInstances[i].Password); err != nil {
+			slog.Warn("PostgreSQL 密码解密失败，保留原值", "err", err)
+		} else {
+			cfg.PostgresInstances[i].Password = d
+		}
+	}
+	for i := range cfg.MongoDBInstances {
+		if d, err := c.Decrypt(cfg.MongoDBInstances[i].Password); err != nil {
+			slog.Warn("MongoDB 密码解密失败，保留原值", "err", err)
+		} else {
+			cfg.MongoDBInstances[i].Password = d
+		}
+	}
 }

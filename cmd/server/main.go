@@ -40,6 +40,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 登录密码平滑迁移：若配置中仍为明文，则自动转为 bcrypt 哈希并写回配置文件。
+	if migrated, merr := cfg.Auth.MigratePasswordIfNeeded(*cfgPath); merr != nil {
+		slog.Warn("登录密码迁移为哈希失败（不影响启动，下次登录将按明文兜底）", "err", merr)
+	} else if migrated {
+		slog.Info("登录密码已自动迁移为 bcrypt 哈希", "path", *cfgPath)
+	}
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
@@ -147,7 +154,7 @@ func main() {
 	}
 
 	// API
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)

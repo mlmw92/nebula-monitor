@@ -50,6 +50,13 @@ export default {
       body: JSON.stringify(body),
     }),
   del: (p) => request(p, { method: 'DELETE' }),
+  // 修改登录密码
+  changePassword: (oldPassword, newPassword) =>
+    request('/api/v1/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldPassword, newPassword }),
+    }),
   // multipart 上传（XHR 实现以支持上传进度回调 onProgress(percent)）
   upload: (p, formData, onProgress) => {
     const token = getToken()

@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/server/config"
+	servercrypto "github.com/nebula/monitor/internal/server/crypto"
 )
 
 // 登录失败限流：每个源 IP 在窗口内最多允许 loginLimitMax 次失败，超出返回 429。
@@ -180,7 +182,9 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userOK := subtle.ConstantTimeCompare([]byte(body.Username), []byte(a.auth.Username)) == 1
-	passOK := subtle.ConstantTimeCompare([]byte(body.Password), []byte(a.auth.Password)) == 1
+	// 密码校验走 servercrypto.VerifyPassword：优先 bcrypt 哈希比对，
+	// 对未迁移的旧明文配置自动按明文常量时间比较兜底（与启动时迁移互补）。
+	passOK := servercrypto.VerifyPassword(a.auth.Password, body.Password)
 	if !userOK || !passOK {
 		loginFail(ip)
 		w.Header().Set("Content-Type", "application/json")
@@ -209,6 +213,46 @@ func (a *API) handleLogout(w http.ResponseWriter, r *http.Request) {
 // handleAuthInfo 返回是否启用认证（前端用于决定是否显示登录页）
 func (a *API) handleAuthInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"authEnabled": a.auth.Enabled})
+}
+
+// changePasswordRequest 修改密码请求体。
+type changePasswordRequest struct {
+	OldPassword string `json:"oldPassword"`
+	NewPassword string `json:"newPassword"`
+}
+
+// handleChangePassword 修改登录密码。要求已登录（authRequired 中间件保证）。
+// 校验旧密码 -> bcrypt 哈希新密码 -> 更新内存并持久化到 server.yaml。
+func (a *API) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	if !a.auth.Enabled {
+		writeJSON(w, 400, map[string]string{"error": "未启用登录认证，无需修改密码"})
+		return
+	}
+	var body changePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "请求体解析失败"})
+		return
+	}
+	if body.NewPassword == "" {
+		writeJSON(w, 400, map[string]string{"error": "新密码不能为空"})
+		return
+	}
+	if !servercrypto.VerifyPassword(a.auth.Password, body.OldPassword) {
+		writeJSON(w, 401, map[string]string{"error": "原密码不正确"})
+		return
+	}
+	hashed, err := servercrypto.HashPassword(body.NewPassword)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "密码加密失败"})
+		return
+	}
+	a.auth.Password = hashed
+	if err := config.PatchAuthPassword(a.configPath, hashed); err != nil {
+		slog.Error("持久化新密码失败", "err", err)
+		writeJSON(w, 500, map[string]string{"error": "保存失败，请检查服务端配置写入权限"})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"ok": "true"})
 }
 
 // 简易 int 转 string（避免引入 strconv）
