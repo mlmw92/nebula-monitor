@@ -28,6 +28,9 @@ type Task struct {
 	Target   string   `json:"target" yaml:"target"`     // URL（HTTP/HTTPS）或 host:port（TCP）或 host（ICMP）
 	Interval int      `json:"interval" yaml:"interval"` // 拨测间隔（秒）
 	Timeout  int      `json:"timeout" yaml:"timeout"`   // 超时（秒）
+	// FailThreshold 连续失败达到该次数才判定为故障并触发告警，用于抑制单次网络抖动
+	// 产生的“故障→恢复”邮件对。≤ 0 表示使用默认阈值（3 次）。
+	FailThreshold int `json:"fail_threshold,omitempty" yaml:"fail_threshold,omitempty"`
 	Enabled  bool     `json:"enabled" yaml:"enabled"`
 	Severity string   `json:"severity" yaml:"severity"` // 告警严重级别: critical/warning/info，默认 warning
 	Notify   []string `json:"notify" yaml:"notify"`     // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示仅平台展示、不推送外部渠道
