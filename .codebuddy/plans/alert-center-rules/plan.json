@@ -1,0 +1,13 @@
+{
+  "id": "32bd20fb3eae49d4bdc2df653b85be4b",
+  "name": "完善告警中心：四类场景规则+静默时段+告警升级",
+  "overview": "扩展告警中心规则引擎：新增主机离线、中间件服务离线、数据库主从切换、集群状态损坏四类场景规则类型，并支持周期性静默时段与告警升级策略，配套前端配置界面与 README 说明。",
+  "status": "finished",
+  "parts": [
+    "req",
+    "tech"
+  ],
+  "hasConfirmed": true,
+  "content": "## 用户需求\n\n完善告警中心功能，针对以下四类场景提供开箱即用的告警规则：**主机离线、中间件服务离线、数据库主从切换、集群状态损坏**，并支持自定义阈值、静默时段与告警升级策略。\n\n## 产品概述\n\n在现有阈值告警引擎（规则管理、事件记录、通知渠道、抑制/分组/确认、维护窗口）基础上，新增四种场景化规则类型与三类高级策略，使运维人员无需深入 PromQL/指标细节即可配置常见故障告警。\n\n## 核心功能\n\n- **主机离线**：节点心跳超时（nodeMgr 标记 offline）即触发，无需依赖指标上报\n- **中间件服务离线**：基于 `mysql/postgres/redis/nginx/kafka/rocketmq/k8s` 等 `*_instance_up` 指标（值为 0 即离线），阈值可自定义\n- **数据库主从切换**：基于 `*_instance_up` 序列的 `role` 标签（master/slave、PRIMARY/SECONDARY）变化检测切换事件\n- **集群状态损坏**：按 group 聚合各实例 role，无主（0 个 PRIMARY/master）或多主（>1 个）即告警；K8s 基于 `k8s_cluster_up` 检测\n- **自定义阈值**：各场景阈值/运算符/持续时间可调\n- **静默时段**：三层静默——单次规则静默（现有）、按周重复的周期静默时段（新增）、全局维护窗口（现有）\n- **告警升级策略**：持续未恢复超过设定时长后升级告警级别并按指定渠道通知，支持按间隔重复提醒\n- **规则模板**：模板库新增四类场景模板，前端\"从模板新建\"即可快速配置\n- **文档**：README 新增\"告警场景\"章节，说明每类场景的触发条件、告警级别、通知方式与处理建议\n\n## 约束\n\n- 不改动 Agent（避免重分发）：主从切换/集群损坏检测全部基于 Server 端 TSDB 中已有 role 标签序列实现\n- 规则 JSON 向后兼容：旧规则无 `type` 字段时默认按阈值规则处理\n\n## 技术栈\n\n- 后端：Go（现有 `github.com/nebula/monitor` 模块，`internal/server/alert` 包扩展）\n- 前端：Vue 3 + Vite + Element Plus（现有 `web/src/components` 扩展）\n- 存储：沿用 VictoriaMetrics 即时查询（`storage.QueryInstant` / `QueryAllLatest`）；规则持久化沿用 YAML\n\n## 实现思路\n\n在现有阈值引擎的评估循环上增加**规则类型分发**，将四种新场景作为一等规则类型接入同一套 fire/resolve/通知/抑制/确认链路；静默时段与升级策略作为规则级通用配置在各类型评估前/后统一处理，不引入新的架构模式。关键设计决策：\n\n1. **场景数据源全部来自 Server 端**：主机离线读 `nodeMgr` 内存状态（零存储查询）；服务离线/主从切换/集群损坏通过 `QueryAllLatest(metric)` 一次跨节点查询获取全部序列（含 `role/group/topology` 标签），按规则数量级控制存储开销，避免逐节点 N 次查询。\n2. **role 取值必须去重取最新**：GR 切主后旧 role 序列会在 staleness 窗口（约 5 分钟）内残留，按 `node|instance` 聚合时取\"数据点时间戳最大\"的序列（复用 `handleRedisInstances` 既有去重模式）。\n3. **事件型 vs 状态型语义**：`role_change` 为事件型——检测到 role 变化即 fire（记录事件 + 通知），下一评估周期自动 resolve，重复切换重复触发；`node_offline/service_down/cluster_fault` 为状态型——持续满足条件才维持 firing，恢复即 resolve。\n4. **三层静默统一入口**：规则评估前先检查 `Silenced/SilenceUntil`（单次）与新增 `QuietPeriods`（周期，按周几+HH:MM 匹配，支持跨天），命中即跳过该规则本轮评估；全局维护窗口仍只在通知层生效（事件照常记录），与现有行为一致。\n5. **升级策略挂在 ruleState 上**：`ruleState` 增加 `firedAt/escalated/lastRepeatAt`，对已 firing 状态按 `AfterMinutes` 触发一次升级（新事件 + 按升级渠道通知）、按 `RepeatMinutes` 周期重复提醒（仅通知不落新事件），恢复时重置；升级通知同样受维护窗口/静默约束。\n6. **前端按类型动态渲染表单**：RuleModal 增加\"规则类型\"选择器，非阈值类型隐藏指标/运算符/阈值下拉（服务离线仍保留自定义阈值），按类型显示服务/拓扑选择；新增\"静默时段\"可增删的多时段编辑区与\"升级策略\"折叠面板。\n\n## 架构设计\n\n```mermaid\nflowchart TD\nA[评估循环 evaluate] --> B{规则启用?}\nB -->|否| A\nB -->|是| C{静默检查<br/>单次Silenced/周期QuietPeriods}\nC -->|命中| A\nC -->|未命中| D{规则类型 Type}\nD -->|threshold 默认| E[逐节点 QueryInstant<br/>Compare 阈值比较]\nD -->",
+  "todolist": []
+}

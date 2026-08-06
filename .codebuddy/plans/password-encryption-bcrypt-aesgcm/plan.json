@@ -1,0 +1,62 @@
+{
+  "id": "1153612fb70549b5a0bad86a8081550e",
+  "name": "密码加密加固",
+  "overview": "对 nebula-monitor 的登录密码采用 bcrypt 哈希、中间件监控密码采用 AES-GCM 对称加密（agent 端 master-key），并在加载旧明文配置时平滑迁移，防止服务器被攻破后密码明文泄露。",
+  "status": "building",
+  "parts": [
+    "req",
+    "tech",
+    "todos"
+  ],
+  "hasConfirmed": true,
+  "content": "## 用户需求\n\n服务器被攻破时，存储在服务器/本机的密码以明文泄露，需对两类密码做加密加固：登录密码、中间件监控密码。加密方案采用两者结合：登录密码用 bcrypt 哈希（不可逆），中间件监控密码用 master-key AES-GCM 对称加密（可还原以连库）。要求升级后旧明文配置自动平滑迁移，用户无需重填或重置。\n\n## 产品概述\n\n在不改变现有功能与使用方式的前提下，对 nebula-monitor 的敏感凭据做静态加密存储。登录密码在 Server 配置中以 bcrypt 哈希存储、登录时哈希比对；中间件（Redis/MySQL/PostgreSQL/MongoDB 等）的连接密码在 Agent 配置中以 AES-GCM 密文存储，Agent 加载时解密为明文供采集器使用。两类配置均兼容现有明文旧格式，实现无感升级。\n\n## 核心特性\n\n- 登录密码 bcrypt 哈希存储与比对，替换原明文 ConstantTimeCompare\n- 中间件监控密码 AES-GCM 对称加密，密文前缀 `enc:` 区分明文旧配置\n- 旧明文配置平滑迁移：Server 启动时将明文登录密码转为哈希并落盘；Agent 加载时旧明文密码直接按明文使用、密文自动解密\n- 采集器上报仍为 `json:\"-\"`，密码不离开主机，泄露面不变\n- 新增单元测试覆盖哈希校验、加解密往返、旧明文兼容\n\n## 技术栈\n\n- 后端：Go 1.21+，标准库 `crypto/aes`/`crypto/cipher`(GCM) + `golang.org/x/crypto/bcrypt`(v0.26.0 已在 go.mod，提升为直接依赖)\n- 配置格式：YAML（server `config/config.go` / agent `config/config.go`），不改变现有配置文件路径与字段名\n- 前端：本期无需改动（登录仍提交明文 password，由后端哈希比对；传输由 HTTPS/登录态保护）\n\n## 实现方案\n\n### 整体策略\n\n两类密码分两条独立链路处理，互不耦合：\n\n1. **登录密码（server）**：`AuthConfig.Password` 语义从「明文」变为「bcrypt hash（形如 `$2a$...`）」。新增 `internal/server/crypto` 包封装 `HashPassword`/`VerifyPassword`（bcrypt）。`handleLogin` 改用 `bcrypt.CompareHashAndPassword`。为兼容旧明文，加载配置时若 `Password` 不以 `$2a/`$2b/`$2y 开头则视为明文，立即 bcrypt 哈希并写回（内存+落盘）。\n2. **中间件密码（agent）**：新增 `internal/agent/crypto` 包封装 AES-GCM `Encrypt`/`Decrypt`，master key 取自 agent.yaml 新增字段 `cryptoKey`（yaml 明文，缺省回退到编译期内置派生常量，保证无配置也能解密历史密文）。约定密文前缀 `enc:`。在 `agent/config.Load()` 中对各 `*Instances` 的 `Password` 做后处理：以 `enc:` 开头→去前缀后 AES-GCM 解密为明文写入内存；否则保持原明文（旧配置兼容）。采集器读取的内存值已是明文，行为不变。\n\n### 关键技术决策与权衡\n\n- **bcrypt 而非 AES**：登录密码只用于验证、永不还原，哈希不可逆，被攻破后无法反推原密码，最安全。\n- **AES-GCM 而非哈希**：中间件密码需还原以建立数据库连接，只能对称加密；GCM 提供认证加密，防篡改。\n- **master key 缺省内置派生值**：Agent 通常无人工配置密钥能力，内置常量保证开箱即用；用户可在 `cryptoKey` 配置自定义 key 提升安全性（key 本身存于本机 agent.yaml，防御「单文件泄露/只读挂载」场景，与需求一致）。\n- **agent 不做强制回写**：已核实 agent 包无 `os.WriteFile`/`yaml.Marshal`，不引入回写逻辑（避免大改动与风险）。磁盘密文化发生在「用户下次修改密码经下发链路写入」时；本次仅保证读时解密与旧明文兼容。\n- **平滑迁移零中断**：server 明文→hash 在 Load 时自动完成并落盘；agent 明文密码原样可用。用户无需任何手动操作。\n\n### 性能与可靠性\n\n- bcrypt 默认 cost=10，单次校验 ~100ms，登录为低频操作，无性能瓶颈；`bcrypt.CompareHashAndPassword` 内置常量时间比较防时序攻击。\n- AES-GCM 加解密为内存操作，每个密码仅数十字节，采集间隔（默认 15s）下开销可忽略。\n- 解密失败（密钥不匹配/密文损坏）时记录 `slog.Warn` 并保留原值（或置空使连接失败并告警），避免 panic 导致 agent 启动失败。\n\n## 实现要点\n\n### 目录结构与受影响文件\n\n```\nnebula-monitor/\n├── go.mod                                   # [MODIFY] 将 golang.org/x/crypto 由 indirect 提升为直接依赖（运行 go mod tidy）\n├── internal/server/\n│   ├── crypto/crypto.go                     # [NEW] bcrypt 封装：HashPassword/VerifyPassword/IsHashed\n│   ├── crypto/crypto_test.go                # [NEW] 哈希/校验/旧明文兼容测试\n│   ├── config/config.go                     # [MODIFY] AuthConfig.Password 注释改为「bcrypt 哈希」；Load() 中对明文密码自动哈希并写回落盘\n│   └── api/auth.go                          # [MODIFY] handleLogin 改用 crypto.VerifyPassword 比对（VerifyPassword 内置旧明文兜底）\n├── internal/agent/\n│   ├── crypto/crypto.go                     # [NEW] AES-GCM 封装：DefaultKey/NewCipher/Encrypt/Decrypt（enc: 前缀）\n│   ├── crypto/crypto_test.go                # [NEW] 加解密往返/前缀识别/错误密钥测试\n│   └── config/config.go                     # [MODIFY] 新增 CryptoKey 字段；Load() 中对 Redis/MySQL/Postgres/MongoDB 等 *Instances.Password 做 enc: 解密/明文兼容后处理\n└── internal/model/metric.go                 # [确认] 各实例 Password 字段保持 json:\"-\" 不变（仅约定 enc: 前缀语义，不改结构）\n```\n\n### 关键接口（新增包）\n\n```\n// internal/server/crypto/crypto.go\npackage crypto\nfunc HashPassword(plain string) (string, error)   // bcrypt.GenerateFromPassword, cost=10\nfunc VerifyPassword(hash, plain string) bool      // bcrypt.CompareHashAndPassword；非 bcrypt 前缀按明文比对兜底\nfunc IsHashed(s string) bool                      // 以 $2a$/$2b$/$2y$ 开头\n\n// internal/agent/crypto/crypto.go\npackage crypto\nfunc DefaultKey() []byte                         // 内置派生默认 master key（编译期常量）\nfunc NewCipher(key []byte) (Cipher, error)        // 基于 AES-GCM 构造\ntype Cipher interface {\n    Encrypt(plain string) string                  // 返回 \"enc:\" + base64(ciphertext)\n    Decrypt(s string) (string, error)             // 识别 \"enc:\" 前缀并解密；非前缀原样返回（旧明文兼容）\n}\n```\n\n### 平滑迁移细节\n\n- **Server**：`config.Load()` 读取后，若 `!servercrypto.IsHashed(cfg.Auth.Password) && cfg.Auth.Password != \"\"` → 哈希后写回 `cfg.Auth.Password` 并 `os.WriteFile` 落盘（先备份原文件为 `.bak`）。`handleLogin` 主路径用 `VerifyPassword`；`VerifyPassword` 内部对非 bcrypt 前缀的存储值按明文 `subtle.ConstantTimeCompare` 兜底，保证极端未落盘场景仍可登录。\n- **Agent**：`config.Load()` 在 `yaml.Unmarshal` 后对 `RedisInstances/MySQLInstances/PostgresInstances/MongoDBInstances`（以及其余含 Password 的实例类型）逐条调用 `cipher.Decrypt(inst.Password)`，结果写回 `inst.Password`（内存）。`cryptoKey` 为空时使用 `DefaultKey()`。解密失败仅告警、保留原值。\n\n### 验证方式\n\n- 单元测试：`go test ./internal/server/crypto/... ./internal/agent/crypto/...`\n- 手动：使用旧明文 `agent.yaml`（含 Redis/MySQL 明文密码）启动 agent，确认采集正常；将 `Auth.Password` 设为明文 `admin` 启动 server，确认自动转为 `$2a 哈希且可登录；密文 `enc:` 配置项能正确解密连库。\n- Agent 改动需与 Server 同步升级并重分发 agent 二进制（项目既有规范）。",
+  "todolist": [
+    {
+      "id": "add-server-crypto",
+      "content": "新增 internal/server/crypto 包：bcrypt Hash/Verify/IsHashed 封装",
+      "dependencies": [],
+      "status": "completed"
+    },
+    {
+      "id": "migrate-login-password",
+      "content": "修改 config.Load 与 handleLogin，登录密码 bcrypt 哈希存储与比对并平滑迁移旧明文",
+      "dependencies": [
+        "add-server-crypto"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "add-agent-crypto",
+      "content": "新增 internal/agent/crypto 包：AES-GCM Encrypt/Decrypt 与默认 master key",
+      "dependencies": [],
+      "status": "completed"
+    },
+    {
+      "id": "decrypt-mw-password",
+      "content": "修改 agent config.Load，对中间件 Password 做 enc: 解密与旧明文兼容",
+      "dependencies": [
+        "add-agent-crypto"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "unit-tests",
+      "content": "编写 server/agent crypto 单元测试覆盖哈希与加解密往返",
+      "dependencies": [
+        "add-server-crypto",
+        "add-agent-crypto"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "tidy-and-verify",
+      "content": "go mod tidy 提升 crypto 依赖，运行测试与编译验证，提交 git",
+      "dependencies": [
+        "migrate-login-password",
+        "decrypt-mw-password",
+        "unit-tests"
+      ],
+      "status": "pending"
+    }
+  ]
+}

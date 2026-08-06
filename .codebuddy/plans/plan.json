@@ -1,0 +1,57 @@
+{
+  "id": "1153612fb70549b5a0bad86a8081550e",
+  "name": "密码加密加固（国密 SM3/SM4）",
+  "overview": "对 nebula-monitor 的登录密码采用国密 SM3 加盐哈希、中间件监控密码采用 SM4-CBC + SM3-HMAC 对称加密（agent 端 master-key），并在加载旧明文配置时平滑迁移；另提供 Web 端「修改密码」功能。防止服务器被攻破后密码明文泄露。",
+  "status": "finished",
+  "parts": [
+    "req",
+    "tech",
+    "todos"
+  ],
+  "hasConfirmed": true,
+  "content": "## 用户需求\n\n服务器被攻破时，存储在服务器/本机的密码以明文泄露，需对两类密码做加密加固：登录密码、中间件监控密码。加密方案采用国密算法：登录密码用 SM3 加盐哈希（不可逆），中间件监控密码用 SM4-CBC 对称加密 + SM3-HMAC 完整性校验（可还原以连库）。要求升级后旧明文配置自动平滑迁移，用户无需重填或重置。用户额外要求提供 Web 端「修改密码」功能。\n\n> 说明：方案最初设计为 bcrypt + AES-GCM，后经用户要求改为国密算法（SM3 / SM4）。\n\n## 产品概述\n\n在不改变现有功能与使用方式的前提下，对 nebula-monitor 的敏感凭据做静态加密存储。登录密码在 Server 配置中以国密 SM3 加盐哈希存储、登录时哈希比对；中间件（Redis/MySQL/PostgreSQL/MongoDB 等）的连接密码在 Agent 配置中以 SM4-CBC 密文存储，Agent 加载时解密为明文供采集器使用。两类配置均兼容现有明文旧格式，实现无感升级。\n\n## 核心特性\n\n- 登录密码 SM3 加盐哈希存储与比对，替换原明文 ConstantTimeCompare\n- 中间件监控密码 SM4-CBC 对称加密 + SM3-HMAC 完整性校验，密文前缀 `enc:` 区分明文旧配置\n- 旧明文配置平滑迁移：Server 启动时将明文登录密码转为 SM3 哈希并落盘；Agent 加载时旧明文密码直接按明文使用、密文自动解密\n- 采集器上报仍为 `json:\"-\"`，密码不离开主机，泄露面不变\n- Web 端「修改密码」功能：已登录用户校验旧密码后重置，新密码以 SM3 哈希持久化\n- 新增单元测试覆盖哈希校验、加解密往返、旧明文兼容\n\n## 技术栈\n\n- 后端：Go 1.21+，国密算法库 `github.com/tjfoc/gmsm v1.4.1`（sm3 / sm4），标准库 `crypto/cipher`(CBC)\n- 配置格式：YAML（server `config/config.go` / agent `config/config.go`），不改变现有配置文件路径与字段名\n- 前端：Vue3 + Element Plus，新增「修改密码」子页（登录仍提交明文 password，由后端哈希比对）\n\n## 实现方案\n\n### 整体策略\n\n两类密码分两条独立链路处理，互不耦合：\n\n1. **登录密码（server）**：`AuthConfig.Password` 语义从「明文」变为「国密 SM3 加盐哈希（形如 `sm3:<saltHex>:<hashHex>`）」。新增 `internal/server/crypto` 包封装 `HashPassword`/`VerifyPassword`/`IsHashed`。`handleLogin` 与 `handleChangePassword` 改用 `servercrypto.VerifyPassword`。为兼容旧明文，加载配置时若 `Password` 不以 `sm3:` 开头则视为明文，立即 SM3 哈希并写回（内存+落盘）。\n2. **中间件密码（agent）**：新增 `internal/agent/crypto` 包封装 SM4-CBC `Encrypt`/`Decrypt`（随机 IV + PKCS7 填充 + SM3-HMAC 校验），master key 取自 agent.yaml 新增字段 `cryptoKey`（yaml 明文，缺省回退到编译期内置派生常量，16 字节 SM4 密钥）。约定密文前缀 `enc:`。在 `agent/config.Load()` 中对各 `*Instances` 的 `Password` 做后处理：以 `enc:` 开头→去前缀后 SM4 解密为明文写入内存；否则保持原明文（旧配置兼容）。采集器读取的内存值已是明文，行为不变。\n\n### 关键技术决策与权衡\n\n- **SM3 而非对称加密**：登录密码只用于验证、永不还原，哈希不可逆，被攻破后无法反推原密码，最安全。采用随机 salt 防止彩虹表。\n- **SM4-CBC + SM3-HMAC 而非哈希**：中间件密码需还原以建立数据库连接，只能对称加密；CBC 提供机密性，SM3-HMAC(IV‖密文) 提供完整性/防篡改。\n- **master key 缺省内置派生值**：Agent 通常无人工配置密钥能力，内置常量保证开箱即用；用户可在 `cryptoKey` 配置自定义 key 提升安全性（key 本身存于本机 agent.yaml，防御「单文件泄露/只读挂载」场景，与需求一致）。\n- **agent 不做强制回写**：已核实 agent 包无 `os.WriteFile`/`yaml.Marshal`，不引入回写逻辑（避免大改动与风险）。磁盘密文化发生在「用户下次修改密码经下发链路写入」时；本次仅保证读时解密与旧明文兼容。\n- **平滑迁移零中断**：server 明文→SM3 哈希在启动时自动完成并落盘；agent 明文密码原样可用。用户无需任何手动操作。\n\n### 性能与可靠性\n\n- SM3 为快速哈希，登录为低频操作，无性能瓶颈；`VerifyPassword` 内置常量时间比较防时序攻击。\n- SM4-CBC 加解密为内存操作，每个密码仅数十字节，采集间隔（默认 15s）下开销可忽略。\n- 解密失败（密钥不匹配/HMAC 校验失败/密文损坏）时记录 `slog.Warn` 并保留原值（或置空使连接失败并告警），避免 panic 导致 agent 启动失败。\n\n## 实现要点\n\n### 目录结构与受影响文件\n\n```\nnebula-monitor/\n├── go.mod                                   # [MODIFY] 新增 github.com/tjfoc/gmsm v1.4.1 直接依赖\n├── internal/server/\n│   ├── crypto/crypto.go                     # [NEW] SM3 加盐哈希：HashPassword/VerifyPassword/IsHashed\n│   ├── crypto/crypto_test.go                # [NEW] 哈希/校验/加盐去重/旧明文兼容测试\n│   ├── config/config.go                     # [MODIFY] AuthConfig.Password 注释；启动明文→SM3 哈希迁移并落盘；PatchAuthPassword\n│   └── api/auth.go                          # [MODIFY] handleLogin 改用 VerifyPassword；新增 handleChangePassword\n│   └── api/query.go                          # [MODIFY] API 增加 configPath；注册 change-password 路由\n│   └── cmd/server/main.go                   # [MODIFY] 启动后迁移；api.New 传入 *cfgPath\n├── internal/agent/\n│   ├── crypto/crypto.go                     # [NEW] SM4-CBC + SM3-HMAC 封装\n│   ├── crypto/crypto_test.go                # [NEW] 加解密往返/错误密钥 HMAC 失败测试\n│   └── config/config.go                     # [MODIFY] 新增 CryptoKey；Load() 中解密中间件密码\n├── web/src/\n│   ├── api/http.js                          # [MODIFY] 新增 changePassword\n│   ├── components/Sidebar.vue               # [MODIFY] 增加「修改密码」入口\n│   ├── layouts/MainLayout.vue               # [MODIFY] 面包屑支持修改密码\n│   ├── router/index.js                      # [MODIFY] system/settings → SettingsView\n│   └── components/settings/\n│       ├── SettingsView.vue                 # [NEW] 标签页容器\n│       └── ChangePasswordSubView.vue        # [NEW] 修改密码表单\n```\n\n### 关键接口（新增包）\n\n```go\n// internal/server/crypto/crypto.go\npackage crypto\nfunc HashPassword(plain string) (string, error)   // 生成 \"sm3:<saltHex>:<hashHex>\"\nfunc VerifyPassword(stored, plain string) bool     // sm3: 前缀走 SM3(salt||pwd) 常量时间比较；否则明文兜底\nfunc IsHashed(s string) bool                      // 以 sm3: 开头\n\n// internal/agent/crypto/crypto.go\npackage crypto\nfunc NewCipher(key []byte) (*Cipher, error)        // SM4 密钥归一化为 16 字节\nfunc (c *Cipher) Encrypt(plain string) (string, error)   // \"enc:\" + base64(IV‖密文‖SM3-HMAC)\nfunc (c *Cipher) Decrypt(s string) (string, error)        // enc: 前缀解密+校验；非前缀原样返回\nfunc IsEncrypted(s string) bool\n```\n\n### 平滑迁移细节\n\n- **Server**：`cmd/server/main.go` 加载配置后，若 `!servercrypto.IsHashed(cfg.Auth.Password) && cfg.Auth.Password != \"\"` → SM3 哈希后写回并通过 `config.PatchAuthPassword` 以 `yaml.Node` 精确定位 `auth.password` 段原子写回（先备份 `.bak`）。\n- **Agent**：`config.Load()` 在 `yaml.Unmarshal` 后对 `RedisInstances/MySQLInstances/PostgresInstances/MongoDBInstances` 逐条调用 `cipher.Decrypt(inst.Password)`，结果写回内存。`cryptoKey` 为空时用内置默认密钥。解密失败仅告警、保留原值。\n\n### Web 修改密码\n\n- 路由 `system/settings` 指向 `SettingsView`（标签页：站点与品牌 / 修改密码）。\n- `ChangePasswordSubView.vue` 表单校验后调用 `http.changePassword(old, new)`。\n- 后端 `POST /api/v1/auth/change-password`（authRequired 保证已登录）：校验旧密码 → SM3 哈希新密码 → 更新内存并 `PatchAuthPassword` 持久化。\n\n### 验证方式\n\n- 单元测试：`go test ./internal/server/crypto/... ./internal/agent/crypto/...`（已通过）\n- 手动：旧明文 agent.yaml 启动 agent 采集正常；明文 Auth.Password 启动 server 自动转 sm3: 并可登录；enc: 密文正确解密连库；Web 改密后重登成功。\n- Agent 改动需与 Server 同步升级并重分发 agent 二进制。",
+  "todolist": [
+    {
+      "id": "add-server-crypto",
+      "content": "新增 internal/server/crypto 包：SM3 加盐哈希 Hash/Verify/IsHashed 封装",
+      "dependencies": [],
+      "status": "completed"
+    },
+    {
+      "id": "migrate-login-password",
+      "content": "修改 config.Load 与 main 启动，登录密码 SM3 哈希存储与比对并平滑迁移旧明文",
+      "dependencies": ["add-server-crypto"],
+      "status": "completed"
+    },
+    {
+      "id": "add-agent-crypto",
+      "content": "新增 internal/agent/crypto 包：SM4-CBC + SM3-HMAC 封装与默认 master key",
+      "dependencies": [],
+      "status": "completed"
+    },
+    {
+      "id": "decrypt-mw-password",
+      "content": "修改 agent config.Load，对中间件 Password 做 enc: 解密与旧明文兼容",
+      "dependencies": ["add-agent-crypto"],
+      "status": "completed"
+    },
+    {
+      "id": "web-change-password",
+      "content": "新增 Web 端修改密码功能：后端 API + 前端 ChangePasswordSubView + 路由/侧边栏",
+      "dependencies": [],
+      "status": "completed"
+    },
+    {
+      "id": "unit-tests",
+      "content": "编写 server/agent crypto 单元测试覆盖哈希与加解密往返（已通过）",
+      "dependencies": ["add-server-crypto", "add-agent-crypto"],
+      "status": "completed"
+    },
+    {
+      "id": "tidy-and-verify",
+      "content": "go mod tidy 引入 gmsm、运行测试与编译验证、提交 git（两个 commit 已完成）",
+      "dependencies": ["migrate-login-password", "decrypt-mw-password", "unit-tests", "web-change-password"],
+      "status": "completed"
+    }
+  ]
+}

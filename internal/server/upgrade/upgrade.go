@@ -89,6 +89,10 @@ type Config struct {
 	ArchiveKeep     int    // 保留已上传升级包（版本归档）的份数；默认 5
 	UseSystemd  bool   // 是否用 systemd 重启 server
 	Service     string // systemd 服务名
+	// 配置文件备份：每次升级前对以下配置文件做带版本时间戳的副本备份，
+	// 防止升级（含密码迁移、Web 端改写）意外损坏配置导致无法回退。
+	ServerConfigPath string   // server 主配置文件路径（如 server.yaml）
+	ExtraConfigPaths []string // 其它独立配置文件（如 notify.yaml/ui.yaml/screen.yaml 等）
 }
 
 // ArchiveEntry 已归档（已上传）升级包的记录，用于 Web 端选择回退到指定版本。
@@ -339,6 +343,14 @@ func (m *Manager) applyCore(id, version string, components []Component, unpackRo
 	agentUpdated := false
 	var serverApplied, webApplied bool
 	var applyErrors []string
+
+	// 0) 升级前备份配置文件（带版本时间戳，便于回退）
+	configBackupDir := filepath.Join(backupDir, "configs")
+	if err := m.backupConfigs(configBackupDir, version, &applyErrors); err != nil {
+		// 备份失败仅记录，不阻断升级（配置通常非升级包覆盖对象）
+		applyErrors = append(applyErrors, "备份配置文件失败: "+err.Error())
+		slog.Warn("升级前配置文件备份失败", "err", err)
+	}
 
 	// 1) 替换 server（仅当前架构）
 	for _, c := range components {
@@ -669,6 +681,51 @@ func (m *Manager) pruneBackups() {
 	for _, b := range backups[:len(backups)-m.cfg.BackupKeep] {
 		_ = os.RemoveAll(b)
 	}
+}
+
+// backupConfigs 升级前对配置文件做带版本时间戳的副本备份。
+// 备份文件名形如 <原名>.v<version>.<ts>.<ext>，多个文件同名时以目录层级去歧义；
+// 这里采用「configs/<原名>-v<version>-<ts>」方式，确保每次升级可回退到对应版本配置。
+func (m *Manager) backupConfigs(dir, version string, applyErrors *[]string) error {
+	paths := make([]string, 0, len(m.cfg.ExtraConfigPaths)+1)
+	if m.cfg.ServerConfigPath != "" {
+		paths = append(paths, m.cfg.ServerConfigPath)
+	}
+	paths = append(paths, m.cfg.ExtraConfigPaths...)
+	if len(paths) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	ts := time.Now().Format("20060102-150405")
+	saved := 0
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		fi, err := os.Stat(p)
+		if err != nil {
+			// 文件不存在（如未启用某独立配置文件）跳过，不报错
+			slog.Debug("升级前配置文件备份跳过（不存在）", "path", p)
+			continue
+		}
+		if fi.IsDir() {
+			continue
+		}
+		base := filepath.Base(p)
+		dst := filepath.Join(dir, fmt.Sprintf("%s-v%s-%s", base, version, ts))
+		if err := copyFile(p, dst); err != nil {
+			*applyErrors = append(*applyErrors, fmt.Sprintf("备份配置文件 %s 失败: %s", p, err.Error()))
+			continue
+		}
+		saved++
+		slog.Info("升级前已备份配置文件", "src", p, "dst", dst)
+	}
+	if saved == 0 {
+		return nil
+	}
+	return nil
 }
 
 func (m *Manager) restart() error {

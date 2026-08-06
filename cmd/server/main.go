@@ -146,6 +146,14 @@ func main() {
 			ArchiveKeep:     cfg.Upgrade.ArchiveKeep,
 			UseSystemd:      cfg.Upgrade.UseSystemd,
 			Service:         cfg.Upgrade.Service,
+			ServerConfigPath: *cfgPath,
+			ExtraConfigPaths: []string{
+				cfg.NotifyFile,
+				cfg.DialtestFile,
+				cfg.ScreenFile,
+				cfg.UIFile,
+				cfg.GeoIPFile,
+			},
 		}, nodeMgr)
 		if err != nil {
 			slog.Error("初始化升级管理器失败", "err", err)
