@@ -386,6 +386,7 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `agentBinDir` | Agent 二进制分发目录（自带 CDN） |
 | `agentScriptPath` | Agent 安装脚本路径（`/install/agent-install.sh`） |
 | `dialtestFile` | 拨测任务配置文件（默认 `/etc/monitor-server/dialtest.yaml`） |
+| `auth.password` | Web 登录密码。存储为**国密 SM3 加盐哈希**（形如 `sm3:<salt>:<hash>`）；旧明文配置在 Server 启动时自动迁移为哈希并写回，无需手动处理。可在 Web 端「系统设置 → 修改密码」更改。 |
 | `reportDir` | 报告存储目录（默认 `/var/lib/monitor-server/reports`） |
 
 > **Web 通知配置**：登录后在「通知配置」页可视化配置邮件 / Webhook / 钉钉 / 飞书 / 企业微信，支持多收件人、多群（多 Webhook 地址）、@ 成员；保存即写入独立 `notifyFile` 并热加载，无需重启。敏感字段（SMTP 密码、机器人加签密钥）读取时脱敏，留空表示不修改。
@@ -535,7 +536,7 @@ redisInstances:
 |------|------|------|
 | `name` | 是 | 实例别名，Web 展示用 |
 | `addr` | 是 | 地址 `host:port`（直连为 Redis 地址；sentinel 为哨兵地址；cluster 为任一节点；exporter 为实例地址） |
-| `password` | 否 | 认证密码，`json:"-"` 标记，**仅存 Agent 本地，绝不通过网络上报**，Web 端不可见 |
+| `password` | 否 | 认证密码，`json:"-"` 标记，**仅存 Agent 本地，绝不通过网络上报**，Web 端不可见；存储为**国密 SM4 加密**（形如 `enc:<base64>`），旧明文配置保持兼容、按明文使用，无需手动处理 |
 | `db` | 否 | 预留字段，当前采集为实例级指标，与具体 DB 无关，**无需填写** |
 | `topology` | 是 | `standalone` \| `replication` \| `sentinel` \| `cluster` |
 | `sentinelName` | 哨兵必填 | sentinel 模式监控的 master 名称 |
@@ -916,7 +917,7 @@ fastdfsInstances:
 4. Web 端左侧菜单「中间件监控」→ 对应中间件 Tab（Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes）查看：概览卡片、实例列表、实例详情抽屉（多趋势图）。
 
 > **版本一致性**：中间件监控涉及 Agent（采集）与 Server（实例聚合 + API）两端改动，两端须同时升级到同一版本（≥ 1.2.0），否则对应 Tab 无数据。
-> **密码安全**：各中间件 `password` 仅在 Agent 本地用于直连，`json:"-"` 标记，不上报、不入库、Web 不可见。
+> **密码安全**：各中间件 `password` 仅在 Agent 本地用于直连，`json:"-"` 标记，不上报、不入库、Web 不可见；磁盘上以**国密 SM4 加密**形式存储（旧明文配置保持兼容，无需手动处理）。Server 登录密码以**国密 SM3 加盐哈希**存储，被攻破时无法反推原密码。
 
 ---
 
