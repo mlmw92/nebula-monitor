@@ -23,6 +23,7 @@ import (
 	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/receiver"
 	"github.com/nebula/monitor/internal/server/report"
+	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/screencfg"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/uicfg"
@@ -133,6 +134,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 自定义仪表盘配置（文件缺失则初始化为空，不阻断启动）
+	dashMgr, err := dashboard.New(cfg.DashboardsFile)
+	if err != nil {
+		slog.Error("初始化仪表盘配置失败", "err", err)
+		os.Exit(1)
+	}
+
 	// 系统升级管理器
 	var upgrader *upgrade.Manager
 	if cfg.Upgrade.Enabled {
@@ -163,6 +171,7 @@ func main() {
 
 	// API
 	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath)
+	rest.SetDashboardManager(dashMgr)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)

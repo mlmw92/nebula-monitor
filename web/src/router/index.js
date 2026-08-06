@@ -27,6 +27,8 @@ const routes = [
       { path: 'system/upgrade', name: 'system-upgrade', component: () => import('../components/UpgradeView.vue') },
       { path: 'notify', name: 'notify', component: () => import('../components/NotifyView.vue') },
       { path: 'system/settings', name: 'system-settings', component: () => import('../components/settings/SettingsView.vue') },
+      { path: 'metrics/explore', name: 'metrics-explore', component: () => import('../components/metrics/MetricsExploreView.vue') },
+      { path: 'system/dashboards', name: 'system-dashboards', component: () => import('../components/dashboard/DashboardView.vue') },
     ],
   },
 ]

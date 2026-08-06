@@ -17,6 +17,7 @@ import (
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/config"
+	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/instancereg"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
@@ -94,7 +95,11 @@ type API struct {
 	uiMgr          *uicfg.Manager      // 系统 UI 品牌配置（系统名称/Logo）
 	serverProvince string              // server 自动探测到的所在地（省级行政区）
 	configPath     string              // server.yaml 路径，用于改密码时持久化
+	dashMgr        *dashboard.Manager  // 自定义仪表盘配置（可空）
 }
+
+// SetDashboardManager 注入仪表盘配置管理器（可选，不注入则相关接口返回空列表）。
+func (a *API) SetDashboardManager(m *dashboard.Manager) { a.dashMgr = m }
 
 // New 创建 API。
 func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string) *API {
@@ -208,6 +213,18 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// 代理模式状态查询（网闸场景 Edge/Hub 代理连接状态）
 	mux.HandleFunc("GET /api/v1/proxy/status", a.handleProxyStatus)
+
+	// 可观测性增强：指标目录（自动发现）+ 历史数据导出
+	mux.HandleFunc("GET /api/v1/metrics/catalog", a.handleMetricsCatalog)
+	mux.HandleFunc("GET /api/v1/metrics/active", a.handleMetricsActive)
+	mux.HandleFunc("GET /api/v1/metrics/export", a.handleMetricsExport)
+
+	// 可观测性增强：自定义仪表盘
+	mux.HandleFunc("GET /api/v1/dashboards", a.handleDashboardsList)
+	mux.HandleFunc("POST /api/v1/dashboards", a.handleDashboardCreate)
+	mux.HandleFunc("GET /api/v1/dashboards/{id}", a.handleDashboardGet)
+	mux.HandleFunc("PUT /api/v1/dashboards/{id}", a.handleDashboardUpdate)
+	mux.HandleFunc("DELETE /api/v1/dashboards/{id}", a.handleDashboardDelete)
 }
 
 // handleInstallInfo 返回 Agent 一行安装命令（server 地址取自请求 Host，secret 取自配置）。

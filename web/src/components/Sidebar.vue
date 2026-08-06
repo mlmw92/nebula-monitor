@@ -82,6 +82,8 @@ import {
   Setting,
   ArrowDown,
   ArrowRight,
+  DataLine,
+  Grid,
 } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { useBrand } from '../composables/useBrand'
@@ -107,6 +109,8 @@ const flatItems = [
   { key: 'dialtest', to: '/dialtest', label: '服务拨测', icon: Connection },
   { key: 'report', to: '/report', label: '巡检报告', icon: Document },
   { key: 'notify', to: '/notify', label: '通知配置', icon: Message },
+  { key: 'metrics-explore', to: '/metrics/explore', label: '指标浏览', icon: DataLine },
+  { key: 'dashboards', to: '/system/dashboards', label: '自定义仪表盘', icon: Grid },
 ]
 
 // 分组菜单：一级菜单 + 二级子菜单
