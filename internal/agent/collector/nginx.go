@@ -66,6 +66,7 @@ func (c *NginxCollector) collectStubStatus(cfg model.NginxInstanceConfig, now in
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
+	defer client.CloseIdleConnections()
 	resp, err := client.Get(url)
 	if err != nil {
 		slog.Warn("Nginx stub_status 拉取失败", "url", url, "err", err)

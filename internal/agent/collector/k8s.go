@@ -62,6 +62,11 @@ func (c *K8sCollector) collectCluster(cfg model.K8sInstanceConfig, now int64) ([
 	if conn != nil {
 		inst.Instance = conn.apiServer
 	}
+	if conn != nil {
+		// conn 按采集周期创建；采集结束后关闭自定义 Transport 的空闲连接，
+		// 避免 apiserver keep-alive 连接随周期累积。
+		defer conn.client.CloseIdleConnections()
+	}
 	if err != nil {
 		slog.Warn("K8s 连接配置解析失败", "name", cfg.Name, "err", err)
 		return []model.Metric{c.mk("k8s_cluster_up", 0, cfg, conn, nil, now)}, inst

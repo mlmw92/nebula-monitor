@@ -49,6 +49,9 @@ func (c *DockerCollector) collectDaemon(cfg model.DockerInstanceConfig, now int6
 		slog.Warn("Docker daemon 地址无效", "addr", cfg.Addr)
 		return nil, nil
 	}
+	// 当前 client 按采集周期创建；显式关闭连接池，避免自定义 Transport
+	// 的 keep-alive 连接被遗留到下一周期。
+	defer client.CloseIdleConnections()
 
 	// 1. 获取容器列表
 	containers, err := c.listContainers(client, cfg.Addr)
