@@ -62,9 +62,7 @@
         </router-view>
       </main>
 
-      <footer v-if="brand.footer" class="global-footer">
-        {{ brand.footer }}
-      </footer>
+      <SiteFooter />
     </div>
   </div>
 </template>
@@ -74,13 +72,12 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Expand, Fold, Refresh, Bell, User, DataAnalysis } from '@element-plus/icons-vue'
 import Sidebar from '../components/Sidebar.vue'
+import SiteFooter from '../components/SiteFooter.vue'
 import http, { setToken } from '../api/http'
 import { connectWS } from '../api/ws'
-import { useBrand } from '../composables/useBrand'
 
 const router = useRouter()
 const route = useRoute()
-const { brand } = useBrand()
 const collapsed = ref(false)
 const alertCount = ref(0)
 const username = ref(localStorage.getItem('nebula_user') || 'admin')
@@ -334,13 +331,5 @@ onUnmounted(() => {
   max-width: 1700px;
   width: 100%;
   margin: 0 auto;
-}
-.global-footer {
-  padding: 14px 20px;
-  text-align: center;
-  font-size: 12px;
-  color: var(--text-muted);
-  border-top: 1px solid var(--border);
-  background: var(--card-bg);
 }
 </style>

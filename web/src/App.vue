@@ -1,10 +1,8 @@
 <template>
   <router-view />
-  <SiteFooter />
 </template>
 
 <script setup>
-import SiteFooter from './components/SiteFooter.vue'
 import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import http, { getToken, setToken } from './api/http'
