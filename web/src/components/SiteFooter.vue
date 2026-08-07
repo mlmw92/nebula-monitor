@@ -26,115 +26,19 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed } from 'vue'
+import { useBrand } from '../composables/useBrand'
 
-const settings = ref({})
-
-const asObject = (value) => value && typeof value === 'object' ? value : {}
-
-function unwrap(payload) {
-  let value = asObject(payload)
-  for (const key of ['data', 'config', 'settings', 'site', 'brand']) {
-    if (value[key] && typeof value[key] === 'object') value = value[key]
-  }
-  return value
-}
-
-function pick(...values) {
-  return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '')
-}
-
-const footer = computed(() => asObject(
-  settings.value.footer ||
-  settings.value.footerSettings ||
-  settings.value.branding?.footer ||
-  settings.value.brand?.footer
-))
-const brandName = computed(() => pick(
-  footer.value.brandName,
-  settings.value.siteName,
-  settings.value.brandName,
-  settings.value.name,
-  'Nebula Monitor'
-))
-const footerText = computed(() => pick(
-  footer.value.text,
-  footer.value.content,
-  footer.value.copyright,
-  footer.value.copyrightText,
-  settings.value.footerText,
-  settings.value.footerContent,
-  settings.value.copyright,
-  `© ${new Date().getFullYear()} ${brandName.value}`
-))
-const icpText = computed(() => pick(
-  footer.value.icp,
-  footer.value.icpNumber,
-  footer.value.beian,
-  footer.value.record,
-  settings.value.icp,
-  settings.value.icpNumber,
-  settings.value.beian
-))
-const icpUrl = computed(() => pick(footer.value.icpUrl, footer.value.beianUrl, settings.value.icpUrl))
-const visible = computed(() => footer.value.enabled !== false && footer.value.visible !== false && footer.value.show !== false && settings.value.footerEnabled !== false)
+const { brand } = useBrand()
+const brandName = computed(() => brand.name || 'NebulaEye')
+const footerText = computed(() => brand.footer || '')
+const visible = computed(() => Boolean(brand.footer))
+const icpText = computed(() => '')
+const icpUrl = computed(() => '')
 
 const links = computed(() => {
-  let value = footer.value.links || settings.value.footerLinks || []
-  if (typeof value === 'string') {
-    try { value = JSON.parse(value) } catch { value = [] }
-  }
-  const list = Array.isArray(value) ? value : Object.entries(asObject(value)).map(([label, url]) => ({ label, url }))
-  return list.map((item) => {
-    const link = typeof item === 'string' ? { label: item, url: item } : asObject(item)
-    return {
-      label: pick(link.label, link.title, link.name, link.text),
-      url: pick(link.url, link.href, '#'),
-      external: link.external !== false
-    }
-  }).filter((item) => item.label)
+  return []
 })
-
-async function loadSettings() {
-  for (const key of ['siteSettings', 'brandSettings', 'siteConfig', 'branding']) {
-    try {
-      const payload = JSON.parse(localStorage.getItem(key) || 'null')
-      if (payload && typeof payload === 'object') settings.value = { ...settings.value, ...unwrap(payload) }
-    } catch {
-      // Ignore malformed legacy cache entries.
-    }
-  }
-
-  const endpoints = [
-    '/api/v1/settings/brand',
-    '/api/v1/settings/branding',
-    '/api/v1/site/brand',
-    '/api/v1/site/branding',
-    '/api/v1/config/brand',
-    '/api/v1/config/site',
-    '/api/v1/settings/site',
-    '/api/v1/site-settings',
-    '/api/v1/site/config',
-    '/api/v1/site-config',
-    '/api/v1/branding',
-    '/api/v1/settings'
-  ]
-  for (const endpoint of endpoints) {
-    try {
-      const response = await fetch(endpoint)
-      if (!response.ok) continue
-      const payload = unwrap(await response.json())
-      if (Object.keys(payload).length) {
-        settings.value = { ...settings.value, ...payload }
-        if (payload.footer || payload.footerSettings || payload.branding?.footer || payload.brand?.footer) return
-      }
-    } catch {
-      // Branding is optional; keep the local fallback when the endpoint is unavailable.
-    }
-  }
-}
-
-onMounted(loadSettings)
 </script>
 
 <style scoped>
