@@ -35,7 +35,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { initChart, monitorOption, COLORS } from '../../charts/echarts'
-import http from '../../api/http'
+import http, { get as httpGet } from '../../api/http'
 import { useDashboards } from '../../composables/useDashboards'
 
 const kw = ref('')
@@ -88,7 +88,7 @@ async function renderChart() {
   if (!chart) chart = initChart(chartEl.value)
   const { start, end, step } = rangeBounds('1h')
   try {
-    const d = await http.get(`/api/v1/query/range?metric=${encodeURIComponent(selected.value.name)}&start=${start}&end=${end}&step=${step}`)
+    const d = await httpGet(`/api/v1/query/range?metric=${encodeURIComponent(selected.value.name)}&start=${start}&end=${end}&step=${step}`)
     const series = d.series || d.data || []
     const data = {}
     ;(series || []).forEach((s) => {

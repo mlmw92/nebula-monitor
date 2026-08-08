@@ -35,8 +35,14 @@ async function request(path, opts) {
   return r.json()
 }
 
-export default {
-  get: (p) => request(p),
+// 具名导出基础 GET，供指标浏览等高频查询入口直接使用，避免旧缓存或模块互操作
+// 导致默认客户端对象上的 get 方法不可用。
+export const get = (p) => request(p)
+
+// 先绑定客户端对象，再由对象内部的方法引用自身，避免 create/update
+// 等方法调用未定义的 api 变量导致页面运行时异常。
+const api = {
+  get,
   post: (p, body) =>
     request(p, {
       method: 'POST',
@@ -125,3 +131,5 @@ export default {
       })
   },
 }
+
+export default api

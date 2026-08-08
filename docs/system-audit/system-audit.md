@@ -134,6 +134,15 @@
 - 建议：按功能拆分提交；确认无关文件归属后再执行“打包升级”。升级流程继续遵循：根据修改类型升级版本号、生成 full/upgrade 包并提交 Git，不上传或应用到服务器。
 - 验证标准：打包前 `git status` 中仅保留当前需求相关文件，发布包版本与 Git 提交版本一致。
 
+### SA-012：指标目录查询使用的 HTTP 客户端方法不稳定
+
+- 优先级：P1
+- 状态：已完成（待实际页面验证）
+- 涉及文件：`web/src/api/http.js`、`web/src/components/metrics/MetricsExploreView.vue`
+- 现象：指标目录点击 CPU 使用率时，查询提示 `Cannot read properties of undefined (reading 'get')`。
+- 修复记录：HTTP 客户端增加具名 `get` 导出，指标目录查询直接使用具名 GET 方法；同时修正客户端内部对未定义 `api` 变量的引用。
+- 验证结果：前端构建通过；需要在实际部署页面点击 CPU 使用率确认查询曲线正常。
+
 ## 建议处理顺序
 
 1. SA-001、SA-002：先修复认证和密钥泄露问题。
