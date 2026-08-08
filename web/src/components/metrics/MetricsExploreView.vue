@@ -47,7 +47,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { initChart, COLORS } from '../../charts/echarts'
+import { initChart, monitorOption, COLORS } from '../../charts/echarts'
 import http, { get as httpGet, metricCatalog, metricActive } from '../../api/http'
 import { useDashboards } from '../../composables/useDashboards'
 
@@ -111,24 +111,42 @@ async function renderChart() {
     ElMessage.error('图表容器未准备好，请稍后重试')
     return
   }
-  if (!chart) chart = initChart(chartEl.value)
-  const { start, end, step } = rangeBounds('1h')
   try {
-    const d = await httpGet(`/api/v1/query/range?metric=${encodeURIComponent(selected.value.name)}&start=${start}&end=${end}&step=${step}`)
-    const series = d.series || d.data || []
-    const data = {}
-    ;(series || []).forEach((s) => {
-      const label = s.labels && s.labels.instance ? `${selected.value.name}·${s.labels.instance}` : selected.value.name
-      data[label] = (s.points || []).map((p) => [p.timestamp, p.value])
-    })
-    chart.setOption({
-      series: Object.keys(data).map((n) => ({
-        name: n, data: data[n] || [], type: 'line', smooth: true, showSymbol: false,
-        lineStyle: { color: COLORS.cyan, width: 2 }, areaStyle: { color: 'rgba(34,211,238,0.12)' },
-      })),
-    })
+    if (!chart || (typeof chart.isDisposed === 'function' && chart.isDisposed())) {
+      chart = initChart(chartEl.value)
+    }
+  } catch (e) {
+    ElMessage.error('图表初始化失败：' + (e.message || e))
+    return
+  }
+  const { start, end, step } = rangeBounds('1h')
+  let d
+  try {
+    d = await httpGet(`/api/v1/query/range?metric=${encodeURIComponent(selected.value.name)}&start=${start}&end=${end}&step=${step}`)
   } catch (e) {
     ElMessage.error('查询失败：' + (e.message || e))
+    return
+  }
+
+  try {
+    const data = (d.series || d.data || []).map((s, index) => {
+      const labels = s.labels || {}
+      const suffix = labels.instance || labels.node || labels.host || `序列 ${index + 1}`
+      return {
+        name: `${selected.value.name}·${suffix}`,
+        data: (s.points || []).map((p) => [Number(p.timestamp), Number(p.value)]),
+        color: COLORS.cyan,
+      }
+    })
+    chart.clear()
+    chart.setOption(monitorOption({
+      xMin: start,
+      xMax: end,
+      series: data,
+      area: true,
+    }), true)
+  } catch (e) {
+    ElMessage.error('图表渲染失败：' + (e.message || e))
   }
 }
 
