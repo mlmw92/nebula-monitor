@@ -2,14 +2,14 @@
   <div class="host-panel">
     <!-- 左侧：实时状态 + 主机健康 -->
     <div class="left-col">
-      <ScreenGauges title="集群实时状态" :items="gaugeItems" />
+      <ScreenGauges title="集群实时状态" :items="gaugeItems" :cols="5" />
       <div class="glass host-list">
-        <div class="hl-title">主机健康 · 点击下钻</div>
+        <div class="hl-title">主机健康 · 点击查看详情</div>
         <div class="hl-head">
           <span>主机</span><span>CPU</span><span>内存</span><span>磁盘</span><span>负载</span><span>流量</span>
         </div>
         <div class="hl-body">
-          <div class="hl-row" v-for="n in nodes" :key="n.hostname" :class="{ offline: !n.online }" @click="drillNode(n.hostname)">
+          <div class="hl-row" v-for="n in nodes" :key="n.hostname" :class="{ offline: !n.online }" @click="openHostDetail(n)">
             <span class="hl-name">
               <i class="dot" :class="n.online ? 'on' : 'off'"></i>
               <span v-if="!n.online" class="offline-badge">🔴离线</span>
@@ -48,15 +48,17 @@
         <div ref="netChart" class="trend-chart"></div>
       </div>
     </div>
+
+    <HostDetailDialog v-model:visible="detailVisible" :host="detailHost" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { initChart, monitorOption, COLORS, rateShort } from '../../charts/echarts'
 import ScreenGauges from './ScreenGauges.vue'
 import ScreenTrend from './ScreenTrend.vue'
+import HostDetailDialog from './HostDetailDialog.vue'
 import { queryClusterTrend, queryPerNodeTrend } from './useTrend'
 
 // 多主机折线配色：按索引循环取色
@@ -66,8 +68,10 @@ const props = defineProps({
   nodes: { type: Array, default: () => [] },
 })
 
-const router = useRouter()
 const netChart = ref(null)
+const detailVisible = ref(false)
+const detailHostName = ref('')
+const detailHost = computed(() => props.nodes.find((n) => n.hostname === detailHostName.value) || null)
 let chart = null
 let ro = null
 let timer = null
@@ -91,11 +95,13 @@ const gaugeItems = computed(() => {
   const mem = avg('mem')
   const disk = avg('disk')
   const netIn = props.nodes.reduce((s, n) => s + (n.netIn || 0), 0)
+  const netOut = props.nodes.reduce((s, n) => s + (n.netOut || 0), 0)
   return [
     { key: 'cpu', label: 'CPU 使用率' + avgSuffix.value, value: cpu, text: cpu.toFixed(1) + '%', color: usageColor(cpu) },
     { key: 'mem', label: '内存使用率' + avgSuffix.value, value: mem, text: mem.toFixed(1) + '%', color: usageColor(mem) },
     { key: 'disk', label: '磁盘使用率' + avgSuffix.value, value: disk, text: disk.toFixed(1) + '%', color: usageColor(disk) },
     { key: 'net', label: '实时入流量', type: 'text', text: rateShort(netIn), color: 'var(--info)' },
+    { key: 'netOut', label: '实时出流量', type: 'text', text: rateShort(netOut), color: COLORS.purple },
   ]
 })
 
@@ -107,8 +113,9 @@ function pctStyle(v) {
   const c = usageColor(v || 0)
   return v >= 70 ? { color: c, fontWeight: 700 } : {}
 }
-function drillNode(name) {
-  router.push('/node/' + encodeURIComponent(name))
+function openHostDetail(host) {
+  detailHostName.value = host.hostname
+  detailVisible.value = true
 }
 
 // ---- 列表单元格辅助展示 ----
@@ -229,7 +236,8 @@ watch(
 <style scoped>
 .host-panel {
   display: grid;
-  grid-template-columns: minmax(360px, 24%) 1fr;
+  /* 左侧同时承载 5 个状态卡与 6 列主机健康数据，避免信息挤成一条窄栏 */
+  grid-template-columns: minmax(420px, 32%) minmax(0, 1fr);
   gap: 12px;
   min-height: 0;
   height: 100%;
@@ -408,7 +416,7 @@ watch(
 
 /* ============ 宽屏 / 4K 适配 ============ */
 @media (min-width: 2400px) {
-  .host-panel { gap: 18px; grid-template-columns: minmax(420px, 22%) 1fr; }
+  .host-panel { gap: 18px; grid-template-columns: minmax(560px, 30%) minmax(0, 1fr); }
   .left-col { gap: 18px; }
   .host-list { padding: 16px 18px; }
   .hl-title { font-size: 17px; margin-bottom: 12px; }
@@ -427,7 +435,7 @@ watch(
   .trend-cur { font-size: 19px; }
 }
 @media (min-width: 3440px) {
-  .host-panel { gap: 24px; grid-template-columns: minmax(520px, 22%) 1fr; }
+  .host-panel { gap: 24px; grid-template-columns: minmax(700px, 30%) minmax(0, 1fr); }
   .left-col { gap: 24px; }
   .host-list { padding: 20px 22px; }
   .hl-title { font-size: 22px; margin-bottom: 16px; }

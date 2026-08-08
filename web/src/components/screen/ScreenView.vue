@@ -193,6 +193,28 @@ function avgOnline(key) {
   return list.length > 0 ? list.reduce((s, n) => s + (n[key] || 0), 0) / list.length : 0
 }
 
+// 健康分数需要被 KPI 条引用，先声明相关 computed，避免生产压缩后出现 TDZ。
+const healthScore = computed(() => {
+  const online = onlineCards.value.length
+  const total = nodeCards.value.length
+  const cpu = avgOnline('cpu')
+  const mem = avgOnline('mem')
+  const disk = avgOnline('disk')
+  const onlineScore = total > 0 ? (online / total) * 100 : 100
+  const cpuScore = Math.max(0, 100 - cpu)
+  const memScore = Math.max(0, 100 - mem)
+  const diskScore = Math.max(0, 100 - disk)
+  const alertScore = Math.max(0, 100 - firingCount.value * 10)
+  return Math.round((onlineScore + cpuScore + memScore + diskScore + alertScore) / 5)
+})
+
+const healthScoreColor = computed(() => {
+  if (healthScore.value >= 90) return 'var(--chart-green)'
+  if (healthScore.value >= 70) return 'var(--accent)'
+  if (healthScore.value >= 50) return 'var(--warn)'
+  return 'var(--danger)'
+})
+
 // 持久 KPI 条数据
 const kpiBar = computed(() => {
   const online = onlineCards.value.length
@@ -213,27 +235,6 @@ const kpiBar = computed(() => {
     { key: 'alerts', label: '告警', value: firingCount.value, color: firingCount.value > 0 ? 'var(--danger)' : 'var(--chart-green)', unit: firingCount.value > 0 ? '条活跃' : '正常' },
     { key: 'health', label: '健康', value: healthScore.value, color: healthScoreColor.value, unit: '分' },
   ]
-})
-
-const healthScore = computed(() => {
-  const online = onlineCards.value.length
-  const total = nodeCards.value.length
-  const cpu = avgOnline('cpu')
-  const mem = avgOnline('mem')
-  const disk = avgOnline('disk')
-  const onlineScore = total > 0 ? (online / total) * 100 : 100
-  const cpuScore = Math.max(0, 100 - cpu)
-  const memScore = Math.max(0, 100 - mem)
-  const diskScore = Math.max(0, 100 - disk)
-  const alertScore = Math.max(0, 100 - firingCount.value * 10)
-  return Math.round((onlineScore + cpuScore + memScore + diskScore + alertScore) / 5)
-})
-
-const healthScoreColor = computed(() => {
-  if (healthScore.value >= 90) return 'var(--chart-green)'
-  if (healthScore.value >= 70) return 'var(--accent)'
-  if (healthScore.value >= 50) return 'var(--warn)'
-  return 'var(--danger)'
 })
 
 // 工具函数

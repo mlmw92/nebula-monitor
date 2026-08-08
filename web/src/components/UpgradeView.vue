@@ -133,9 +133,10 @@
               size="small"
               type="warning"
               plain
-              :disabled="!canRollbackTo(row.version) || rollingBack"
+              :loading="rollingBack"
+              :disabled="!canRollbackTo(row.version) || rollingBack || cooldown > 0"
               @click="rollbackTo(row.version)"
-            >切换</el-button>
+            >{{ cooldown > 0 ? `请等待 ${cooldown}s` : '切换' }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -330,6 +331,27 @@ async function loadArchive() {
   archiveLoading.value = false
 }
 
+// 切换会重启当前 Server，HTTP 请求可能在响应返回前被主动断开。
+// 断连不等于切换失败，等待服务恢复并确认实际运行版本后再给出结果。
+async function waitForServerVersion(targetVersion, timeout = 30000) {
+  const deadline = Date.now() + timeout
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+  while (Date.now() < deadline) {
+    try {
+      const v = await http.get('/api/v1/version')
+      if (!targetVersion || v.server === targetVersion) return true
+    } catch (e) {
+      // Server 正在重启，继续轮询。
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  return false
+}
+
+function isRestartDisconnect(error) {
+  return /Failed to fetch|网络错误|NetworkError|fetch/i.test(error?.message || '')
+}
+
 // 该版本是否可回退：必须是已归档版本、且不是当前运行版本。
 function canRollbackTo(version) {
   if (!version || version === currentVersion.value.server) return false
@@ -348,8 +370,18 @@ async function rollbackTo(version) {
   try {
     await http.post('/api/v1/system/upgrade/rollback-to', { version, operator: 'web' })
     ElMessage.success(`已切换到 v${version}，server 即将重启。请稍候刷新页面。`)
+    startCooldown(15)
     setTimeout(() => window.location.reload(), 8000)
   } catch (e) {
+    if (isRestartDisconnect(e) && await waitForServerVersion(version)) {
+      ElMessage.success(`已切换到 v${version}，server 已恢复。`)
+      startCooldown(15)
+      await loadCurrentVersion()
+      await loadHistory()
+      await loadArchive()
+      setTimeout(() => window.location.reload(), 8000)
+      return
+    }
     ElMessage.error('切换失败：' + e.message)
     await loadArchive()
   } finally {
@@ -403,12 +435,19 @@ async function doApply() {
   } catch { return }
   applying.value = true
   applyError.value = ''
+  const targetVersion = pending.value?.version || ''
   try {
     await http.post('/api/v1/system/upgrade/apply?operator=web', {})
     ElMessage.success('升级已提交，server 即将重启（约 5-15 秒）。请稍候刷新页面。')
     startCooldown(15)
     setTimeout(() => window.location.reload(), 8000)
   } catch (e) {
+    if (isRestartDisconnect(e) && await waitForServerVersion(targetVersion)) {
+      ElMessage.success(`升级已完成，server 已恢复到 v${targetVersion}。`)
+      startCooldown(15)
+      setTimeout(() => window.location.reload(), 8000)
+      return
+    }
     applyError.value = e.message
     ElMessage.error('升级失败：' + e.message)
     await loadPending()

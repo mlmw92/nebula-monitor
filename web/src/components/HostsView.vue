@@ -195,9 +195,9 @@
         <el-table-column v-if="colVisible('diskRW')" label="磁盘读写" prop="diskRead" sortable="custom" min-width="120">
           <template #default="{ row }">
             <span class="rate mono sm">
-              R{{ fmtRate(m(row).diskRead) }}
+              读{{ fmtRate(m(row).diskRead) }}
               <small class="sep">/</small>
-              W{{ fmtRate(m(row).diskWr) }}
+              写{{ fmtRate(m(row).diskWr) }}
             </span>
           </template>
         </el-table-column>

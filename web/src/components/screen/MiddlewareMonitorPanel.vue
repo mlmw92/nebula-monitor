@@ -430,12 +430,26 @@ async function loadDetail() {
     const resp = await http.get(
       t === 'docker' ? '/api/v1/middleware/docker/containers' : `/api/v1/middleware/${t}/instances`
     )
-    const list = t === 'docker' ? resp?.containers || [] : resp?.instances || []
+    // 各中间件接口的列表字段并不完全一致：Docker 返回 containers，
+    // Kubernetes 返回 clusters，其余类型返回 instances。
+    const list = t === 'docker'
+      ? resp?.containers || []
+      : t === 'k8s'
+        ? resp?.clusters || []
+        : resp?.instances || []
     instances.value = list
-    const nodeList = [...new Set(list.map((i) => i.node).filter(Boolean))]
+    const nodeList = [...new Set(list.map((i) => i.node || i.host || i.hostname).filter(Boolean))]
     if (m) {
-      const data = await queryClusterTrend(nodeList, m.key, m.mode)
-      paramSeries.value = [{ name: m.label, color: COLORS.cyan, data }]
+      let data = await queryClusterTrend(nodeList, m.key, m.mode)
+      let label = m.label
+
+      // Redis 未配置 maxmemory 时，采集端不会产生百分比指标；退化到
+      // used_memory 仍展示真实历史数值，避免趋势区整块空白。
+      if (!data.length && t === 'redis' && m.key === 'redis_used_memory_percent') {
+        data = await queryClusterTrend(nodeList, 'redis_used_memory', m.mode)
+        label = '已用内存'
+      }
+      paramSeries.value = [{ name: label, color: COLORS.cyan, data }]
       renderParam()
     }
   } catch (e) {
@@ -725,7 +739,7 @@ onUnmounted(() => {
 .mw-detail {
   flex: 1;
   display: grid;
-  grid-template-columns: 1.3fr 1fr;
+  grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
   gap: 12px;
   min-height: 0;
 }
@@ -1073,11 +1087,11 @@ onUnmounted(() => {
 .mi-name {
   font-size: 12px;
   color: var(--accent);
-  max-width: 130px;
+  flex: 1 1 120px;
+  min-width: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-decoration: underline dotted;
 }
 .mi-name:hover {
   color: var(--chart-cyan);
@@ -1111,11 +1125,17 @@ onUnmounted(() => {
 .mi-node {
   font-size: 11px;
   color: var(--text-muted);
-  max-width: 120px;
+  max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   margin-left: auto;
+}
+
+@media (max-width: 1100px) {
+  .mw-detail {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 0.85fr);
+  }
 }
 .mi-empty {
   padding: 20px 0;
