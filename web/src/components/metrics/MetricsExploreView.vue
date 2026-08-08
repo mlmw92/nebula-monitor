@@ -47,8 +47,8 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { initChart, monitorOption, COLORS } from '../../charts/echarts'
-import http, { get as httpGet } from '../../api/http'
+import { initChart, COLORS } from '../../charts/echarts'
+import http, { get as httpGet, metricCatalog, metricActive } from '../../api/http'
 import { useDashboards } from '../../composables/useDashboards'
 
 const kw = ref('')
@@ -107,6 +107,10 @@ function rangeBounds(r) {
 async function renderChart() {
   if (!selected.value) return
   await nextTick()
+  if (!chartEl.value) {
+    ElMessage.error('图表容器未准备好，请稍后重试')
+    return
+  }
   if (!chart) chart = initChart(chartEl.value)
   const { start, end, step } = rangeBounds('1h')
   try {
@@ -162,11 +166,11 @@ async function addToDash() {
 function resize() { chart && chart.resize() }
 onMounted(async () => {
   try {
-    const d = await http.metricCatalog()
+    const d = await metricCatalog()
     catalog.value = d.catalog || {}
     categories.value = d.categories || []
     try {
-      const a = await http.metricActive()
+      const a = await metricActive()
       activeMap.value = Object.fromEntries((a.items || []).map((item) => [item.name, item.active === true]))
     } catch (e) {
       // 自动发现失败不影响指标目录浏览，状态保持为“暂无数据/未检测”。

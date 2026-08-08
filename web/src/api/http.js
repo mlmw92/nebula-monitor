@@ -39,6 +39,12 @@ async function request(path, opts) {
 // 导致默认客户端对象上的 get 方法不可用。
 export const get = (p) => request(p)
 
+// 指标浏览页使用具名请求函数，避免不同构建环境下默认导出对象互操作异常。
+export const metricCatalog = () => request('/api/v1/metrics/catalog')
+export const metricActive = (params = {}) => {
+  const q = new URLSearchParams(params).toString()
+  return request('/api/v1/metrics/active' + (q ? '?' + q : ''))
+}
 // 先绑定客户端对象，再由对象内部的方法引用自身，避免 create/update
 // 等方法调用未定义的 api 变量导致页面运行时异常。
 const api = {
@@ -99,11 +105,8 @@ const api = {
     })
   },
   // 指标目录（自动发现）
-  metricCatalog: () => request('/api/v1/metrics/catalog'),
-  metricActive: (params = {}) => {
-    const q = new URLSearchParams(params).toString()
-    return request('/api/v1/metrics/active' + (q ? '?' + q : ''))
-  },
+  metricCatalog,
+  metricActive,
   // 自定义仪表盘 CRUD
   listDashboards: () => request('/api/v1/dashboards'),
   getDashboard: (id) => request('/api/v1/dashboards/' + id),
