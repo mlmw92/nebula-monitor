@@ -52,7 +52,9 @@
           </el-select>
         </el-form-item>
         <el-form-item label="限定主机">
-          <el-input v-model="editForm.node" placeholder="留空=全部" />
+          <el-select v-model="editForm.node" filterable clearable allow-create placeholder="留空=全部" style="width:100%">
+            <el-option v-for="n in nodeList" :key="n.hostname" :label="n.displayName || n.hostname" :value="n.hostname" />
+          </el-select>
         </el-form-item>
         <el-form-item label="时间范围">
           <el-select v-model="editForm.range" style="width:100%">
@@ -102,6 +104,7 @@ const newDashName = ref('')
 const editIndex = ref(-1)
 const editForm = ref({ title: '', metric: '', chartType: 'line', node: '', range: '1h' })
 const flatMetrics = ref([])
+const nodeList = ref([])
 
 const active = computed(() => dashboards.value.find((d) => d.id === activeId.value) || null)
 const activePanels = computed(() => {
@@ -189,6 +192,11 @@ onMounted(async () => {
   const arr = []
   for (const k in cat) arr.push(...cat[k])
   flatMetrics.value = arr
+  // 加载主机列表供面板配置选择
+  try {
+    const nd = await http.get('/api/v1/nodes')
+    nodeList.value = nd.nodes || []
+  } catch (_) { /* 静默失败，不影响其他功能 */ }
 })
 </script>
 
