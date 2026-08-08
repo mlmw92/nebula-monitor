@@ -32,8 +32,13 @@
 
         <!-- 来源 IP Top 10 -->
         <div class="glass nt-card">
-          <div class="ntc-head">
+          <div class="ntc-head ntc-head-ip">
             <span>来源 IP Top 10</span>
+            <label class="internal-ip-filter" title="默认隐藏回环、私有、链路本地及其他保留地址">
+              <input v-model="includeInternalIps" type="checkbox" />
+              <span class="filter-toggle" aria-hidden="true"></span>
+              <span>包含内部 IP</span>
+            </label>
           </div>
           <div class="rank-list">
             <div class="rank-row" v-for="(ip, i) in ipList" :key="ip.ip">
@@ -207,7 +212,11 @@ const topKpis = computed(() => {
 const topUris = computed(() => summary.value?.topUris || [])
 const topIps = computed(() => summary.value?.topIps || [])
 const uriList = computed(() => topUris.value.slice(0, 10))
-const ipList = computed(() => topIps.value.slice(0, 10))
+const includeInternalIps = ref(false)
+const ipList = computed(() => {
+  const list = includeInternalIps.value ? topIps.value : topIps.value.filter((ip) => !isInternalIp(ip.ip))
+  return list.slice(0, 10)
+})
 
 const maxUri = computed(() => Math.max(...uriList.value.map((u) => u.count || 0), 1))
 const maxIp = computed(() => Math.max(...ipList.value.map((i) => i.requests || 0), 1))
@@ -216,7 +225,31 @@ function uriPct(u) {
   return ((u.count / maxUri.value) * 100).toFixed(1) + '%'
 }
 function ipPct(ip) {
-  return ((ip.count / maxIp.value) * 100).toFixed(1) + '%'
+  return ((ip.requests / maxIp.value) * 100).toFixed(1) + '%'
+}
+
+// 识别回环、私有、链路本地、共享地址及保留地址，默认不纳入来源 IP 排名。
+function isInternalIp(value) {
+  const ip = String(value || '').trim().replace(/^\[|\]$/g, '')
+  if (!ip) return true
+  if (ip === '::1' || ip === '::' || ip === '0:0:0:0:0:0:0:1') return true
+  if (/^(fc|fd)[0-9a-f]{2}:/i.test(ip) || /^fe[89ab][0-9a-f]:/i.test(ip)) return true
+
+  const parts = ip.split('.').map(Number)
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false
+  const [a, b] = parts
+  return (
+    (a === 0) ||
+    ip === '120.0.0.1' ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
+  )
 }
 
 // 来源地排名（cn 视图下合并国内省份与国外国家，按请求量排序）
@@ -511,6 +544,66 @@ onUnmounted(() => {
   margin-bottom: 4px;
   letter-spacing: 0.03em;
   flex-shrink: 0;
+}
+
+.ntc-head-ip {
+  align-items: center;
+}
+
+.internal-ip-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 16px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.internal-ip-filter input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.filter-toggle {
+  position: relative;
+  width: 24px;
+  height: 14px;
+  border: 1px solid rgba(159, 179, 200, 0.42);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  transition: all 0.16s ease;
+}
+
+.filter-toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform 0.16s ease, background 0.16s ease;
+}
+
+.internal-ip-filter input:checked + .filter-toggle {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.2);
+}
+
+.internal-ip-filter input:checked + .filter-toggle::after {
+  background: var(--accent);
+  transform: translateX(10px);
+}
+
+.internal-ip-filter:focus-within .filter-toggle {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .ntc-stat {
