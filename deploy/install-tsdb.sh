@@ -323,8 +323,8 @@ services:
     restart: unless-stopped
     command: $cmd_extra
     ports:
-      - "$port_write:$port_write"
-      - "$port_query:$port_query"
+      - "127.0.0.1:$port_write:$port_write"
+      - "127.0.0.1:$port_query:$port_query"
     volumes:
       - tsdb-data:/var/lib/tsdb
 $mount
@@ -382,8 +382,8 @@ services:
       - --tsdb.path=/thanos-receive-data
       - --receive.replication-factor=1
     ports:
-      - "19291:19291"
-      - "10901:10901"
+      - "127.0.0.1:19291:19291"
+      - "127.0.0.1:10901:10901"
     volumes:
       - thanos-receive-data:/thanos-receive-data
   thanos-query:
@@ -395,7 +395,7 @@ services:
       - --http-address=0.0.0.0:9090
       - --store=thanos-receive:10901
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     depends_on:
       - thanos-receive
 volumes:

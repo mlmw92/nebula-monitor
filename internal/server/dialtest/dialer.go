@@ -30,10 +30,10 @@ type Task struct {
 	Timeout  int      `json:"timeout" yaml:"timeout"`   // 超时（秒）
 	// FailThreshold 连续失败达到该次数才判定为故障并触发告警，用于抑制单次网络抖动
 	// 产生的“故障→恢复”邮件对。≤ 0 表示使用默认阈值（3 次）。
-	FailThreshold int `json:"fail_threshold,omitempty" yaml:"fail_threshold,omitempty"`
-	Enabled  bool     `json:"enabled" yaml:"enabled"`
-	Severity string   `json:"severity" yaml:"severity"` // 告警严重级别: critical/warning/info，默认 warning
-	Notify   []string `json:"notify" yaml:"notify"`     // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示仅平台展示、不推送外部渠道
+	FailThreshold int      `json:"fail_threshold,omitempty" yaml:"fail_threshold,omitempty"`
+	Enabled       bool     `json:"enabled" yaml:"enabled"`
+	Severity      string   `json:"severity" yaml:"severity"` // 告警严重级别: critical/warning/info，默认 warning
+	Notify        []string `json:"notify" yaml:"notify"`     // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示仅平台展示、不推送外部渠道
 
 	// SSL 证书过期预警阈值（天）：仅 HTTPS 任务生效；≤ 0 表示沿用默认（预警 30 / 告警 7）。
 	// 证书剩余天数 ≤ CertWarnDays 触发「警告」，≤ CertCritDays 触发「紧急」。
@@ -43,13 +43,13 @@ type Task struct {
 
 // Result 拨测结果。
 type Result struct {
-	TaskID     string
-	Up         bool
-	Latency    float64 // 毫秒
-	CertExpiry float64 // SSL 证书剩余天数（仅 HTTPS，可为负表示已过期）
-	CertNotAfter int64  // SSL 证书到期时间戳（毫秒，仅 HTTPS 且成功解析到证书时 > 0）
-	StatusCode int     // HTTP 状态码（仅 HTTP/HTTPS）
-	Error      string  // 异常原因（仅 Up=false 时有效，如连接拒绝/超时/DNS失败/HTTP状态文本）
+	TaskID       string
+	Up           bool
+	Latency      float64 // 毫秒
+	CertExpiry   float64 // SSL 证书剩余天数（仅 HTTPS，可为负表示已过期）
+	CertNotAfter int64   // SSL 证书到期时间戳（毫秒，仅 HTTPS 且成功解析到证书时 > 0）
+	StatusCode   int     // HTTP 状态码（仅 HTTP/HTTPS）
+	Error        string  // 异常原因（仅 Up=false 时有效，如连接拒绝/超时/DNS失败/HTTP状态文本）
 }
 
 // Dialer 执行拨测。
@@ -83,7 +83,8 @@ func (d *Dialer) dialHTTP(task Task) Result {
 	client := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			// 默认执行系统 CA 和主机名校验，避免拨测结果被中间人伪造。
+			TLSClientConfig: &tls.Config{},
 		},
 	}
 	scheme := string(task.Type)
@@ -101,9 +102,9 @@ func (d *Dialer) dialHTTP(task Task) Result {
 	defer resp.Body.Close()
 
 	result := Result{
-		TaskID:    task.ID,
-		Up:        resp.StatusCode >= 200 && resp.StatusCode < 400,
-		Latency:   round2(latency),
+		TaskID:     task.ID,
+		Up:         resp.StatusCode >= 200 && resp.StatusCode < 400,
+		Latency:    round2(latency),
 		StatusCode: resp.StatusCode,
 	}
 	// 非 2xx/3xx 视为异常，记录 HTTP 状态文本作为原因

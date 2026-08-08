@@ -17,13 +17,13 @@ import (
 	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/api"
 	"github.com/nebula/monitor/internal/server/config"
+	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/receiver"
 	"github.com/nebula/monitor/internal/server/report"
-	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/screencfg"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/uicfg"
@@ -145,15 +145,16 @@ func main() {
 	var upgrader *upgrade.Manager
 	if cfg.Upgrade.Enabled {
 		upgrader, err = upgrade.New(upgrade.Config{
-			Dir:             cfg.Upgrade.Dir,
-			BinDir:          cfg.Upgrade.BinDir,
-			WebDir:          cfg.WebDir,
-			AgentBinDir:     cfg.AgentBinDir,
-			AgentScriptPath: cfg.AgentScriptPath,
-			BackupKeep:      cfg.Upgrade.BackupKeep,
-			ArchiveKeep:     cfg.Upgrade.ArchiveKeep,
-			UseSystemd:      cfg.Upgrade.UseSystemd,
-			Service:         cfg.Upgrade.Service,
+			Dir:              cfg.Upgrade.Dir,
+			BinDir:           cfg.Upgrade.BinDir,
+			WebDir:           cfg.WebDir,
+			AgentBinDir:      cfg.AgentBinDir,
+			AgentScriptPath:  cfg.AgentScriptPath,
+			BackupKeep:       cfg.Upgrade.BackupKeep,
+			ArchiveKeep:      cfg.Upgrade.ArchiveKeep,
+			UseSystemd:       cfg.Upgrade.UseSystemd,
+			Service:          cfg.Upgrade.Service,
+			CurrentVersion:   version.Version,
 			ServerConfigPath: *cfgPath,
 			ExtraConfigPaths: []string{
 				cfg.NotifyFile,

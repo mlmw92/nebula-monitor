@@ -34,13 +34,13 @@ import (
 
 // Component 描述升级包内一个组件。
 type Component struct {
-	Name     string `json:"name"`                // server | agent | web | agent-script
-	Arch     string `json:"arch,omitempty"`      // amd64 | arm64 | arm（web/agent-script 为空）
-	Source   string `json:"source"`              // 包内相对路径
-	Target   string `json:"target,omitempty"`    // 目标绝对路径（仅展示用）
-	Action   string `json:"action"`              // install_file | sync_dir
-	Mode     string `json:"mode,omitempty"`      // install_file 时的文件 mode（八进制字符串）
-	Checksum string `json:"checksum,omitempty"`  // sha256:<hex>，上传时自动计算填入
+	Name     string `json:"name"`               // server | agent | web | agent-script
+	Arch     string `json:"arch,omitempty"`     // amd64 | arm64 | arm（web/agent-script 为空）
+	Source   string `json:"source"`             // 包内相对路径
+	Target   string `json:"target,omitempty"`   // 目标绝对路径（仅展示用）
+	Action   string `json:"action"`             // install_file | sync_dir
+	Mode     string `json:"mode,omitempty"`     // install_file 时的文件 mode（八进制字符串）
+	Checksum string `json:"checksum,omitempty"` // sha256:<hex>，上传时自动计算填入
 }
 
 // Manifest 升级包 manifest.json。
@@ -53,17 +53,18 @@ type Manifest struct {
 
 // Task 已上传待应用（或已应用）的升级任务。
 type Task struct {
-	ID          string      `json:"id"`
-	Version     string      `json:"version"`
-	Notes       string      `json:"notes,omitempty"`
-	UploadedAt  time.Time   `json:"uploadedAt"`
-	Status      string      `json:"status"` // pending | applying | applied | failed
-	Components  []Component `json:"components"`
-	ServerArch  string      `json:"serverArch,omitempty"`
-	ServerSize  int64       `json:"serverSize,omitempty"`
-	WebSize     int64       `json:"webSize,omitempty"`
-	AgentArches []string    `json:"agentArches,omitempty"`
-	Error       string      `json:"error,omitempty"`
+	ID                 string      `json:"id"`
+	Version            string      `json:"version"`
+	Notes              string      `json:"notes,omitempty"`
+	PreviousVersionMin string      `json:"previousVersionMin,omitempty"`
+	UploadedAt         time.Time   `json:"uploadedAt"`
+	Status             string      `json:"status"` // pending | applying | applied | failed
+	Components         []Component `json:"components"`
+	ServerArch         string      `json:"serverArch,omitempty"`
+	ServerSize         int64       `json:"serverSize,omitempty"`
+	WebSize            int64       `json:"webSize,omitempty"`
+	AgentArches        []string    `json:"agentArches,omitempty"`
+	Error              string      `json:"error,omitempty"`
 }
 
 // HistoryEntry 升级历史记录。
@@ -80,15 +81,16 @@ type HistoryEntry struct {
 
 // Config 升级模块配置。
 type Config struct {
-	Dir         string // 升级工作目录（上传包 / 解压 / 备份）
-	BinDir      string // server 二进制安装目录（默认 /usr/local/bin）
-	WebDir      string // 前端静态资源目录
+	Dir             string // 升级工作目录（上传包 / 解压 / 备份）
+	BinDir          string // server 二进制安装目录（默认 /usr/local/bin）
+	WebDir          string // 前端静态资源目录
 	AgentBinDir     string // agent 自带 CDN 根目录（含 agent/linux/<arch>/agent）
 	AgentScriptPath string // Agent 安装脚本目标路径（apply 时写入，如 dataDir/agent-dist/agent-install.sh）
 	BackupKeep      int    // 保留备份份数
 	ArchiveKeep     int    // 保留已上传升级包（版本归档）的份数；默认 5
-	UseSystemd  bool   // 是否用 systemd 重启 server
-	Service     string // systemd 服务名
+	UseSystemd      bool   // 是否用 systemd 重启 server
+	Service         string // systemd 服务名
+	CurrentVersion  string // 当前运行版本，用于普通升级的 SemVer 校验
 	// 配置文件备份：每次升级前对以下配置文件做带版本时间戳的副本备份，
 	// 防止升级（含密码迁移、Web 端改写）意外损坏配置导致无法回退。
 	ServerConfigPath string   // server 主配置文件路径（如 server.yaml）
@@ -205,10 +207,20 @@ func (m *Manager) Upload(r *http.Request, maxBytes int64) (*Task, error) {
 	if mf.Version == "" {
 		mf.Version = "unknown"
 	}
+	if err := validateVersionForUpload(m.cfg.CurrentVersion, mf.Version, mf.PreviousVersionMin); err != nil {
+		os.RemoveAll(unpackDir)
+		os.Remove(incoming)
+		return nil, err
+	}
 	// 校验每个 component.source 存在并计算 sha256
 	for i := range mf.Components {
 		c := &mf.Components[i]
-		src := filepath.Join(unpackDir, c.Source)
+		src, err := safeComponentPath(unpackDir, c.Source)
+		if err != nil {
+			os.RemoveAll(unpackDir)
+			os.Remove(incoming)
+			return nil, err
+		}
 		fi, err := os.Stat(src)
 		if err != nil {
 			os.RemoveAll(unpackDir)
@@ -230,12 +242,13 @@ func (m *Manager) Upload(r *http.Request, maxBytes int64) (*Task, error) {
 	}
 
 	task := &Task{
-		ID:         id,
-		Version:    mf.Version,
-		Notes:      mf.Notes,
-		UploadedAt: time.Now(),
-		Status:     "pending",
-		Components: mf.Components,
+		ID:                 id,
+		Version:            mf.Version,
+		Notes:              mf.Notes,
+		PreviousVersionMin: mf.PreviousVersionMin,
+		UploadedAt:         time.Now(),
+		Status:             "pending",
+		Components:         mf.Components,
 	}
 	for _, c := range mf.Components {
 		switch c.Name {
@@ -286,6 +299,10 @@ func (m *Manager) Apply(operator string) (*Task, error) {
 		m.mu.Unlock()
 		return nil, errors.New("升级正在进行中")
 	}
+	if err := validateVersionForUpload(m.cfg.CurrentVersion, t.Version, t.PreviousVersionMin); err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
 	t.Status = "applying"
 	unpackRoot := filepath.Join(m.cfg.Dir, "unpacked", t.ID)
 	m.mu.Unlock()
@@ -309,6 +326,12 @@ func (m *Manager) applyCore(id, version string, components []Component, unpackRo
 		Version:    version,
 		Status:     "applying",
 		Components: components,
+	}
+	if err := verifyComponents(unpackRoot, components); err != nil {
+		t.Status = "failed"
+		t.Error = err.Error()
+		m.recordHistory(id, version, action, operator, "failed", err.Error(), false)
+		return t, err
 	}
 	for _, c := range components {
 		switch c.Name {
@@ -392,7 +415,7 @@ func (m *Manager) applyCore(id, version string, components []Component, unpackRo
 			}
 		}
 		src := filepath.Join(unpackRoot, c.Source)
-		if err := syncDir(src, m.cfg.WebDir); err != nil {
+		if err := syncDirStaged(src, m.cfg.WebDir); err != nil {
 			applyErrors = append(applyErrors, "替换 web 失败: "+err.Error())
 		} else {
 			webApplied = true
@@ -415,7 +438,7 @@ func (m *Manager) applyCore(id, version string, components []Component, unpackRo
 			_ = copyFile(dest, filepath.Join(backupDir, fmt.Sprintf("agent-%s", c.Arch)))
 		}
 		src := filepath.Join(unpackRoot, c.Source)
-		if err := copyFileMode(src, dest, 0o755); err != nil {
+		if err := replaceFileAtomic(src, dest, 0o755); err != nil {
 			applyErrors = append(applyErrors, fmt.Sprintf("复制 agent (%s) 失败: %s", c.Arch, err.Error()))
 		} else {
 			agentUpdated = true
@@ -438,7 +461,7 @@ func (m *Manager) applyCore(id, version string, components []Component, unpackRo
 					mode = mm
 				}
 			}
-			if err := copyFileMode(src, m.cfg.AgentScriptPath, mode); err != nil {
+			if err := replaceFileAtomic(src, m.cfg.AgentScriptPath, mode); err != nil {
 				applyErrors = append(applyErrors, "复制 agent-install.sh 失败: "+err.Error())
 			} else {
 				agentUpdated = true // 属于 Agent CDN 更新的一部分
@@ -447,10 +470,36 @@ func (m *Manager) applyCore(id, version string, components []Component, unpackRo
 		}
 	}
 
+	// 任一组件替换失败时恢复本次已经替换的 server/web，避免磁盘上留下混合版本。
+	if len(applyErrors) > 0 {
+		if serverApplied {
+			backup := filepath.Join(backupDir, "monitor-server")
+			if _, err := os.Stat(backup); err == nil {
+				if err := replaceFileAtomic(backup, serverBin, 0o755); err != nil {
+					applyErrors = append(applyErrors, "恢复 server 失败: "+err.Error())
+				}
+			} else {
+				_ = os.Remove(serverBin)
+			}
+			serverApplied = false
+		}
+		if webApplied {
+			backupWeb := filepath.Join(backupDir, "web")
+			if _, err := os.Stat(backupWeb); err == nil {
+				if err := syncDirStaged(backupWeb, m.cfg.WebDir); err != nil {
+					applyErrors = append(applyErrors, "恢复 web 失败: "+err.Error())
+				}
+			} else {
+				_ = os.RemoveAll(m.cfg.WebDir)
+			}
+			webApplied = false
+		}
+	}
+
 	m.pruneBackups()
 
 	// 4) 重启 server（仅在确实替换了 server 二进制时）
-	if serverApplied {
+	if serverApplied && len(applyErrors) == 0 {
 		if err := m.restart(); err != nil {
 			applyErrors = append(applyErrors, "重启 server 失败: "+err.Error())
 		}
@@ -934,6 +983,34 @@ func syncDir(src, dst string) error {
 	})
 }
 
+// syncDirStaged 先在目标目录同级完成完整同步，再切换目录名，避免源目录
+// 复制中途失败时把正在使用的 Web 目录清成半套版本。
+func syncDirStaged(src, dst string) error {
+	parent := filepath.Dir(dst)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	stage := filepath.Join(parent, ".upgrade-web-"+randHex(8))
+	defer os.RemoveAll(stage)
+	if err := syncDir(src, stage); err != nil {
+		return err
+	}
+	old := filepath.Join(parent, ".upgrade-web-old-"+randHex(8))
+	if _, err := os.Stat(dst); err == nil {
+		if err := os.Rename(dst, old); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(stage, dst); err != nil {
+		if _, oldErr := os.Stat(old); oldErr == nil {
+			_ = os.Rename(old, dst)
+		}
+		return err
+	}
+	_ = os.RemoveAll(old)
+	return nil
+}
+
 func fileSHA256(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -980,4 +1057,44 @@ func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func safeComponentPath(root, source string) (string, error) {
+	if strings.TrimSpace(source) == "" {
+		return "", errors.New("manifest component.source 不能为空")
+	}
+	cleanRoot := filepath.Clean(root)
+	target := filepath.Clean(filepath.Join(cleanRoot, source))
+	if target != cleanRoot && !strings.HasPrefix(target, cleanRoot+string(os.PathSeparator)) {
+		return "", fmt.Errorf("manifest 非法路径: %s", source)
+	}
+	return target, nil
+}
+
+func verifyComponents(root string, components []Component) error {
+	for _, c := range components {
+		src, err := safeComponentPath(root, c.Source)
+		if err != nil {
+			return err
+		}
+		fi, err := os.Stat(src)
+		if err != nil {
+			return fmt.Errorf("组件 %s 不存在: %w", c.Source, err)
+		}
+		if fi.IsDir() || c.Checksum == "" {
+			continue
+		}
+		want := strings.TrimPrefix(c.Checksum, "sha256:")
+		if len(want) != sha256.Size*2 {
+			return fmt.Errorf("组件 %s checksum 格式无效", c.Source)
+		}
+		got, err := fileSHA256(src)
+		if err != nil {
+			return fmt.Errorf("校验组件 %s 失败: %w", c.Source, err)
+		}
+		if !strings.EqualFold(got, want) {
+			return fmt.Errorf("组件 %s checksum 不匹配", c.Source)
+		}
+	}
+	return nil
 }

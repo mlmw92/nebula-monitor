@@ -1,5 +1,15 @@
 <template>
   <div class="network-tab">
+    <div class="nt-instance-bar glass">
+      <span class="nt-instance-label">Nginx 实例</span>
+      <select v-model="selectedInstance" class="nt-instance-select" aria-label="选择 Nginx 实例">
+        <option value="">全部实例</option>
+        <option v-for="it in nginxInstances" :key="instanceKey(it)" :value="instanceKey(it)">
+          {{ instanceLabel(it) }}{{ it.up ? '' : ' · 离线' }}
+        </option>
+      </select>
+      <span class="nt-instance-hint">{{ selectedInstance ? '当前显示单实例数据' : '当前显示集群汇总数据' }}</span>
+    </div>
     <!-- 顶部 KPI 条 -->
     <div class="nt-kpi-row">
       <div class="glass nt-kpi" v-for="k in topKpis" :key="k.key">
@@ -51,21 +61,24 @@
           </div>
         </div>
 
-        <!-- 请求趋势 -->
-        <div class="glass nt-card">
-          <div class="ntc-head">
-            <span>请求趋势</span>
-            <span class="ntc-stat" v-if="totalRate">{{ rateShort(totalRate) }}/s</span>
+        <!-- 图表区：请求趋势与状态码分布上下排列 -->
+        <div class="nt-chart-stack">
+          <!-- 请求趋势 -->
+          <div class="glass nt-card">
+            <div class="ntc-head">
+              <span>请求趋势</span>
+              <span class="ntc-stat" v-if="totalRate">{{ rateShort(totalRate) }}/s</span>
+            </div>
+            <div ref="trendChart" class="ntc-chart"></div>
           </div>
-          <div ref="trendChart" class="ntc-chart"></div>
-        </div>
 
-        <!-- 状态码分布 -->
-        <div class="glass nt-card">
-          <div class="ntc-head">
-            <span>状态码分布</span>
+          <!-- 状态码分布 -->
+          <div class="glass nt-card">
+            <div class="ntc-head">
+              <span>状态码分布</span>
+            </div>
+            <div ref="statusChart" class="ntc-chart"></div>
           </div>
-          <div ref="statusChart" class="ntc-chart"></div>
         </div>
       </div>
 
@@ -128,6 +141,7 @@ let status = null
 let map = null
 let ro = null
 let timer = null
+let refreshing = false
 
 const summary = ref(null)
 const geoData = ref({ cn: null, world: null })
@@ -155,12 +169,21 @@ const displayPoints = computed(() => {
   return [...provinces, ...foreignCountryPoints.value]
 })
 const nginxInstances = ref([])
-const totalRequests = ref(0)
-const totalRate = ref(0)
+const selectedInstance = ref('')
+
+function instanceKey(it) { return `${it.node || ''}|${it.instance || ''}` }
+function instanceLabel(it) { return [it.name || it.instance, it.node].filter(Boolean).join(' · ') }
+
+const selectedSummary = computed(() => {
+  if (!selectedInstance.value) return summary.value || {}
+  return summary.value?.instanceSummaries?.[selectedInstance.value] || {}
+})
+const totalRequests = computed(() => selectedSummary.value.totalRequests || 0)
+const totalRate = computed(() => selectedSummary.value.totalRate || 0)
 
 // 是否已启用访问日志
 const accessEnabled = computed(() => {
-  const s = summary.value || {}
+  const s = selectedSummary.value
   return !!((s.topUris && s.topUris.length) || (s.topIps && s.topIps.length) || s.totalRequests)
 })
 
@@ -171,7 +194,7 @@ function isValidPoint(p) {
 
 // 顶部 KPI 条
 const topKpis = computed(() => {
-  const s = summary.value || {}
+  const s = selectedSummary.value
   const points = displayPoints.value
   const maxSrc = points.length ? points.reduce((a, b) => (a.requests > b.requests ? a : b)) : null
   const isWorld = geoScope.value === 'world'
@@ -209,8 +232,8 @@ const topKpis = computed(() => {
 })
 
 // 排行列表数据
-const topUris = computed(() => summary.value?.topUris || [])
-const topIps = computed(() => summary.value?.topIps || [])
+const topUris = computed(() => selectedSummary.value.topUris || [])
+const topIps = computed(() => selectedSummary.value.topIps || [])
 const uriList = computed(() => topUris.value.slice(0, 10))
 const includeInternalIps = ref(false)
 const ipList = computed(() => {
@@ -282,7 +305,7 @@ function ipTitle(ip) {
 
 // 状态码分布
 const statusCounts = computed(() => {
-  const m = summary.value?.statusCounts || {}
+  const m = selectedSummary.value.statusCounts || {}
   return Object.keys(m)
     .map((k) => ({ code: k, count: m[k] }))
     .sort((a, b) => a.code.localeCompare(b.code))
@@ -293,8 +316,6 @@ async function loadSummary() {
   try {
     const data = await http.get('/api/v1/middleware/nginx/access/summary')
     summary.value = data
-    totalRequests.value = data?.totalRequests || 0
-    totalRate.value = data?.totalRate || 0
   } catch (e) {
     console.error('nginx access summary 加载失败', e)
   }
@@ -302,7 +323,8 @@ async function loadSummary() {
 
 async function loadInstances() {
   try {
-    nginxInstances.value = await http.get('/api/v1/middleware/nginx/instances')
+    const data = await http.get('/api/v1/middleware/nginx/instances')
+    nginxInstances.value = data?.instances || []
   } catch (e) {
     nginxInstances.value = []
   }
@@ -310,7 +332,8 @@ async function loadInstances() {
 
 async function loadGeo(scope) {
   try {
-    const data = await http.get(`/api/v1/middleware/nginx/access/geo?scope=${scope}`)
+    const instance = selectedInstance.value ? `&instance=${encodeURIComponent(selectedInstance.value)}` : ''
+    const data = await http.get(`/api/v1/middleware/nginx/access/geo?scope=${scope}${instance}`)
     geoData.value[scope] = data
   } catch (e) {
     console.error('nginx access geo 加载失败', scope, e)
@@ -320,8 +343,9 @@ async function loadGeo(scope) {
 async function loadTrends() {
   const list = props.nodes || []
   if (!list.length || !trend) return
+  const instance = selectedInstance.value ? selectedInstance.value.split('|').slice(1).join('|') : ''
   const [req] = await Promise.all([
-    queryClusterTrend(list, 'nginx_access_requests', 'sum'),
+    queryClusterTrend(list, 'nginx_access_requests', 'sum', { labels: instance ? { instance } : undefined }),
   ])
   trend.setOption(
     monitorOption({
@@ -419,12 +443,22 @@ function changeScope(s) {
   loadGeo(s)
 }
 
+watch(selectedInstance, async () => {
+	await refresh()
+})
+
 async function refresh() {
-  await loadSummary()
-  await loadInstances()
-  await loadTrends()
-  renderStatus()
-  await Promise.all([loadGeo('cn'), loadGeo('world')])
+	if (refreshing) return
+	refreshing = true
+	try {
+	await loadSummary()
+	await loadInstances()
+	await loadTrends()
+	renderStatus()
+	await Promise.all([loadGeo('cn'), loadGeo('world')])
+	} finally {
+		refreshing = false
+	}
 }
 
 // 监听 geo 数据变化，更新地图
@@ -522,6 +556,51 @@ onUnmounted(() => {
 .nt-left {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 10px;
+  min-height: 0;
+}
+
+.nt-instance-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  flex-shrink: 0;
+  border: 1px solid rgba(34, 211, 238, 0.14);
+  background: linear-gradient(90deg, rgba(16, 36, 58, 0.88), rgba(13, 24, 42, 0.72));
+}
+
+.nt-instance-label {
+  color: var(--text-dim);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.nt-instance-select {
+  min-width: 220px;
+  padding: 5px 28px 5px 9px;
+  border: 1px solid rgba(34, 211, 238, 0.36);
+  border-radius: 5px;
+  background: rgba(5, 15, 29, 0.82);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+
+.nt-instance-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.12);
+}
+
+.nt-instance-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.nt-chart-stack {
+  grid-column: 1 / -1;
+  display: grid;
   grid-template-rows: 1fr 1fr;
   gap: 10px;
   min-height: 0;
@@ -827,6 +906,7 @@ onUnmounted(() => {
   .ntk-sub { font-size: 14px; }
   .nt-body { gap: 14px; }
   .nt-left { gap: 14px; }
+  .nt-chart-stack { gap: 14px; }
   .nt-right { gap: 14px; grid-template-columns: 1fr minmax(300px, 20%); }
   .nt-card { padding: 14px 16px 8px; }
   .ntc-head { font-size: 15px; }
@@ -846,6 +926,7 @@ onUnmounted(() => {
   .ntk-sub { font-size: 17px; }
   .nt-body { gap: 20px; }
   .nt-left { gap: 20px; }
+  .nt-chart-stack { gap: 20px; }
   .nt-right { gap: 20px; grid-template-columns: 1fr minmax(380px, 20%); }
   .nt-card { padding: 18px 22px 10px; }
   .ntc-head { font-size: 18px; }

@@ -63,7 +63,7 @@ func (c *NginxCollector) collectStubStatus(cfg model.NginxInstanceConfig, now in
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.InsecureTLS},
 		},
 	}
 	defer client.CloseIdleConnections()
@@ -141,7 +141,10 @@ func (c *NginxCollector) downInstance(cfg model.NginxInstanceConfig) model.Nginx
 }
 
 func (c *NginxCollector) collectExporter(cfg model.NginxInstanceConfig, now int64) ([]model.Metric, model.NginxInstance) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.InsecureTLS}},
+	}
 	resp, err := client.Get(cfg.ExporterURL)
 	if err != nil {
 		slog.Warn("Nginx exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
@@ -175,7 +178,7 @@ func (c *NginxCollector) collectExporter(cfg model.NginxInstanceConfig, now int6
 //	8456 8456 32891
 //	Reading: 0 Writing: 3 Waiting: 12
 var (
-	reActive = regexp.MustCompile(`Active connections:\s*(\d+)`)
+	reActive  = regexp.MustCompile(`Active connections:\s*(\d+)`)
 	reNumbers = regexp.MustCompile(`\s+(\d+)\s+(\d+)\s+(\d+)`)
 	reRWWait  = regexp.MustCompile(`Reading:\s*(\d+)\s+Writing:\s*(\d+)\s+Waiting:\s*(\d+)`)
 )

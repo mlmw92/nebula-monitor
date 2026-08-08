@@ -72,25 +72,25 @@ type ReportProvider interface {
 
 // API 聚合所有 REST 接口依赖。
 type API struct {
-	store     storage.Storage
-	nodeMgr   *node.Manager
-	rules     RulesProvider
-	alerts    AlertStore
-	hub         *Hub
-	agentAuth   config.AgentAuthConfig
-	agentBinDir string
-	webDir      string
-	auth        config.AuthConfig
-	upgrader  *upgrade.Manager
-	notifyMgr *notify.Manager
-	screenMgr *screencfg.Manager
-	engine    *alert.Engine
-	maintenance MaintenanceProvider
-	dialtest  DialtestProvider
-	report    ReportProvider
-	acks      *alert.AckStore
-	inhibit   *alert.InhibitStore
-	grouping  *alert.GroupingStore
+	store          storage.Storage
+	nodeMgr        *node.Manager
+	rules          RulesProvider
+	alerts         AlertStore
+	hub            *Hub
+	agentAuth      config.AgentAuthConfig
+	agentBinDir    string
+	webDir         string
+	auth           config.AuthConfig
+	upgrader       *upgrade.Manager
+	notifyMgr      *notify.Manager
+	screenMgr      *screencfg.Manager
+	engine         *alert.Engine
+	maintenance    MaintenanceProvider
+	dialtest       DialtestProvider
+	report         ReportProvider
+	acks           *alert.AckStore
+	inhibit        *alert.InhibitStore
+	grouping       *alert.GroupingStore
 	ngx            *nginxaccess.Window // Nginx access log 地理聚合窗口（可空）
 	uiMgr          *uicfg.Manager      // 系统 UI 品牌配置（系统名称/Logo）
 	serverProvince string              // server 自动探测到的所在地（省级行政区）
@@ -230,6 +230,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 // handleInstallInfo 返回 Agent 一行安装命令（server 地址取自请求 Host，secret 取自配置）。
 // 同时返回网闸代理场景（edge/hub）的配置模板，供前端引导页生成两侧 agent.yaml。
 func (a *API) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
+	// Agent 密钥是长期凭据。若未开启登录认证，当前接口无法确认请求者是管理员，
+	// 因此拒绝返回包含密钥的安装命令，避免匿名请求泄露 Agent 接入密钥。
+	if a.agentAuth.Enabled && !a.auth.Enabled {
+		http.Error(w, "Agent 接入认证已开启，请先开启 Server 登录认证后获取安装信息", http.StatusForbidden)
+		return
+	}
 	srv := "http://" + r.Host
 	cmd := "curl -fsSL " + srv + "/install/agent-install.sh | bash -s -- --server " + srv
 	secretPart := ""
@@ -310,9 +316,9 @@ func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
 		DiskIopsW  float64 `json:"diskIopsW"`
 		NetDrop    float64 `json:"netDrop"`
 		TcpRetrans float64 `json:"tcpRetrans"`
-	MemTotal   float64 `json:"memTotal"`
-	MemUsed    float64 `json:"memUsed"`
-	ProcCount  float64 `json:"procCount"`
+		MemTotal   float64 `json:"memTotal"`
+		MemUsed    float64 `json:"memUsed"`
+		ProcCount  float64 `json:"procCount"`
 	}
 	out := map[string]*nodeMetric{}
 
@@ -348,11 +354,11 @@ func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
 				m.Load15 = round2(v)
 			case "mem_total_bytes":
 				m.MemTotal = v
-		case "mem_used_bytes":
-			m.MemUsed = v
-		case "process_total":
-			m.ProcCount = v
-		case "tcp_retransmit_rate":
+			case "mem_used_bytes":
+				m.MemUsed = v
+			case "process_total":
+				m.ProcCount = v
+			case "tcp_retransmit_rate":
 				m.TcpRetrans = round2(v)
 			}
 		}
@@ -643,16 +649,34 @@ func (a *API) handleQueryRange(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "metric required", http.StatusBadRequest)
 		return
 	}
-	start, _ := strconv.ParseInt(q.Get("start"), 10, 0)
-	end, _ := strconv.ParseInt(q.Get("end"), 10, 0)
-	step, _ := strconv.ParseInt(q.Get("step"), 10, 0)
-	if step == 0 {
+	start, errStart := strconv.ParseInt(q.Get("start"), 10, 64)
+	end, errEnd := strconv.ParseInt(q.Get("end"), 10, 64)
+	if errStart != nil || errEnd != nil || start <= 0 || end <= start {
+		http.Error(w, "start/end 必须为合法毫秒时间戳且 end>start", http.StatusBadRequest)
+		return
+	}
+	// 普通趋势查询也必须限制跨度，避免异常参数拖垮时序库。
+	const maxRangeSpan = int64(7 * 24 * 3600 * 1000)
+	if end-start > maxRangeSpan {
+		http.Error(w, "查询时间跨度不能超过 7 天", http.StatusBadRequest)
+		return
+	}
+	step, errStep := strconv.ParseInt(q.Get("step"), 10, 64)
+	if q.Get("step") != "" && errStep != nil {
+		http.Error(w, "step 必须为合法毫秒数", http.StatusBadRequest)
+		return
+	}
+	if step <= 0 {
 		// 默认按跨度自动降采样到约 300 点
 		span := end - start
 		step = span / 300
 		if step < 60000 {
 			step = 60000 // 最少 60s（毫秒单位）
 		}
+	}
+	if step < 1000 || step > end-start {
+		http.Error(w, "step 必须在 1 秒到查询跨度之间", http.StatusBadRequest)
+		return
 	}
 	labels := parseLabelQuery(q)
 	series, err := a.store.QueryRange(node, name, labels, start, end, step)

@@ -16,7 +16,7 @@ services:
       - vm-data:/victoria-metrics-data
     restart: always
     ports:
-      - "8428:8428"
+      - "127.0.0.1:8428:8428"
 
   server:
     image: monitor-server:latest

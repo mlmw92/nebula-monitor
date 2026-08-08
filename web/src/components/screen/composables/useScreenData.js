@@ -16,7 +16,6 @@ export function useScreenData() {
   const metrics = ref({})
   const alerts = ref([])
   const mwInstances = ref([])
-  const nginxSummary = ref(null)
 
   const activeAlerts = computed(() => alerts.value.filter((a) => a.state === 'firing'))
   const firingCount = computed(() => activeAlerts.value.length)
@@ -65,16 +64,8 @@ export function useScreenData() {
     mwInstances.value = list
   }
 
-  async function loadNginx() {
-    try {
-      nginxSummary.value = await http.get('/api/v1/middleware/nginx/access/summary')
-    } catch (e) {
-      nginxSummary.value = null
-    }
-  }
-
   async function refreshAll() {
-    await Promise.all([loadBase(), loadMiddleware(), loadNginx()])
+    await Promise.all([loadBase(), loadMiddleware()])
   }
 
   return {
@@ -82,13 +73,11 @@ export function useScreenData() {
     metrics,
     alerts,
     mwInstances,
-    nginxSummary,
     nodeCards,
     activeAlerts,
     firingCount,
     loadBase,
     loadMiddleware,
-    loadNginx,
     refreshAll,
   }
 }
