@@ -58,6 +58,7 @@
           :nodes="nodes"
           :metrics="metrics"
           :alerts="alerts"
+          :health-score="healthScore"
         />
         <HostsTab
           v-else-if="activeTab === 'hosts'"
@@ -80,6 +81,7 @@
           :nodes="nodes"
           :metrics="metrics"
           :alerts="alerts"
+          :health-score="healthScore"
         />
       </Transition>
     </main>
@@ -147,6 +149,7 @@ import { useScreenData } from './composables/useScreenData'
 import { useCountdown } from './composables/useCountdown'
 import { useScreenConfig, REFRESH_INTERVALS } from './composables/useScreenConfig'
 import { CN_PROVINCES } from '../../charts/geoCoords'
+import { calculateSystemHealth } from '../../composables/healthScore'
 
 const router = useRouter()
 const { brand } = useBrand()
@@ -194,19 +197,7 @@ function avgOnline(key) {
 }
 
 // 健康分数需要被 KPI 条引用，先声明相关 computed，避免生产压缩后出现 TDZ。
-const healthScore = computed(() => {
-  const online = onlineCards.value.length
-  const total = nodeCards.value.length
-  const cpu = avgOnline('cpu')
-  const mem = avgOnline('mem')
-  const disk = avgOnline('disk')
-  const onlineScore = total > 0 ? (online / total) * 100 : 100
-  const cpuScore = Math.max(0, 100 - cpu)
-  const memScore = Math.max(0, 100 - mem)
-  const diskScore = Math.max(0, 100 - disk)
-  const alertScore = Math.max(0, 100 - firingCount.value * 10)
-  return Math.round((onlineScore + cpuScore + memScore + diskScore + alertScore) / 5)
-})
+const healthScore = computed(() => calculateSystemHealth(nodes.value, metrics.value, alerts.value).score)
 
 const healthScoreColor = computed(() => {
   if (healthScore.value >= 90) return 'var(--chart-green)'

@@ -38,8 +38,8 @@ const props = defineProps({
 })
 
 const level = computed(() => {
-  if (props.score >= 80) return 'green'
-  if (props.score >= 60) return 'amber'
+  if (props.score >= 90) return 'green'
+  if (props.score >= 70) return 'amber'
   return 'red'
 })
 const levelLabel = computed(() => ({ green: '优秀', amber: '一般', red: '风险' }[level.value]))
@@ -57,13 +57,13 @@ const hexPoints = computed(() => {
 })
 
 function barColor(v) {
-  if (v >= 80) return 'var(--accent)'
-  if (v >= 50) return 'var(--warn)'
+  if (v >= 90) return 'var(--accent)'
+  if (v >= 70) return 'var(--warn)'
   return 'var(--danger)'
 }
 const bars = computed(() => [
   { key: 'online', label: '在线率', value: Math.round(props.onlineRate), color: barColor(props.onlineRate) },
-  { key: 'alertFree', label: '无告警率', value: Math.round(props.alertFreeRate), color: barColor(props.alertFreeRate) },
+  { key: 'alertFree', label: '告警健康度', value: Math.round(props.alertFreeRate), color: barColor(props.alertFreeRate) },
   { key: 'cpu', label: 'CPU 余量', value: Math.round(props.cpuHeadroom), color: barColor(props.cpuHeadroom) },
   { key: 'disk', label: '磁盘余量', value: Math.round(props.diskHeadroom), color: barColor(props.diskHeadroom) },
 ])

@@ -50,6 +50,7 @@ import http from '../api/http'
 import { middlewareTypes } from './overview/middlewareConfig'
 import { formatMetric } from './overview/format'
 import { useOverviewLayout } from './overview/useOverviewLayout'
+import { calculateSystemHealth } from '../composables/healthScore'
 
 import HealthBlock from './overview/HealthBlock.vue'
 import KpiBlock from './overview/KpiBlock.vue'
@@ -148,80 +149,7 @@ const groupedHosts = computed(() => {
   return order.map((g) => ({ group: g, hosts: map[g] }))
 })
 
-function avg(arr) {
-  if (!arr.length) return 0
-  return arr.reduce((a, b) => a + b, 0) / arr.length
-}
-
-const health = computed(() => {
-  const ns = sortedNodes.value
-  const total = ns.length
-  const offline = ns.filter((n) => n.status !== 'online').length
-  const online = total - offline
-
-  // 资源压力统计：仅对“超过告警阈值”的部分扣分，避免正常负载拉低分数
-  const pressureConfig = [
-    { key: 'cpu', label: 'CPU', warnAt: 70, weight: 15 },
-    { key: 'mem', label: '内存', warnAt: 80, weight: 12 },
-    { key: 'disk', label: '磁盘', warnAt: 85, weight: 12 },
-  ]
-  const pressure = pressureConfig.map((p) => {
-    const values = []
-    ns.forEach((n) => {
-      const v = (latestMap.value[n.hostname] || {})[p.key]
-      if (typeof v === 'number' && !isNaN(v)) values.push(v)
-    })
-    const avgVal = avg(values)
-    // 平均超阈值幅度（只统计超过 warnAt 的部分，未超过为 0）
-    const avgOver = avg(values.map((v) => Math.max(0, v - p.warnAt)))
-    const warnCount = values.filter((v) => v >= p.warnAt).length
-    const badCount = values.filter((v) => v >= p.warnAt + 15).length
-    return { ...p, rate: avgVal, avgOver, warnCount, badCount, count: values.length }
-  })
-
-  const crit = alertsAll.value.filter((x) => (x.severity || '').toLowerCase() === 'critical').length
-  const warn = alertsAll.value.filter((x) => (x.severity || '').toLowerCase() === 'warning').length
-
-  let score = 100
-  if (total > 0) {
-    // 离线扣分（权重最大）
-    score -= (offline / total) * 60
-    // 资源超阈值扣分（只有实际超过阈值才扣）
-    pressure.forEach((p) => {
-      score -= (p.avgOver / 100) * p.weight
-    })
-    // 活跃告警扣分
-    score -= crit * 5
-    score -= warn * 2
-    score = Math.max(0, Math.round(score))
-  }
-
-  let statusText = '未知'
-  let rank = 'unknown'
-  if (total === 0) {
-    statusText = '无数据'
-  } else if (score >= 90) {
-    statusText = '健康'
-    rank = 'good'
-  } else if (score >= 70) {
-    statusText = '轻微风险'
-    rank = 'warn'
-  } else {
-    statusText = '风险较高'
-    rank = 'bad'
-  }
-  return {
-    score,
-    statusText,
-    rank,
-    total,
-    online,
-    offline,
-    criticalAlerts: crit,
-    warningAlerts: warn,
-    pressure,
-  }
-})
+const health = computed(() => calculateSystemHealth(nodes.value, latestMap.value, alertsAll.value))
 
 const kpis = computed(() => {
   const ns = sortedNodes.value

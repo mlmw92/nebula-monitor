@@ -24,13 +24,14 @@ type nginxAccessInstance struct {
 
 // nginxAccessSummaryResp 是 /access/summary 的响应体。
 type nginxAccessSummaryResp struct {
-	TotalRequests float64            `json:"totalRequests"`
-	TotalRate     float64            `json:"totalRate"`
-	TotalBytes    float64            `json:"totalBytes"`
-	StatusCounts  map[string]float64 `json:"statusCounts"`
-	TopURIs       []model.NameCount  `json:"topUris"`
-	TopIPs        []nginxaccess.IPAgg `json:"topIps"`
-	Instances     []nginxAccessInstance `json:"instances"`
+	TotalRequests     float64                                `json:"totalRequests"`
+	TotalRate         float64                                `json:"totalRate"`
+	TotalBytes        float64                                `json:"totalBytes"`
+	StatusCounts      map[string]float64                     `json:"statusCounts"`
+	TopURIs           []model.NameCount                      `json:"topUris"`
+	TopIPs            []nginxaccess.IPAgg                    `json:"topIps"`
+	Instances         []nginxAccessInstance                  `json:"instances"`
+	InstanceSummaries map[string]nginxaccess.InstanceSummary `json:"instanceSummaries"`
 }
 
 // nginxAccessLine 是地图动线的起终点对（中文名 + 英文名，坐标由前端按地图 name 解析）。
@@ -57,12 +58,13 @@ func (a *API) handleNginxAccessSummary(w http.ResponseWriter, r *http.Request) {
 		summary = a.ngx.Summary()
 	}
 	resp := nginxAccessSummaryResp{
-		TotalRequests: summary.TotalRequests,
-		TotalRate:     summary.TotalRate,
-		TotalBytes:    summary.TotalBytes,
-		StatusCounts:  summary.StatusCounts,
-		TopURIs:       summary.TopURIs,
-		TopIPs:        summary.TopIPs,
+		TotalRequests:     summary.TotalRequests,
+		TotalRate:         summary.TotalRate,
+		TotalBytes:        summary.TotalBytes,
+		StatusCounts:      summary.StatusCounts,
+		TopURIs:           summary.TopURIs,
+		TopIPs:            summary.TopIPs,
+		InstanceSummaries: summary.InstanceSummaries,
 	}
 
 	// 实例级 up/连接数（复用 nginx_instance_up + nginx_active_connections）
@@ -131,7 +133,8 @@ func (a *API) handleNginxAccessGeo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
-	resp.Points = a.ngx.Points(scope)
+	instance := r.URL.Query().Get("instance")
+	resp.Points = a.ngx.PointsFor(scope, instance)
 	// 部署点：服务器（数据中心）所在地。默认取 server 自动探测到的省级行政区；
 	// 若大屏配置显式指定了所在地（自动探测失败兜底），则以配置为准。
 	// 世界地图上省份无对应区域，统一落到国家中心。

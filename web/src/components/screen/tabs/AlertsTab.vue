@@ -30,31 +30,19 @@ import ScreenAlertLevels from '../ScreenAlertLevels.vue'
 import ScreenHealthScore from '../ScreenHealthScore.vue'
 import ScreenRisk from '../ScreenRisk.vue'
 import ScrollTablePanel from '../ScrollTablePanel.vue'
+import { calculateAlertScore } from '../../../composables/healthScore'
+import { buildNodeCards } from '../composables/useNodeCards'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
   metrics: { type: Object, default: () => ({}) },
   alerts: { type: Array, default: () => [] },
+  healthScore: { type: Number, default: 100 },
 })
 
 const router = useRouter()
 
-const nodeCards = computed(() =>
-  props.nodes.map((n) => ({
-    name: n.hostname,
-    ip: n.ip || '-',
-    online: n.status === 'online',
-    cpu: props.metrics[n.hostname]?.cpu || 0,
-    mem: props.metrics[n.hostname]?.mem || 0,
-    disk: props.metrics[n.hostname]?.disk || 0,
-    load1: props.metrics[n.hostname]?.load1 || 0,
-    load: props.metrics[n.hostname]?.load1 || 0,
-    netIn: props.metrics[n.hostname]?.netIn || 0,
-    netOut: props.metrics[n.hostname]?.netOut || 0,
-    memTotal: props.metrics[n.hostname]?.memTotal || 0,
-    procCount: props.metrics[n.hostname]?.procCount || 0,
-  }))
-)
+const nodeCards = computed(() => buildNodeCards(props.nodes, props.metrics))
 
 const activeAlerts = computed(() => (props.alerts || []).filter((a) => a.state === 'firing'))
 const onlineNodes = computed(() => nodeCards.value.filter((n) => n.online !== false))
@@ -66,17 +54,7 @@ function avg(key) {
   return list.reduce((s, n) => s + (n[key] || 0), 0) / list.length
 }
 
-const healthScore = computed(() => {
-  const total = props.nodes.length
-  const online = onlineCount.value
-  const firing = activeAlerts.value.length
-  const onlineScore = total > 0 ? (online / total) * 100 : 100
-  const cpuScore = Math.max(0, 100 - avg('cpu'))
-  const memScore = Math.max(0, 100 - avg('mem'))
-  const diskScore = Math.max(0, 100 - avg('disk'))
-  const alertScore = Math.max(0, 100 - firing * 10)
-  return Math.round((onlineScore + cpuScore + memScore + diskScore + alertScore) / 5)
-})
+const healthScore = computed(() => props.healthScore)
 
 const onlineRate = computed(() => {
   return props.nodes.length > 0
@@ -85,8 +63,7 @@ const onlineRate = computed(() => {
 })
 
 const alertFreeRate = computed(() => {
-  const firing = activeAlerts.value.length
-  return Math.max(0, 100 - firing * 10)
+  return calculateAlertScore(activeAlerts.value)
 })
 
 const cpuHeadroom = computed(() => Math.round(Math.max(0, 100 - avg('cpu'))))

@@ -11,7 +11,7 @@
           </svg>
           <div class="mh-score-val">{{ healthScore }}<span>分</span></div>
         </div>
-        <div class="mh-score-label">综合健康评分</div>
+          <div class="mh-score-label">中间件健康评分</div>
       </div>
       <div class="mh-stats">
         <div class="mh-stat"><b>{{ overview?.total || 0 }}</b><span>实例总数</span></div>

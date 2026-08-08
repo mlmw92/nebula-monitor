@@ -88,8 +88,8 @@ function usageColor(v) {
   return COLORS.cyan
 }
 function healthColor(v) {
-  if (v >= 80) return COLORS.green
-  if (v >= 60) return COLORS.amber
+  if (v >= 90) return COLORS.green
+  if (v >= 70) return COLORS.amber
   return COLORS.red
 }
 

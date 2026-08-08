@@ -364,6 +364,7 @@ func (c *NginxAccessCollector) collectFile(cfg model.NginxInstanceConfig, state 
 	}
 
 	stat := &model.NginxAccessStat{
+		Node:        c.node,
 		Instance:    normalizeRemoteAddr(cfg.Addr, ""),
 		Group:       c.group,
 		PeriodSec:   round2(periodSec),

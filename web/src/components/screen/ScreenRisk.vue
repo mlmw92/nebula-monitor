@@ -33,6 +33,13 @@
     <div class="sr-foot">
       风险主机 <b class="mono">{{ riskCount }}</b> 台 · 占比 <b class="mono">{{ pct(riskCount) }}%</b>
     </div>
+    <div v-if="riskReasons.length" class="sr-reasons">
+      <div class="sr-reasons-title">风险原因</div>
+      <div v-for="item in riskReasons" :key="item.key" class="sr-reason">
+        <span class="sr-reason-host">{{ item.name }}</span>
+        <span>{{ item.reason }}</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -48,26 +55,52 @@ const props = defineProps({
 const R = 46
 const C = 2 * Math.PI * R
 
-// 分级：故障=离线或有 critical 告警；预警=有 warning 告警或峰值>=70%；其余正常
-const dist = computed(() => {
-  let normal = 0, warn = 0, danger = 0
+// 分级：故障=离线或有 critical 告警；预警=有 warning 告警或峰值>=70%；其余正常。
+// 兼容原始节点(status)和大屏节点卡片(online)两种字段结构。
+const evaluatedHosts = computed(() => {
   const firing = props.alerts.filter((a) => a.state === 'firing')
-  for (const n of props.nodes) {
-    const online = n.status === 'online'
-    const na = firing.filter((a) => a.node === n.hostname)
-    const hasCrit = na.some((a) => a.severity === 'critical')
-    const hasWarn = na.some((a) => a.severity === 'warning')
+  return props.nodes.map((n) => {
+    const online = typeof n.online === 'boolean' ? n.online : n.status === 'online'
+    const na = firing.filter((a) => a.node === n.hostname || a.node === n.name)
+    const hasCrit = na.some((a) => (a.severity || '').toLowerCase() === 'critical')
+    const hasWarn = na.some((a) => (a.severity || '').toLowerCase() === 'warning')
     const m = props.metrics[n.hostname] || {}
-    const peak = Math.max(m.cpu || 0, m.mem || 0, m.disk || 0)
-    if (!online || hasCrit) danger += 1
-    else if (hasWarn || peak >= 70) warn += 1
-    else normal += 1
-  }
-  return { normal, warn, danger }
+    const cpu = Number(n.cpu ?? m.cpu ?? 0)
+    const mem = Number(n.mem ?? m.mem ?? 0)
+    const disk = Number(n.disk ?? m.disk ?? 0)
+    const resources = []
+    if (cpu >= 70) resources.push(`CPU ${Math.round(cpu)}%`)
+    if (mem >= 80) resources.push(`内存 ${Math.round(mem)}%`)
+    if (disk >= 85) resources.push(`磁盘 ${Math.round(disk)}%`)
+    const resourceWarning = cpu >= 70 || mem >= 80 || disk >= 85
+    let level = 'normal'
+    if (!online || hasCrit) level = 'danger'
+    else if (hasWarn || resourceWarning) level = 'warn'
+    const reasons = []
+    if (!online) reasons.push('主机离线')
+    if (hasCrit) reasons.push('严重告警')
+    if (hasWarn) reasons.push('预警告警')
+    const alertReasons = [...new Set(na.map((a) => a.ruleName || a.summary).filter(Boolean))]
+    if (alertReasons.length) reasons.push(`告警：${alertReasons.join('、')}`)
+    if (resources.length) reasons.push(`资源超阈值：${resources.join('、')}`)
+    return {
+      key: n.hostname || n.name,
+      name: n.label || n.displayName || n.hostname || n.name || '-',
+      level,
+      reason: reasons.join('；'),
+    }
+  })
+})
+
+const dist = computed(() => {
+  const result = { normal: 0, warn: 0, danger: 0 }
+  evaluatedHosts.value.forEach((host) => { result[host.level] += 1 })
+  return result
 })
 
 const total = computed(() => props.nodes.length)
 const riskCount = computed(() => dist.value.warn + dist.value.danger)
+const riskReasons = computed(() => evaluatedHosts.value.filter((host) => host.level !== 'normal'))
 
 const segments = computed(() => {
   const t = total.value || 1
@@ -184,5 +217,27 @@ function pct(v) {
 }
 .sr-foot b {
   color: var(--warn);
+}
+.sr-reasons {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  max-height: 72px;
+  overflow: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.sr-reasons-title {
+  margin-bottom: 4px;
+  color: var(--warn);
+}
+.sr-reason {
+  display: flex;
+  gap: 6px;
+  line-height: 18px;
+}
+.sr-reason-host {
+  flex-shrink: 0;
+  color: var(--text);
 }
 </style>

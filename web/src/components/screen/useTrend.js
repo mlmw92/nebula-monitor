@@ -83,10 +83,10 @@ export async function fetchRange(node, metric, { minutes = 60, step = 60000, lab
 }
 
 // 集群聚合趋势：取节点列表前 max 台并发查询后聚合
-export async function queryClusterTrend(nodeList, metric, mode = 'avg', { minutes = 60, step = 60000, max = 20, byNode = false } = {}) {
+export async function queryClusterTrend(nodeList, metric, mode = 'avg', { minutes = 60, step = 60000, max = 20, byNode = false, labels } = {}) {
   const sample = (nodeList || []).filter(Boolean).slice(0, max)
   if (!sample.length) return []
-  const results = await Promise.all(sample.map((n) => fetchRange(n, metric, { minutes, step })))
+  const results = await Promise.all(sample.map((n) => fetchRange(n, metric, { minutes, step, labels })))
   return aggregateSeries(results, mode, byNode)
 }
 

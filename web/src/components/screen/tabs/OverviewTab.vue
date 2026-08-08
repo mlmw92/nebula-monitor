@@ -37,11 +37,13 @@ import ScreenHealthScore from '../ScreenHealthScore.vue'
 import ScrollTablePanel from '../ScrollTablePanel.vue'
 import { rateShort } from '../../../charts/echarts'
 import { buildNodeCards } from '../composables/useNodeCards'
+import { calculateAlertScore } from '../../../composables/healthScore'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
   metrics: { type: Object, default: () => ({}) },
   alerts: { type: Array, default: () => [] },
+  healthScore: { type: Number, default: 100 },
 })
 
 const topoHasNodes = ref(false)
@@ -59,25 +61,11 @@ function avg(key) {
   return list.reduce((s, n) => s + (n[key] || 0), 0) / list.length
 }
 
-// 健康评分计算
-const healthScore = computed(() => {
-  const cpu = avg('cpu')
-  const mem = avg('mem')
-  const disk = avg('disk')
-  const total = totalCount.value
-  const online = onlineCount.value
-  const firing = (props.alerts || []).filter((a) => a.state === 'firing').length
-  const onlineScore = total > 0 ? (online / total) * 100 : 100
-  const cpuScore = Math.max(0, 100 - cpu)
-  const memScore = Math.max(0, 100 - mem)
-  const diskScore = Math.max(0, 100 - disk)
-  const alertScore = Math.max(0, 100 - firing * 10)
-  return Math.round((onlineScore + cpuScore + memScore + diskScore + alertScore) / 5)
-})
+const healthScore = computed(() => props.healthScore)
 
 const healthLevel = computed(() => {
-  if (healthScore.value >= 80) return 'green'
-  if (healthScore.value >= 60) return 'amber'
+  if (healthScore.value >= 90) return 'green'
+  if (healthScore.value >= 70) return 'amber'
   return 'red'
 })
 
@@ -88,8 +76,7 @@ const onlineRate = computed(() => {
 })
 
 const alertFreeRate = computed(() => {
-  const firing = (props.alerts || []).filter((a) => a.state === 'firing').length
-  return Math.max(0, 100 - firing * 10)
+  return calculateAlertScore((props.alerts || []).filter((a) => a.state === 'firing'))
 })
 
 const cpuHeadroom = computed(() => Math.round(Math.max(0, 100 - avg('cpu'))))
