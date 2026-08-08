@@ -68,6 +68,19 @@
         <el-button type="primary" @click="savePanel">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 新建看板弹窗：避免使用浏览器原生 prompt，保持界面风格和校验一致。 -->
+    <el-dialog v-model="newDashDlg" title="新建看板" width="420px" @closed="newDashName = ''">
+      <el-form @submit.prevent="confirmNewDash">
+        <el-form-item label="看板名称" label-width="90px">
+          <el-input v-model="newDashName" placeholder="请输入看板名称" maxlength="50" show-word-limit @keyup.enter="confirmNewDash" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="newDashDlg = false">取消</el-button>
+        <el-button type="primary" @click="confirmNewDash">创建</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -84,6 +97,8 @@ const activeId = ref('')
 const editing = ref(false)
 const draft = ref(null)
 const panelDlg = ref(false)
+const newDashDlg = ref(false)
+const newDashName = ref('')
 const editIndex = ref(-1)
 const editForm = ref({ title: '', metric: '', chartType: 'line', node: '', range: '1h' })
 const flatMetrics = ref([])
@@ -101,9 +116,22 @@ async function refresh() {
 }
 
 function newDash() {
-  const name = prompt('看板名称')
-  if (!name) return
-  create(name, []).then(refresh).catch((e) => ElMessage.error(e.message || e))
+  newDashName.value = ''
+  newDashDlg.value = true
+}
+
+function confirmNewDash() {
+  const name = newDashName.value.trim()
+  if (!name) {
+    ElMessage.warning('请输入看板名称')
+    return
+  }
+  create(name, [])
+    .then(() => {
+      newDashDlg.value = false
+      return refresh()
+    })
+    .catch((e) => ElMessage.error(e.message || e))
 }
 
 function delDash() {
