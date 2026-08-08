@@ -44,11 +44,9 @@ func (a *API) handleMetricsActive(w http.ResponseWriter, r *http.Request) {
 		}
 		active := false
 		if a.store != nil {
-			var labels map[string]string
-			if node != "" {
-				labels = map[string]string{"node": node}
-			}
-			if s, err := a.store.QueryInstant(node, m.Name, labels); err == nil && len(s) > 0 {
+			// node 已作为 QueryInstant 的独立参数传入，不能再次放进 labels，
+			// 否则会生成重复的 node matcher，部分 PromQL 后端会拒绝该查询。
+			if s, err := a.store.QueryInstant(node, m.Name, nil); err == nil && len(s) > 0 {
 				active = true
 			}
 		}

@@ -1,7 +1,11 @@
 <template>
   <div class="explore">
     <div class="left">
-      <div class="left-head">指标目录</div>
+      <div class="left-head-row">
+        <div class="left-head">指标目录</div>
+        <span v-if="activeLoaded" class="discover-count">{{ activeCount }}/{{ metricCount }} 有数据</span>
+        <span v-else class="discover-count muted">检测中…</span>
+      </div>
       <el-input v-model="kw" placeholder="搜索指标名/中文名" size="small" clearable class="kw" />
       <el-tree
         :data="treeData"
@@ -10,7 +14,16 @@
         highlight-current
         @node-click="onNodeClick"
         default-expand-all
-      />
+      >
+        <template #default="{ data }">
+          <span class="metric-tree-node">
+            <span>{{ data.label }}</span>
+            <span v-if="data.meta" :class="['metric-state', data.meta.active ? 'online' : 'offline']">
+              {{ data.meta.active ? '有数据' : '暂无数据' }}
+            </span>
+          </span>
+        </template>
+      </el-tree>
     </div>
     <div class="right">
       <div v-if="!selected" class="empty">从左侧选择指标查看趋势</div>
@@ -41,6 +54,8 @@ import { useDashboards } from '../../composables/useDashboards'
 const kw = ref('')
 const catalog = ref({})
 const categories = ref([])
+const activeMap = ref({})
+const activeLoaded = ref(false)
 const selected = ref(null)
 const chartEl = ref(null)
 let chart = null
@@ -59,11 +74,18 @@ const treeData = computed(() => {
     list.push({
       key: 'cat:' + cat,
       label: cat,
-      children: items.map((m) => ({ key: 'm:' + m.name, label: `${m.title} (${m.name})`, meta: m })),
+      children: items.map((m) => ({
+        key: 'm:' + m.name,
+        label: `${m.title} (${m.name})`,
+        meta: { ...m, active: activeMap.value[m.name] === true },
+      })),
     })
   }
   return list
 })
+
+const metricCount = computed(() => Object.values(catalog.value).reduce((n, list) => n + (list || []).length, 0))
+const activeCount = computed(() => Object.values(activeMap.value).filter(Boolean).length)
 
 function onNodeClick(node) {
   if (node.meta) {
@@ -139,9 +161,22 @@ async function addToDash() {
 
 function resize() { chart && chart.resize() }
 onMounted(async () => {
-  const d = await http.metricCatalog()
-  catalog.value = d.catalog || {}
-  categories.value = d.categories || []
+  try {
+    const d = await http.metricCatalog()
+    catalog.value = d.catalog || {}
+    categories.value = d.categories || []
+    try {
+      const a = await http.metricActive()
+      activeMap.value = Object.fromEntries((a.items || []).map((item) => [item.name, item.active === true]))
+    } catch (e) {
+      // 自动发现失败不影响指标目录浏览，状态保持为“暂无数据/未检测”。
+      ElMessage.warning('自动发现状态暂时不可用')
+    }
+  } catch (e) {
+    ElMessage.error('加载指标目录失败：' + (e.message || e))
+  } finally {
+    activeLoaded.value = true
+  }
   window.addEventListener('resize', resize)
 })
 onBeforeUnmount(() => {
@@ -153,7 +188,14 @@ onBeforeUnmount(() => {
 <style scoped>
 .explore { display: flex; height: calc(100vh - 140px); }
 .left { width: 320px; border-right: 1px solid rgba(34,211,238,0.12); padding: 12px; overflow: auto; }
-.left-head { font-size: 15px; font-weight: 700; color: #e5edf7; margin-bottom: 8px; }
+.left-head-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.left-head { font-size: 15px; font-weight: 700; color: #e5edf7; }
+.discover-count { font-size: 11px; color: #34d399; }
+.discover-count.muted { color: #64748b; }
+.metric-tree-node { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; }
+.metric-state { flex: none; font-size: 10px; }
+.metric-state.online { color: #34d399; }
+.metric-state.offline { color: #64748b; }
 .kw { margin-bottom: 8px; }
 .right { flex: 1; padding: 16px; }
 .empty { color: #64748b; margin-top: 40px; text-align: center; }
