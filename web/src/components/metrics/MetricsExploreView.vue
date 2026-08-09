@@ -143,7 +143,10 @@ async function renderChart() {
       xMin: start,
       xMax: end,
       series: data,
-      area: true,
+      chartType: selected.value.chart || 'line',
+      unit: selected.value.unit,
+      yMin: selected.value.unit === '%' ? 0 : undefined,
+      yMax: selected.value.unit === '%' ? 100 : undefined,
     }), true)
   } catch (e) {
     ElMessage.error('图表渲染失败：' + (e.message || e))

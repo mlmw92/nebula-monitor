@@ -16,14 +16,14 @@ func init() {
 	// —— 内存 ——
 	Register(MetricMeta{Name: "mem_used_percent", Title: "内存使用率", Category: CatMemory, Unit: "%", Chart: ChartArea})
 	Register(MetricMeta{Name: "mem_used_bytes", Title: "已用内存", Category: CatMemory, Unit: "B", Chart: ChartLine})
-	Register(MetricMeta{Name: "mem_total_bytes", Title: "总内存", Category: CatMemory, Unit: "B", Chart: ChartGauge})
+	Register(MetricMeta{Name: "mem_total_bytes", Title: "总内存", Category: CatMemory, Unit: "B", Chart: ChartLine})
 	Register(MetricMeta{Name: "swap_used_percent", Title: "Swap 使用率", Category: CatMemory, Unit: "%", Chart: ChartArea})
 	Register(MetricMeta{Name: "swap_used_bytes", Title: "已用 Swap", Category: CatMemory, Unit: "B", Chart: ChartLine})
 
 	// —— 磁盘 ——
 	Register(MetricMeta{Name: "disk_used_percent", Title: "磁盘使用率", Category: CatDisk, Unit: "%", Chart: ChartArea})
 	Register(MetricMeta{Name: "disk_used", Title: "已用磁盘", Category: CatDisk, Unit: "B", Chart: ChartLine})
-	Register(MetricMeta{Name: "disk_total", Title: "磁盘总量", Category: CatDisk, Unit: "B", Chart: ChartGauge})
+	Register(MetricMeta{Name: "disk_total", Title: "磁盘总量", Category: CatDisk, Unit: "B", Chart: ChartLine})
 	Register(MetricMeta{Name: "disk_read_bytes", Title: "磁盘读速率", Category: CatDisk, Unit: "B/s", Chart: ChartLine})
 	Register(MetricMeta{Name: "disk_write_bytes", Title: "磁盘写速率", Category: CatDisk, Unit: "B/s", Chart: ChartLine})
 

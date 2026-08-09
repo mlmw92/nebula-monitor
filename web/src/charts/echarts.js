@@ -126,12 +126,102 @@ export function rateShort(v) {
   return b.toFixed(0) + ' B/s'
 }
 
+// 字节格式化：B -> KB -> MB -> GB -> TB
+function formatBytes(v) {
+  const b = Number(v || 0)
+  if (b >= (1 << 40)) return (b / (1 << 40)).toFixed(2) + ' TB'
+  if (b >= (1 << 30)) return (b / (1 << 30)).toFixed(2) + ' GB'
+  if (b >= (1 << 20)) return (b / (1 << 20)).toFixed(1) + ' MB'
+  if (b >= (1 << 10)) return (b / (1 << 10)).toFixed(0) + ' KB'
+  return b.toFixed(0) + ' B'
+}
+
+// 根据单位和值格式化仪表盘显示文本
+function gaugeFormatter(value, unit) {
+  if (unit === 'B') return formatBytes(value)
+  if (unit === '%') return value.toFixed(1) + '%'
+  if (value >= 1000000000) return (value / 1e9).toFixed(2) + 'G'
+  if (value >= 1000000) return (value / 1e6).toFixed(2) + 'M'
+  if (value >= 10000) return (value / 1000).toFixed(1) + 'k'
+  return value.toLocaleString()
+}
+
 // 基础监控面板通用配置。
-// opts: { yMin, yMax, yFormatter, tipFormatter, xFormatter, series:[{name,color,data}], colors }
+// opts: { chartType, yMin, yMax, yFormatter, tipFormatter, xFormatter, series:[{name,color,data}], colors }
 export function monitorOption(opts) {
   const o = opts || {}
   const series = o.series || []
   const colors = o.colors
+  const chartType = o.chartType === 'area' ? 'area' : (o.chartType || 'line')
+
+  // 非趋势图推荐展示当前值：每条时序只取最后一个有效点。
+  const latest = series.map((s) => {
+    const points = (s.data || []).filter((p) => Array.isArray(p) && Number.isFinite(Number(p[1])))
+    const point = points.length ? points[points.length - 1] : null
+    return { name: s.name, value: point ? Number(point[1]) : 0, color: s.color || COLORS.cyan }
+  })
+
+  if (chartType === 'bar') {
+    return {
+      grid: baseGrid({ top: 38, left: 56, right: 18, bottom: 42 }),
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        backgroundColor: 'rgba(11,17,32,0.92)',
+        borderColor: 'rgba(34,211,238,0.3)',
+        textStyle: { color: '#e5edf7', fontSize: 12 },
+      },
+      xAxis: { type: 'category', data: latest.map((s) => s.name), axisLine: { lineStyle: { color: AXIS } }, axisLabel: { color: AXIS, fontSize: 11, hideOverlap: true } },
+      yAxis: { type: 'value', min: o.yMin != null ? o.yMin : 0, max: o.yMax, axisLabel: { color: AXIS, fontSize: 11, formatter: o.yFormatter }, splitLine: { lineStyle: { color: SPLIT } } },
+      series: [{
+        type: 'bar',
+        data: latest.map((s) => ({ value: s.value, itemStyle: { color: s.color, borderRadius: [4, 4, 0, 0] } })),
+        barMaxWidth: 46,
+      }],
+    }
+  }
+
+  if (chartType === 'gauge') {
+    const current = latest[0] || { value: 0, color: COLORS.cyan, name: '' }
+    const unit = o.unit || ''
+    // 百分比指标固定 0-100；字节/数值类根据当前值自动计算上限
+    const max = o.yMax != null ? o.yMax : (unit === '%' ? 100 : Math.max(1, current.value * 1.2))
+    const formatted = gaugeFormatter(current.value, unit)
+    return {
+      tooltip: { formatter: `${current.name}<br/>当前值: ${formatted}` },
+      series: [{
+        type: 'gauge', min: o.yMin || 0, max, startAngle: 90, endAngle: -270, radius: '78%',
+        pointer: { show: false },
+        progress: { show: true, width: 20, roundCap: true, itemStyle: { color: current.color } },
+        axisLine: { lineStyle: { width: 20, color: [[1, 'rgba(255,255,255,0.08)']] } },
+        axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, anchor: { show: false },
+        title: { show: true, color: AXIS, offsetCenter: [0, '52%'], fontSize: 13 },
+        detail: {
+          valueAnimation: true,
+          color: current.color,
+          fontSize: current.value >= 10000000 ? 22 : 28,
+          fontWeight: 700,
+          offsetCenter: [0, '4%'],
+          formatter: () => formatted,
+        },
+        data: [{ value: current.value, name: current.name }],
+      }],
+    }
+  }
+
+  if (chartType === 'pie') {
+    return {
+      tooltip: { trigger: 'item', backgroundColor: 'rgba(11,17,32,0.92)', textStyle: { color: '#e5edf7', fontSize: 12 }, formatter: '{b}<br/>当前值: {c} ({d}%)' },
+      legend: { bottom: 4, type: 'scroll', textStyle: { color: AXIS, fontSize: 11 } },
+      series: [{
+        type: 'pie', radius: ['42%', '70%'], center: ['50%', '46%'], avoidLabelOverlap: true,
+        itemStyle: { borderColor: '#0b1120', borderWidth: 2 },
+        label: { color: '#e5edf7', formatter: '{b}: {c}' },
+        data: latest.map((s) => ({ name: s.name, value: s.value, itemStyle: { color: s.color } })),
+      }],
+    }
+  }
+
   return {
     grid: baseGrid({ top: 38, left: 56, right: 18, bottom: 28 }),
     legend: { textStyle: { color: AXIS, fontSize: 11 }, top: 4, icon: 'roundRect', itemWidth: 14, itemHeight: 8 },
@@ -157,7 +247,7 @@ export function monitorOption(opts) {
       axisLabel: { color: AXIS, fontSize: 11, formatter: o.yFormatter },
       splitLine: { show: true, lineStyle: { color: SPLIT } },
     },
-    series: series.map((s, i) => gradientSeries(s.name, s.color || (colors && colors[i]) || COLORS.cyan, s.data, o.area !== false)),
+    series: series.map((s, i) => gradientSeries(s.name, s.color || (colors && colors[i]) || COLORS.cyan, s.data, chartType === 'area' || (chartType === 'line' && o.area !== false))),
   }
 }
 
