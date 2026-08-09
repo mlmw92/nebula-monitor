@@ -75,7 +75,10 @@ func (m *Manager) Register(p *model.ReportPayload) {
 	n.IP = p.IP
 	n.OS = p.OS
 	n.Arch = p.Arch
-	if n.Mode == "" && p.Mode != "" {
+	// 每次上报都同步模式，兼容代理节点在旧版本注册为 collect 后升级的情况。
+	// 仅在为空时赋值会导致 nodes.json 中残留的旧模式永远无法被纠正，
+	// 进而使 Edge/Hub 继续出现在主机列表中。
+	if p.Mode == model.ModeCollect || p.Mode == model.ModeEdge || p.Mode == model.ModeHub {
 		n.Mode = p.Mode
 	}
 	// 已存在节点：分组以 Server 端（nodes.json）为准，避免 Agent 默认 group 覆盖用户自定义分组。

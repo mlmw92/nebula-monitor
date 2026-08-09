@@ -4,7 +4,7 @@
     <div class="glass panel toolbar">
       <div class="toolbar-left">
         <el-radio-group v-model="statusFilter" size="small">
-          <el-radio-button value="">全部 ({{ nodes.length }})</el-radio-button>
+          <el-radio-button value="">全部 ({{ filteredNodes.length }})</el-radio-button>
           <el-radio-button value="online">在线 ({{ onlineCount }})</el-radio-button>
           <el-radio-button value="offline">离线 ({{ offlineCount }})</el-radio-button>
           <el-radio-button value="warning">异常 ({{ warningCount }})</el-radio-button>
@@ -579,9 +579,9 @@ let loadTimer = null
 let countdownTimer = null
 let visible = true
 
-const onlineCount = computed(() => nodes.value.filter((n) => n.status === 'online').length)
-const offlineCount = computed(() => nodes.value.filter((n) => n.status !== 'online').length)
-const warningCount = computed(() => nodes.value.filter((n) => nodeSeverity(n) >= 50 && n.status === 'online').length)
+const onlineCount = computed(() => filteredNodes.value.filter((n) => n.status === 'online').length)
+const offlineCount = computed(() => filteredNodes.value.filter((n) => n.status !== 'online').length)
+const warningCount = computed(() => filteredNodes.value.filter((n) => nodeSeverity(n) >= 50 && n.status === 'online').length)
 
 // 列设置：可勾选展示哪些列
 const colOptions = [
