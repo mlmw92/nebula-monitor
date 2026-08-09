@@ -120,19 +120,25 @@ export function historyOption() {
 // 速率短格式（坐标轴标签）：B/s -> KB/s -> MB/s -> GB/s
 export function rateShort(v) {
   const b = Number(v || 0)
-  if (b >= 1 << 30) return (b / (1 << 30)).toFixed(1) + ' GB/s'
-  if (b >= 1 << 20) return (b / (1 << 20)).toFixed(1) + ' MB/s'
-  if (b >= 1 << 10) return (b / (1 << 10)).toFixed(0) + ' KB/s'
+  if (b >= _1GB) return (b / _1GB).toFixed(1) + ' GB/s'
+  if (b >= _1MB) return (b / _1MB).toFixed(1) + ' MB/s'
+  if (b >= _1KB) return (b / _1KB).toFixed(0) + ' KB/s'
   return b.toFixed(0) + ' B/s'
 }
 
 // 字节格式化：B -> KB -> MB -> GB -> TB
+// 注意：JS 的 << 是 32 位整数运算，1<<40 会溢出为 256，必须用字面量或 Math.pow(2,n)
+const _1TB = 1099511627776   // 2^40
+const _1GB = 1073741824      // 2^30
+const _1MB = 1048576         // 2^20
+const _1KB = 1024            // 2^10
+
 function formatBytes(v) {
   const b = Number(v || 0)
-  if (b >= (1 << 40)) return (b / (1 << 40)).toFixed(2) + ' TB'
-  if (b >= (1 << 30)) return (b / (1 << 30)).toFixed(2) + ' GB'
-  if (b >= (1 << 20)) return (b / (1 << 20)).toFixed(1) + ' MB'
-  if (b >= (1 << 10)) return (b / (1 << 10)).toFixed(0) + ' KB'
+  if (b >= _1TB) return (b / _1TB).toFixed(2) + ' TB'
+  if (b >= _1GB) return (b / _1GB).toFixed(2) + ' GB'
+  if (b >= _1MB) return (b / _1MB).toFixed(1) + ' MB'
+  if (b >= _1KB) return (b / _1KB).toFixed(0) + ' KB'
   return b.toFixed(0) + ' B'
 }
 
