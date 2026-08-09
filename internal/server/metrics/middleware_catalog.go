@@ -10,19 +10,19 @@ func init() {
 	Register(MetricMeta{Name: "redis_used_memory_bytes", Title: "内存占用", Category: CatRedis, Unit: "B", Chart: ChartLine})
 	Register(MetricMeta{Name: "redis_hit_rate", Title: "命中率", Category: CatRedis, Unit: "%", Chart: ChartArea})
 	Register(MetricMeta{Name: "redis_qps", Title: "QPS", Category: CatRedis, Unit: "次/s", Chart: ChartLine})
-	Register(MetricMeta{Name: "redis_uptime_in_seconds", Title: "运行时长", Category: CatRedis, Unit: "s", Chart: ChartGauge})
+	Register(MetricMeta{Name: "redis_uptime_in_seconds", Title: "运行时长", Category: CatRedis, Unit: "s", Chart: ChartLine})
 
 	// —— MySQL ——
 	Register(MetricMeta{Name: "mysql_up", Title: "MySQL 存活", Category: CatMySQL, Unit: "", Chart: ChartGauge})
 	Register(MetricMeta{Name: "mysql_queries_per_sec", Title: "QPS", Category: CatMySQL, Unit: "次/s", Chart: ChartLine})
 	Register(MetricMeta{Name: "mysql_threads_connected", Title: "活跃连接数", Category: CatMySQL, Unit: "个", Chart: ChartLine})
 	Register(MetricMeta{Name: "mysql_slow_queries", Title: "慢查询数", Category: CatMySQL, Unit: "个", Chart: ChartLine})
-	Register(MetricMeta{Name: "mysql_uptime", Title: "运行时长", Category: CatMySQL, Unit: "s", Chart: ChartGauge})
+	Register(MetricMeta{Name: "mysql_uptime", Title: "运行时长", Category: CatMySQL, Unit: "s", Chart: ChartLine})
 
 	// —— PostgreSQL ——
 	Register(MetricMeta{Name: "postgres_up", Title: "PostgreSQL 存活", Category: CatPostgres, Unit: "", Chart: ChartGauge})
 	Register(MetricMeta{Name: "postgres_connections", Title: "连接数", Category: CatPostgres, Unit: "个", Chart: ChartLine})
-	Register(MetricMeta{Name: "postgres_uptime_seconds", Title: "运行时长", Category: CatPostgres, Unit: "s", Chart: ChartGauge})
+	Register(MetricMeta{Name: "postgres_uptime_seconds", Title: "运行时长", Category: CatPostgres, Unit: "s", Chart: ChartLine})
 
 	// —— Nginx ——
 	Register(MetricMeta{Name: "nginx_up", Title: "Nginx 存活", Category: CatNginx, Unit: "", Chart: ChartGauge})
@@ -41,7 +41,7 @@ func init() {
 
 	// —— MongoDB ——
 	Register(MetricMeta{Name: "mongodb_up", Title: "MongoDB 存活", Category: CatMongo, Unit: "", Chart: ChartGauge})
-	Register(MetricMeta{Name: "mongodb_uptime_seconds", Title: "运行时长", Category: CatMongo, Unit: "s", Chart: ChartGauge})
+	Register(MetricMeta{Name: "mongodb_uptime_seconds", Title: "运行时长", Category: CatMongo, Unit: "s", Chart: ChartLine})
 	Register(MetricMeta{Name: "mongodb_connections", Title: "连接数", Category: CatMongo, Unit: "个", Chart: ChartLine})
 
 	// —— RocketMQ ——

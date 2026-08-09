@@ -140,10 +140,40 @@ function formatBytes(v) {
 function gaugeFormatter(value, unit) {
   if (unit === 'B') return formatBytes(value)
   if (unit === '%') return value.toFixed(1) + '%'
+  if (unit === '个') return value.toLocaleString() + ' 个'
+  if (unit === '核') return value.toLocaleString() + ' 核'
+  if (unit === '次/s') return value.toLocaleString() + ' 次/s'
+  if (unit === '个/s') return value.toLocaleString() + ' 个/s'
+  if (unit === 's') return formatSeconds(value)
   if (value >= 1000000000) return (value / 1e9).toFixed(2) + 'G'
   if (value >= 1000000) return (value / 1e6).toFixed(2) + 'M'
   if (value >= 10000) return (value / 1000).toFixed(1) + 'k'
   return value.toLocaleString()
+}
+
+// 秒数格式化：s -> m -> h -> d
+function formatSeconds(v) {
+  const s = Number(v || 0)
+  if (s >= 86400) return (s / 86400).toFixed(1) + ' 天'
+  if (s >= 3600) return (s / 3600).toFixed(1) + ' 时'
+  if (s >= 60) return (s / 60).toFixed(0) + ' 分'
+  return s.toFixed(0) + ' 秒'
+}
+
+// 趋势图 Y 轴标签格式化：根据单位把裸数字转为可读形式
+function axisValueFormatter(value, unit) {
+  if (unit === 'B') return formatBytes(value)
+  if (unit === 'B/s') return rateShort(value)
+  if (unit === '%') return Number(value).toFixed(0) + '%'
+  if (unit === '个') return Number(value).toLocaleString() + ' 个'
+  if (unit === '核') return Number(value).toLocaleString() + ' 核'
+  if (unit === '次/s') return Number(value).toLocaleString() + ' 次/s'
+  if (unit === '个/s') return Number(value).toLocaleString() + ' 个/s'
+  if (unit === 's') return formatSeconds(value)
+  if (value >= 1000000000) return (value / 1e9).toFixed(1) + 'G'
+  if (value >= 1000000) return (value / 1e6).toFixed(1) + 'M'
+  if (value >= 10000) return (value / 1000).toFixed(1) + 'k'
+  return Number(value).toLocaleString()
 }
 
 // 基础监控面板通用配置。
@@ -172,7 +202,7 @@ export function monitorOption(opts) {
         textStyle: { color: '#e5edf7', fontSize: 12 },
       },
       xAxis: { type: 'category', data: latest.map((s) => s.name), axisLine: { lineStyle: { color: AXIS } }, axisLabel: { color: AXIS, fontSize: 11, hideOverlap: true } },
-      yAxis: { type: 'value', min: o.yMin != null ? o.yMin : 0, max: o.yMax, axisLabel: { color: AXIS, fontSize: 11, formatter: o.yFormatter }, splitLine: { lineStyle: { color: SPLIT } } },
+      yAxis: { type: 'value', min: o.yMin != null ? o.yMin : 0, max: o.yMax, axisLabel: { color: AXIS, fontSize: 11, formatter: o.yFormatter || ((v) => axisValueFormatter(v, o.unit)) }, splitLine: { lineStyle: { color: SPLIT } } },
       series: [{
         type: 'bar',
         data: latest.map((s) => ({ value: s.value, itemStyle: { color: s.color, borderRadius: [4, 4, 0, 0] } })),
@@ -230,7 +260,7 @@ export function monitorOption(opts) {
       backgroundColor: 'rgba(11,17,32,0.92)',
       borderColor: 'rgba(34,211,238,0.3)',
       textStyle: { color: '#e5edf7', fontSize: 12 },
-      valueFormatter: o.tipFormatter || ((v) => (v == null ? '-' : v)),
+      valueFormatter: o.tipFormatter || ((v) => (v == null ? '-' : axisValueFormatter(v, o.unit))),
     },
     xAxis: {
       type: 'time',
@@ -244,7 +274,7 @@ export function monitorOption(opts) {
       type: 'value',
       min: o.yMin != null ? o.yMin : 0,
       max: o.yMax,
-      axisLabel: { color: AXIS, fontSize: 11, formatter: o.yFormatter },
+      axisLabel: { color: AXIS, fontSize: 11, formatter: o.yFormatter || ((v) => axisValueFormatter(v, o.unit)) },
       splitLine: { show: true, lineStyle: { color: SPLIT } },
     },
     series: series.map((s, i) => gradientSeries(s.name, s.color || (colors && colors[i]) || COLORS.cyan, s.data, chartType === 'area' || (chartType === 'line' && o.area !== false))),
