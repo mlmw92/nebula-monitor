@@ -973,10 +973,10 @@ fastdfsInstances:
 
 **1. 生成 TLS 证书（网闸两侧共用同一 CA）**
 
-推荐**自动生成**：安装命令加 `--tls-auto`，脚本在 `/etc/monitor-agent/certs/` 生成自签 CA + Hub/Edge 节点证书，无需公网 CA、无需手动准备 openssl 命令。
+推荐**自动生成**：安装命令加 `--tls-auto`，先由 Hub 生成自签 CA 和节点证书，再复制证书目录到 Edge；Edge 只复用已有 CA，不要在空目录独立生成另一套 CA。无需公网 CA、无需手动准备 openssl 命令。
 
 ```bash
-# 区 B Hub 节点（自动生成证书）
+# 区 A Hub 节点（自动生成证书）
 curl -fsSL http://<server>:8080/install/agent-install.sh | bash -s -- \
   --mode hub --listen :8443 --server http://127.0.0.1:8080 --tls-auto --yes [--secret <KEY>]
 

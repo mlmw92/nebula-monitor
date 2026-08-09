@@ -253,8 +253,12 @@ func (a *API) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
 		// 代理模式配置模板（前端引导页填充后生成完整命令）
 		"proxyTemplates": map[string]interface{}{
 			"edge": map[string]interface{}{
-				"command": "curl -fsSL " + srv + "/install/agent-install.sh | bash -s -- --mode edge --listen :18080 --hub-addr <HUB_IP>:8443 --tls-cert /path/edge.crt --tls-key /path/edge.key --tls-ca /path/ca.crt" + secretPart,
-				"config":  "mode: \"edge\"\nproxy:\n  listen: \":18080\"\n  hubAddr: \"<HUB_IP>:8443\"\n  tlsCert: \"/path/edge.crt\"\n  tlsKey: \"/path/edge.key\"\n  tlsCa: \"/path/ca.crt\"\n  bufferSize: 1000\n  poolSize: 2\n",
+				// 网闸路由/端口策略由部署人员决定，不能从 Server 请求 Host 推断 Edge 可达地址。
+				"command": "curl -fsSL http://<EDGE_DOWNLOAD_HOST>:8080/install/agent-install.sh | bash -s -- --mode edge --listen :18080 --hub-addr <HUB_IP>:8443 --server http://<EDGE_REPORT_HOST>:8080 --base-url http://<EDGE_DOWNLOAD_HOST>:8080/bin --tls-cert /path/edge.crt --tls-key /path/edge.key --tls-ca /path/ca.crt" + secretPart,
+				"config":  "mode: \"edge\"\nserverURL: \"http://<EDGE_REPORT_HOST>:8080\"\nproxy:\n  listen: \":18080\"\n  hubAddr: \"<HUB_IP>:8443\"\n  tlsCert: \"/path/edge.crt\"\n  tlsKey: \"/path/edge.key\"\n  tlsCa: \"/path/ca.crt\"\n  bufferSize: 1000\n  poolSize: 2\n",
+			},
+			"agent": map[string]interface{}{
+				"command": "curl -fsSL http://<EDGE_IP>:18080/install/agent-install.sh | bash -s -- --server http://<EDGE_IP>:18080 --base-url http://<EDGE_IP>:18080/bin --yes" + secretPart,
 			},
 			"hub": map[string]interface{}{
 				"command": "curl -fsSL " + srv + "/install/agent-install.sh | bash -s -- --mode hub --listen :8443 --server " + srv + " --tls-cert /path/hub.crt --tls-key /path/hub.key --tls-ca /path/ca.crt" + secretPart,

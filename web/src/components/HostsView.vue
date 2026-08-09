@@ -253,8 +253,8 @@
           <div class="drawer-section">
             <h4 class="section-label">说明</h4>
             <p class="block-desc">
-              适用于两个网区经网闸隔离、仅有 1 个开放端口的场景。区 B 部署 Hub、区 A 部署 Edge 构成隧道，
-              采集 Agent 的 serverURL 指向 Edge 本地口。网闸仅需开放 TCP 8443（Edge → Hub）。
+              适用于两个网区经网闸隔离的场景。区 A 部署 Monitor Server 和 Hub，区 B 部署 Edge 与普通采集
+              Agent；Edge 主动连接区 A 的 Hub 构成 mTLS 隧道。区 B 的采集 Agent 使用 Edge 本地地址上报。
             </p>
           </div>
 
@@ -270,10 +270,11 @@
             </el-radio-group>
 
             <template v-if="tlsAuto">
-              <p class="section-desc tip">
-                自动模式会在两端各生成证书，<b>需保证对端持有同一 ca.crt</b>：先在一端安装并把
-                <code>/etc/monitor-agent/certs/</code> 整个目录复制到对端，再安装对端（脚本检测到已有 ca.crt 会复用，
-                确保 mTLS 校验通过）。下方安装命令已包含 <code>--tls-auto</code>。
+            <p class="section-desc tip">
+                自动模式不是让两端独立生成两套 CA。请先在 Hub 执行安装命令生成 CA 和证书，
+                再将 <code>/etc/monitor-agent/certs/</code> 复制到 Edge，最后执行 Edge 安装命令。
+                Edge 检测到已有 <code>ca.crt</code> 后会复用同一 CA，确保 mTLS 校验通过；如果两端都在空目录执行
+                <code>--tls-auto</code>，会生成不同 CA 并导致连接失败。
               </p>
             </template>
 
@@ -306,10 +307,17 @@ openssl x509 -req -in edge.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 36
           </div>
 
           <div class="drawer-section">
-            <h4 class="section-label">Hub Proxy（区 B · 监控中心侧）</h4>
-            <div class="form-item"><label>TLS 监听地址</label><el-input v-model="hubForm.listen" placeholder=":8443" /></div>
-            <div class="form-item"><label>真实 Server 地址</label><el-input v-model="hubForm.server" placeholder="http://127.0.0.1:8080" /></div>
+            <h4 class="section-label">Hub Proxy（区 A · Server 所在侧）</h4>
+            <div class="form-item">
+              <label>TLS 监听地址</label><el-input v-model="hubForm.listen" placeholder=":8443" />
+              <p class="field-help">Hub 在区 A 监听 Edge 发起的 mTLS 隧道连接。网闸转发的目标端口应与此一致，通常使用 <code>:8443</code>。</p>
+            </div>
+            <div class="form-item">
+              <label>真实 Server 地址</label><el-input v-model="hubForm.server" placeholder="http://127.0.0.1:8080" />
+              <p class="field-help">Hub 将 Edge 转来的 HTTP 请求转发到此地址。Hub 与 Server 同机时填写 <code>http://127.0.0.1:8080</code>；分机部署时填写区 A 内 Server 的实际 HTTP 地址。</p>
+            </div>
             <template v-if="!tlsAuto">
+              <p class="field-help">手动证书模式：Hub 使用 <code>hub.crt/hub.key</code>，且两端必须配置同一 CA 的 <code>ca.crt</code>。</p>
               <div class="form-item"><label>TLS 证书路径</label><el-input v-model="hubForm.tlsCert" placeholder="/etc/monitor-agent/certs/hub.crt" /></div>
               <div class="form-item"><label>TLS 私钥路径</label><el-input v-model="hubForm.tlsKey" placeholder="/etc/monitor-agent/certs/hub.key" /></div>
               <div class="form-item"><label>CA 证书路径</label><el-input v-model="hubForm.tlsCa" placeholder="/etc/monitor-agent/certs/ca.crt" /></div>
@@ -317,22 +325,41 @@ openssl x509 -req -in edge.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 36
           </div>
 
           <div class="drawer-section">
-            <h4 class="section-label">Edge Proxy（区 A · 被监控侧）</h4>
-            <div class="form-item"><label>本地监听地址</label><el-input v-model="edgeForm.listen" placeholder=":18080" /></div>
-            <div class="form-item"><label>Hub 地址 host:port</label><el-input v-model="edgeForm.hubAddr" placeholder="10.0.0.2:8443" /></div>
+            <h4 class="section-label">Edge Proxy（区 B · 被监控侧）</h4>
+            <div class="form-item">
+              <label>本地监听地址</label><el-input v-model="edgeForm.listen" placeholder=":18080" />
+              <p class="field-help">Edge 在区 B 接收普通 Agent 的 HTTP 请求；区 B Agent 的安装/上报地址需指向 Edge 的区 B IP 加此端口，例如 <code>http://172.20.0.10:18080</code>。仅需在区 B 开放。</p>
+            </div>
+            <div class="form-item">
+              <label>Hub 地址 host:port</label><el-input v-model="edgeForm.hubAddr" placeholder="10.0.0.2:8443" />
+              <p class="field-help">Edge 建立 mTLS 隧道的目标。若网闸做端口转发，填 Gateway 的区 B 地址，例如 <code>172.20.0.100:8443</code>；若网闸只做三层路由，填 Hub 的真实地址，例如 <code>192.168.47.10:8443</code>。</p>
+            </div>
+            <div class="form-item">
+              <label>Edge 安装下载地址</label><el-input v-model="edgeForm.downloadURL" placeholder="http://&lt;可经网闸访问的地址&gt;:8080" />
+              <p class="field-help">Edge 在线安装时获取 <code>/install/agent-install.sh</code> 与 <code>/bin/...</code> 的 HTTP 地址。端口转发模式填 Gateway 的区 B HTTP 地址，例如 <code>http://172.20.0.100:8080</code>。</p>
+            </div>
+            <div class="form-item">
+              <label>Edge 自身上报地址</label><el-input v-model="edgeForm.reportURL" placeholder="http://&lt;可经网闸访问的地址&gt;:8080" />
+              <p class="field-help">Edge 的 <code>proxy_*</code> 自监控指标发送到此 Server HTTP API 地址。它不是 Hub 的 TLS 端口，不能填写 <code>https://...:8443</code>。</p>
+            </div>
+            <div class="form-item">
+              <label>区 B Agent 安装/上报地址</label><el-input v-model="edgeForm.agentServer" placeholder="http://&lt;EDGE_IP&gt;:18080" />
+              <p class="field-help">区 B 普通 Agent 使用的唯一地址，通常为 Edge 的区 B IP 加本地监听端口，例如 <code>http://172.20.0.10:18080</code>；Agent 无需知道 Hub、Gateway 或 Server 地址。</p>
+            </div>
             <template v-if="!tlsAuto">
+              <p class="field-help">手动证书模式：Edge 使用 <code>edge.crt/edge.key</code>，并与 Hub 使用同一 CA 的 <code>ca.crt</code>。</p>
               <div class="form-item"><label>TLS 证书路径</label><el-input v-model="edgeForm.tlsCert" placeholder="/etc/monitor-agent/certs/edge.crt" /></div>
               <div class="form-item"><label>TLS 私钥路径</label><el-input v-model="edgeForm.tlsKey" placeholder="/etc/monitor-agent/certs/edge.key" /></div>
               <div class="form-item"><label>CA 证书路径</label><el-input v-model="edgeForm.tlsCa" placeholder="/etc/monitor-agent/certs/ca.crt" /></div>
             </template>
             <div class="form-row">
-              <div class="form-item"><label>断连缓冲条数</label><el-input-number v-model="edgeForm.bufferSize" :min="100" :max="100000" :step="100" controls-position="right" /></div>
-              <div class="form-item"><label>并发隧道连接数</label><el-input-number v-model="edgeForm.poolSize" :min="1" :max="10" controls-position="right" /></div>
+              <div class="form-item"><label>断连缓冲条数</label><el-input-number v-model="edgeForm.bufferSize" :min="100" :max="100000" :step="100" controls-position="right" /><p class="field-help">网闸断开时 Edge 在内存中暂存的最大请求数；满后新请求会被丢弃。初始建议保持 1000。</p></div>
+              <div class="form-item"><label>并发隧道连接数</label><el-input-number v-model="edgeForm.poolSize" :min="1" :max="10" controls-position="right" /><p class="field-help">Edge 到 Hub 的长连接数量；通常 2 即可，网闸高延迟或 Agent 较多时可提高。</p></div>
             </div>
           </div>
 
           <div class="drawer-section">
-            <h4 class="section-label">Hub 安装命令（区 B 执行）</h4>
+            <h4 class="section-label">Hub 安装命令（区 A 执行）</h4>
             <div class="cmd-box"><div class="cmd-header"><span class="cmd-label">bash</span><el-button size="small" @click="copy(hubCommand)">复制</el-button></div><pre class="cmd-text">{{ hubCommand }}</pre></div>
           </div>
 
@@ -342,13 +369,35 @@ openssl x509 -req -in edge.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 36
           </div>
 
           <div class="drawer-section">
-            <h4 class="section-label">Edge 安装命令（区 A 执行）</h4>
+            <h4 class="section-label">区 A 普通采集 Agent（直连 Server）</h4>
+            <p class="section-desc tip">
+              区 A Agent 与 Monitor Server 位于同一网区，无需经过 Hub 或 Edge。安装脚本、Agent 二进制下载和运行后的指标上报均使用
+              Server 地址；直接执行以下命令即可。
+            </p>
+            <div class="cmd-box"><div class="cmd-header"><span class="cmd-label">bash</span><el-button size="small" @click="copy(zoneAAgentCommand)">复制</el-button></div><pre class="cmd-text">{{ zoneAAgentCommand }}</pre></div>
+          </div>
+
+          <div class="drawer-section">
+            <h4 class="section-label">Edge 安装命令（区 B 执行）</h4>
+            <p class="section-desc tip">
+              请填写 Edge 经网闸可访问的下载与上报地址。下载地址用于获取安装脚本和二进制；上报地址写入
+              Edge 配置，用于发送 <code>proxy_*</code> 自监控指标。
+            </p>
             <div class="cmd-box"><div class="cmd-header"><span class="cmd-label">bash</span><el-button size="small" @click="copy(edgeCommand)">复制</el-button></div><pre class="cmd-text">{{ edgeCommand }}</pre></div>
           </div>
 
           <div class="drawer-section">
             <h4 class="section-label">Edge agent.yaml 模板</h4>
             <div class="cmd-box"><div class="cmd-header"><span class="cmd-label">yaml</span><el-button size="small" @click="copy(edgeYaml)">复制</el-button></div><pre class="cmd-text">{{ edgeYaml }}</pre></div>
+          </div>
+
+          <div class="drawer-section">
+            <h4 class="section-label">区 B 普通采集 Agent 安装命令</h4>
+            <p class="section-desc tip">
+              先确认区 B Edge 已启动且已连接 Hub。区 B Agent 的安装脚本、二进制下载、指标上报、实时命令和后续自升级均使用“区 B Agent 安装/上报地址”，
+              由 Edge 转发到区 A Hub/Server；普通 Agent 无需直连区 A Server。
+            </p>
+            <div class="cmd-box"><div class="cmd-header"><span class="cmd-label">bash</span><el-button size="small" @click="copy(proxyAgentCommand)">复制</el-button></div><pre class="cmd-text">{{ proxyAgentCommand }}</pre></div>
           </div>
 
           <div class="drawer-section deploy-steps">
@@ -441,6 +490,9 @@ const hubForm = reactive({
 const edgeForm = reactive({
   listen: ':18080',
   hubAddr: '10.0.0.2:8443',
+  downloadURL: '',
+  reportURL: '',
+  agentServer: 'http://<EDGE_IP>:18080',
   tlsCert: '/etc/monitor-agent/certs/edge.crt',
   tlsKey: '/etc/monitor-agent/certs/edge.key',
   tlsCa: '/etc/monitor-agent/certs/ca.crt',
@@ -450,6 +502,9 @@ const edgeForm = reactive({
 
 // 服务端密钥（安装 Server 时确定）：直连命令已由后端拼接；网闸命令/YAML 复用此值
 const serverSecret = computed(() => (installInfo.value.secret || '').replace(/^ --secret /, '').trim())
+
+// 区 A Agent 与 Server 同网区，直接复用常规安装命令。
+const zoneAAgentCommand = computed(() => installInfo.value.command || '等待 Server 安装地址加载…')
 
 // Hub 安装命令
 const hubCommand = computed(() => {
@@ -481,8 +536,10 @@ proxy:
 
 // Edge 安装命令
 const edgeCommand = computed(() => {
-  const srv = installInfo.value.serverURL || 'http://<SERVER>:8080'
-  let cmd = `curl -fsSL ${srv}/install/agent-install.sh | bash -s -- --mode edge --listen ${edgeForm.listen} --hub-addr ${edgeForm.hubAddr}`
+  const downloadURL = edgeForm.downloadURL || 'http://<EDGE_DOWNLOAD_HOST>:8080'
+  const reportURL = edgeForm.reportURL || 'http://<EDGE_REPORT_HOST>:8080'
+  // 网络路径由部署人员配置；安装下载源与运行后的自监控上报地址可以不同。
+  let cmd = `curl -fsSL ${downloadURL}/install/agent-install.sh | bash -s -- --mode edge --listen ${edgeForm.listen} --hub-addr ${edgeForm.hubAddr} --server ${reportURL} --base-url ${downloadURL}/bin`
   cmd += tlsAuto.value ? ' --tls-auto' : ` --tls-cert ${edgeForm.tlsCert} --tls-key ${edgeForm.tlsKey} --tls-ca ${edgeForm.tlsCa}`
   cmd += ` --buffer-size ${edgeForm.bufferSize} --pool-size ${edgeForm.poolSize}`
   cmd += ' --yes'
@@ -490,14 +547,22 @@ const edgeCommand = computed(() => {
   return cmd
 })
 
+// 区 B 普通 Agent：安装与运行均通过本区 Edge，Edge 会把全部 HTTP 路径转发至区 A 的 Hub/Server。
+const proxyAgentCommand = computed(() => {
+  let cmd = `curl -fsSL ${edgeForm.agentServer}/install/agent-install.sh | bash -s -- --server ${edgeForm.agentServer} --base-url ${edgeForm.agentServer}/bin --yes`
+  if (installInfo.value.authEnabled) cmd += installInfo.value.secret
+  return cmd
+})
+
 // Edge agent.yaml 模板
 const edgeYaml = computed(() => {
+  const reportURL = edgeForm.reportURL || 'http://<EDGE_REPORT_HOST>:8080'
   return `mode: "edge"
 node: "edge-proxy"
 group: "proxy"
 secret: "${serverSecret.value}"
 interval: 15
-serverURL: "https://${edgeForm.hubAddr}"
+serverURL: "${reportURL}"
 
 proxy:
   listen: "${edgeForm.listen}"
@@ -1255,6 +1320,19 @@ defineExpose({ reload: load })
 .form-item label {
   font-size: 12px;
   color: var(--text-dim);
+}
+.field-help {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+.field-help code {
+  font-family: var(--mono);
+  color: var(--accent);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0 3px;
+  border-radius: 3px;
 }
 .form-row {
   display: grid;
