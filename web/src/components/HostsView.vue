@@ -64,8 +64,13 @@
       </div>
     </div>
 
+    <el-tabs v-model="hostTab" class="host-tabs" type="card">
+      <el-tab-pane label="普通主机" name="hosts" />
+      <el-tab-pane label="网闸代理（Hub / Edge）" name="proxy" />
+    </el-tabs>
+
     <!-- 代理节点独立展示，不与普通采集主机混在一起。 -->
-    <div class="glass panel proxy-status-panel">
+    <div v-if="hostTab === 'proxy'" class="glass panel proxy-status-panel">
       <div class="proxy-status-head">
         <div><span class="panel-title">网闸代理状态</span><span class="panel-subtitle">Hub / Edge</span></div>
         <el-tag v-if="proxyStatus.length === 0" type="info" size="small">暂无代理上报</el-tag>
@@ -82,7 +87,7 @@
     </div>
 
     <!-- 主机列表 -->
-    <div class="glass panel">
+    <div v-if="hostTab === 'hosts'" class="glass panel">
       <el-table
         ref="hostTable"
         :data="pagedNodes"
@@ -473,6 +478,7 @@ const nodes = ref([])
 const latestAgentVersion = ref('')
 const metrics = ref({})
 const proxyStatus = ref([])
+const hostTab = ref('hosts')
 const groups = ref([])
 const statusFilter = ref('')
 const groupFilter = ref('')
@@ -1355,6 +1361,9 @@ defineExpose({ reload: load })
   color: var(--text-muted);
 }
 .proxy-status-panel { margin-bottom: 14px; }
+.host-tabs { margin: 0 0 12px; }
+.host-tabs :deep(.el-tabs__header) { margin: 0; }
+.host-tabs :deep(.el-tabs__content) { display: none; }
 .proxy-status-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .panel-title { font-size: 13px; color: var(--text); font-weight: 600; }
 .panel-subtitle { margin-left: 8px; font-size: 11px; color: var(--text-muted); }
