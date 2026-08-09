@@ -64,6 +64,23 @@
       </div>
     </div>
 
+    <!-- 代理节点独立展示，不与普通采集主机混在一起。 -->
+    <div class="glass panel proxy-status-panel">
+      <div class="proxy-status-head">
+        <div><span class="panel-title">网闸代理状态</span><span class="panel-subtitle">Hub / Edge</span></div>
+        <el-tag v-if="proxyStatus.length === 0" type="info" size="small">暂无代理上报</el-tag>
+        <span v-else class="proxy-summary">在线 {{ proxyStatus.filter(p => p.online).length }} / {{ proxyStatus.length }}</span>
+      </div>
+      <el-table v-if="proxyStatus.length" :data="proxyStatus" size="small" stripe>
+        <el-table-column prop="node" label="节点" min-width="180" />
+        <el-table-column label="角色" width="90"><template #default="{ row }"><el-tag size="small" :type="row.mode === 'hub' ? 'warning' : 'primary'">{{ row.mode === 'hub' ? 'Hub' : 'Edge' }}</el-tag></template></el-table-column>
+        <el-table-column label="状态" width="90"><template #default="{ row }"><el-tag size="small" :type="row.online ? 'success' : 'danger'">{{ row.online ? '在线' : '离线' }}</el-tag></template></el-table-column>
+        <el-table-column prop="connActive" label="活跃连接" width="100" />
+        <el-table-column prop="forwardTotal" label="转发请求" width="110" />
+        <el-table-column prop="reconnectTotal" label="重连次数" width="100" />
+      </el-table>
+    </div>
+
     <!-- 主机列表 -->
     <div class="glass panel">
       <el-table
@@ -455,6 +472,7 @@ const router = useRouter()
 const nodes = ref([])
 const latestAgentVersion = ref('')
 const metrics = ref({})
+const proxyStatus = ref([])
 const groups = ref([])
 const statusFilter = ref('')
 const groupFilter = ref('')
@@ -768,14 +786,16 @@ async function load() {
   if (!visible) return
   loadError.value = ''
   try {
-    const [nd, md, gd] = await Promise.all([
+    const [nd, md, gd, pd] = await Promise.all([
       http.get('/api/v1/nodes'),
       http.get('/api/v1/nodes/latest'),
       http.get('/api/v1/groups'),
+      http.get('/api/v1/proxy/status'),
     ])
     nodes.value = nd.nodes || []
     metrics.value = md.metrics || {}
     groups.value = gd.groups || []
+    proxyStatus.value = (pd.items || []).map((p) => ({ ...p, online: p.online !== false }))
     lastRefresh.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   } catch (e) {
     loadError.value = '数据加载失败：' + (e.message || '未知错误')
@@ -1334,6 +1354,11 @@ defineExpose({ reload: load })
   line-height: 1.55;
   color: var(--text-muted);
 }
+.proxy-status-panel { margin-bottom: 14px; }
+.proxy-status-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.panel-title { font-size: 13px; color: var(--text); font-weight: 600; }
+.panel-subtitle { margin-left: 8px; font-size: 11px; color: var(--text-muted); }
+.proxy-summary { font-size: 12px; color: var(--text-muted); }
 .field-help code {
   font-family: var(--mono);
   color: var(--accent);

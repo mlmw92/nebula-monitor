@@ -53,6 +53,8 @@ OS=""
 CONFIG_DIR="/etc/monitor-agent"
 BIN_DIR="/usr/local/bin"
 SERVICE_DIR="/etc/systemd/system"
+AGENT_BIN="$BIN_DIR/monitor-agent"
+SERVICE_NAME="monitor-agent"
 
 # ============================ 日志/工具 ============================
 c_info()  { printf '\033[36m[步骤]\033[0m %s\n' "$*"; }
@@ -143,6 +145,9 @@ usage() {
   --tls-days <n>      自动生成证书有效期天数（默认 3650）
   --buffer-size <n>   Edge 断连时内存缓冲条数（默认 1000）
   --pool-size <n>     Edge 到 Hub 的并发隧道连接数（默认 2）
+  --config-dir <dir>  配置目录（默认 /etc/monitor-agent；用于同机部署多个实例）
+  --bin-path <path>   Agent 二进制路径（默认 /usr/local/bin/monitor-agent）
+  --service-name <n>  普通采集 Agent 的 systemd 服务名（默认 monitor-agent）
   -h, --help          显示本帮助
 
 示例：
@@ -212,6 +217,9 @@ while [[ $# -gt 0 ]]; do
     --tls-days) TLS_DAYS="$2"; shift 2 ;;
     --buffer-size) BUFFER_SIZE="$2"; shift 2 ;;
     --pool-size)   POOL_SIZE="$2"; shift 2 ;;
+    --config-dir)  CONFIG_DIR="$2"; shift 2 ;;
+    --bin-path)    AGENT_BIN="$2"; shift 2 ;;
+    --service-name) SERVICE_NAME="$2"; shift 2 ;;
     -h|--help)  usage ;;
     *) die "未知参数: $1（用 -h 查看帮助）" ;;
   esac
@@ -460,8 +468,8 @@ acquire_binary() {
       src="$tmp/agent"
     fi
   fi
-  install -m 0755 "$src" "$BIN_DIR/monitor-agent" || die "安装 monitor-agent 失败"
-  c_ok "Agent 已安装: $BIN_DIR/monitor-agent"
+  install -m 0755 "$src" "$AGENT_BIN" || die "安装 monitor-agent 失败"
+  c_ok "Agent 已安装: $AGENT_BIN"
 }
 
 # ============================ 生成配置 ============================
@@ -577,14 +585,14 @@ install_self_script() {
 }
 
 write_service() {
-  cat > "$SERVICE_DIR/monitor-agent.service" <<EOF
+  cat > "$SERVICE_DIR/$SERVICE_NAME.service" <<EOF
 [Unit]
 Description=nebula-monitor Agent (主机指标采集上报)
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=$BIN_DIR/monitor-agent -config $CONFIG_DIR/agent.yaml
+ExecStart=$AGENT_BIN -config $CONFIG_DIR/agent.yaml
 Restart=always
 RestartSec=5
 User=root
@@ -594,18 +602,18 @@ KillMode=process
 [Install]
 WantedBy=multi-user.target
 EOF
-  c_ok "已写入 systemd 单元: $SERVICE_DIR/monitor-agent.service"
+  c_ok "已写入 systemd 单元: $SERVICE_DIR/$SERVICE_NAME.service"
 }
 
 # ============================ 启动 & 校验 ============================
 start_service() {
   if ! have_cmd systemctl; then
-    c_warn "跳过 systemd 启动；可手动执行: $BIN_DIR/monitor-agent -config $CONFIG_DIR/agent.yaml"
+    c_warn "跳过 systemd 启动；可手动执行: $AGENT_BIN -config $CONFIG_DIR/agent.yaml"
     return
   fi
   systemctl daemon-reload
-  systemctl enable monitor-agent.service
-  systemctl restart monitor-agent.service
+  systemctl enable "$SERVICE_NAME.service"
+  systemctl restart "$SERVICE_NAME.service"
   sleep 2
 }
 
@@ -630,7 +638,7 @@ connectivity_check() {
   fi
   if have_cmd systemctl; then
     local st
-    st="$(systemctl is-active monitor-agent.service 2>/dev/null || echo unknown)"
+    st="$(systemctl is-active "$SERVICE_NAME.service" 2>/dev/null || echo unknown)"
     if [[ "$st" == "active" ]]; then
       c_ok "Agent 服务运行中 (systemctl is-active monitor-agent = active)"
     else
@@ -652,7 +660,7 @@ summary() {
   echo " 采集项      : CPU=$C_CPU MEM=$C_MEM DISK=$C_DISK NET=$C_NET PROC=$C_PROC LOAD=$C_LOAD"
   echo " 配置文件    : $CONFIG_DIR/agent.yaml"
   echo " 配置脚本    : $CONFIG_DIR/agent-install.sh（执行 redis 子命令配置 Redis 监控）"
-  echo " 二进制      : $BIN_DIR/monitor-agent"
+  echo " 二进制      : $AGENT_BIN"
   echo "------------------------------------------------------------"
   echo " 查看状态 : systemctl status monitor-agent"
   echo " 查看日志 : journalctl -u monitor-agent -f"
@@ -795,10 +803,10 @@ redis_config() {
   # 重启 agent
   if have_cmd systemctl; then
     c_info "重启 monitor-agent 服务..."
-    systemctl restart monitor-agent 2>/dev/null || true
+    systemctl restart "$SERVICE_NAME" 2>/dev/null || true
     sleep 2
     local st
-    st="$(systemctl is-active monitor-agent 2>/dev/null || echo unknown)"
+    st="$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo unknown)"
     if [[ "$st" == "active" ]]; then
       c_ok "Agent 已重启并运行中"
     else
@@ -1062,10 +1070,10 @@ middleware_config() {
   # 重启 agent
   if have_cmd systemctl; then
     c_info "重启 monitor-agent 服务..."
-    systemctl restart monitor-agent 2>/dev/null || true
+    systemctl restart "$SERVICE_NAME" 2>/dev/null || true
     sleep 2
     local st
-    st="$(systemctl is-active monitor-agent 2>/dev/null || echo unknown)"
+    st="$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo unknown)"
     if [[ "$st" == "active" ]]; then
       c_ok "Agent 已重启并运行中"
     else
@@ -1215,10 +1223,10 @@ k8s_config() {
   # 重启 agent
   if have_cmd systemctl; then
     c_info "重启 monitor-agent 服务..."
-    systemctl restart monitor-agent 2>/dev/null || true
+    systemctl restart "$SERVICE_NAME" 2>/dev/null || true
     sleep 2
     local st
-    st="$(systemctl is-active monitor-agent 2>/dev/null || echo unknown)"
+    st="$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo unknown)"
     if [[ "$st" == "active" ]]; then
       c_ok "Agent 已重启并运行中"
     else
@@ -1470,7 +1478,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=$BIN_DIR/monitor-agent -config $CONFIG_DIR/agent.yaml
+ExecStart=$AGENT_BIN -config $CONFIG_DIR/agent.yaml
 Restart=always
 RestartSec=5
 User=root
@@ -1484,7 +1492,7 @@ EOF
 
 start_proxy_service() {
   if ! have_cmd systemctl; then
-    c_warn "跳过 systemd 启动；可手动执行: $BIN_DIR/monitor-agent -config $CONFIG_DIR/agent.yaml"
+    c_warn "跳过 systemd 启动；可手动执行: $AGENT_BIN -config $CONFIG_DIR/agent.yaml"
     return
   fi
   local svc_name="monitor-proxy-$MODE"
@@ -1518,7 +1526,7 @@ proxy_summary() {
     echo " 真实 Server : $SERVER_URL"
   fi
   echo " 配置文件    : $CONFIG_DIR/agent.yaml"
-  echo " 二进制      : $BIN_DIR/monitor-agent"
+  echo " 二进制      : $AGENT_BIN"
   echo " 服务名      : $svc_name"
   echo " TLS 证书    : $TLS_CERT"
   echo "------------------------------------------------------------"

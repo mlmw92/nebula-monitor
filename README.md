@@ -1105,6 +1105,20 @@ proxy:
 | `proxy_reconnect_total` | 累计重连次数 |
 | `proxy_buffer_depth` | 当前缓冲深度（Edge 断连期间） |
 
+### Hub/Edge 与普通 Agent 同机部署
+
+Hub/Edge 与普通采集 Agent 使用独立的配置目录、二进制路径和 systemd 服务名，互不覆盖。例如 Server 同机运行 Hub 时，可用以下参数另外安装本机采集 Agent：
+
+```bash
+curl -fsSL http://127.0.0.1:8080/install/agent-install.sh | bash -s -- \
+  --server http://127.0.0.1:8080 \
+  --config-dir /etc/monitor-agent-collect \
+  --bin-path /usr/local/bin/monitor-agent-collect \
+  --service-name monitor-agent-collect --yes
+```
+
+Hub 仍使用 `monitor-proxy-hub.service` 和 `/etc/monitor-agent/agent.yaml`，普通采集 Agent 使用 `monitor-agent-collect.service` 和独立目录。
+
 ### 故障排查
 
 ```bash

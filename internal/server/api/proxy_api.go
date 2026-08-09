@@ -15,6 +15,7 @@ import (
 type proxyStatusItem struct {
 	Node           string `json:"node"`
 	Mode           string `json:"mode"`           // edge | hub
+	Online         bool   `json:"online"`         // 最近一次心跳是否在线
 	ConnActive     int64  `json:"connActive"`     // 当前活跃隧道连接数
 	ForwardTotal   int64  `json:"forwardTotal"`   // 累计转发请求数
 	DroppedTotal   int64  `json:"droppedTotal"`   // 累计丢弃请求数
@@ -52,7 +53,11 @@ func (a *API) handleProxyStatus(w http.ResponseWriter, r *http.Request) {
 		if mode == "" {
 			mode = "edge"
 		}
-		it := proxyStatusItem{Node: node, Mode: mode, ConnActive: val}
+		online := true
+		if n, ok := a.nodeMgr.GetNode(node); ok {
+			online = n.Status == "online"
+		}
+		it := proxyStatusItem{Node: node, Mode: mode, Online: online, ConnActive: val}
 		items = append(items, it)
 		itemByNode[node] = &items[len(items)-1]
 	}
