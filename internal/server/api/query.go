@@ -299,7 +299,7 @@ func (a *API) handleVersion(w http.ResponseWriter, r *http.Request) {
 // ---- 节点与分组 ----
 
 func (a *API) handleNodes(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]interface{}{"nodes": a.nodeMgr.ListNodes()})
+	writeJSON(w, 200, map[string]interface{}{"nodes": a.nodeMgr.ListHostNodes()})
 }
 
 // handleNodesLatest 一次性聚合所有节点的关键指标，供主机列表展示。

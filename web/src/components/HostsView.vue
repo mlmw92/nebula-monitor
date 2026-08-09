@@ -645,7 +645,8 @@ function sortValue(n, prop) {
 
 // 仅过滤（不含排序）
 const filteredNodes = computed(() => {
-  let arr = nodes.value
+  // 后端 /api/v1/nodes 已过滤 edge/hub；前端再过滤一次作为兜底，避免其它入口混入代理节点
+  let arr = nodes.value.filter((n) => n.mode !== 'edge' && n.mode !== 'hub')
   if (statusFilter.value === 'online') arr = arr.filter((n) => n.status === 'online')
   else if (statusFilter.value === 'offline') arr = arr.filter((n) => n.status !== 'online')
   else if (statusFilter.value === 'warning') arr = arr.filter((n) => nodeSeverity(n) >= 50)

@@ -188,6 +188,18 @@ type proxyMetricsProvider interface {
 	Metrics() proxy.MetricsSnapshot
 }
 
+// modeForModel 将 config 的运行模式转换为 model 常量。
+func modeForModel(cfg *config.Config) string {
+	switch cfg.Mode {
+	case config.ModeEdge:
+		return model.ModeEdge
+	case config.ModeHub:
+		return model.ModeHub
+	default:
+		return model.ModeCollect
+	}
+}
+
 // reportProxyMetrics 周期上报代理自监控指标到 Server。
 // 上报格式复用现有 /api/v1/report，构造最小 ReportPayload 只含 proxy_* 指标。
 func reportProxyMetrics(cfg *config.Config, p proxyMetricsProvider) {
@@ -201,17 +213,19 @@ func reportProxyMetrics(cfg *config.Config, p proxyMetricsProvider) {
 	}
 	ticker := time.NewTicker(time.Duration(cfg.Interval) * time.Second)
 	defer ticker.Stop()
+	mode := modeForModel(cfg)
 	for range ticker.C {
 		m := p.Metrics()
 		metrics := []model.Metric{
-			{Name: "proxy_conn_active", Node: node, Value: float64(m.ConnActive), Timestamp: model.NowMillis()},
-			{Name: "proxy_forward_total", Node: node, Value: float64(m.ForwardTotal), Timestamp: model.NowMillis()},
-			{Name: "proxy_dropped_total", Node: node, Value: float64(m.DroppedTotal), Timestamp: model.NowMillis()},
-			{Name: "proxy_reconnect_total", Node: node, Value: float64(m.ReconnectTotal), Timestamp: model.NowMillis()},
-			{Name: "proxy_buffer_depth", Node: node, Value: float64(m.BufferDepth), Timestamp: model.NowMillis()},
+			{Name: "proxy_conn_active", Node: node, Labels: map[string]string{"mode": mode}, Value: float64(m.ConnActive), Timestamp: model.NowMillis()},
+			{Name: "proxy_forward_total", Node: node, Labels: map[string]string{"mode": mode}, Value: float64(m.ForwardTotal), Timestamp: model.NowMillis()},
+			{Name: "proxy_dropped_total", Node: node, Labels: map[string]string{"mode": mode}, Value: float64(m.DroppedTotal), Timestamp: model.NowMillis()},
+			{Name: "proxy_reconnect_total", Node: node, Labels: map[string]string{"mode": mode}, Value: float64(m.ReconnectTotal), Timestamp: model.NowMillis()},
+			{Name: "proxy_buffer_depth", Node: node, Labels: map[string]string{"mode": mode}, Value: float64(m.BufferDepth), Timestamp: model.NowMillis()},
 		}
 		payload := model.ReportPayload{
 			Node:    node,
+			Mode:    mode,
 			Group:   cfg.Group,
 			Labels:  cfg.Labels,
 			Version: version.Version,
@@ -252,6 +266,7 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 	osName, arch, ip := coll.HostInfo()
 	payload := model.ReportPayload{
 		Node:              cfg.Node,
+		Mode:              modeForModel(cfg),
 		IP:                ip,
 		OS:                osName,
 		Arch:              arch,

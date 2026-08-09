@@ -65,6 +65,7 @@ func (m *Manager) Register(p *model.ReportPayload) {
 		// 新节点：Agent 上报的 group 仅作为默认值；若为空则归入默认分组
 		n = &model.Node{
 			Hostname:  p.Node,
+			Mode:      p.Mode,
 			Group:     p.Group,
 			Labels:    p.Labels,
 			CreatedAt: now,
@@ -74,6 +75,9 @@ func (m *Manager) Register(p *model.ReportPayload) {
 	n.IP = p.IP
 	n.OS = p.OS
 	n.Arch = p.Arch
+	if n.Mode == "" && p.Mode != "" {
+		n.Mode = p.Mode
+	}
 	// 已存在节点：分组以 Server 端（nodes.json）为准，避免 Agent 默认 group 覆盖用户自定义分组。
 	// 仅当该节点尚无有效分组时，才用 Agent 上报的 group 作为兜底。
 	if !ok || n.Group == "" {
@@ -120,6 +124,20 @@ func (m *Manager) ListNodes() []model.Node {
 	defer m.mu.RUnlock()
 	out := make([]model.Node, 0, len(m.nodes))
 	for _, n := range m.nodes {
+		out = append(out, *n)
+	}
+	return out
+}
+
+// ListHostNodes 返回普通采集节点（过滤掉 edge/hub 等代理节点）。
+func (m *Manager) ListHostNodes() []model.Node {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]model.Node, 0, len(m.nodes))
+	for _, n := range m.nodes {
+		if n.Mode == model.ModeEdge || n.Mode == model.ModeHub {
+			continue
+		}
 		out = append(out, *n)
 	}
 	return out

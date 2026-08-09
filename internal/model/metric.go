@@ -3,7 +3,14 @@ package model
 
 import "time"
 
-// Metric 是单个指标采样点，贯穿 Agent 采集→上报→Server 写 VM→查询→前端全链路。
+// Agent 运行模式常量。
+const (
+	ModeCollect = "collect" // 普通采集节点
+	ModeEdge    = "edge"    // 网闸代理-边缘端
+	ModeHub     = "hub"     // 网闸代理-中心端
+)
+
+// Metric 是单个指标采样点，贯穿 Agent 采集→上报→存储→查询→前端全链路。
 // 映射到 VictoriaMetrics 时：Name 作 __name__，Node/Labels 合并为样本标签。
 type Metric struct {
 	Node      string            `json:"node"`      // 主机名
@@ -36,6 +43,7 @@ type ProcessStat struct {
 // ReportPayload 是 Agent 上报的请求体。
 type ReportPayload struct {
 	Node              string             `json:"node"`                        // 主机名
+	Mode              string             `json:"mode,omitempty"`              // 运行模式：collect | edge | hub
 	IP                string             `json:"ip"`                          // 主机 IP
 	OS                string             `json:"os"`                          // 操作系统
 	Arch              string             `json:"arch"`                        // CPU 架构
@@ -390,6 +398,7 @@ type HostInfo struct {
 // Node 表示一个被监控节点。
 type Node struct {
 	Hostname    string            `json:"hostname"`              // 主机名
+	Mode        string            `json:"mode,omitempty"`        // 运行模式：collect | edge | hub
 	DisplayName string            `json:"displayName,omitempty"` // 自定义显示名/别名（不修改 Agent 上报的真实主机名）
 	IP          string            `json:"ip"`                    // 主机 IP
 	OS          string            `json:"os"`                    // 操作系统
