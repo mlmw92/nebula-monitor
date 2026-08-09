@@ -931,8 +931,14 @@ async function batchUpgrade() {
     const queued = (res && res.queued) || 0
     const skipped = (res && res.skipped) || 0
     let msg = '已下发升级 ' + queued + ' 台'
-    if (skipped > 0) msg += '，跳过 ' + skipped + ' 台（缺二进制/节点不存在）'
-    ElMessage.success(msg + '，Agent 将在下次心跳时执行（约 15-30s 内生效）')
+    if (skipped > 0) {
+      const skippedDetails = (res.details || [])
+        .filter((d) => d.status !== 'queued')
+        .map((d) => d.status === 'no_binary' ? `${d.name}（缺少 ${d.arch || '未知架构'} 二进制）` : `${d.name}（节点不存在）`)
+      msg += '，跳过 ' + skipped + ' 台'
+      if (skippedDetails.length) msg += '：' + skippedDetails.join('、')
+    }
+    ElMessage[skipped > 0 ? 'warning' : 'success'](msg + '。Agent 将在下次心跳时执行（约 15-30s 内生效）')
     // 清空选中状态，方便用户继续多选
     selectedRows.value = []
     hostTable.value?.clearSelection()
