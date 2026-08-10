@@ -803,6 +803,11 @@ func (a *API) handleRuleCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	if err := alert.ValidateRule(rule); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	rule.ID = ""
 	created := a.rules.Create(rule)
 	writeJSON(w, 200, created)
 }
@@ -814,6 +819,10 @@ func (a *API) handleRuleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rule.ID = r.PathValue("id")
+	if err := alert.ValidateRule(rule); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if err := a.rules.Update(rule); err != nil {
 		http.Error(w, "rule not found", http.StatusNotFound)
 		return
@@ -822,7 +831,10 @@ func (a *API) handleRuleUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleRuleDelete(w http.ResponseWriter, r *http.Request) {
-	a.rules.Delete(r.PathValue("id"))
+	if err := a.rules.Delete(r.PathValue("id")); err != nil {
+		http.Error(w, "rule not found", http.StatusNotFound)
+		return
+	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
@@ -831,7 +843,7 @@ func (a *API) handleRuleTemplates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"templates": alert.DefaultTemplates()})
 }
 
-// handleAlertAcks 返回全部已确认告警的 key 映射（rule|host|instance）。
+// handleAlertAcks 返回全部已确认告警的 key 映射（rule|host|instance|startsAt）。
 func (a *API) handleAlertAcks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"acks": a.acks.Map()})
 }
@@ -842,13 +854,18 @@ func (a *API) handleAlertAck(w http.ResponseWriter, r *http.Request) {
 		Rule     string `json:"rule"`
 		Host     string `json:"host"`
 		Instance string `json:"instance"`
+		StartsAt int64  `json:"startsAt"`
 		User     string `json:"user"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Rule == "" || body.Host == "" {
-		http.Error(w, "rule and host required", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Rule == "" || body.Host == "" || body.StartsAt <= 0 {
+		http.Error(w, "rule, host and startsAt required", http.StatusBadRequest)
 		return
 	}
-	a.acks.Mark(body.Rule, body.Host, body.Instance, body.User)
+	user := authenticatedUser(r)
+	if user == "" {
+		user = "anonymous"
+	}
+	a.acks.Mark(body.Rule, body.Host, body.Instance, body.StartsAt, user)
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 

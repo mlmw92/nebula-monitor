@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -16,6 +17,15 @@ import (
 	"github.com/nebula/monitor/internal/server/config"
 	servercrypto "github.com/nebula/monitor/internal/server/crypto"
 )
+
+type authUserContextKey struct{}
+
+func authenticatedUser(r *http.Request) string {
+	if v, ok := r.Context().Value(authUserContextKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
 
 // 登录失败限流：每个源 IP 在窗口内最多允许 loginLimitMax 次失败，超出返回 429。
 var (
@@ -148,12 +158,14 @@ func AuthMiddleware(next http.Handler, authCfg config.AuthConfig) http.Handler {
 				tok = c.Value
 			}
 		}
-		if _, ok := verifyToken(tok, authCfg.Secret); !ok {
+		user, ok := verifyToken(tok, authCfg.Secret)
+		if !ok {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "未登录或登录已过期"})
 			return
 		}
+		r = r.WithContext(context.WithValue(r.Context(), authUserContextKey{}, user))
 		next.ServeHTTP(w, r)
 	})
 }

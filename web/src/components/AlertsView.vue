@@ -132,7 +132,7 @@
             <template v-if="row.notify && row.notify.length">
               <el-tag v-for="c in row.notify" :key="c" size="small" style="margin: 0 4px 4px 0">{{ channelLabel(c) }}</el-tag>
             </template>
-            <span v-else class="muted">不发送</span>
+              <span v-else class="muted">全部启用渠道</span>
           </template>
         </el-table-column>
         <el-table-column label="应用范围" min-width="140">
@@ -286,7 +286,7 @@
         @selection-change="onSelect"
         @row-dblclick="openDetail"
       >
-        <el-table-column type="selection" width="45" />
+        <el-table-column type="selection" width="45" :selectable="selectableAlert" />
         <el-table-column prop="ruleName" label="规则" min-width="140" />
         <el-table-column prop="node" label="节点" min-width="130" />
         <el-table-column label="级别" width="80">
@@ -296,7 +296,7 @@
         </el-table-column>
         <el-table-column label="状态" width="120">
           <template #default="{ row }">
-            <el-tag v-if="acks[ackKey(row)]" type="info" size="small" effect="plain">已确认</el-tag>
+            <el-tag v-if="row.state === 'firing' && acks[ackKey(row)]" type="info" size="small" effect="plain">已确认</el-tag>
             <el-tag v-else :type="row.state === 'firing' ? 'danger' : 'success'" size="small" effect="dark">
               {{ row.state === 'firing' ? '告警中' : '已恢复' }}
             </el-tag>
@@ -385,8 +385,8 @@
         <div class="ev-chart-title" v-if="detail.metric">触发指标近 1 小时趋势</div>
         <div class="ev-chart" ref="chartRef" v-if="detail.metric"></div>
         <div class="ev-actions">
-          <el-button type="primary" size="small" :disabled="acks[ackKey(detail)]" @click="ackEvent(detail)">
-            {{ acks[ackKey(detail)] ? '已确认' : '确认告警' }}
+          <el-button type="primary" size="small" :disabled="detail.state !== 'firing' || acks[ackKey(detail)]" @click="ackEvent(detail)">
+            {{ detail.state !== 'firing' ? '已恢复' : (acks[ackKey(detail)] ? '已确认' : '确认告警') }}
           </el-button>
           <el-button size="small" @click="drawer = false">关闭</el-button>
         </div>
@@ -481,7 +481,7 @@ watch([evPageSize, eventFilter], () => {
 })
 
 function ackKey(e) {
-  return `${e.ruleName}|${e.node}|${e.instance || ''}`
+  return `${e.ruleName}|${e.node}|${e.instance || ''}|${e.startsAt || 0}`
 }
 function sevType(s) {
   return { critical: 'danger', warning: 'warning', info: 'info' }[s] || 'info'
@@ -490,7 +490,7 @@ function sevLabel(s) {
   return { critical: '紧急', warning: '警告', info: '信息' }[s] || s
 }
 function stateLabel(e) {
-  if (acks.value[ackKey(e)]) return '已确认'
+  if (e.state === 'firing' && acks.value[ackKey(e)]) return '已确认'
   return { firing: '告警中', resolved: '已恢复', pending: '待触发' }[e.state] || e.state
 }
 function channelLabel(v) {
@@ -766,7 +766,10 @@ function conditionText(row) {
 }
 
 function onSelect(rows) {
-  selected.value = rows
+	selected.value = rows
+}
+function selectableAlert(row) {
+  return row.state === 'firing'
 }
 function openDetail(row) {
   detail.value = row
@@ -778,7 +781,7 @@ function gotoNode(row) {
 }
 async function ackEvent(row) {
   try {
-    await http.post('/api/v1/alerts/ack', { rule: row.ruleName, host: row.node, instance: row.instance || '' })
+    await http.post('/api/v1/alerts/ack', { rule: row.ruleName, host: row.node, instance: row.instance || '', startsAt: row.startsAt })
     ElMessage.success('已确认')
     drawer.value = false
     await load()
@@ -790,7 +793,7 @@ async function batchAck() {
   if (!selected.value.length) return
   try {
     await Promise.all(selected.value.map((r) =>
-      http.post('/api/v1/alerts/ack', { rule: r.ruleName, host: r.node, instance: r.instance || '' }),
+      http.post('/api/v1/alerts/ack', { rule: r.ruleName, host: r.node, instance: r.instance || '', startsAt: r.startsAt }),
     ))
     ElMessage.success(`已确认 ${selected.value.length} 条`)
     await load()

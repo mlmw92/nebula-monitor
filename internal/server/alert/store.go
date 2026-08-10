@@ -51,13 +51,20 @@ func (s *VMAlertStore) Add(e model.AlertEvent) {
 	if e.Message != "" {
 		labels["message"] = strings.ReplaceAll(e.Message, "\n", " ")
 	}
+	if e.Test {
+		labels["test"] = "true"
+	}
+	ts := e.StartsAt
+	if ts == 0 {
+		ts = e.EndsAt
+	}
 	if err := s.store.Write([]model.Metric{
 		{
 			Node:      "system",
 			Name:      alertMetric,
 			Labels:    labels,
 			Value:     e.Value,
-			Timestamp: e.StartsAt,
+			Timestamp: ts,
 		},
 	}); err != nil {
 		slog.Error("告警事件写入时序库失败", "err", err, "rule", e.RuleName, "node", e.Node)
@@ -69,7 +76,7 @@ func (s *VMAlertStore) Add(e model.AlertEvent) {
 // 用 range query 在大窗口+固定步长下会被时序库降采样吞掉，改用 instant query
 // 直接取每个序列的最新点，对每个 (rule, host, state) 都能拿到。
 func (s *VMAlertStore) Recent(limit int) []model.AlertEvent {
-	series, err := s.store.QueryInstant("system", alertMetric, nil)
+	series, err := s.store.QueryInstantWithLookback("system", alertMetric, nil, 30*24*time.Hour)
 	if err != nil {
 		slog.Warn("告警事件查询失败", "err", err)
 		return nil
@@ -83,7 +90,8 @@ func (s *VMAlertStore) Recent(limit int) []model.AlertEvent {
 		key := ser.Labels["rule"] + "|" + ser.Labels["host"] + "|" + ser.Labels["instance"] + "|" + ser.Labels["state"]
 		p := ser.Points[len(ser.Points)-1]
 		ev := buildEvent(ser.Labels, p.Timestamp, p.Value)
-		if cur, ok := latest[key]; !ok || ev.StartsAt > cur.StartsAt {
+		if cur, ok := latest[key]; !ok || eventTime(ev) > eventTime(cur) ||
+			(eventTime(ev) == eventTime(cur) && ev.Suppressed && !cur.Suppressed) {
 			if !ok {
 				order = append(order, key)
 			}
@@ -94,7 +102,7 @@ func (s *VMAlertStore) Recent(limit int) []model.AlertEvent {
 	for _, k := range order {
 		out = append(out, latest[k])
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].StartsAt > out[j].StartsAt })
+	sort.Slice(out, func(i, j int) bool { return eventTime(out[i]) > eventTime(out[j]) })
 	if len(out) > limit {
 		out = out[:limit]
 	}
@@ -103,7 +111,7 @@ func (s *VMAlertStore) Recent(limit int) []model.AlertEvent {
 
 // Active 返回当前活跃（firing）告警。对于同一规则、节点和实例，只保留最新状态仍为 firing 的事件。
 func (s *VMAlertStore) Active() []model.AlertEvent {
-	series, err := s.store.QueryInstant("system", alertMetric, nil)
+	series, err := s.store.QueryInstantWithLookback("system", alertMetric, nil, 30*24*time.Hour)
 	if err != nil {
 		slog.Warn("活跃告警查询失败", "err", err)
 		return nil
@@ -114,12 +122,13 @@ func (s *VMAlertStore) Active() []model.AlertEvent {
 			continue
 		}
 		p := ser.Points[len(ser.Points)-1]
-		if time.Now().UnixMilli()-p.Timestamp > int64(7*24*time.Hour) {
+		ev := buildEvent(ser.Labels, p.Timestamp, p.Value)
+		if ev.Test {
 			continue
 		}
-		ev := buildEvent(ser.Labels, p.Timestamp, p.Value)
 		key := ev.RuleID + "|" + ev.Node + "|" + ev.Instance
-		if cur, ok := latest[key]; !ok || eventTime(ev) > eventTime(cur) {
+		if cur, ok := latest[key]; !ok || eventTime(ev) > eventTime(cur) ||
+			(eventTime(ev) == eventTime(cur) && ev.Suppressed && !cur.Suppressed) {
 			latest[key] = ev
 		}
 	}
@@ -173,5 +182,6 @@ func buildEvent(labels map[string]string, ts int64, value float64) model.AlertEv
 		ev.Threshold = v
 	}
 	ev.Message = labels["message"]
+	ev.Test = labels["test"] == "true"
 	return ev
 }

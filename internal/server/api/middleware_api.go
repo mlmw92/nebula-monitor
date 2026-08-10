@@ -24,29 +24,29 @@ func (a *API) handleMySQLInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type mysqlInstanceInfo struct {
-		Node              string  `json:"node"`
-		Instance          string  `json:"instance"`
-		Name              string  `json:"name"`
-		Role              string  `json:"role"`
-		Topology          string  `json:"topology"`
-		Version           string  `json:"version"`
-		Up                bool    `json:"up"`
-		Group             string  `json:"group"`
-		ReplicaOf         string  `json:"replicaOf,omitempty"`
-		ThreadsConnected  float64 `json:"threadsConnected"`
-		ThreadsRunning    float64 `json:"threadsRunning"`
-		MaxConnections    float64 `json:"maxConnections"`
-		QueriesPerSec     float64 `json:"queriesPerSec"`
-		SlowQueries       float64 `json:"slowQueries"`
-		BufferPoolHitRate float64 `json:"bufferPoolHitRate"`
-		RowLockWaits      float64 `json:"rowLockWaits"`
-		Deadlocks         float64 `json:"deadlocks"`
+		Node                string  `json:"node"`
+		Instance            string  `json:"instance"`
+		Name                string  `json:"name"`
+		Role                string  `json:"role"`
+		Topology            string  `json:"topology"`
+		Version             string  `json:"version"`
+		Up                  bool    `json:"up"`
+		Group               string  `json:"group"`
+		ReplicaOf           string  `json:"replicaOf,omitempty"`
+		ThreadsConnected    float64 `json:"threadsConnected"`
+		ThreadsRunning      float64 `json:"threadsRunning"`
+		MaxConnections      float64 `json:"maxConnections"`
+		QueriesPerSec       float64 `json:"queriesPerSec"`
+		SlowQueries         float64 `json:"slowQueries"`
+		BufferPoolHitRate   float64 `json:"bufferPoolHitRate"`
+		RowLockWaits        float64 `json:"rowLockWaits"`
+		Deadlocks           float64 `json:"deadlocks"`
 		SecondsBehindMaster float64 `json:"secondsBehindMaster"`
-		ComCommit         float64 `json:"comCommit"`
-		ComRollback       float64 `json:"comRollback"`
-		BytesReceived     float64 `json:"bytesReceived"`
-		BytesSent         float64 `json:"bytesSent"`
-		Uptime            float64 `json:"uptime"`
+		ComCommit           float64 `json:"comCommit"`
+		ComRollback         float64 `json:"comRollback"`
+		BytesReceived       float64 `json:"bytesReceived"`
+		BytesSent           float64 `json:"bytesSent"`
+		Uptime              float64 `json:"uptime"`
 	}
 
 	// 实时在线状态：以 node|instance 为键记录最新 up 值（>0 为在线）。
@@ -92,20 +92,20 @@ func (a *API) handleMySQLInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metricMap := map[string]func(ri *mysqlInstanceInfo, v float64){
-		"mysql_threads_connected":          func(ri *mysqlInstanceInfo, v float64) { ri.ThreadsConnected = round2(v) },
-		"mysql_threads_running":            func(ri *mysqlInstanceInfo, v float64) { ri.ThreadsRunning = round2(v) },
-		"mysql_max_connections":            func(ri *mysqlInstanceInfo, v float64) { ri.MaxConnections = round2(v) },
-		"mysql_queries_per_sec":            func(ri *mysqlInstanceInfo, v float64) { ri.QueriesPerSec = round2(v) },
-		"mysql_slow_queries":               func(ri *mysqlInstanceInfo, v float64) { ri.SlowQueries = round2(v) },
+		"mysql_threads_connected":           func(ri *mysqlInstanceInfo, v float64) { ri.ThreadsConnected = round2(v) },
+		"mysql_threads_running":             func(ri *mysqlInstanceInfo, v float64) { ri.ThreadsRunning = round2(v) },
+		"mysql_max_connections":             func(ri *mysqlInstanceInfo, v float64) { ri.MaxConnections = round2(v) },
+		"mysql_queries_per_sec":             func(ri *mysqlInstanceInfo, v float64) { ri.QueriesPerSec = round2(v) },
+		"mysql_slow_queries":                func(ri *mysqlInstanceInfo, v float64) { ri.SlowQueries = round2(v) },
 		"mysql_innodb_buffer_pool_hit_rate": func(ri *mysqlInstanceInfo, v float64) { ri.BufferPoolHitRate = round2(v) },
-		"mysql_innodb_row_lock_waits":      func(ri *mysqlInstanceInfo, v float64) { ri.RowLockWaits = round2(v) },
-		"mysql_innodb_deadlocks":           func(ri *mysqlInstanceInfo, v float64) { ri.Deadlocks = round2(v) },
-		"mysql_seconds_behind_master":      func(ri *mysqlInstanceInfo, v float64) { ri.SecondsBehindMaster = round2(v) },
-		"mysql_com_commit":                 func(ri *mysqlInstanceInfo, v float64) { ri.ComCommit = round2(v) },
-		"mysql_com_rollback":               func(ri *mysqlInstanceInfo, v float64) { ri.ComRollback = round2(v) },
-		"mysql_bytes_received":             func(ri *mysqlInstanceInfo, v float64) { ri.BytesReceived = round2(v) },
-		"mysql_bytes_sent":                 func(ri *mysqlInstanceInfo, v float64) { ri.BytesSent = round2(v) },
-		"mysql_uptime":                     func(ri *mysqlInstanceInfo, v float64) { ri.Uptime = round2(v) },
+		"mysql_innodb_row_lock_waits":       func(ri *mysqlInstanceInfo, v float64) { ri.RowLockWaits = round2(v) },
+		"mysql_innodb_deadlocks":            func(ri *mysqlInstanceInfo, v float64) { ri.Deadlocks = round2(v) },
+		"mysql_seconds_behind_master":       func(ri *mysqlInstanceInfo, v float64) { ri.SecondsBehindMaster = round2(v) },
+		"mysql_com_commit":                  func(ri *mysqlInstanceInfo, v float64) { ri.ComCommit = round2(v) },
+		"mysql_com_rollback":                func(ri *mysqlInstanceInfo, v float64) { ri.ComRollback = round2(v) },
+		"mysql_bytes_received":              func(ri *mysqlInstanceInfo, v float64) { ri.BytesReceived = round2(v) },
+		"mysql_bytes_sent":                  func(ri *mysqlInstanceInfo, v float64) { ri.BytesSent = round2(v) },
+		"mysql_uptime":                      func(ri *mysqlInstanceInfo, v float64) { ri.Uptime = round2(v) },
 	}
 	for metricName, setter := range metricMap {
 		series, err := a.store.QueryAllLatest(metricName, nil)
@@ -145,24 +145,24 @@ func (a *API) handlePostgresInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type postgresInstanceInfo struct {
-		Node            string  `json:"node"`
-		Instance        string  `json:"instance"`
-		Name            string  `json:"name"`
-		Role            string  `json:"role"`
-		Topology        string  `json:"topology"`
-		Version         string  `json:"version"`
-		Database        string  `json:"database"`
-		Up              bool    `json:"up"`
-		Group           string  `json:"group"`
-		Numbackends     float64 `json:"numbackends"`
-		MaxConnections  float64 `json:"maxConnections"`
-		XactCommit      float64 `json:"xactCommit"`
-		XactRollback    float64 `json:"xactRollback"`
-		CacheHitRatio   float64 `json:"cacheHitRatio"`
-		Deadlocks       float64 `json:"deadlocks"`
-		ReplicationLag  float64 `json:"replicationLag"`
-		DatabaseSize    float64 `json:"databaseSize"`
-		Uptime          float64 `json:"uptime"`
+		Node           string  `json:"node"`
+		Instance       string  `json:"instance"`
+		Name           string  `json:"name"`
+		Role           string  `json:"role"`
+		Topology       string  `json:"topology"`
+		Version        string  `json:"version"`
+		Database       string  `json:"database"`
+		Up             bool    `json:"up"`
+		Group          string  `json:"group"`
+		Numbackends    float64 `json:"numbackends"`
+		MaxConnections float64 `json:"maxConnections"`
+		XactCommit     float64 `json:"xactCommit"`
+		XactRollback   float64 `json:"xactRollback"`
+		CacheHitRatio  float64 `json:"cacheHitRatio"`
+		Deadlocks      float64 `json:"deadlocks"`
+		ReplicationLag float64 `json:"replicationLag"`
+		DatabaseSize   float64 `json:"databaseSize"`
+		Uptime         float64 `json:"uptime"`
 	}
 
 	instances := map[string]*postgresInstanceInfo{}
@@ -343,24 +343,24 @@ func (a *API) handleMongoDBInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metricMap := map[string]func(ri *mongoInstanceInfo, v float64){
-		"mongodb_uptime_seconds":         func(ri *mongoInstanceInfo, v float64) { ri.Uptime = round2(v) },
-		"mongodb_connections_current":    func(ri *mongoInstanceInfo, v float64) { ri.ConnectionsCurrent = round2(v) },
-		"mongodb_connections_available":  func(ri *mongoInstanceInfo, v float64) { ri.ConnectionsAvail = round2(v) },
-		"mongodb_mem_resident_bytes":     func(ri *mongoInstanceInfo, v float64) { ri.MemResidentMB = round2(v / 1024 / 1024) },
-		"mongodb_mem_virtual_bytes":      func(ri *mongoInstanceInfo, v float64) { ri.MemVirtualMB = round2(v / 1024 / 1024) },
-		"mongodb_opcounters_insert":      func(ri *mongoInstanceInfo, v float64) { ri.OpInsert = round2(v) },
-		"mongodb_opcounters_query":       func(ri *mongoInstanceInfo, v float64) { ri.OpQuery = round2(v) },
-		"mongodb_opcounters_update":      func(ri *mongoInstanceInfo, v float64) { ri.OpUpdate = round2(v) },
-		"mongodb_opcounters_delete":      func(ri *mongoInstanceInfo, v float64) { ri.OpDelete = round2(v) },
-		"mongodb_opcounters_command":     func(ri *mongoInstanceInfo, v float64) { ri.OpCommand = round2(v) },
-		"mongodb_db_dataSize_bytes":      func(ri *mongoInstanceInfo, v float64) { ri.DbDataSizeMB = round2(v / 1024 / 1024) },
-		"mongodb_db_storageSize_bytes":   func(ri *mongoInstanceInfo, v float64) { ri.DbStorageSizeMB = round2(v / 1024 / 1024) },
-		"mongodb_db_indexSize_bytes":     func(ri *mongoInstanceInfo, v float64) { ri.DbIndexSizeMB = round2(v / 1024 / 1024) },
-		"mongodb_db_objects":             func(ri *mongoInstanceInfo, v float64) { ri.DbObjects = round2(v) },
-		"mongodb_db_indexes":             func(ri *mongoInstanceInfo, v float64) { ri.DbIndexes = round2(v) },
-		"mongodb_repl_state":             func(ri *mongoInstanceInfo, v float64) { ri.ReplState = round2(v) },
-		"mongodb_repl_health":            func(ri *mongoInstanceInfo, v float64) { ri.ReplHealth = round2(v) },
-		"mongodb_repl_lag":               func(ri *mongoInstanceInfo, v float64) { ri.ReplLag = round2(v) },
+		"mongodb_uptime_seconds":        func(ri *mongoInstanceInfo, v float64) { ri.Uptime = round2(v) },
+		"mongodb_connections_current":   func(ri *mongoInstanceInfo, v float64) { ri.ConnectionsCurrent = round2(v) },
+		"mongodb_connections_available": func(ri *mongoInstanceInfo, v float64) { ri.ConnectionsAvail = round2(v) },
+		"mongodb_mem_resident_bytes":    func(ri *mongoInstanceInfo, v float64) { ri.MemResidentMB = round2(v / 1024 / 1024) },
+		"mongodb_mem_virtual_bytes":     func(ri *mongoInstanceInfo, v float64) { ri.MemVirtualMB = round2(v / 1024 / 1024) },
+		"mongodb_opcounters_insert":     func(ri *mongoInstanceInfo, v float64) { ri.OpInsert = round2(v) },
+		"mongodb_opcounters_query":      func(ri *mongoInstanceInfo, v float64) { ri.OpQuery = round2(v) },
+		"mongodb_opcounters_update":     func(ri *mongoInstanceInfo, v float64) { ri.OpUpdate = round2(v) },
+		"mongodb_opcounters_delete":     func(ri *mongoInstanceInfo, v float64) { ri.OpDelete = round2(v) },
+		"mongodb_opcounters_command":    func(ri *mongoInstanceInfo, v float64) { ri.OpCommand = round2(v) },
+		"mongodb_db_dataSize_bytes":     func(ri *mongoInstanceInfo, v float64) { ri.DbDataSizeMB = round2(v / 1024 / 1024) },
+		"mongodb_db_storageSize_bytes":  func(ri *mongoInstanceInfo, v float64) { ri.DbStorageSizeMB = round2(v / 1024 / 1024) },
+		"mongodb_db_indexSize_bytes":    func(ri *mongoInstanceInfo, v float64) { ri.DbIndexSizeMB = round2(v / 1024 / 1024) },
+		"mongodb_db_objects":            func(ri *mongoInstanceInfo, v float64) { ri.DbObjects = round2(v) },
+		"mongodb_db_indexes":            func(ri *mongoInstanceInfo, v float64) { ri.DbIndexes = round2(v) },
+		"mongodb_repl_state":            func(ri *mongoInstanceInfo, v float64) { ri.ReplState = round2(v) },
+		"mongodb_repl_health":           func(ri *mongoInstanceInfo, v float64) { ri.ReplHealth = round2(v) },
+		"mongodb_repl_lag":              func(ri *mongoInstanceInfo, v float64) { ri.ReplLag = round2(v) },
 	}
 	for metricName, setter := range metricMap {
 		series, err := a.store.QueryAllLatest(metricName, nil)
@@ -462,18 +462,18 @@ func (a *API) handleFastDFSInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metricMap := map[string]func(ri *fastdfsInstanceInfo, v float64){
-		"fastdfs_group_count":          func(ri *fastdfsInstanceInfo, v float64) { ri.GroupTotal = round2(v) },
-		"fastdfs_storage_count":        func(ri *fastdfsInstanceInfo, v float64) { ri.StorageTotal = round2(v) },
-		"fastdfs_storage_online_count": func(ri *fastdfsInstanceInfo, v float64) { ri.StorageOnline = round2(v) },
+		"fastdfs_group_count":           func(ri *fastdfsInstanceInfo, v float64) { ri.GroupTotal = round2(v) },
+		"fastdfs_storage_count":         func(ri *fastdfsInstanceInfo, v float64) { ri.StorageTotal = round2(v) },
+		"fastdfs_storage_online_count":  func(ri *fastdfsInstanceInfo, v float64) { ri.StorageOnline = round2(v) },
 		"fastdfs_storage_offline_count": func(ri *fastdfsInstanceInfo, v float64) { ri.StorageOffline = round2(v) },
-		"fastdfs_total_space":          func(ri *fastdfsInstanceInfo, v float64) { ri.TotalSpaceMB = round2(v / 1024 / 1024) },
-		"fastdfs_free_space":           func(ri *fastdfsInstanceInfo, v float64) { ri.FreeSpaceMB = round2(v / 1024 / 1024) },
-		"fastdfs_used_space":           func(ri *fastdfsInstanceInfo, v float64) { ri.UsedSpaceMB = round2(v / 1024 / 1024) },
-		"fastdfs_trunk_free_space":     func(ri *fastdfsInstanceInfo, v float64) { ri.TrunkFreeMB = round2(v / 1024 / 1024) },
-		"fastdfs_disk_read_bytes":      func(ri *fastdfsInstanceInfo, v float64) { ri.DiskReadMB = round2(v / 1024 / 1024) },
-		"fastdfs_disk_write_bytes":     func(ri *fastdfsInstanceInfo, v float64) { ri.DiskWriteMB = round2(v / 1024 / 1024) },
-		"fastdfs_net_recv_bytes":       func(ri *fastdfsInstanceInfo, v float64) { ri.NetRecvMB = round2(v / 1024 / 1024) },
-		"fastdfs_net_sent_bytes":       func(ri *fastdfsInstanceInfo, v float64) { ri.NetSentMB = round2(v / 1024 / 1024) },
+		"fastdfs_total_space":           func(ri *fastdfsInstanceInfo, v float64) { ri.TotalSpaceMB = round2(v / 1024 / 1024) },
+		"fastdfs_free_space":            func(ri *fastdfsInstanceInfo, v float64) { ri.FreeSpaceMB = round2(v / 1024 / 1024) },
+		"fastdfs_used_space":            func(ri *fastdfsInstanceInfo, v float64) { ri.UsedSpaceMB = round2(v / 1024 / 1024) },
+		"fastdfs_trunk_free_space":      func(ri *fastdfsInstanceInfo, v float64) { ri.TrunkFreeMB = round2(v / 1024 / 1024) },
+		"fastdfs_disk_read_bytes":       func(ri *fastdfsInstanceInfo, v float64) { ri.DiskReadMB = round2(v / 1024 / 1024) },
+		"fastdfs_disk_write_bytes":      func(ri *fastdfsInstanceInfo, v float64) { ri.DiskWriteMB = round2(v / 1024 / 1024) },
+		"fastdfs_net_recv_bytes":        func(ri *fastdfsInstanceInfo, v float64) { ri.NetRecvMB = round2(v / 1024 / 1024) },
+		"fastdfs_net_sent_bytes":        func(ri *fastdfsInstanceInfo, v float64) { ri.NetSentMB = round2(v / 1024 / 1024) },
 	}
 	for metricName, setter := range metricMap {
 		series, err := a.store.QueryAllLatest(metricName, nil)
@@ -513,20 +513,20 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type nginxInstanceInfo struct {
-		Node              string  `json:"node"`
-		NodeIP            string  `json:"nodeIp"`
-		Instance          string  `json:"instance"`
-		Name              string  `json:"name"`
-		Version           string  `json:"version"`
-		Up                bool    `json:"up"`
-		Group             string  `json:"group"`
-		ActiveConnections float64 `json:"activeConnections"`
-		Accepts           float64 `json:"accepts"`
-		Handled           float64 `json:"handled"`
-		Requests          float64 `json:"requests"`
-		Reading           float64 `json:"reading"`
-		Writing           float64 `json:"writing"`
-		Waiting           float64 `json:"waiting"`
+		Node               string  `json:"node"`
+		NodeIP             string  `json:"nodeIp"`
+		Instance           string  `json:"instance"`
+		Name               string  `json:"name"`
+		Version            string  `json:"version"`
+		Up                 bool    `json:"up"`
+		Group              string  `json:"group"`
+		ActiveConnections  float64 `json:"activeConnections"`
+		Accepts            float64 `json:"accepts"`
+		Handled            float64 `json:"handled"`
+		Requests           float64 `json:"requests"`
+		Reading            float64 `json:"reading"`
+		Writing            float64 `json:"writing"`
+		Waiting            float64 `json:"waiting"`
 		ConnectionDropRate float64 `json:"connectionDropRate"`
 	}
 
@@ -548,10 +548,10 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 				Node:     node,
 				NodeIP:   a.nodeIP(node),
 				Instance: instance,
-				Name:    s.Labels["name"],
-				Version: s.Labels["version"],
-				Group:   s.Labels["group"],
-				Up:      s.Points[len(s.Points)-1].Value > 0,
+				Name:     s.Labels["name"],
+				Version:  s.Labels["version"],
+				Group:    s.Labels["group"],
+				Up:       s.Points[len(s.Points)-1].Value > 0,
 			}
 			keys = append(keys, key)
 		}
@@ -615,13 +615,13 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 
 // middlewareOverviewType 单类中间件健康度。
 type middlewareOverviewType struct {
-	Type       string           `json:"type"`       // redis/mysql/postgres/nginx/kafka/docker/rocketmq/k8s
-	Label      string           `json:"label"`      // 中文名
-	Total      int              `json:"total"`      // 实例总数
-	Up         int              `json:"up"`         // 在线实例数
-	Down       int              `json:"down"`       // 离线实例数
-	AlertCount int              `json:"alertCount"` // 关联活跃告警数
-	Summary    []mwSummaryItem  `json:"summary"`    // 核心指标摘要（卡片展示）
+	Type       string          `json:"type"`       // redis/mysql/postgres/nginx/kafka/docker/rocketmq/k8s
+	Label      string          `json:"label"`      // 中文名
+	Total      int             `json:"total"`      // 实例总数
+	Up         int             `json:"up"`         // 在线实例数
+	Down       int             `json:"down"`       // 离线实例数
+	AlertCount int             `json:"alertCount"` // 关联活跃告警数
+	Summary    []mwSummaryItem `json:"summary"`    // 核心指标摘要（卡片展示）
 }
 
 // mwSummaryItem 是某类中间件在总览卡片上展示的核心指标摘要。
@@ -838,22 +838,22 @@ func (a *API) handleKafkaInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type kafkaInstanceInfo struct {
-		Node                       string  `json:"node"`
-		Instance                   string  `json:"instance"`
-		Name                       string  `json:"name"`
-		Role                       string  `json:"role"`
-		Version                    string  `json:"version"`
-		Up                         bool    `json:"up"`
-		Group                      string  `json:"group"`
-		BrokerCount                float64 `json:"brokerCount"`
-		TopicCount                 float64 `json:"topicCount"`
-		PartitionCount             float64 `json:"partitionCount"`
-		UnderReplicatedPartitions  float64 `json:"underReplicatedPartitions"`
-		OfflinePartitions          float64 `json:"offlinePartitions"`
-		ConsumerGroupCount         float64 `json:"consumerGroupCount"`
-		ConsumerLag                float64 `json:"consumerLag"`
-		ConsumerLagMax             float64 `json:"consumerLagMax"`
-		ActiveControllerCount      float64 `json:"activeControllerCount"`
+		Node                      string  `json:"node"`
+		Instance                  string  `json:"instance"`
+		Name                      string  `json:"name"`
+		Role                      string  `json:"role"`
+		Version                   string  `json:"version"`
+		Up                        bool    `json:"up"`
+		Group                     string  `json:"group"`
+		BrokerCount               float64 `json:"brokerCount"`
+		TopicCount                float64 `json:"topicCount"`
+		PartitionCount            float64 `json:"partitionCount"`
+		UnderReplicatedPartitions float64 `json:"underReplicatedPartitions"`
+		OfflinePartitions         float64 `json:"offlinePartitions"`
+		ConsumerGroupCount        float64 `json:"consumerGroupCount"`
+		ConsumerLag               float64 `json:"consumerLag"`
+		ConsumerLagMax            float64 `json:"consumerLagMax"`
+		ActiveControllerCount     float64 `json:"activeControllerCount"`
 	}
 
 	instances := map[string]*kafkaInstanceInfo{}
@@ -978,22 +978,22 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type dockerContainerInfo struct {
-		Node            string  `json:"node"`
-		Instance        string  `json:"instance"` // 容器短 ID
-		Name            string  `json:"name"`     // 容器名
-		Image           string  `json:"image"`
-		Status          string  `json:"status"`
-		Up              bool    `json:"up"`
-		Group           string  `json:"group"`
-		CPUPercent      float64 `json:"cpuPercent"`
-		MemUsage        float64 `json:"memUsage"`
-		MemLimit        float64 `json:"memLimit"`
-		MemPercent      float64 `json:"memPercent"`
-		NetRx           float64 `json:"netRx"`
-		NetTx           float64 `json:"netTx"`
-		DiskRead        float64 `json:"diskRead"`
-		DiskWrite       float64 `json:"diskWrite"`
-		PidsCurrent     float64 `json:"pidsCurrent"`
+		Node        string  `json:"node"`
+		Instance    string  `json:"instance"` // 容器短 ID
+		Name        string  `json:"name"`     // 容器名
+		Image       string  `json:"image"`
+		Status      string  `json:"status"`
+		Up          bool    `json:"up"`
+		Group       string  `json:"group"`
+		CPUPercent  float64 `json:"cpuPercent"`
+		MemUsage    float64 `json:"memUsage"`
+		MemLimit    float64 `json:"memLimit"`
+		MemPercent  float64 `json:"memPercent"`
+		NetRx       float64 `json:"netRx"`
+		NetTx       float64 `json:"netTx"`
+		DiskRead    float64 `json:"diskRead"`
+		DiskWrite   float64 `json:"diskWrite"`
+		PidsCurrent float64 `json:"pidsCurrent"`
 	}
 
 	instances := map[string]*dockerContainerInfo{}
@@ -1007,13 +1007,13 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 		key := node + "|" + instance
 		if _, exists := instances[key]; !exists {
 			ri := &dockerContainerInfo{
-				Node:    node,
+				Node:     node,
 				Instance: instance,
-				Name:    s.Labels["container_name"],
-				Image:   s.Labels["image"],
-				Status:  s.Labels["status"],
-				Group:   s.Labels["group"],
-				Up:      s.Points[len(s.Points)-1].Value > 0,
+				Name:     s.Labels["container_name"],
+				Image:    s.Labels["image"],
+				Status:   s.Labels["status"],
+				Group:    s.Labels["group"],
+				Up:       s.Points[len(s.Points)-1].Value > 0,
 			}
 			instances[key] = ri
 			keys = append(keys, key)
@@ -1040,15 +1040,15 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metricMap := map[string]func(ri *dockerContainerInfo, v float64){
-		"docker_container_cpu_percent":     func(ri *dockerContainerInfo, v float64) { ri.CPUPercent = round2(v) },
-		"docker_container_mem_usage_bytes": func(ri *dockerContainerInfo, v float64) { ri.MemUsage = round2(v) },
-		"docker_container_mem_limit_bytes": func(ri *dockerContainerInfo, v float64) { ri.MemLimit = round2(v) },
-		"docker_container_mem_percent":     func(ri *dockerContainerInfo, v float64) { ri.MemPercent = round2(v) },
-		"docker_container_net_rx_bytes":    func(ri *dockerContainerInfo, v float64) { ri.NetRx = round2(v) },
-		"docker_container_net_tx_bytes":    func(ri *dockerContainerInfo, v float64) { ri.NetTx = round2(v) },
-		"docker_container_disk_read_bytes": func(ri *dockerContainerInfo, v float64) { ri.DiskRead = round2(v) },
+		"docker_container_cpu_percent":      func(ri *dockerContainerInfo, v float64) { ri.CPUPercent = round2(v) },
+		"docker_container_mem_usage_bytes":  func(ri *dockerContainerInfo, v float64) { ri.MemUsage = round2(v) },
+		"docker_container_mem_limit_bytes":  func(ri *dockerContainerInfo, v float64) { ri.MemLimit = round2(v) },
+		"docker_container_mem_percent":      func(ri *dockerContainerInfo, v float64) { ri.MemPercent = round2(v) },
+		"docker_container_net_rx_bytes":     func(ri *dockerContainerInfo, v float64) { ri.NetRx = round2(v) },
+		"docker_container_net_tx_bytes":     func(ri *dockerContainerInfo, v float64) { ri.NetTx = round2(v) },
+		"docker_container_disk_read_bytes":  func(ri *dockerContainerInfo, v float64) { ri.DiskRead = round2(v) },
 		"docker_container_disk_write_bytes": func(ri *dockerContainerInfo, v float64) { ri.DiskWrite = round2(v) },
-		"docker_container_pids_current":    func(ri *dockerContainerInfo, v float64) { ri.PidsCurrent = round2(v) },
+		"docker_container_pids_current":     func(ri *dockerContainerInfo, v float64) { ri.PidsCurrent = round2(v) },
 	}
 	for metricName, setter := range metricMap {
 		series, err := a.store.QueryAllLatest(metricName, nil)
@@ -1097,32 +1097,32 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 	}
 	hosts := map[string]*dockerHostInfo{}
 	var hostKeys []string
-		if totalSeries, err := a.store.QueryAllLatest("docker_containers_total", nil); err == nil {
-			for _, s := range totalSeries {
-				node := s.Labels["node"]
-				daemon := s.Labels["instance"]
-				if node == "" || daemon == "" || len(s.Points) == 0 {
-					continue
+	if totalSeries, err := a.store.QueryAllLatest("docker_containers_total", nil); err == nil {
+		for _, s := range totalSeries {
+			node := s.Labels["node"]
+			daemon := s.Labels["instance"]
+			if node == "" || daemon == "" || len(s.Points) == 0 {
+				continue
+			}
+			key := node + "|" + daemon
+			if _, ok := hosts[key]; !ok {
+				hosts[key] = &dockerHostInfo{
+					Node:            node,
+					Daemon:          daemon,
+					IP:              hostFromDaemon(daemon),
+					NodeIP:          a.nodeIP(node),
+					Group:           s.Labels["group"],
+					Up:              true,
+					ContainersTotal: s.Points[len(s.Points)-1].Value,
 				}
-				key := node + "|" + daemon
-				if _, ok := hosts[key]; !ok {
-					hosts[key] = &dockerHostInfo{
-						Node:            node,
-						Daemon:          daemon,
-						IP:              hostFromDaemon(daemon),
-						NodeIP:          a.nodeIP(node),
-						Group:           s.Labels["group"],
-						Up:              true,
-						ContainersTotal: s.Points[len(s.Points)-1].Value,
-					}
-					hostKeys = append(hostKeys, key)
-				}
+				hostKeys = append(hostKeys, key)
 			}
 		}
+	}
 	for metric, setter := range map[string]func(*dockerHostInfo, float64){
-		"docker_containers_running":  func(h *dockerHostInfo, v float64) { h.ContainersRunning = v },
-		"docker_containers_stopped":  func(h *dockerHostInfo, v float64) { h.ContainersStopped = v },
-		"docker_images_total":         func(h *dockerHostInfo, v float64) { h.ImagesTotal = v },
+		"docker_containers_running": func(h *dockerHostInfo, v float64) { h.ContainersRunning = v },
+		"docker_containers_stopped": func(h *dockerHostInfo, v float64) { h.ContainersStopped = v },
+		"docker_images_total":       func(h *dockerHostInfo, v float64) { h.ImagesTotal = v },
 	} {
 		series, err := a.store.QueryAllLatest(metric, nil)
 		if err != nil {
@@ -1160,21 +1160,21 @@ func (a *API) handleRocketMQInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type rocketmqInstanceInfo struct {
-		Node                 string  `json:"node"`
-		Instance             string  `json:"instance"`
-		Name                 string  `json:"name"`
-		Role                 string  `json:"role"`
-		Version              string  `json:"version"`
-		Up                   bool    `json:"up"`
-		Group                string  `json:"group"`
-		BrokerCount          float64 `json:"brokerCount"`
-		TopicCount           float64 `json:"topicCount"`
-		ConsumerGroupCount   float64 `json:"consumerGroupCount"`
-		BrokerTPS            float64 `json:"brokerTps"`
-		ProducerTPS          float64 `json:"producerTps"`
-		ConsumerTPS          float64 `json:"consumerTps"`
-		MessageAccumulation  float64 `json:"messageAccumulation"`
-		ConsumerLag          float64 `json:"consumerLag"`
+		Node                string  `json:"node"`
+		Instance            string  `json:"instance"`
+		Name                string  `json:"name"`
+		Role                string  `json:"role"`
+		Version             string  `json:"version"`
+		Up                  bool    `json:"up"`
+		Group               string  `json:"group"`
+		BrokerCount         float64 `json:"brokerCount"`
+		TopicCount          float64 `json:"topicCount"`
+		ConsumerGroupCount  float64 `json:"consumerGroupCount"`
+		BrokerTPS           float64 `json:"brokerTps"`
+		ProducerTPS         float64 `json:"producerTps"`
+		ConsumerTPS         float64 `json:"consumerTps"`
+		MessageAccumulation float64 `json:"messageAccumulation"`
+		ConsumerLag         float64 `json:"consumerLag"`
 	}
 
 	instances := map[string]*rocketmqInstanceInfo{}
@@ -1225,14 +1225,14 @@ func (a *API) handleRocketMQInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metricMap := map[string]func(ri *rocketmqInstanceInfo, v float64){
-		"rocketmq_broker_count":           func(ri *rocketmqInstanceInfo, v float64) { ri.BrokerCount = round2(v) },
-		"rocketmq_topic_count":            func(ri *rocketmqInstanceInfo, v float64) { ri.TopicCount = round2(v) },
-		"rocketmq_consumer_group_count":   func(ri *rocketmqInstanceInfo, v float64) { ri.ConsumerGroupCount = round2(v) },
-		"rocketmq_broker_tps":             func(ri *rocketmqInstanceInfo, v float64) { ri.BrokerTPS = round2(v) },
-		"rocketmq_producer_tps":           func(ri *rocketmqInstanceInfo, v float64) { ri.ProducerTPS = round2(v) },
-		"rocketmq_consumer_tps":           func(ri *rocketmqInstanceInfo, v float64) { ri.ConsumerTPS = round2(v) },
-		"rocketmq_message_accumulation":   func(ri *rocketmqInstanceInfo, v float64) { ri.MessageAccumulation = round2(v) },
-		"rocketmq_consumer_lag":           func(ri *rocketmqInstanceInfo, v float64) { ri.ConsumerLag = round2(v) },
+		"rocketmq_broker_count":         func(ri *rocketmqInstanceInfo, v float64) { ri.BrokerCount = round2(v) },
+		"rocketmq_topic_count":          func(ri *rocketmqInstanceInfo, v float64) { ri.TopicCount = round2(v) },
+		"rocketmq_consumer_group_count": func(ri *rocketmqInstanceInfo, v float64) { ri.ConsumerGroupCount = round2(v) },
+		"rocketmq_broker_tps":           func(ri *rocketmqInstanceInfo, v float64) { ri.BrokerTPS = round2(v) },
+		"rocketmq_producer_tps":         func(ri *rocketmqInstanceInfo, v float64) { ri.ProducerTPS = round2(v) },
+		"rocketmq_consumer_tps":         func(ri *rocketmqInstanceInfo, v float64) { ri.ConsumerTPS = round2(v) },
+		"rocketmq_message_accumulation": func(ri *rocketmqInstanceInfo, v float64) { ri.MessageAccumulation = round2(v) },
+		"rocketmq_consumer_lag":         func(ri *rocketmqInstanceInfo, v float64) { ri.ConsumerLag = round2(v) },
 	}
 	for metricName, setter := range metricMap {
 		series, err := a.store.QueryAllLatest(metricName, nil)
@@ -1271,6 +1271,10 @@ func (a *API) handleMaintenanceSet(w http.ResponseWriter, r *http.Request) {
 	var mw model.MaintenanceWindow
 	if err := json.NewDecoder(r.Body).Decode(&mw); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if mw.Enabled && (mw.Start <= 0 || mw.End <= mw.Start) {
+		http.Error(w, "enabled maintenance window requires end > start", http.StatusBadRequest)
 		return
 	}
 	a.maintenance.Set(mw)
@@ -1442,24 +1446,24 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type k8sClusterInfo struct {
-		Node                 string  `json:"node"`
-		Instance             string  `json:"instance"`
-		Name                 string  `json:"name"`
-		Version              string  `json:"version"`
-		Up                   bool    `json:"up"`
-		Group                string  `json:"group"`
-		NodesTotal           float64 `json:"nodesTotal"`
-		NodesReady           float64 `json:"nodesReady"`
-		PodsTotal            float64 `json:"podsTotal"`
-		PodsRunning          float64 `json:"podsRunning"`
-		PodsPending          float64 `json:"podsPending"`
-		PodsFailed           float64 `json:"podsFailed"`
-		DeploymentsTotal     float64 `json:"deploymentsTotal"`
-		DeploymentsUnhealthy float64 `json:"deploymentsUnhealthy"`
-		StatefulSetsTotal    float64 `json:"statefulSetsTotal"`
+		Node                  string  `json:"node"`
+		Instance              string  `json:"instance"`
+		Name                  string  `json:"name"`
+		Version               string  `json:"version"`
+		Up                    bool    `json:"up"`
+		Group                 string  `json:"group"`
+		NodesTotal            float64 `json:"nodesTotal"`
+		NodesReady            float64 `json:"nodesReady"`
+		PodsTotal             float64 `json:"podsTotal"`
+		PodsRunning           float64 `json:"podsRunning"`
+		PodsPending           float64 `json:"podsPending"`
+		PodsFailed            float64 `json:"podsFailed"`
+		DeploymentsTotal      float64 `json:"deploymentsTotal"`
+		DeploymentsUnhealthy  float64 `json:"deploymentsUnhealthy"`
+		StatefulSetsTotal     float64 `json:"statefulSetsTotal"`
 		StatefulSetsUnhealthy float64 `json:"statefulSetsUnhealthy"`
-		DaemonSetsTotal      float64 `json:"daemonSetsTotal"`
-		DaemonSetsUnhealthy  float64 `json:"daemonSetsUnhealthy"`
+		DaemonSetsTotal       float64 `json:"daemonSetsTotal"`
+		DaemonSetsUnhealthy   float64 `json:"daemonSetsUnhealthy"`
 	}
 
 	clusters := map[string]*k8sClusterInfo{}
@@ -1545,14 +1549,14 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 
 	// 节点明细
 	type k8sNodeInfo struct {
-		Cluster   string  `json:"cluster"`
-		Instance  string  `json:"instance"`
-		NodeName  string  `json:"nodeName"`
-		Role      string  `json:"role"`
-		IP        string  `json:"ip"`
-		Ready     bool    `json:"ready"`
-		CPUCores  float64 `json:"cpuCores"`
-		MemBytes  float64 `json:"memBytes"`
+		Cluster  string  `json:"cluster"`
+		Instance string  `json:"instance"`
+		NodeName string  `json:"nodeName"`
+		Role     string  `json:"role"`
+		IP       string  `json:"ip"`
+		Ready    bool    `json:"ready"`
+		CPUCores float64 `json:"cpuCores"`
+		MemBytes float64 `json:"memBytes"`
 	}
 	nodes := map[string]*k8sNodeInfo{}
 	var nodeKeys []string
@@ -1565,14 +1569,14 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 			}
 			key := instance + "|" + nodeName
 			if _, ok := nodes[key]; !ok {
-			nodes[key] = &k8sNodeInfo{
-				Cluster:  s.Labels["name"],
-				Instance: instance,
-				NodeName: nodeName,
-				Role:     s.Labels["role"],
-				IP:       s.Labels["internal_ip"],
-				Ready:    s.Points[len(s.Points)-1].Value > 0,
-			}
+				nodes[key] = &k8sNodeInfo{
+					Cluster:  s.Labels["name"],
+					Instance: instance,
+					NodeName: nodeName,
+					Role:     s.Labels["role"],
+					IP:       s.Labels["internal_ip"],
+					Ready:    s.Points[len(s.Points)-1].Value > 0,
+				}
 				nodeKeys = append(nodeKeys, key)
 			}
 		}

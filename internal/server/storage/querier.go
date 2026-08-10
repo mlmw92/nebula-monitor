@@ -7,7 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/nebula/monitor/internal/model"
 )
@@ -95,6 +98,85 @@ func (s *PromStorage) QueryInstant(node, name string, labels map[string]string) 
 		return nil, fmt.Errorf("query 返回 %d: %s", resp.StatusCode, string(body))
 	}
 	return parsePromResult(body)
+}
+
+// QueryInstantWithLookback 查询稀疏样本。普通 instant vector 受 PromQL lookback
+// 限制，告警事件可能数天没有新样本，因此这里用 last_over_time 保留长期事件；
+// 另查询 timestamp(last_over_time(...)) 取回原始样本时间，而不是表达式求值时间。
+func (s *PromStorage) QueryInstantWithLookback(node, name string, labels map[string]string, lookback time.Duration) ([]model.Series, error) {
+	if lookback <= 0 {
+		lookback = 30 * 24 * time.Hour
+	}
+	expr, err := buildExpr(node, name, labels)
+	if err != nil {
+		return nil, err
+	}
+	rangeExpr := "[" + promDuration(lookback) + "]"
+	values, err := s.queryExpr("last_over_time(" + expr + rangeExpr + ")")
+	if err != nil {
+		return nil, err
+	}
+	times, err := s.queryExpr("timestamp(last_over_time(" + expr + rangeExpr + "))")
+	if err != nil {
+		return nil, err
+	}
+	timeBySeries := make(map[string]int64, len(times))
+	for _, ser := range times {
+		if len(ser.Points) == 0 {
+			continue
+		}
+		timeBySeries[seriesKey(ser.Labels)] = int64(ser.Points[len(ser.Points)-1].Value * 1000)
+	}
+	for i := range values {
+		if len(values[i].Points) == 0 {
+			continue
+		}
+		if ts, ok := timeBySeries[seriesKey(values[i].Labels)]; ok {
+			values[i].Points[len(values[i].Points)-1].Timestamp = ts
+		}
+	}
+	return values, nil
+}
+
+func (s *PromStorage) queryExpr(expr string) ([]model.Series, error) {
+	q := url.Values{}
+	q.Set("query", expr)
+	resp, err := s.httpClient.Get(s.queryURL + "?" + q.Encode())
+	if err != nil {
+		return nil, fmt.Errorf("query 失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("query 返回 %d: %s", resp.StatusCode, string(body))
+	}
+	return parsePromResult(body)
+}
+
+func promDuration(d time.Duration) string {
+	if d%time.Hour == 0 {
+		return strconv.FormatInt(int64(d/time.Hour), 10) + "h"
+	}
+	return d.String()
+}
+
+func seriesKey(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(labels[k])
+		b.WriteByte('\x00')
+	}
+	return b.String()
 }
 
 // QueryAllLatest 对单一指标跨所有节点做即时查询（不限定 node），返回完整序列集合。

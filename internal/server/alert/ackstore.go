@@ -3,6 +3,7 @@ package alert
 import (
 	"encoding/json"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -12,11 +13,12 @@ type AckInfo struct {
 	Rule     string `json:"rule"`
 	Host     string `json:"host"`
 	Instance string `json:"instance"`
+	StartsAt int64  `json:"startsAt"` // 被确认告警的触发时间（毫秒）
 	User     string `json:"user,omitempty"`
 	Time     int64  `json:"time"` // 确认时间（毫秒）
 }
 
-// AckStore 以 JSON 文件持久化告警确认状态，按 rule|host|instance 去重。
+// AckStore 以 JSON 文件持久化告警确认状态，按 rule|host|instance|startsAt 去重。
 // 与 monitor_alert 时序库解耦，避免污染 firing/resolved 状态序列。
 type AckStore struct {
 	mu   sync.RWMutex
@@ -31,7 +33,9 @@ func NewAckStore(path string) *AckStore {
 	return s
 }
 
-func ackKey(rule, host, instance string) string { return rule + "|" + host + "|" + instance }
+func ackKey(rule, host, instance string, startsAt int64) string {
+	return rule + "|" + host + "|" + instance + "|" + strconv.FormatInt(startsAt, 10)
+}
 
 func (s *AckStore) load() {
 	data, err := os.ReadFile(s.path)
@@ -43,25 +47,26 @@ func (s *AckStore) load() {
 		return
 	}
 	for _, a := range list {
-		s.acks[ackKey(a.Rule, a.Host, a.Instance)] = a
+		s.acks[ackKey(a.Rule, a.Host, a.Instance, a.StartsAt)] = a
 	}
 }
 
 // Mark 确认（认领）一条告警。
-func (s *AckStore) Mark(rule, host, instance, user string) {
+func (s *AckStore) Mark(rule, host, instance string, startsAt int64, user string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.acks[ackKey(rule, host, instance)] = AckInfo{
+	s.acks[ackKey(rule, host, instance, startsAt)] = AckInfo{
 		Rule:     rule,
 		Host:     host,
 		Instance: instance,
+		StartsAt: startsAt,
 		User:     user,
 		Time:     time.Now().UnixMilli(),
 	}
 	s.persistLocked()
 }
 
-// Map 返回全部确认状态快照，key 为 rule|host|instance。
+// Map 返回全部确认状态快照，key 为 rule|host|instance|startsAt。
 func (s *AckStore) Map() map[string]AckInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

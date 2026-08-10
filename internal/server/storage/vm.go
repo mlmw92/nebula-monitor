@@ -116,6 +116,8 @@ type Storage interface {
 	QueryLatest(node, name string, labels map[string]string) (*model.Point, error)
 	// QueryInstant 即时查询，返回所有匹配序列（向量结果），用于进程 TOP 等多序列场景。
 	QueryInstant(node, name string, labels map[string]string) ([]model.Series, error)
+	// QueryInstantWithLookback 查询稀疏事件的最新样本，并保留原始样本时间戳。
+	QueryInstantWithLookback(node, name string, labels map[string]string, lookback time.Duration) ([]model.Series, error)
 	// QueryAllLatest 对单一指标跨所有节点做即时查询，返回按节点标签分组的全部序列（用于主机列表聚合）。
 	QueryAllLatest(name string, labels map[string]string) ([]model.Series, error)
 	// Close 释放资源。

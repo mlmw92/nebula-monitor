@@ -518,6 +518,8 @@ type AlertEvent struct {
 	Suppressed   bool       `json:"suppressed,omitempty"`   // 是否被抑制（被更高优先级告警压制）
 	SuppressedBy string     `json:"suppressedBy,omitempty"` // 抑制来源规则名/标识
 	GroupKey     string     `json:"groupKey,omitempty"`     // 分组键（相同键的告警合并为一组通知）
+	Notify       []string   `json:"notify,omitempty"`       // 本事件允许发送的通知渠道（运行时分组使用）
+	Test         bool       `json:"test,omitempty"`         // 是否为手动测试事件
 }
 
 // NowMillis 返回当前毫秒时间戳。

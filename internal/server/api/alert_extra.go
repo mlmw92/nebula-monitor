@@ -70,6 +70,20 @@ func (a *API) handleGroupingPut(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleAlertStats(w http.ResponseWriter, r *http.Request) {
 	active := a.alerts.Active()
 	recent := a.alerts.Recent(200)
+	cutoff := time.Now().Add(-24 * time.Hour).UnixMilli()
+	recent24 := make([]model.AlertEvent, 0, len(recent))
+	for _, e := range recent {
+		if e.Test {
+			continue
+		}
+		ts := e.StartsAt
+		if ts == 0 {
+			ts = e.EndsAt
+		}
+		if ts >= cutoff {
+			recent24 = append(recent24, e)
+		}
+	}
 
 	bySeverity := map[string]int{"critical": 0, "warning": 0, "info": 0}
 	byState := map[string]int{"firing": 0, "resolved": 0}
@@ -83,7 +97,7 @@ func (a *API) handleAlertStats(w http.ResponseWriter, r *http.Request) {
 			suppressed++
 		}
 	}
-	for _, e := range recent {
+	for _, e := range recent24 {
 		if e.State == model.AlertStateFiring {
 			byState["firing"]++
 		} else if e.State == model.AlertStateResolved {
@@ -118,7 +132,7 @@ func (a *API) handleAlertStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"firing":     firing,
 		"suppressed": suppressed,
-		"total":      len(recent),
+		"total":      len(recent24),
 		"bySeverity": bySeverity,
 		"byState":    byState,
 		"topRules":   top,

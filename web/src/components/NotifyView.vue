@@ -106,7 +106,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
 import StringListInput from './StringListInput.vue'
 

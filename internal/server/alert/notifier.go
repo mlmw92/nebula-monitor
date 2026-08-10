@@ -235,7 +235,7 @@ func emailHTML(e model.AlertEvent) string {
 </div>
 </body></html>`,
 		stateColor,
-		e.RuleName,
+		htmlEscape(e.RuleName),
 		sevBg, sevColor, sev,
 		stateBg, stateColor, state,
 		htmlEscape(e.Node),
@@ -361,15 +361,27 @@ func (n *WebhookNotifier) Notify(e model.AlertEvent) error {
 		return err
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
+	var firstErr error
 	for _, u := range n.cfg.URLs {
 		resp, err := client.Post(u, "application/json", bytes.NewReader(payload))
 		if err != nil {
 			slog.Error("Webhook 通知失败", "url", u, "err", err)
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
+		}
+		if resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			err = fmt.Errorf("Webhook 返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			slog.Error("Webhook 通知失败", "url", u, "err", err)
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 		resp.Body.Close()
 	}
-	return nil
+	return firstErr
 }
 
 // NotifyGroup 将一组告警汇总为单条 webhook 消息发送。
@@ -386,15 +398,27 @@ func (n *WebhookNotifier) NotifyGroup(events []model.AlertEvent) error {
 		return err
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
+	var firstErr error
 	for _, u := range n.cfg.URLs {
 		resp, err := client.Post(u, "application/json", bytes.NewReader(payload))
 		if err != nil {
 			slog.Error("Webhook 汇总通知失败", "url", u, "err", err)
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
+		}
+		if resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			err = fmt.Errorf("Webhook 汇总返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			slog.Error("Webhook 汇总通知失败", "url", u, "err", err)
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 		resp.Body.Close()
 	}
-	return nil
+	return firstErr
 }
 
 // BuildNotifiers 根据配置构建通知器列表。

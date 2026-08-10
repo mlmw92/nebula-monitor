@@ -230,7 +230,7 @@
               {{ c.enabled ? c.label : `${c.label}（未启用）` }}
             </el-checkbox>
           </el-checkbox-group>
-          <div class="field-hint">留空则不发送通知；未启用的渠道需先在「通知配置」中开启。</div>
+          <div class="field-hint">留空则发送到全部已启用渠道；未启用的渠道需先在「通知配置」中开启。</div>
         </el-form-item>
       </div>
 

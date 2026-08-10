@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -189,8 +190,12 @@ func (s *RulesStore) Create(r model.AlertRule) model.AlertRule {
 func (s *RulesStore) Update(r model.AlertRule) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.rules[r.ID]; !ok {
+	existing, ok := s.rules[r.ID]
+	if !ok {
 		return os.ErrNotExist
+	}
+	if r.CreatedAt == 0 {
+		r.CreatedAt = existing.CreatedAt
 	}
 	r.UpdatedAt = model.NowMillis()
 	s.rules[r.ID] = r
@@ -214,6 +219,18 @@ func (s *RulesStore) Delete(id string) error {
 // 否则按 ID 合并：已存在的规则更新其字段并保留原 CreatedAt，不存在的规则创建。
 // 返回新增数与更新数，导入完成后一次性持久化。调用方无需持锁。
 func (s *RulesStore) ImportRules(rules []model.AlertRule, replace bool) (created, updated int, err error) {
+	seen := map[string]bool{}
+	for _, r := range rules {
+		if err := ValidateRule(r); err != nil {
+			return 0, 0, err
+		}
+		if r.ID != "" {
+			if seen[r.ID] {
+				return 0, 0, fmt.Errorf("导入数据包含重复规则 ID: %s", r.ID)
+			}
+			seen[r.ID] = true
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if replace {
@@ -301,12 +318,93 @@ func dirOf(path string) string {
 
 // parseFor 将 "5m" 之类解析为秒。
 func parseFor(s string) int64 {
-	if s == "" {
+	if s == "" || s == "0" || s == "0s" {
 		return 0
 	}
 	d, err := time.ParseDuration(s)
-	if err != nil {
-		return 0
+	if err != nil || d < 0 {
+		// 非法持续时间不能退化为立即触发，否则配置拼写错误会造成误报风暴。
+		return 1 << 62
 	}
 	return int64(d.Seconds())
+}
+
+// ValidateRule 校验来自 API/导入的数据，避免非法规则被持久化后以“立即触发”运行。
+func ValidateRule(r model.AlertRule) error {
+	if strings.TrimSpace(r.Name) == "" {
+		return fmt.Errorf("规则名称不能为空")
+	}
+	switch r.Severity {
+	case model.SeverityCritical, model.SeverityWarning, model.SeverityInfo:
+	default:
+		return fmt.Errorf("无效告警级别: %q", r.Severity)
+	}
+	switch r.Type {
+	case "", "threshold":
+		if r.Metric == "" {
+			return fmt.Errorf("阈值规则必须设置指标")
+		}
+		if !validOperator(r.Operator) {
+			return fmt.Errorf("无效运算符: %q", r.Operator)
+		}
+	case model.RuleTypeNodeOffline:
+	case model.RuleTypeServiceDown, model.RuleTypeRoleChange, model.RuleTypeClusterFault:
+		if !validService(r.Service) {
+			return fmt.Errorf("无效中间件类型: %q", r.Service)
+		}
+	default:
+		return fmt.Errorf("无效规则类型: %q", r.Type)
+	}
+	if r.Scope != "" && r.Scope != "all" && r.Scope != "specified" {
+		return fmt.Errorf("无效作用范围: %q", r.Scope)
+	}
+	if r.Scope == "specified" && len(r.Nodes) == 0 {
+		return fmt.Errorf("指定主机范围不能为空")
+	}
+	if r.For != "" && r.For != "0" {
+		d, err := time.ParseDuration(r.For)
+		if err != nil || d < 0 {
+			return fmt.Errorf("无效持续时间: %q", r.For)
+		}
+	}
+	validChannels := map[string]bool{"email": true, "webhook": true, "dingtalk": true, "feishu": true, "wecom": true}
+	for _, ch := range r.Notify {
+		if !validChannels[ch] {
+			return fmt.Errorf("无效通知渠道: %q", ch)
+		}
+	}
+	for _, q := range r.QuietPeriods {
+		if parseHHMM(q.Start) < 0 || parseHHMM(q.End) < 0 {
+			return fmt.Errorf("无效静默时间: %q-%q", q.Start, q.End)
+		}
+	}
+	if r.Escalation != nil {
+		if r.Escalation.AfterMinutes < 0 || r.Escalation.RepeatMinutes < 0 {
+			return fmt.Errorf("升级时间不能为负数")
+		}
+		for _, ch := range r.Escalation.Channels {
+			if !validChannels[ch] {
+				return fmt.Errorf("无效升级通知渠道: %q", ch)
+			}
+		}
+	}
+	return nil
+}
+
+func validOperator(op string) bool {
+	switch op {
+	case ">", ">=", "<", "<=", "==", "!=":
+		return true
+	default:
+		return false
+	}
+}
+
+func validService(s string) bool {
+	switch s {
+	case "mysql", "postgres", "redis", "nginx", "kafka", "rocketmq", "docker", "k8s":
+		return true
+	default:
+		return false
+	}
 }

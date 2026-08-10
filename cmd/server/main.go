@@ -114,7 +114,9 @@ func main() {
 	dialtestStore := dialtest.NewStore(cfg.DialtestFile)
 	dialtestSched := dialtest.NewScheduler(dialtestStore, store)
 	// 拨测状态跃迁联动告警事件（P2）：故障/恢复统一进入告警中心并通知。
-	dialtestSched.SetSink(engine)
+	if cfg.Alert.Enabled {
+		dialtestSched.SetSink(engine)
+	}
 	dialtestSched.Start(ctx)
 
 	// 报告生成模块
@@ -185,7 +187,9 @@ func main() {
 
 	// 启动后台任务
 	go hub.Run()
-	engine.Start(ctx)
+	if cfg.Alert.Enabled {
+		engine.Start(ctx)
+	}
 	go offlineChecker(ctx, nodeMgr, 10*time.Second)
 
 	// 认证中间件（启用 auth 时保护 /api/v1/* 业务接口）
