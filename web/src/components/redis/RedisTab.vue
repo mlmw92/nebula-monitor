@@ -60,7 +60,7 @@
         <AlertIcon />
         <span>检测到 {{ stats.alertCount }} 个实例存在健康风险</span>
       </div>
-      <div class="alert-summary-desc">在线实例仍可连接；异常实例表示触发了页面健康检查规则，请优先查看下方实例列表的“异常原因”。</div>
+      <div class="alert-summary-desc">在线实例仍可连接；异常实例表示触发了页面健康检查规则，请优先查看下方实例列表的"异常原因"。</div>
       <div class="alert-summary-list">
         <span v-for="item in alertInstances.slice(0, 6)" :key="item.node + item.instance" class="issue-chip" @click="openDetail(item)">
           <span class="mono">{{ displayInstance(item) }}</span>
@@ -1687,11 +1687,18 @@ function handleResize() {
 /* ==== 多集群横向并排（auto-fill），单集群自适应 ==== */
 .topo-clusters-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   margin-top: 12px;
+  width: 100%;
+  min-width: 0;
 }
-.topo-cluster-card { margin-top: 0; height: fit-content; }
+.topo-cluster-card {
+  margin-top: 0;
+  width: 100%;
+  min-width: 0;
+  height: fit-content;
+}
 .name-source-hint {
   font-size: 10px; color: rgba(255,255,255,0.4);
   border: 1px dashed rgba(255,255,255,0.18); padding: 1px 7px;
@@ -1738,6 +1745,83 @@ function handleResize() {
   display: flex; align-items: center; gap: 6px;
 }
 .unlinked-list { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ==== Redis Cluster 横向分组拓扑：masters 横排，replicas 组内竖排 ==== */
+.topo-cluster-card .ms-tree {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+}
+.topo-cluster-card .ms-unit {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex: 1 1 260px;
+  min-width: 240px;
+  max-width: 100%;
+}
+.topo-cluster-card .ms-master {
+  width: 100%;
+}
+.topo-cluster-card .ms-branch {
+  flex-direction: column;
+  align-items: stretch;
+  margin-left: 0;
+  margin-top: 10px;
+}
+/* 集群拓扑 rail 位于从节点上方，改为横向排列避免竖排文字重叠 */
+.topo-cluster-card .ms-branch-rail {
+  width: auto;
+  height: auto;
+  min-height: 26px;
+  border-left: 0;
+  border-bottom: 2px solid rgba(147,197,253,0.65);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 18px;
+  padding: 6px 0 6px 4px;
+  margin: 0 0 8px 0;
+}
+.topo-cluster-card .ms-branch-rail::after {
+  content: none;
+}
+.topo-cluster-card .ms-rail-repl,
+.topo-cluster-card .ms-rail-fo {
+  position: relative;
+  z-index: 1;
+  writing-mode: horizontal-tb;
+  white-space: nowrap;
+  letter-spacing: 0.5px;
+}
+.topo-cluster-card .ms-slaves {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 0;
+}
+.topo-cluster-card .ms-slave-card {
+  min-width: 0;
+  width: 100%;
+  padding: 7px 9px;
+}
+
+/* 宽屏下三组尽量完整显示；窄屏再退化为横向滚动 */
+@media (max-width: 900px) {
+  .topo-cluster-card .ms-tree {
+    overflow-x: auto;
+  }
+  .topo-cluster-card .ms-unit {
+    flex: 0 0 260px;
+    min-width: 240px;
+  }
+}
 
 /* ==== 强化 rail 方向箭头（复制 ↓ 实线 + 故障转移 ↑ 虚线）==== */
 .ms-branch-rail {
