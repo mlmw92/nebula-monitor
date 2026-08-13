@@ -67,7 +67,11 @@
             <span class="cat-tag">{{ catLabel(row.category) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="node" label="节点" width="150" />
+        <el-table-column prop="nodeIp" label="节点" width="150">
+          <template #default="{ row }">
+            <span :title="row.node">{{ row.nodeIp || row.node }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="message" label="描述" min-width="280" show-overflow-tooltip />
         <el-table-column label="来源 / 账户" width="170">
           <template #default="{ row }">

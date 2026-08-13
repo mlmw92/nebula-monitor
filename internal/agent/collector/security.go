@@ -53,6 +53,7 @@ var (
 // SSH 日志增量解析（记录文件偏移），避免重复解析全量日志。
 type SecurityCollector struct {
 	node   string
+	nodeIP string
 	cfg    config.SecurityConfig
 	mu     sync.Mutex
 	fim    *fimState            // FIM 基线状态（含本地偏移/哈希）
@@ -67,7 +68,7 @@ type fimState struct {
 }
 
 // NewSecurityCollector 创建安全采集器并加载本地 FIM 基线（若存在）。
-func NewSecurityCollector(node string, cfg config.SecurityConfig) *SecurityCollector {
+func NewSecurityCollector(node, nodeIP string, cfg config.SecurityConfig) *SecurityCollector {
 	if cfg.BruteForceThreshold <= 0 {
 		cfg.BruteForceThreshold = 5
 	}
@@ -76,6 +77,7 @@ func NewSecurityCollector(node string, cfg config.SecurityConfig) *SecurityColle
 	}
 	c := &SecurityCollector{
 		node:    node,
+		nodeIP:  nodeIP,
 		cfg:     cfg,
 		sshOff:  map[string]int64{},
 	}
@@ -189,22 +191,22 @@ func (c *SecurityCollector) collectSSH() []model.SecurityEvent {
 					ip := m[2]
 					failByIP[ip] = append(failByIP[ip], ts)
 					// 失败登录审计事件（信息级别，便于追溯攻击来源）
-					events = append(events, mkEvent(c.node, model.SecurityCatSSHAudit, model.SeverityInfo,
+					events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSSHAudit, model.SeverityInfo,
 						fmt.Sprintf("SSH 登录失败：用户 %s 来自 %s", m[1], ip),
 						map[string]string{"user": m[1], "result": "failed"}, ip, "", ts))
 				} else if m := reSSHInvalidUser.FindStringSubmatch(line); m != nil {
 					failByIP[m[2]] = append(failByIP[m[2]], ts)
-					events = append(events, mkEvent(c.node, model.SecurityCatSSHAudit, model.SeverityInfo,
+					events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSSHAudit, model.SeverityInfo,
 						fmt.Sprintf("SSH 登录失败：无效用户 %s 来自 %s", m[1], m[2]),
 						map[string]string{"user": m[1], "result": "invalid"}, m[2], "", ts))
 				} else if m := reSSHClosedBy.FindStringSubmatch(line); m != nil {
 					failByIP[m[2]] = append(failByIP[m[2]], ts)
-					events = append(events, mkEvent(c.node, model.SecurityCatSSHAudit, model.SeverityInfo,
+					events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSSHAudit, model.SeverityInfo,
 						fmt.Sprintf("SSH 认证中断：用户 %s 来自 %s", m[1], m[2]),
 						map[string]string{"user": m[1], "result": "closed"}, m[2], "", ts))
 				} else if m := reSSHAccepted.FindStringSubmatch(line); m != nil {
 					// 成功登录也记录审计（不告警），便于排查暴力破解后的入侵
-					events = append(events, mkEvent(c.node, model.SecurityCatSSHAudit, model.SeverityInfo,
+					events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSSHAudit, model.SeverityInfo,
 						fmt.Sprintf("SSH 登录成功：用户 %s 来自 %s", m[1], m[2]),
 						map[string]string{"user": m[1], "result": "success"}, m[2], m[1], ts))
 				}
@@ -232,7 +234,7 @@ func (c *SecurityCollector) collectSSH() []model.SecurityEvent {
 			}
 		}
 		if cnt >= c.cfg.BruteForceThreshold {
-			events = append(events, mkEvent(c.node, model.SecurityCatSSHBruteforce, model.SeverityCritical,
+			events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSSHBruteforce, model.SeverityCritical,
 				fmt.Sprintf("检测到 SSH 暴力破解：来源 %s 在 %d 秒内失败 %d 次", ip, c.cfg.BruteForceWindowSec, cnt),
 				map[string]string{"failCount": strconv.Itoa(cnt), "windowSec": strconv.Itoa(c.cfg.BruteForceWindowSec)},
 				ip, "", now.UnixMilli()))
@@ -259,7 +261,7 @@ func (c *SecurityCollector) collectFIM() []model.SecurityEvent {
 			if os.IsNotExist(err) {
 				// 文件被删除
 				if _, existed := prev[path]; existed {
-					events = append(events, mkEvent(c.node, model.SecurityCatFIM, model.SeverityWarning,
+					events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatFIM, model.SeverityWarning,
 						fmt.Sprintf("受监测文件被删除：%s", path),
 						map[string]string{"action": "deleted", "path": path}, "", "", now))
 				}
@@ -270,14 +272,14 @@ func (c *SecurityCollector) collectFIM() []model.SecurityEvent {
 		newHashes[path] = sum
 		if old, ok := prev[path]; ok {
 			if old != sum {
-				events = append(events, mkEvent(c.node, model.SecurityCatFIM, model.SeverityWarning,
+				events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatFIM, model.SeverityWarning,
 					fmt.Sprintf("受监测文件被修改：%s（哈希 %s → %s）", path, shortHash(old), shortHash(sum)),
 					map[string]string{"action": "modified", "path": path, "oldHash": old, "newHash": sum}, "", "", now))
 			}
 		} else {
 			// 新文件（基线中不存在）
 			if len(prev) > 0 {
-				events = append(events, mkEvent(c.node, model.SecurityCatFIM, model.SeverityWarning,
+				events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatFIM, model.SeverityWarning,
 					fmt.Sprintf("发现新增受监测文件：%s", path),
 					map[string]string{"action": "added", "path": path, "hash": sum}, "", "", now))
 			}
@@ -326,7 +328,7 @@ func (c *SecurityCollector) collectSudo() []model.SecurityEvent {
 				line = strings.TrimRight(line, "\r\n")
 				if m := reSudo.FindStringSubmatch(line); m != nil {
 					// m[1]=执行者 m[2]=目标用户 m[3]=命令
-					events = append(events, mkEvent(c.node, model.SecurityCatSudoAudit, model.SeverityInfo,
+					events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSudoAudit, model.SeverityInfo,
 						fmt.Sprintf("sudo 提权：%s 以 %s 身份执行命令", m[1], m[2]),
 						map[string]string{"targetUser": m[2], "command": m[3]}, "", m[1], parseSyslogTime(line, now)))
 				}
@@ -356,7 +358,7 @@ func (c *SecurityCollector) collectProcessAnomalies() []model.SecurityEvent {
 		// 反弹 shell 特征（需多个关键字组合，避免误报常见脚本）
 		for _, pat := range reversePatterns {
 			if strings.Contains(lcmd, pat) {
-				events = append(events, mkEvent(c.node, model.SecurityCatProcessAnomaly, model.SeverityCritical,
+				events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatProcessAnomaly, model.SeverityCritical,
 					fmt.Sprintf("检测到可疑反弹 shell 特征：进程 %s (PID %d) 命令行含 %q", p.name, p.pid, pat),
 					map[string]string{"pid": strconv.Itoa(p.pid), "name": p.name, "cmdline": cmd, "feature": pat}, "", "", now))
 				break
@@ -364,7 +366,7 @@ func (c *SecurityCollector) collectProcessAnomalies() []model.SecurityEvent {
 		}
 		for _, pat := range minerPatterns {
 			if strings.Contains(lcmd, pat) {
-				events = append(events, mkEvent(c.node, model.SecurityCatProcessAnomaly, model.SeverityCritical,
+				events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatProcessAnomaly, model.SeverityCritical,
 					fmt.Sprintf("检测到疑似挖矿进程：%s (PID %d)", p.name, p.pid),
 					map[string]string{"pid": strconv.Itoa(p.pid), "name": p.name, "cmdline": cmd, "feature": pat}, "", "", now))
 				break
@@ -419,6 +421,7 @@ func (c *SecurityCollector) collectBaseline() *model.SecurityBaseline {
 	}
 	return &model.SecurityBaseline{
 		Node:      c.node,
+		NodeIP:    c.nodeIP,
 		Score:     score,
 		Items:     items,
 		CheckedAt: now,
@@ -565,7 +568,7 @@ func (c *SecurityCollector) sshLogPaths() []string {
 }
 
 // mkEvent 构造一条安全事件并生成稳定 ID。
-func mkEvent(node, category string, sev model.Severity, msg string, detail map[string]string, srcIP, user string, ts int64) model.SecurityEvent {
+func mkEvent(node, nodeIP, category string, sev model.Severity, msg string, detail map[string]string, srcIP, user string, ts int64) model.SecurityEvent {
 	id := fmt.Sprintf("%s|%s|%s", node, category, hashString(node+category+msg+srcIP))
 	if sev == "" {
 		sev = model.SeverityInfo
@@ -573,6 +576,7 @@ func mkEvent(node, category string, sev model.Severity, msg string, detail map[s
 	return model.SecurityEvent{
 		ID:        id,
 		Node:      node,
+		NodeIP:    nodeIP,
 		Category:  category,
 		Severity:  sev,
 		Message:   msg,

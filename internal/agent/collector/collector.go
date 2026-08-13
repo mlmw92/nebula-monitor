@@ -94,7 +94,7 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 		c.port = NewPortCollector(node, portChecks)
 	}
 	if cfg.Security {
-		c.security = NewSecurityCollector(node, securityCfg)
+		c.security = NewSecurityCollector(node, primaryIP(), securityCfg)
 	}
 	return c
 }

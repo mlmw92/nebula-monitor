@@ -21,6 +21,7 @@ const (
 type SecurityEvent struct {
 	ID        string            `json:"id"`                  // 事件唯一 ID（node|category|hash）
 	Node      string            `json:"node"`                // 节点名
+	NodeIP    string            `json:"nodeIp,omitempty"`    // 节点 IP（服务器 IP）
 	Category  string            `json:"category"`            // 类别：见 SecurityCat* 常量
 	Severity  Severity          `json:"severity"`            // 严重级别
 	Message   string            `json:"message"`             // 人类可读描述
@@ -43,8 +44,9 @@ type SecurityBaselineItem struct {
 
 // SecurityBaseline 主机安全基线检查结果，含 0-100 合规评分与逐项明细。
 type SecurityBaseline struct {
-	Node      string               `json:"node"`      // 节点名
-	Score     float64              `json:"score"`     // 合规评分 0-100
-	Items     []SecurityBaselineItem `json:"items"`   // 各项检查结果
-	CheckedAt int64                `json:"checkedAt"` // 检查时间（毫秒）
+	Node      string                 `json:"node"`      // 节点名
+	NodeIP    string                 `json:"nodeIp,omitempty"` // 节点 IP（服务器 IP）
+	Score     float64                `json:"score"`     // 合规评分 0-100
+	Items     []SecurityBaselineItem `json:"items"`     // 各项检查结果
+	CheckedAt int64                  `json:"checkedAt"` // 检查时间（毫秒）
 }
