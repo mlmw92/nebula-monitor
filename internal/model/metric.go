@@ -66,6 +66,8 @@ type ReportPayload struct {
 	MongoDBInstances  []MongoDBInstance  `json:"mongoInstances,omitempty"`    // MongoDB 实例元信息
 	FastDFSInstances  []FastDFSInstance  `json:"fastdfsInstances,omitempty"`  // FastDFS 实例元信息
 	NginxAccessStats  []NginxAccessStat  `json:"nginxAccessStats,omitempty"`  // Nginx access log 聚合统计
+	SecurityEvents    []SecurityEvent    `json:"securityEvents,omitempty"`    // 安全事件（结构化，非时序）
+	SecurityBaseline  *SecurityBaseline  `json:"securityBaseline,omitempty"`  // 安全基线检查结果
 	ReportAt          int64              `json:"reportAt"`                    // 上报时间（毫秒）
 }
 

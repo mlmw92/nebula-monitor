@@ -101,7 +101,7 @@ func main() {
 		cfg.RedisInstances, cfg.MySQLInstances, cfg.PostgresInstances,
 		cfg.NginxInstances, cfg.KafkaInstances, cfg.DockerInstances,
 		cfg.RocketMQInstances, cfg.K8sInstances, cfg.MongoDBInstances, cfg.FastDFSInstances,
-		cfg.PortChecks,
+		cfg.PortChecks, cfg.Security,
 	)
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
@@ -126,6 +126,7 @@ func main() {
 	if cs.MongoDB { enabledCollectors = append(enabledCollectors, "mongodb") }
 	if cs.FastDFS { enabledCollectors = append(enabledCollectors, "fastdfs") }
 	if cs.Port { enabledCollectors = append(enabledCollectors, "port") }
+	if cs.Security { enabledCollectors = append(enabledCollectors, "security") }
 
 	slog.Info("Agent 启动", "node", cfg.Node, "server", cfg.ServerURL, "interval", cfg.Interval, "version", version.Version, "collectors", enabledCollectors)
 
@@ -262,6 +263,7 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 	metrics = append(metrics, mongoMetrics...)
 	fastdfsMetrics, fastdfsInstances := coll.CollectFastDFS()
 	metrics = append(metrics, fastdfsMetrics...)
+	securityEvents, securityBaseline := coll.CollectSecurity()
 
 	osName, arch, ip := coll.HostInfo()
 	payload := model.ReportPayload{
@@ -288,6 +290,8 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 		MongoDBInstances:  mongoInstances,
 		FastDFSInstances:  fastdfsInstances,
 		NginxAccessStats:  nginxAccessStats,
+		SecurityEvents:    securityEvents,
+		SecurityBaseline:  securityBaseline,
 		ReportAt:          model.NowMillis(),
 	}
 	resp, err := rep.ReportFull(payload)

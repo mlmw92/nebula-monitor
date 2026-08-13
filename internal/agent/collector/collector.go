@@ -30,6 +30,7 @@ type Collector struct {
 	port        *PortCollector
 	mongo       *MongoDBCollector
 	fastdfs     *FastDFSCollector
+	security    *SecurityCollector
 }
 
 // New 创建 Collector。
@@ -45,6 +46,7 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	mongoInstances []model.MongoDBInstanceConfig,
 	fastdfsInstances []model.FastDFSInstanceConfig,
 	portChecks []string,
+	securityCfg config.SecurityConfig,
 ) *Collector {
 	c := &Collector{
 		node:   node,
@@ -90,6 +92,9 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	}
 	if cfg.Port {
 		c.port = NewPortCollector(node, portChecks)
+	}
+	if cfg.Security {
+		c.security = NewSecurityCollector(node, securityCfg)
 	}
 	return c
 }
@@ -235,6 +240,15 @@ func (c *Collector) CollectFastDFS() ([]model.Metric, []model.FastDFSInstance) {
 		return nil, nil
 	}
 	return c.fastdfs.Collect()
+}
+
+// CollectSecurity 采集安全事件与基线检查结果。
+// 返回该节点的安全事件列表与基线评分（可为 nil，表示未启用安全采集）。
+func (c *Collector) CollectSecurity() ([]model.SecurityEvent, *model.SecurityBaseline) {
+	if c.security == nil {
+		return nil, nil
+	}
+	return c.security.Collect()
 }
 
 // HostInfo 返回主机静态信息（OS/Arch/IP），用于上报体。

@@ -9,10 +9,12 @@ import (
 	"strconv"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/instancereg"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
+	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/storage"
 )
 
@@ -25,12 +27,16 @@ type Receiver struct {
 	nodeMgr *node.Manager
 	auth    config.AgentAuthConfig
 	ngx     *nginxaccess.Window // Nginx access log 地理聚合窗口（可空）
+	sec     *security.Store     // 安全事件/基线存储（可空，传 nil 关闭安全能力）
+	alerts  *alert.Engine       // 告警引擎（安全事件注入告警中心，可空）
 }
 
 // New 创建 Receiver。auth 为 Agent 接入授权配置（参考哪吒探针密钥机制）；
-// ngx 为 Nginx access log 聚合窗口，可传 nil 关闭该能力。
-func New(s storage.Storage, mgr *node.Manager, auth config.AgentAuthConfig, ngx *nginxaccess.Window) *Receiver {
-	return &Receiver{storage: s, nodeMgr: mgr, auth: auth, ngx: ngx}
+// ngx 为 Nginx access log 聚合窗口，可传 nil 关闭该能力；
+// sec/alerts 为安全能力依赖，可传 nil 关闭安全事件落库与告警。
+func New(s storage.Storage, mgr *node.Manager, auth config.AgentAuthConfig, ngx *nginxaccess.Window,
+	sec *security.Store, alerts *alert.Engine) *Receiver {
+	return &Receiver{storage: s, nodeMgr: mgr, auth: auth, ngx: ngx, sec: sec, alerts: alerts}
 }
 
 // HandleReport 处理 POST /api/v1/report。
@@ -187,6 +193,17 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		}
 		if r.ngx != nil {
 			r.ngx.Add(payload.NginxAccessStats)
+		}
+	}
+
+	// 安全事件/基线处理：先落库，再对每条事件注入告警中心（复用静默/维护窗口/通知）。
+	if r.sec != nil && (len(payload.SecurityEvents) > 0 || payload.SecurityBaseline != nil) {
+		r.sec.Ingest(payload.Node, payload.SecurityEvents, payload.SecurityBaseline)
+	}
+	if r.alerts != nil {
+		for i := range payload.SecurityEvents {
+			ev := &payload.SecurityEvents[i]
+			r.alerts.EmitSecurityAlert(ev.Node, payload.IP, ev.Category, ev.Severity, ev.Message, nil)
 		}
 	}
 

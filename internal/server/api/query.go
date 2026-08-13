@@ -25,6 +25,7 @@ import (
 	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/report"
 	"github.com/nebula/monitor/internal/server/screencfg"
+	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/uicfg"
 	"github.com/nebula/monitor/internal/server/upgrade"
@@ -96,14 +97,15 @@ type API struct {
 	serverProvince string              // server 自动探测到的所在地（省级行政区）
 	configPath     string              // server.yaml 路径，用于改密码时持久化
 	dashMgr        *dashboard.Manager  // 自定义仪表盘配置（可空）
+	security       *security.Store    // 安全事件/基线存储（可空，关闭安全能力）
 }
 
 // SetDashboardManager 注入仪表盘配置管理器（可选，不注入则相关接口返回空列表）。
 func (a *API) SetDashboardManager(m *dashboard.Manager) { a.dashMgr = m }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince(), configPath: configPath}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string, sec *security.Store) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince(), configPath: configPath, security: sec}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -151,6 +153,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/rules/{id}/toggle", a.handleRuleToggle)
 	mux.HandleFunc("POST /api/v1/rules/{id}/toggle-silence", a.handleRuleToggleSilence)
 	mux.HandleFunc("DELETE /api/v1/rules/{id}", a.handleRuleDelete)
+
+	// 安全中心：态势概览 / 事件列表 / 基线明细
+	mux.HandleFunc("GET /api/v1/security/summary", a.handleSecuritySummary)
+	mux.HandleFunc("GET /api/v1/security/events", a.handleSecurityEvents)
+	mux.HandleFunc("GET /api/v1/security/baselines", a.handleSecurityBaselines)
 
 	mux.HandleFunc("GET /api/v1/install-info", a.handleInstallInfo)
 	mux.HandleFunc("GET /api/v1/version", a.handleVersion)

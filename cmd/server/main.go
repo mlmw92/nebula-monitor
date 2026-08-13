@@ -24,6 +24,7 @@ import (
 	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/receiver"
 	"github.com/nebula/monitor/internal/server/report"
+	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/screencfg"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/uicfg"
@@ -108,7 +109,9 @@ func main() {
 
 	// 上报接收（Nginx access log 地理聚合窗口：TTL 1h，实时大屏场景）
 	ngxWin := nginxaccess.NewWindow(nginxaccess.NewGeo(), time.Hour)
-	recv := receiver.New(store, nodeMgr, cfg.AgentAuth, ngxWin)
+	// 安全事件/基线存储（JSON 持久化，默认安全能力启用）
+	securityStore := security.New(cfg.SecurityStoreFile)
+	recv := receiver.New(store, nodeMgr, cfg.AgentAuth, ngxWin, securityStore, engine)
 
 	// 拨测模块
 	dialtestStore := dialtest.NewStore(cfg.DialtestFile)
@@ -173,7 +176,7 @@ func main() {
 	}
 
 	// API
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath, securityStore)
 	rest.SetDashboardManager(dashMgr)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}

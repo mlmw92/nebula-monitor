@@ -40,6 +40,7 @@ type Config struct {
 	UIFile          string          `yaml:"uiFile"`          // 系统 UI 品牌配置（系统名称/Logo，Web 端设置写入）
 	GeoIPFile       string          `yaml:"geoipFile"`       // IP 地理库（ip2region v4 xdb）存放路径，Web 端上传后覆盖此文件；缺失时用内置库
 	DashboardsFile  string          `yaml:"dashboardsFile"`  // 自定义仪表盘配置文件（Web 端增删改写入）
+	SecurityStoreFile string         `yaml:"securityStoreFile"` // 安全事件/基线持久化文件
 }
 
 // ScreenConfig 数据大屏模块显隐配置（全局单份，与 notify 一致）。
@@ -330,6 +331,7 @@ func Default() *Config {
 		ScreenFile:      "/etc/monitor-server/screen.yaml",
 		UIFile:          "/etc/monitor-server/ui.yaml",
 		DashboardsFile:  "/etc/monitor-server/dashboards.yaml",
+		SecurityStoreFile: "/var/lib/monitor-server/security_store.json",
 		GeoIPFile:       "/var/lib/monitor-server/geoip/ip2region_v4.xdb",
 		Auth:            AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: ""},
 		Upgrade: UpgradeConfig{

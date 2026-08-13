@@ -2,6 +2,8 @@ package alert
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"math"
@@ -46,6 +48,7 @@ type Engine struct {
 	states       map[string]*ruleState
 	dialActive   map[string]bool         // 拨测任务是否有未恢复故障事件，按 "dialtest:<taskID>" 记录
 	certActive   map[string]certState    // SSL 证书过期告警状态，按 "cert:<taskID>" 记录
+	securityActive map[string]bool       // 安全事件告警活跃状态，按 "node|category|hash(message)" 记录，用于去重窗口
 	firing       map[string]*firingEntry // 活跃 firing 事件（用于抑制匹配），按 rule|node|instance 记录
 	inhibit      *InhibitStore           // 抑制规则（可选）
 	grouping     *GroupingStore          // 分组配置（可选）
@@ -93,6 +96,7 @@ func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
 		states:       map[string]*ruleState{},
 		dialActive:   map[string]bool{},
 		certActive:   map[string]certState{},
+		securityActive: map[string]bool{},
 		firing:       map[string]*firingEntry{},
 		inhibit:      inhibit,
 		grouping:     grouping,
@@ -1118,6 +1122,98 @@ func (e *Engine) emitCertEvent(task dialtest.Task, result dialtest.Result, firin
 		e.notifyDialtest(task, ev)
 	}
 	slog.Info("证书过期告警触发", "task", task.Name, "target", task.Target, "days", result.CertExpiry, "severity", sev, "event", ev.ID)
+}
+
+// EmitSecurityAlert 注入一条安全事件告警，复用统一告警中心（存储/广播/通知/静默/维护窗口）。
+// 同一 (node|category|hash(message)) 在 repeatWindowMs 内只通知一次，避免同类事件刷屏；
+// 事件型告警不维护「恢复」状态，仅做一次注入与通知。
+//
+// 参数：
+//   - node/nodeIP：事件所属节点与 IP（展示用）
+//   - category：安全事件类别（SecurityCat*）
+//   - severity：严重级别
+//   - message：告警描述
+//   - notify：指定通知渠道（留空则根据规则/全部渠道发送）
+func (e *Engine) EmitSecurityAlert(node, nodeIP, category string, severity model.Severity, message string, notify []string) {
+	if severity != model.SeverityCritical && severity != model.SeverityWarning && severity != model.SeverityInfo {
+		severity = model.SeverityWarning
+	}
+	now := model.NowMillis()
+	h := func() string {
+		sum := sha256.Sum256([]byte(node + "|" + category + "|" + message))
+		return hex.EncodeToString(sum[:])[:16]
+	}()
+	key := node + "|" + category + "|" + h
+
+	const repeatWindowMs = 6 * 3600 * 1000 // 6 小时内同款事件仅通知一次
+	e.mu.Lock()
+	last, ok := e.securityActive[key]
+	_ = last
+	if ok {
+		e.mu.Unlock()
+		slog.Debug("安全告警去重，跳过通知", "node", node, "category", category)
+		return
+	}
+	e.securityActive[key] = true
+	e.mu.Unlock()
+
+	// 定时清理去重窗口，避免长期运行后 map 无限增长
+	go func() {
+		time.Sleep(repeatWindowMs)
+		e.mu.Lock()
+		delete(e.securityActive, key)
+		e.mu.Unlock()
+	}()
+
+	ev := model.AlertEvent{
+		ID:        "security-" + h,
+		RuleID:    "security-" + category,
+		RuleName:  "安全事件 - " + securityCategoryName(category),
+		Node:      node,
+		NodeIP:    nodeIP,
+		Metric:    "security_event",
+		Severity:  severity,
+		Message:   message,
+		State:     model.AlertStateFiring,
+		StartsAt:  now,
+		Notify:    append([]string(nil), notify...),
+	}
+	// 抑制匹配（与目标节点/指标匹配的规则会抑制本事件）
+	e.mu.Lock()
+	suppressed, by := e.computeSuppressedLocked(ev)
+	ev.Suppressed = suppressed
+	ev.SuppressedBy = by
+	e.trackFiringLocked(ev, suppressed)
+	e.refreshSuppressedTargetsLocked(ev)
+	e.mu.Unlock()
+
+	e.alerts.Add(ev)
+	if e.broadcaster != nil {
+		e.broadcaster.BroadcastAlert(ev)
+	}
+	// 维护窗口 / 抑制 / 渠道判断由 notify 统一处理（其内部已做维护窗口检查）
+	if !ev.Suppressed {
+		e.notify(ev)
+	}
+	slog.Info("安全告警触发", "node", node, "category", category, "severity", severity, "message", message, "event", ev.ID)
+}
+
+// securityCategoryName 返回安全类别的中文名。
+func securityCategoryName(category string) string {
+	switch category {
+	case model.SecurityCatSSHBruteforce:
+		return "SSH 暴力破解"
+	case model.SecurityCatSSHAudit:
+		return "SSH 登录审计"
+	case model.SecurityCatFIM:
+		return "文件完整性"
+	case model.SecurityCatProcessAnomaly:
+		return "异常进程"
+	case model.SecurityCatSudoAudit:
+		return "sudo 提权审计"
+	default:
+		return category
+	}
 }
 
 // dialMessage 构造拨测故障的描述信息。

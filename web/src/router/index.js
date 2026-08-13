@@ -29,6 +29,7 @@ const routes = [
       { path: 'system/settings', name: 'system-settings', component: () => import('../components/settings/SettingsView.vue') },
       { path: 'metrics/explore', name: 'metrics-explore', component: () => import('../components/metrics/MetricsExploreView.vue') },
       { path: 'system/dashboards', name: 'system-dashboards', component: () => import('../components/dashboard/DashboardView.vue') },
+      { path: 'security', name: 'security', component: () => import('../components/SecurityView.vue') },
     ],
   },
 ]

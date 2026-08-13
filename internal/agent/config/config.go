@@ -42,7 +42,25 @@ type Config struct {
 	FastDFSInstances  []model.FastDFSInstanceConfig  `yaml:"fastdfsInstances"` // FastDFS 实例连接配置
 	PortChecks        []string                  `yaml:"portChecks"`         // TCP 端口存活检测列表，如 ["80","443","3306"]
 	Proxy             ProxyConfig               `yaml:"proxy"`              // 代理模式配置，mode=edge/hub 时生效
+	Security          SecurityConfig            `yaml:"security"`           // 安全采集配置（collectors.security 开启时生效）
 	CryptoKey         string                    `yaml:"cryptoKey"`          // 中间件密码 AES-GCM 主密钥（留空用内置默认密钥；配置密文以 enc: 前缀标识）
+}
+
+// SecurityConfig 是安全采集（SSH 审计/FIM/基线/异常进程/sudo）的可配置项。
+// 所有字段均有合理默认值，开启 collectors.security 后无需额外配置即可工作。
+type SecurityConfig struct {
+	// FIMPaths 需做完整性监测的文件列表（SHA256 基线比对）。默认监测关键系统文件。
+	FIMPaths []string `yaml:"fimPaths"`
+	// FIMBaselinePath 本地 FIM 基线（文件哈希）持久化路径；留空则使用默认路径。
+	FIMBaselinePath string `yaml:"fimBaselinePath"`
+	// SSHLogPaths SSH 登录日志路径；留空则自动探测 /var/log/auth.log 与 /var/log/secure。
+	SSHLogPaths []string `yaml:"sshLogPaths"`
+	// BruteForceThreshold 同一来源 IP 在时间窗口内失败登录超过此次数判定为暴力破解。
+	BruteForceThreshold int `yaml:"bruteForceThreshold"`
+	// BruteForceWindowSec 暴力破解检测的时间窗口（秒）。
+	BruteForceWindowSec int `yaml:"bruteForceWindowSec"`
+	// WeakPasswordCheck 是否检查 /etc/shadow 空口令账户（需要 root 权限，默认开启）。
+	WeakPasswordCheck bool `yaml:"weakPasswordCheck"`
 }
 
 // ProxyConfig 是 Agent 代理模式（edge/hub）的配置。
@@ -89,6 +107,7 @@ type CollectorToggle struct {
 	MongoDB  bool `yaml:"mongodb"`  // MongoDB 中间件监控，默认关闭
 	FastDFS  bool `yaml:"fastdfs"`  // FastDFS 中间件监控，默认关闭
 	Port     bool `yaml:"port"`     // 端口存活检测，默认关闭
+	Security bool `yaml:"security"` // 安全采集（SSH 审计/FIM/基线/异常进程/sudo），默认关闭
 }
 
 // Default 返回默认配置。
@@ -109,6 +128,23 @@ func Default() *Config {
 			BufferSize: 1000,
 			PoolSize:   2,
 		},
+		Security: DefaultSecurity(),
+	}
+}
+
+// DefaultSecurity 返回安全采集的默认配置。
+func DefaultSecurity() SecurityConfig {
+	return SecurityConfig{
+		FIMPaths: []string{
+			"/etc/passwd",
+			"/etc/shadow",
+			"/etc/group",
+			"/etc/ssh/sshd_config",
+			"/etc/sudoers",
+		},
+		BruteForceThreshold: 5,
+		BruteForceWindowSec: 300,
+		WeakPasswordCheck:   true,
 	}
 }
 

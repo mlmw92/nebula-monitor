@@ -84,6 +84,7 @@ import {
   ArrowRight,
   DataLine,
   Grid,
+  Lock,
 } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { useBrand } from '../composables/useBrand'
@@ -111,6 +112,7 @@ const flatItems = [
   { key: 'notify', to: '/notify', label: '通知配置', icon: Message },
   { key: 'metrics-explore', to: '/metrics/explore', label: '指标浏览', icon: DataLine },
   { key: 'dashboards', to: '/system/dashboards', label: '自定义仪表盘', icon: Grid },
+  { key: 'security', to: '/security', label: '安全中心', icon: Lock },
 ]
 
 // 分组菜单：一级菜单 + 二级子菜单
