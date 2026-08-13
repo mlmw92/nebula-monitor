@@ -197,7 +197,17 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// 安全事件/基线处理：先落库，再对每条事件注入告警中心（复用静默/维护窗口/通知）。
+	// 回填节点 IP：事件可能未携带（旧版 Agent 或代理转发场景），统一用上报体的主机 IP 兜底，
+	// 保证前端「节点」列始终展示服务器 IP。
 	if r.sec != nil && (len(payload.SecurityEvents) > 0 || payload.SecurityBaseline != nil) {
+		for i := range payload.SecurityEvents {
+			if payload.SecurityEvents[i].NodeIP == "" {
+				payload.SecurityEvents[i].NodeIP = payload.IP
+			}
+		}
+		if payload.SecurityBaseline != nil && payload.SecurityBaseline.NodeIP == "" {
+			payload.SecurityBaseline.NodeIP = payload.IP
+		}
 		r.sec.Ingest(payload.Node, payload.SecurityEvents, payload.SecurityBaseline)
 	}
 	if r.alerts != nil {
