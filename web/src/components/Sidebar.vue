@@ -107,12 +107,12 @@ const flatItems = [
   { key: 'hosts', to: '/hosts', label: '主机列表', icon: Monitor },
   { key: 'middleware', to: '/middleware', label: '中间件监控', icon: Connection },
   { key: 'alerts', to: '/alerts', label: '告警中心', icon: Bell },
+  { key: 'security', to: '/security', label: '安全中心', icon: Lock },
   { key: 'dialtest', to: '/dialtest', label: '服务拨测', icon: Connection },
   { key: 'report', to: '/report', label: '巡检报告', icon: Document },
   { key: 'notify', to: '/notify', label: '通知配置', icon: Message },
   { key: 'metrics-explore', to: '/metrics/explore', label: '指标浏览', icon: DataLine },
   { key: 'dashboards', to: '/system/dashboards', label: '自定义仪表盘', icon: Grid },
-  { key: 'security', to: '/security', label: '安全中心', icon: Lock },
 ]
 
 // 分组菜单：一级菜单 + 二级子菜单

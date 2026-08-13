@@ -22,6 +22,7 @@
 - **网闸代理模式**：Edge / Hub mTLS 隧道穿透网闸，单端口、断线重连、内存缓冲
 - **一键部署与升级**：Server + Agent 离线 / 在线安装，Web 端系统升级与独立 IP 地理库热更新
 - **可观测性增强**：指标自动发现（按分类浏览全部采集指标、标记在线状态）、自定义仪表盘（Web 端自由编排面板并持久化）、历史数据导出（按指标/主机/时间范围导出 CSV）
+- **安全监测中心**：SSH 登录审计与暴力破解检测、文件完整性监测（FIM，关键文件 SHA256 基线比对）、安全基线合规评分、异常进程与反弹 shell 检测、sudo 提权审计；事件复用阈值告警体系（邮件/Webhook/钉钉/飞书/企业微信，支持静默与维护窗口），Web 端「安全中心」统一查看与处置
 
 > **设计要点**：Server 完全无状态，时序库独立持久化，重启不丢数据；时序库与 Server 可分机部署。
 
@@ -190,6 +191,57 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 - **指标自动发现**：通过「指标浏览」页面按分类查看系统已注册的全部采集指标（主机与各类中间件），并实时探测每个指标是否有数据上报（标记在线/离线），便于快速定位可用指标。对应后端接口 `GET /api/v1/metrics/catalog` 与 `GET /api/v1/metrics/active`。
 - **自定义仪表盘**：通过「自定义仪表盘」页面新建看板，自由添加面板（图表类型支持折线/面积/柱状/仪表盘），每个面板可指定指标、限定主机/中间件实例、附加筛选标签与时间范围/步长。看板配置独立持久化到 `dashboards.yaml`（默认 `/etc/monitor-server/dashboards.yaml`），保存即落盘、热生效，升级不覆盖。对应后端接口 `GET/POST/PUT/DELETE /api/v1/dashboards`。
 - **历史数据导出**：在「指标浏览」页面选定指标、主机/实例与时间范围后，可将历史时序数据导出为 CSV 文件（带 BOM，Excel 友好），单序列输出 `timestamp,value`，多序列输出 `timestamp,labels,value`。导出时间跨度上限为 7 天。对应后端接口 `GET /api/v1/metrics/export?metric=&node=&instance=&start=&end=&step=&labels=`。
+
+**安全监测中心（Agent 采集 + Server 落库告警）**
+
+安全监测中心对被监控主机进行主机层安全巡检，覆盖以下五类检测。事件统一在 Web 端「安全中心」页面（左侧菜单「告警中心」下方）查看，并复用现有告警体系发送通知。
+
+| 检测项 | 说明 |
+|------|------|
+| SSH 登录审计与暴力破解 | 解析 `/var/log/auth.log`（Debian/Ubuntu）或 `/var/log/secure`（RHEL/CentOS）的 SSH 登录记录，统计成功/失败登录与来源 IP；同一来源在时间窗口内失败次数超过阈值即判定为暴力破解并触发告警 |
+| 文件完整性监测（FIM） | 对指定关键文件计算 SHA256 哈希，与首次采集建立的基线比对；文件被修改即产生事件（仅上报哈希，不上传文件内容） |
+| 安全基线检查 | 按合规清单对主机评分（0–100）：如是否允许 root SSH 登录、是否使用密码认证、防火墙是否开启、是否部署 fail2ban、是否存在空口令账号等，得出合规评分与逐项结果 |
+| 异常进程与反弹 shell | 枚举 `/proc` 进程信息，识别矿池连接特征与可疑的反向 shell 进程（如 `bash -i >& /dev/tcp/...`） |
+| sudo 提权审计 | 记录 sudo 提权行为（执行用户、目标用户、命令），不含口令内容 |
+
+**告警复用**：安全事件通过告警引擎统一派发，规则 ID 形如 `security-<检测类别>`（例如 `security-ssh-bruteforce`、`security-fim`、`security-baseline`、`security-process`、`security-sudo`）。在「通知配置」中为安全类规则配置通知渠道与阈值即可收到通知，同样支持静默、维护窗口、告警升级、抑制与分组。
+
+> **版本要求**：安全监测涉及 Agent 采集与 Server 落库/告警两端改动，需 Agent 与 Server 同时升级到 1.22.0 及以上版本；仅升级一端时「安全中心」无数据。
+
+**安全监测中心配置**
+
+安全监测默认关闭，需在 Agent 配置中开启：
+
+```yaml
+collectors:
+  security: true              # ← 开启安全采集（默认 false）
+
+security:                    # 可选，全部字段均有默认值时可省略
+  fimPaths:                  # FIM 监测文件列表，默认监测关键系统文件
+    - /etc/passwd
+    - /etc/shadow
+    - /etc/group
+    - /etc/ssh/sshd_config
+    - /etc/sudoers
+  sshLogPaths:               # SSH 登录日志路径；留空则自动探测 /var/log/auth.log 与 /var/log/secure
+    - /var/log/auth.log
+  bruteForceThreshold: 5     # 暴力破解判定阈值：同一来源失败次数达到该值即告警
+  bruteForceWindowSec: 300   # 统计窗口（秒）：窗口内的失败次数累计
+  weakPasswordCheck: true    # 是否检查空口令账户（需 root 权限，默认开启）
+  fimBaselinePath: ""        # FIM 哈希基线持久化路径；留空使用默认路径
+```
+
+配置要点：
+- 开启 `collectors.security` 后无需额外配置即可工作，所有 `security` 子项均有合理默认值；
+- 修改配置后需重启 Agent 生效；
+- FIM 首次采集会在 Agent 本地建立哈希基线，之后每次比对；基线文件建议随 Agent 一并备份；
+- 安全事件由 Server 接收后落库（默认存储文件 `securityStoreFile`，见 `server.yaml`，默认 `/var/lib/monitor-server/security_store.json`），并在触发阈值时告警；数据仅存于 Server 侧，不上报第三方。
+
+Server 端如需修改安全数据持久化路径，在 `server.yaml` 中配置：
+
+```yaml
+securityStoreFile: /var/lib/monitor-server/security_store.json
+```
 
 ### 路线图（未实现）
 
@@ -425,7 +477,7 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `secret` | 接入授权密钥（与 Server 一致） |
 | `interval` | 采集间隔（秒）；代理模式下用于自监控指标上报周期 |
 | `proxy` | 代理模式配置（mode=edge/hub 时生效），见下表 |
-| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / nginxLog / kafka / docker / rocketmq / k8s / mongodb / fastdfs / port） |
+| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / nginxLog / kafka / docker / rocketmq / k8s / mongodb / fastdfs / port / security）；`security` 默认关闭，开启后由 `security` 配置段控制采集细节 |
 | `redisInstances` | Redis 实例连接配置列表（数组，密码仅存本地不上报） |
 | `mysqlInstances` | MySQL 实例连接配置列表（数组，密码仅存本地不上报） |
 | `postgresInstances` | PostgreSQL 实例连接配置列表（数组，密码仅存本地不上报） |
@@ -437,6 +489,7 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `rocketmqInstances` | RocketMQ 实例连接配置列表（数组） |
 | `k8sInstances` | Kubernetes 集群连接配置列表（数组，kubeconfig/token 仅存本地不上报） |
 | `portChecks` | TCP 端口存活检测列表（数组），如 `["80","443","3306"]`，开启 `collectors.port` 后生效 |
+| `security` | 安全采集配置段（开启 `collectors.security` 后生效），详见「安全监测中心配置」章节 |
 
 **代理模式配置（`proxy` 字段，mode=edge/hub 时生效）**
 
@@ -1193,7 +1246,7 @@ journalctl -u monitor-proxy-hub -f
 cmd/{agent,server}        Agent / Server 入口
 internal/                 业务代码（model / agent / server）
   agent/
-    collector/              各采集器（host / redis / mysql / postgres / nginx / kafka / docker / rocketmq / k8s / port）
+    collector/              各采集器（host / redis / mysql / postgres / nginx / kafka / docker / rocketmq / k8s / port / security）
     config/                 Agent 配置（含 mode/ProxyConfig 代理模式字段）
     proxy/                  代理模式核心包（tunnel/edge/hub/connpool/reconnector/buffer/monitor/tls）
     reporter/               Agent 上报逻辑
