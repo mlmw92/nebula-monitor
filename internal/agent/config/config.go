@@ -122,6 +122,7 @@ func Default() *Config {
 		BatchSize: 200,
 		Collectors: CollectorToggle{
 			CPU: true, Memory: true, Disk: true, Network: true, Process: true, Load: true,
+			Security: true,
 		},
 		Proxy: ProxyConfig{
 			Listen:     ":18080",

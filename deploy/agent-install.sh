@@ -493,6 +493,8 @@ collectors:
   network: $C_NET
   process: $C_PROC
   load: $C_LOAD
+  # === 安全监测（默认开启；FIM/SSH 审计等详见 README「安全监测中心配置」章节）===
+  security: true
   # === 中间件监控（默认关闭，按需开启；实例示例见 README「中间件监控」章节）===
   redis: false
   mysql: false

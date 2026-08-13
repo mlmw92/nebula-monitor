@@ -210,11 +210,11 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 
 **安全监测中心配置**
 
-安全监测默认关闭，需在 Agent 配置中开启：
+安全监测默认开启，新主机部署后无需额外配置即可工作；如需关闭，将 `collectors.security` 设为 `false` 并重启 Agent：
 
 ```yaml
 collectors:
-  security: true              # ← 开启安全采集（默认 false）
+  security: true              # ← 安全采集（默认 true）
 
 security:                    # 可选，全部字段均有默认值时可省略
   fimPaths:                  # FIM 监测文件列表，默认监测关键系统文件
@@ -477,7 +477,7 @@ cross-compile.sh → build-web.sh → fetch-packages.sh → release.sh →
 | `secret` | 接入授权密钥（与 Server 一致） |
 | `interval` | 采集间隔（秒）；代理模式下用于自监控指标上报周期 |
 | `proxy` | 代理模式配置（mode=edge/hub 时生效），见下表 |
-| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / nginxLog / kafka / docker / rocketmq / k8s / mongodb / fastdfs / port / security）；`security` 默认关闭，开启后由 `security` 配置段控制采集细节 |
+| `collectors` | 采集项开关（cpu / memory / disk / network / process / load / redis / mysql / postgres / nginx / nginxLog / kafka / docker / rocketmq / k8s / mongodb / fastdfs / port / security）；`security` 默认开启，关闭时设 `false` |
 | `redisInstances` | Redis 实例连接配置列表（数组，密码仅存本地不上报） |
 | `mysqlInstances` | MySQL 实例连接配置列表（数组，密码仅存本地不上报） |
 | `postgresInstances` | PostgreSQL 实例连接配置列表（数组，密码仅存本地不上报） |
