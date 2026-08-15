@@ -35,7 +35,13 @@ func AuditMiddleware(next http.Handler, store *audit.Store) http.Handler {
 		// 则中间件不再重复记录，避免同一次操作产生两条审计（如规则增删改）。
 		recorded := new(bool)
 		r = r.WithContext(context.WithValue(r.Context(), auditDedupKey{}, recorded))
-		detail := auditRequestDetail(r)
+		// multipart/form-data（升级包 / GeoIP 库上传等）不能提前读取并还原请求体：
+		// io.MultiReader 还原会让下游 ParseMultipartForm 报 "bufio: buffer full"，
+		// 导致上传解析失败。上传类请求本就不会被审计记录（classify 返回空 action），故跳过读取。
+		var detail string
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			detail = auditRequestDetail(r)
+		}
 		recorder := &auditResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(recorder, r)
 		if *recorded {
