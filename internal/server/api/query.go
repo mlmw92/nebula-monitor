@@ -841,6 +841,9 @@ func (a *API) handleRuleUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "rule not found", http.StatusNotFound)
 		return
 	}
+	if before.Enabled && !rule.Enabled && a.engine != nil {
+		a.engine.DisableRule(rule)
+	}
 	RecordChangeAudit(a.audit, r, "update_rule", before, rule)
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }

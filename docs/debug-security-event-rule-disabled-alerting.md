@@ -86,18 +86,21 @@ key := ser.Labels["rule"] + "|" + ser.Labels["host"] + "|" + ser.Labels["instanc
 1. `Recent()` 分组 key 去掉 `state`，改为 `rule|host|instance`，只保留每个告警的最新状态。
 2. `engine.go` 的 `cleanupInactiveRulesLocked` 与 `CloseRuleAlerts` 在关闭告警时**保留原始 message**（如 SSH 认证中断详情），并追加「规则已停用或删除」原因，避免 resolved 行丢失上下文。
 
-### 第 5 步：部署后仍有新告警，且「已恢复」为空
+### 第 6 步：复现并修复规则切换与事件处理之间的缺口
 
-用户部署 `e8e5ebb` 后反馈：活跃与全部 tab 出现**新的**安全事件告警（时间 23:18:07），已恢复 tab 为空。
+继续审计后确认，当前源码仍存在三个独立问题：
 
-复核当前源码（本地 HEAD 已包含 `e8e5ebb`、VERSION 已为 `1.22.8`）：
+1. `evaluate()` 原先在取得引擎锁前读取 `rules.List()`。当评估循环获得旧的 `enabled=true` 快照、规则随后被禁用并完成 `DisableRule()` 清理、又恰有 Agent 事件入队时，本轮仍可能按旧快照消费该事件并写入新的 firing。该 firing 在此前清理之后产生，因此不会同步写入 resolved，表现为「已恢复为空，活跃/全部出现新的告警」。
+2. `PUT /api/v1/rules/:id` 的普通编辑接口此前只保存 `enabled=false`，未调用 `DisableRule()`；只有 switch 使用的 `/toggle` 接口会即时关闭 firing 与清理队列。通过编辑窗口停用规则时，存在一个评估周期内的残留事件窗口。
+3. 安全事件队列由全部安全规则共享。旧的 `clearSecurityEventsForRule()` 在禁用空 Category 的通配规则时会删除所有待处理事件，误伤仍启用的分类规则。
 
-- `receiver.go` 现调用 `IngestSecurityEvents`（已非 `EmitSecurityAlert`）。
-- `evaluate()` 仍有 `if !r.Enabled { continue }` 保护，禁用规则不会触发 `evalSecurityEvents`。
-- 全仓搜索确认 `EmitSecurityAlert` **已无调用方**（死代码）。
-- `cleanupInactiveRulesLocked` 在 `evaluate()` 末尾对已停用安全事件规则调用 `clearSecurityEventsForRule`，清理未处理事件队列。
+**修复**：
 
-结论：当前仓库源码逻辑已正确。线上 `1.22.7` 二进制**仍未包含最新修复**（本地 `VERSION` 当时已是 `1.22.8`，二进制与修复代码不同步），因此仍有绕过禁用的新告警产生。
+- 规则快照与节点快照移动至引擎锁内读取，保证规则停用后的评估不会再使用过期启用快照。
+- 普通规则编辑由启用改为停用时，也调用 `DisableRule()`。
+- 统一按仍启用的安全事件规则筛选共享队列：仅丢弃没有任何启用规则能处理的事件；禁用规则的去重记录仍会清理。
+
+验证：新增通配规则禁用与分类规则并存的回归测试；`go test ./...` 通过。
 
 ---
 
@@ -116,6 +119,7 @@ key := ser.Labels["rule"] + "|" + ser.Labels["host"] + "|" + ser.Labels["instanc
 | --- | --- |
 | `2aa31c2` | 安全事件规则禁用后仍告警及内存无限增长：receiver 改走 `IngestSecurityEvents`，禁用即时清理事件队列与去重缓存 |
 | `e8e5ebb` | 告警中心「全部」tab 对同一事件重复显示 firing/resolved 两行：`Recent()` 分组去 `state`，resolved 保留原始 message |
+| 本次待提交修复 | 规则快照与安全事件队列同步、普通编辑停用即时清理、通配规则禁用不再误删分类规则事件 |
 
 ---
 
@@ -123,8 +127,9 @@ key := ser.Labels["rule"] + "|" + ser.Labels["host"] + "|" + ser.Labels["instanc
 
 1. 重新编译部署最新源码后，执行 `GET /api/v1/version`，确认 `server` 版本与 `buildTime` 已更新为最新编译。
 2. 在 UI 将「安全事件」规则**启用**，等待一条新的 SSH 登录/认证中断事件 → 应产生新告警。
-3. 再将其**禁用** → 后续新事件不再产生告警；已有「告警中」会在约一个评估周期（默认 `EvalInterval=15s`）内自动变「已恢复」。
-4. 切换「活跃 / 全部 / 已恢复」tab，确认不再重复展示同一事件的两行状态。
+3. 再将其禁用（开关或编辑保存均可）→ 当前 firing 立即关闭，后续安全事件不再产生该规则告警。
+4. 同时保留一个启用的指定分类安全事件规则、禁用通配规则，确认该分类的新事件仍能产生告警。
+5. 切换「活跃 / 全部 / 已恢复」tab，确认不再重复展示同一事件的两行状态。
 
 ---
 

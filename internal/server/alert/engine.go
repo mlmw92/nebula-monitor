@@ -234,21 +234,9 @@ func (e *Engine) clearSecurityEventsForRule(r model.AlertRule) {
 			delete(e.securityRuleEvents, key)
 		}
 	}
-	for node, events := range e.securityEvents {
-		filtered := events[:0]
-		for _, ev := range events {
-			if r.Category != "" && r.Category != ev.Category {
-				filtered = append(filtered, ev)
-				continue
-			}
-			// 类别匹配（含空 Category 的通配规则）时丢弃未处理事件，防止禁用后继续触发。
-		}
-		if len(filtered) == 0 {
-			delete(e.securityEvents, node)
-		} else {
-			e.securityEvents[node] = filtered
-		}
-	}
+	// 安全事件队列由多条规则共享。仅保留仍可被任一启用安全事件规则处理的事件，
+	// 防止禁用通配规则时误删启用分类规则的待处理事件。
+	e.cleanupSecurityEventsLocked(e.rules.List())
 }
 
 func (e *Engine) emitRuleSecurityEvent(r model.AlertRule, source model.SecurityEvent, now int64, message string) {
@@ -288,12 +276,14 @@ func (e *Engine) emitRuleSecurityEvent(r model.AlertRule, source model.SecurityE
 }
 
 func (e *Engine) evaluate() {
-	rules := e.rules.List()
-	nodes := e.nodeMgr.ListNodes()
 	now := model.NowMillis()
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	// 规则读取必须与事件队列操作处于同一个引擎锁边界内：否则规则切换为禁用后，
+	// 本轮可能仍持有旧的 Enabled=true 快照并消费刚上报的安全事件。
+	rules := e.rules.List()
+	nodes := e.nodeMgr.ListNodes()
 	if len(rules) == 0 {
 		e.cleanupInactiveRulesLocked(rules, now)
 		return
@@ -374,16 +364,45 @@ func (e *Engine) cleanupInactiveRulesLocked(rules []model.AlertRule, now int64) 
 			delete(e.states, key)
 		}
 	}
-	// 清理已停用/已删除安全事件规则相关的未处理事件与去重缓存，避免规则关闭后继续触发。
-	for _, r := range rules {
-		if r.Type == RuleTypeSecurityEvent && !r.Enabled {
-			e.clearSecurityEventsForRule(r)
-		}
-	}
+	// 清理已停用/已删除安全事件规则相关的去重缓存，并仅丢弃没有任何启用规则
+	// 能够匹配的事件，避免禁用通配规则时误删启用分类规则的待处理事件。
+	e.cleanupSecurityEventsLocked(rules)
 	e.recheckSuppressedLocked()
 }
 
-// inQuietPeriod 判断当前时间是否落在任意周期静默时段内（按本地星期与时间区间匹配，支持跨天）。
+func (e *Engine) cleanupSecurityEventsLocked(rules []model.AlertRule) {
+	active := make([]model.AlertRule, 0)
+	for _, r := range rules {
+		if r.Type == RuleTypeSecurityEvent && r.Enabled {
+			active = append(active, r)
+		}
+	}
+	for key := range e.securityRuleEvents {
+		for _, r := range rules {
+			if r.Type == RuleTypeSecurityEvent && !r.Enabled && strings.HasPrefix(key, r.ID+"|") {
+				delete(e.securityRuleEvents, key)
+				break
+			}
+		}
+	}
+	for node, events := range e.securityEvents {
+		filtered := events[:0]
+		for _, ev := range events {
+			for _, r := range active {
+				if r.Category == "" || r.Category == ev.Category {
+					filtered = append(filtered, ev)
+					break
+				}
+			}
+		}
+		if len(filtered) == 0 {
+			delete(e.securityEvents, node)
+			continue
+		}
+		e.securityEvents[node] = filtered
+	}
+}
+
 func inQuietPeriod(periods []model.QuietPeriod, nowMillis int64) bool {
 	if len(periods) == 0 {
 		return false
