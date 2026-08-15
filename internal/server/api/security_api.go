@@ -84,7 +84,14 @@ func (a *API) handleSecurityEvents(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	events := a.security.Events(limit, q.Get("category"), q.Get("node"))
+	// category 归一化：空串或各类「全部」占位值都视为不过滤，返回全部事件。
+	// 兼容旧前端把「全部类别」作为一个真实选项（value 可能为 all/全部/* 等）的情形。
+	cat := q.Get("category")
+	switch cat {
+	case "all", "ALL", "all_categories", "全部", "所有", "*", "any", "none":
+		cat = ""
+	}
+	events := a.security.Events(limit, cat, q.Get("node"))
 	if events == nil {
 		events = []model.SecurityEvent{}
 	}
