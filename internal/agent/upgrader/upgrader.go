@@ -103,7 +103,8 @@ func buildUpgradeScript(serverURL, url, binPath, secret string) string {
 	return fmt.Sprintf(`#!/usr/bin/env bash
 set -e
 SCRIPT="$0"
-trap 'rm -f "$SCRIPT"' EXIT
+TMP=""
+trap 'rm -f "$SCRIPT" "$TMP" "$TMP.sha256"' EXIT
 
 LOG() { echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] $*"; }
 
