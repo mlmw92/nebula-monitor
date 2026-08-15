@@ -907,6 +907,11 @@ func (a *API) handleRuleToggle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "update failed", http.StatusInternalServerError)
 		return
 	}
+	// 规则由启用变为停用时，立即通知引擎清理该规则的 firing 与未处理安全事件队列，
+	// 避免前端已显示关闭但后台仍在产生新告警。
+	if !rule.Enabled && a.engine != nil {
+		a.engine.DisableRule(rule)
+	}
 	writeJSON(w, 200, rule)
 }
 

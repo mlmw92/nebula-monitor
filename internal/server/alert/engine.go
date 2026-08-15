@@ -200,12 +200,16 @@ func (e *Engine) evalSecurityEvents(r model.AlertRule, nodes []model.Node, now i
 		if !nodeSet[node] {
 			continue
 		}
-		for _, ev := range events {
+		for i := 0; i < len(events); {
+			ev := events[i]
 			if r.Category != "" && r.Category != ev.Category {
+				i++
 				continue
 			}
 			key := r.ID + "|" + ev.Node + "|" + ev.ID
 			if _, seen := e.securityRuleEvents[key]; seen {
+				// 已按该规则处理过，从事件队列移除，避免无限累积。
+				events = append(events[:i], events[i+1:]...)
 				continue
 			}
 			e.securityRuleEvents[key] = now
@@ -214,6 +218,35 @@ func (e *Engine) evalSecurityEvents(r model.AlertRule, nodes []model.Node, now i
 				msg = "节点 " + ev.Node + " 发生安全事件：" + securityCategoryName(ev.Category)
 			}
 			e.emitRuleSecurityEvent(r, ev, now, msg)
+			// 触发后从队列移除，避免重复处理与内存无限增长。
+			events = append(events[:i], events[i+1:]...)
+		}
+		e.securityEvents[node] = events
+	}
+}
+
+// clearSecurityEventsForRule 在规则禁用/删除时清理该规则相关的未处理安全事件与去重缓存。
+// 调用方须持有 e.mu。
+func (e *Engine) clearSecurityEventsForRule(r model.AlertRule) {
+	prefix := r.ID + "|"
+	for key := range e.securityRuleEvents {
+		if strings.HasPrefix(key, prefix) {
+			delete(e.securityRuleEvents, key)
+		}
+	}
+	for node, events := range e.securityEvents {
+		filtered := events[:0]
+		for _, ev := range events {
+			if r.Category != "" && r.Category != ev.Category {
+				filtered = append(filtered, ev)
+				continue
+			}
+			// 类别匹配（含空 Category 的通配规则）时丢弃未处理事件，防止禁用后继续触发。
+		}
+		if len(filtered) == 0 {
+			delete(e.securityEvents, node)
+		} else {
+			e.securityEvents[node] = filtered
 		}
 	}
 }
@@ -335,6 +368,12 @@ func (e *Engine) cleanupInactiveRulesLocked(rules []model.AlertRule, now int64) 
 		ruleID := strings.SplitN(key, "|", 2)[0]
 		if !active[ruleID] {
 			delete(e.states, key)
+		}
+	}
+	// 清理已停用/已删除安全事件规则相关的未处理事件与去重缓存，避免规则关闭后继续触发。
+	for _, r := range rules {
+		if r.Type == RuleTypeSecurityEvent && !r.Enabled {
+			e.clearSecurityEventsForRule(r)
 		}
 	}
 	e.recheckSuppressedLocked()
@@ -918,6 +957,7 @@ func (e *Engine) refreshSuppressedTargetsLocked(source model.AlertEvent) {
 func (e *Engine) CloseRuleAlerts(rule model.AlertRule, message string) {
 	now := model.NowMillis()
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	deferred := make([]model.AlertEvent, 0)
 	for key, fe := range e.firing {
 		if fe.event.RuleID != rule.ID {
@@ -932,10 +972,12 @@ func (e *Engine) CloseRuleAlerts(rule model.AlertRule, message string) {
 		delete(e.states, key)
 		deferred = append(deferred, ev)
 	}
+	if rule.Type == RuleTypeSecurityEvent {
+		e.clearSecurityEventsForRule(rule)
+	}
 	if len(deferred) > 0 {
 		e.recheckSuppressedLocked()
 	}
-	e.mu.Unlock()
 
 	for _, ev := range deferred {
 		e.alerts.Add(ev)
@@ -943,6 +985,11 @@ func (e *Engine) CloseRuleAlerts(rule model.AlertRule, message string) {
 			e.broadcaster.BroadcastAlert(ev)
 		}
 	}
+}
+
+// DisableRule 在规则禁用时立即关闭其活跃告警并清理相关的安全事件待处理队列。
+func (e *Engine) DisableRule(rule model.AlertRule) {
+	e.CloseRuleAlerts(rule, "规则已停用，告警状态已关闭")
 }
 
 func (e *Engine) resolve(r model.AlertRule, node, instance string, value float64, now int64, msg ...string) {
