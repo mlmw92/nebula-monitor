@@ -74,7 +74,8 @@ func (s *VMAlertStore) Add(e model.AlertEvent) {
 // Recent 返回最近 limit 条告警事件（按事件时间倒序）。
 // 告警事件是 fire/resolve 切换时一次性写入的稀疏样本，
 // 用 range query 在大窗口+固定步长下会被时序库降采样吞掉，改用 instant query
-// 直接取每个序列的最新点，对每个 (rule, host, state) 都能拿到。
+// 直接取每个序列的最新点；对同一 (rule, host, instance) 只保留最新状态的事件，
+// 避免「全部」tab 把 firing/resolved 展示成两行。
 func (s *VMAlertStore) Recent(limit int) []model.AlertEvent {
 	series, err := s.store.QueryInstantWithLookback("system", alertMetric, nil, 30*24*time.Hour)
 	if err != nil {
@@ -87,7 +88,7 @@ func (s *VMAlertStore) Recent(limit int) []model.AlertEvent {
 		if len(ser.Points) == 0 {
 			continue
 		}
-		key := ser.Labels["rule"] + "|" + ser.Labels["host"] + "|" + ser.Labels["instance"] + "|" + ser.Labels["state"]
+		key := ser.Labels["rule"] + "|" + ser.Labels["host"] + "|" + ser.Labels["instance"]
 		p := ser.Points[len(ser.Points)-1]
 		ev := buildEvent(ser.Labels, p.Timestamp, p.Value)
 		if cur, ok := latest[key]; !ok || eventTime(ev) > eventTime(cur) ||

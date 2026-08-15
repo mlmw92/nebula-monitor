@@ -350,7 +350,11 @@ func (e *Engine) cleanupInactiveRulesLocked(rules []model.AlertRule, now int64) 
 		ev.State = model.AlertStateResolved
 		ev.StartsAt = 0
 		ev.EndsAt = now
-		ev.Message = "规则已停用或删除，告警状态已关闭"
+		if ev.Message != "" {
+			ev.Message = ev.Message + "（规则已停用或删除，告警状态已关闭）"
+		} else {
+			ev.Message = "规则已停用或删除，告警状态已关闭"
+		}
 		delete(e.firing, key)
 		e.alerts.Add(ev)
 		if e.broadcaster != nil {
@@ -967,7 +971,11 @@ func (e *Engine) CloseRuleAlerts(rule model.AlertRule, message string) {
 		ev.State = model.AlertStateResolved
 		ev.StartsAt = 0
 		ev.EndsAt = now
-		ev.Message = message
+		if ev.Message != "" {
+			ev.Message = ev.Message + "（" + message + "）"
+		} else {
+			ev.Message = message
+		}
 		delete(e.firing, key)
 		delete(e.states, key)
 		deferred = append(deferred, ev)
