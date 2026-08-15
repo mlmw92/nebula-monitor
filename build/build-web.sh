@@ -19,7 +19,10 @@ npm run build
 cd "$ROOT"
 
 echo "==> 平铺拷贝到 $OUT_DIR"
-rm -rf "$OUT_DIR" || true
+# 先清空目标目录再拷贝，防止旧版本前端文件残留混入新产物。
+# 不用 `rm -rf ... || true`：若删除失败（目录被占用等）会掩盖错误继续 cp，
+# 导致新旧文件叠加（曾把 v1.22.3 旧文件混进 v1.22.4 包）。set -e 下失败即中止。
+rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 cp -a web/dist/. "$OUT_DIR/"
 
