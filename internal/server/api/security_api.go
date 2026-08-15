@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
@@ -84,14 +85,12 @@ func (a *API) handleSecurityEvents(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	// category 归一化：空串或各类「全部」占位值都视为不过滤，返回全部事件。
-	// 兼容旧前端把「全部类别」作为一个真实选项（value 可能为 all/全部/* 等）的情形。
-	cat := q.Get("category")
-	switch cat {
-	case "all", "ALL", "all_categories", "全部", "所有", "*", "any", "none":
-		cat = ""
-	}
-	events := a.security.Events(limit, cat, q.Get("node"))
+	// category / node 归一化：空串或各类「全部」占位值都视为不过滤，返回全部事件。
+	// 兼容旧前端：el-select 未选中时 v-model 为 undefined，经 URLSearchParams
+	// 序列化成字符串 "undefined"（非空），会使后端按非空 category 过滤而返回空。
+	cat := normalizeSecurityFilter(q.Get("category"))
+	node := normalizeSecurityFilter(q.Get("node"))
+	events := a.security.Events(limit, cat, node)
 	if events == nil {
 		events = []model.SecurityEvent{}
 	}
@@ -121,4 +120,15 @@ func (a *API) handleSecurityBaselines(w http.ResponseWriter, r *http.Request) {
 		baselines[i].DisplayName = a.nodeDisplayName(baselines[i].Node)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"baselines": baselines, "enabled": true})
+}
+
+// normalizeSecurityFilter 将安全事件/基线查询参数归一化：
+// 空串、空白、字符串 "undefined"（旧前端 el-select 未选中时经 URLSearchParams
+// 序列化得到），以及各类「全部」占位值，均视为不过滤。
+func normalizeSecurityFilter(v string) string {
+	switch strings.TrimSpace(v) {
+	case "", "undefined", "null", "all", "ALL", "all_categories", "全部", "所有", "*", "any", "none":
+		return ""
+	}
+	return strings.TrimSpace(v)
 }
