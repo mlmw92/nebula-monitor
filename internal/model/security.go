@@ -26,8 +26,9 @@ type SecurityEvent struct {
 	Severity  Severity          `json:"severity"`            // 严重级别
 	Message   string            `json:"message"`             // 人类可读描述
 	Detail    map[string]string `json:"detail,omitempty"`    // 结构化细节（不含敏感内容）
-	SourceIP  string            `json:"sourceIp,omitempty"`  // 来源 IP（SSH/sudo 场景）
-	User      string            `json:"user,omitempty"`      // 关联账户（不含口令）
+	SourceIP        string            `json:"sourceIp,omitempty"`        // 来源 IP（SSH/sudo 场景）
+	SourceLocation  string            `json:"sourceLocation,omitempty"`  // 来源 IP 属地（国家/省份/城市，由 Server 端经 ip2region 补全）
+	User            string            `json:"user,omitempty"`            // 关联账户（不含口令）
 	Timestamp int64             `json:"timestamp"`           // 事件时间（毫秒）
 }
 

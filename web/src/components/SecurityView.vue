@@ -75,10 +75,13 @@
           </template>
         </el-table-column>
         <el-table-column prop="message" label="描述" min-width="280" show-overflow-tooltip />
-        <el-table-column label="来源 / 账户" width="170">
+        <el-table-column label="来源 / 账户" width="190">
           <template #default="{ row }">
-            <span v-if="row.sourceIp" class="dim">IP {{ row.sourceIp }}</span>
-            <span v-if="row.user" class="dim"> · {{ row.user }}</span>
+            <div v-if="row.sourceIp" class="src-block">
+              <span class="dim">IP {{ row.sourceIp }}</span>
+              <span v-if="row.sourceLocation" class="geo-tag" :title="row.sourceLocation">{{ row.sourceLocation }}</span>
+            </div>
+            <span v-if="row.user" class="dim">账户 {{ row.user }}</span>
             <span v-if="!row.sourceIp && !row.user" class="muted">-</span>
           </template>
         </el-table-column>
@@ -399,6 +402,23 @@ onMounted(() => {
 
 .dim { color: var(--text-dim); font-size: 12px; }
 .muted { color: var(--text-muted); font-size: 12px; }
+
+/* 来源 IP 属地标签 */
+.src-block { display: flex; flex-direction: column; gap: 2px; }
+.geo-tag {
+  display: inline-block;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: rgba(74, 157, 240, 0.15);
+  color: #6DB3F2;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 基线 */
 .baseline-node {

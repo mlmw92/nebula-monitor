@@ -9,6 +9,7 @@ import (
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/audit"
+	"github.com/nebula/monitor/internal/server/nginxaccess"
 )
 
 // handleSecuritySummary 返回安全态势概览：合规评分均值、事件总数、风险主机数、FIM 变化数。
@@ -98,6 +99,11 @@ func (a *API) handleSecurityEvents(w http.ResponseWriter, r *http.Request) {
 		if events[i].NodeIP == "" && events[i].Node != "" {
 			events[i].NodeIP = a.nodeIP(events[i].Node)
 		}
+		// 来源 IP 属地：SSH 审计/暴力破解、sudo 审计等事件含 SourceIP，
+		// 经已集成的 ip2region 库补全国家/省份/城市，便于研判攻击来源。
+		if events[i].SourceLocation == "" && events[i].SourceIP != "" {
+			events[i].SourceLocation = geoLocation(events[i].SourceIP)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"events": events, "enabled": true})
 }
@@ -131,4 +137,21 @@ func normalizeSecurityFilter(v string) string {
 		return ""
 	}
 	return strings.TrimSpace(v)
+}
+
+// geoLocation 经已集成的 ip2region 库查询 IP 归属地，返回「国家 省份 城市」
+// 的紧凑展示串；查询失败或内网/保留地址返回空串。
+func geoLocation(ip string) string {
+	country, _, province, city := nginxaccess.NewGeo().Search(ip)
+	var parts []string
+	if country != "" {
+		parts = append(parts, country)
+	}
+	if province != "" && province != country {
+		parts = append(parts, province)
+	}
+	if city != "" && city != province {
+		parts = append(parts, city)
+	}
+	return strings.Join(parts, " ")
 }
