@@ -27,32 +27,35 @@ type Broadcaster interface {
 
 // 规则类型别名（来自 model 包），便于引擎内分支判断。
 const (
-	RuleTypeThreshold    = model.RuleTypeThreshold
-	RuleTypeNodeOffline  = model.RuleTypeNodeOffline
-	RuleTypeServiceDown  = model.RuleTypeServiceDown
-	RuleTypeRoleChange   = model.RuleTypeRoleChange
-	RuleTypeClusterFault = model.RuleTypeClusterFault
+	RuleTypeThreshold     = model.RuleTypeThreshold
+	RuleTypeNodeOffline   = model.RuleTypeNodeOffline
+	RuleTypeServiceDown   = model.RuleTypeServiceDown
+	RuleTypeRoleChange    = model.RuleTypeRoleChange
+	RuleTypeClusterFault  = model.RuleTypeClusterFault
+	RuleTypeSecurityEvent = model.RuleTypeSecurityEvent
 )
 
 // Engine 阈值告警评估引擎。
 type Engine struct {
-	store        storage.Storage
-	nodeMgr      *node.Manager
-	rules        *RulesStore
-	alerts       *VMAlertStore
-	notifiers    []Notifier
-	broadcaster  Broadcaster
-	maintenance  *MaintenanceStore
-	evalInterval int
-	mu           sync.Mutex
-	states       map[string]*ruleState
-	dialActive   map[string]bool         // 拨测任务是否有未恢复故障事件，按 "dialtest:<taskID>" 记录
-	certActive   map[string]certState    // SSL 证书过期告警状态，按 "cert:<taskID>" 记录
-	securityActive map[string]bool       // 安全事件告警活跃状态，按 "node|category|hash(message)" 记录，用于去重窗口
-	firing       map[string]*firingEntry // 活跃 firing 事件（用于抑制匹配），按 rule|node|instance 记录
-	inhibit      *InhibitStore           // 抑制规则（可选）
-	grouping     *GroupingStore          // 分组配置（可选）
-	grouper      *Grouper                // 分组器（分组启用时非空）
+	store              storage.Storage
+	nodeMgr            *node.Manager
+	rules              *RulesStore
+	alerts             *VMAlertStore
+	notifiers          []Notifier
+	broadcaster        Broadcaster
+	maintenance        *MaintenanceStore
+	evalInterval       int
+	mu                 sync.Mutex
+	states             map[string]*ruleState
+	dialActive         map[string]bool                  // 拨测任务是否有未恢复故障事件，按 "dialtest:<taskID>" 记录
+	certActive         map[string]certState             // SSL 证书过期告警状态，按 "cert:<taskID>" 记录
+	securityActive     map[string]bool                  // 安全事件告警活跃状态，按 "node|category|hash(message)" 记录，用于去重窗口
+	securityEvents     map[string][]model.SecurityEvent // 最近一次上报的安全事件，按节点保存
+	securityRuleEvents map[string]int64                 // 已按规则处理的安全事件，按 rule|node|eventID 去重
+	firing             map[string]*firingEntry          // 活跃 firing 事件（用于抑制匹配），按 rule|node|instance 记录
+	inhibit            *InhibitStore                    // 抑制规则（可选）
+	grouping           *GroupingStore                   // 分组配置（可选）
+	grouper            *Grouper                         // 分组器（分组启用时非空）
 }
 
 type ruleState struct {
@@ -85,21 +88,23 @@ func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
 		evalInterval = 15
 	}
 	e := &Engine{
-		store:        store,
-		nodeMgr:      mgr,
-		rules:        rules,
-		alerts:       alerts,
-		notifiers:    notifiers,
-		broadcaster:  broadcaster,
-		maintenance:  maintenance,
-		evalInterval: evalInterval,
-		states:       map[string]*ruleState{},
-		dialActive:   map[string]bool{},
-		certActive:   map[string]certState{},
-		securityActive: map[string]bool{},
-		firing:       map[string]*firingEntry{},
-		inhibit:      inhibit,
-		grouping:     grouping,
+		store:              store,
+		nodeMgr:            mgr,
+		rules:              rules,
+		alerts:             alerts,
+		notifiers:          notifiers,
+		broadcaster:        broadcaster,
+		maintenance:        maintenance,
+		evalInterval:       evalInterval,
+		states:             map[string]*ruleState{},
+		dialActive:         map[string]bool{},
+		certActive:         map[string]certState{},
+		securityActive:     map[string]bool{},
+		securityEvents:     map[string][]model.SecurityEvent{},
+		securityRuleEvents: map[string]int64{},
+		firing:             map[string]*firingEntry{},
+		inhibit:            inhibit,
+		grouping:           grouping,
 	}
 	e.restoreActiveState()
 	// 分组启用时构建分组器：相同 groupBy 的告警合并为一组，按 groupWait/groupInterval 汇总发送。
@@ -158,6 +163,97 @@ func (e *Engine) Start(ctx context.Context) {
 	}()
 }
 
+// IngestSecurityEvents 接收 Agent 上报的安全事件，后续由评估循环按安全事件规则处理。
+func (e *Engine) IngestSecurityEvents(events []model.SecurityEvent) {
+	if len(events) == 0 {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, ev := range events {
+		if ev.Node == "" || ev.ID == "" {
+			continue
+		}
+		current := e.securityEvents[ev.Node]
+		duplicate := false
+		for _, old := range current {
+			if old.ID == ev.ID {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			e.securityEvents[ev.Node] = append(current, ev)
+		}
+	}
+}
+
+// evalSecurityEvents 按安全事件告警规则匹配并触发事件型告警。调用方须持有 e.mu。
+func (e *Engine) evalSecurityEvents(r model.AlertRule, nodes []model.Node, now int64) {
+	nodeSet := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		if matchesGroup(r.Group, n.Group) && matchesScope(r.Scope, r.Nodes, n.Hostname) {
+			nodeSet[n.Hostname] = true
+		}
+	}
+	for node, events := range e.securityEvents {
+		if !nodeSet[node] {
+			continue
+		}
+		for _, ev := range events {
+			if r.Category != "" && r.Category != ev.Category {
+				continue
+			}
+			key := r.ID + "|" + ev.Node + "|" + ev.ID
+			if _, seen := e.securityRuleEvents[key]; seen {
+				continue
+			}
+			e.securityRuleEvents[key] = now
+			msg := ev.Message
+			if msg == "" {
+				msg = "节点 " + ev.Node + " 发生安全事件：" + securityCategoryName(ev.Category)
+			}
+			e.emitRuleSecurityEvent(r, ev, now, msg)
+		}
+	}
+}
+
+func (e *Engine) emitRuleSecurityEvent(r model.AlertRule, source model.SecurityEvent, now int64, message string) {
+	ev := model.AlertEvent{
+		ID:        "security-rule-" + source.ID,
+		RuleID:    r.ID,
+		RuleName:  r.Name,
+		Node:      source.Node,
+		NodeIP:    source.NodeIP,
+		Instance:  source.ID,
+		Metric:    "security_event",
+		Value:     1,
+		Operator:  "==",
+		Threshold: 1,
+		Severity:  r.Severity,
+		State:     model.AlertStateFiring,
+		Message:   message,
+		StartsAt:  now,
+		Notify:    append([]string(nil), r.Notify...),
+	}
+	suppressed, by := e.computeSuppressedLocked(ev)
+	ev.Suppressed = suppressed
+	ev.SuppressedBy = by
+	e.trackFiringLocked(ev, suppressed)
+	e.refreshSuppressedTargetsLocked(ev)
+	e.alerts.Add(ev)
+	if e.broadcaster != nil {
+		e.broadcaster.BroadcastAlert(ev)
+	}
+	if !suppressed {
+		if e.grouper != nil {
+			e.grouper.Add(ev)
+		} else {
+			e.notify(ev)
+		}
+	}
+}
+
 func (e *Engine) evaluate() {
 	rules := e.rules.List()
 	nodes := e.nodeMgr.ListNodes()
@@ -195,6 +291,8 @@ func (e *Engine) evaluate() {
 			e.evalRoleChange(r, nodes, now)
 		case RuleTypeClusterFault:
 			e.evalClusterFault(r, nodes, now)
+		case RuleTypeSecurityEvent:
+			e.evalSecurityEvents(r, nodes, now)
 		default:
 			e.evalThreshold(r, nodes, now)
 		}
@@ -693,7 +791,8 @@ func (e *Engine) notifyEscalation(ev model.AlertEvent, esc *model.Escalation) {
 		chs = e.ruleNotifyChannels(ev.RuleID)
 	}
 	if len(chs) == 0 {
-		chs = e.allChannels()
+		slog.Info("升级未配置通知渠道，仅平台展示", "rule", ev.RuleName, "event", ev.ID)
+		return
 	}
 	ns := append([]Notifier(nil), e.notifiers...)
 	go func() {
@@ -814,6 +913,38 @@ func (e *Engine) refreshSuppressedTargetsLocked(source model.AlertEvent) {
 	}
 }
 
+// CloseRuleAlerts 关闭指定规则的所有活跃告警。用于规则删除，确保删除成功后
+// 不再将该规则的旧 firing 事件展示为活跃告警。
+func (e *Engine) CloseRuleAlerts(rule model.AlertRule, message string) {
+	now := model.NowMillis()
+	e.mu.Lock()
+	deferred := make([]model.AlertEvent, 0)
+	for key, fe := range e.firing {
+		if fe.event.RuleID != rule.ID {
+			continue
+		}
+		ev := fe.event
+		ev.State = model.AlertStateResolved
+		ev.StartsAt = 0
+		ev.EndsAt = now
+		ev.Message = message
+		delete(e.firing, key)
+		delete(e.states, key)
+		deferred = append(deferred, ev)
+	}
+	if len(deferred) > 0 {
+		e.recheckSuppressedLocked()
+	}
+	e.mu.Unlock()
+
+	for _, ev := range deferred {
+		e.alerts.Add(ev)
+		if e.broadcaster != nil {
+			e.broadcaster.BroadcastAlert(ev)
+		}
+	}
+}
+
 func (e *Engine) resolve(r model.AlertRule, node, instance string, value float64, now int64, msg ...string) {
 	message := "节点 " + node + " 指标 " + r.Metric + " 已恢复（规则：" + r.Name + "）"
 	if len(msg) > 0 && msg[0] != "" {
@@ -851,6 +982,83 @@ func (e *Engine) resolve(r model.AlertRule, node, instance string, value float64
 	}
 	e.recheckSuppressedLocked()
 	slog.Info("告警恢复", "rule", r.Name, "node", node, "metric", r.Metric, "value", value)
+}
+
+func (e *Engine) ReconcileDialtestTasks(tasks []dialtest.Task) {
+	active := make(map[string]dialtest.Task, len(tasks))
+	for _, task := range tasks {
+		if task.Enabled {
+			active[task.ID] = task
+		}
+	}
+
+	now := model.NowMillis()
+	var resolved []model.AlertEvent
+	e.mu.Lock()
+	for key, fe := range e.firing {
+		if !strings.HasPrefix(fe.event.RuleID, "dialtest-") {
+			continue
+		}
+		taskID := strings.TrimPrefix(fe.event.RuleID, "dialtest-")
+		task, ok := active[taskID]
+		if ok && fe.event.Node == task.Target {
+			continue
+		}
+		resolved = append(resolved, resolveDialtestEvent(fe.event, now, "拨测任务已删除、停用或目标已变更，告警状态已关闭"))
+		delete(e.firing, key)
+		delete(e.dialActive, "dialtest:"+taskID)
+	}
+	if len(resolved) > 0 {
+		e.recheckSuppressedLocked()
+	}
+	e.mu.Unlock()
+	e.persistDialtestResolutions(resolved)
+}
+
+// ReconcileDialtestSuccess 幂等地把同一任务遗留的所有 firing 事件标记为恢复。
+// 任务目标变更后，恢复事件仍需精确覆盖旧目标的 firing 序列，不能只按当前 target 删除。
+func (e *Engine) ReconcileDialtestSuccess(task dialtest.Task, result dialtest.Result) {
+	now := model.NowMillis()
+	var resolved []model.AlertEvent
+	e.mu.Lock()
+	for key, fe := range e.firing {
+		if fe.event.RuleID != "dialtest-"+task.ID {
+			continue
+		}
+		resolved = append(resolved, resolveDialtestEvent(fe.event, now,
+			fmt.Sprintf("拨测恢复：%s (%s %s) 已恢复正常", task.Name, task.Type, task.Target)))
+		delete(e.firing, key)
+	}
+	delete(e.dialActive, "dialtest:"+task.ID)
+	if len(resolved) > 0 {
+		e.recheckSuppressedLocked()
+	}
+	e.mu.Unlock()
+	e.persistDialtestResolutions(resolved)
+}
+
+func resolveDialtestEvent(ev model.AlertEvent, now int64, message string) model.AlertEvent {
+	ev.State = model.AlertStateResolved
+	ev.StartsAt = 0
+	ev.EndsAt = now
+	ev.Message = message
+	return ev
+}
+
+func (e *Engine) persistDialtestResolutions(events []model.AlertEvent) {
+	for _, ev := range events {
+		e.alerts.Add(ev)
+		if e.broadcaster != nil {
+			e.broadcaster.BroadcastAlert(ev)
+		}
+		if !ev.Suppressed {
+			if e.grouper != nil {
+				e.grouper.Add(ev)
+			} else {
+				e.notify(ev)
+			}
+		}
+	}
 }
 
 // EmitDialtestAlert 由拨测调度器在状态跃迁时调用，产生拨测类告警事件并联动通知。
@@ -1166,17 +1374,17 @@ func (e *Engine) EmitSecurityAlert(node, nodeIP, category string, severity model
 	}()
 
 	ev := model.AlertEvent{
-		ID:        "security-" + h,
-		RuleID:    "security-" + category,
-		RuleName:  "安全事件 - " + securityCategoryName(category),
-		Node:      node,
-		NodeIP:    nodeIP,
-		Metric:    "security_event",
-		Severity:  severity,
-		Message:   message,
-		State:     model.AlertStateFiring,
-		StartsAt:  now,
-		Notify:    append([]string(nil), notify...),
+		ID:       "security-" + h,
+		RuleID:   "security-" + category,
+		RuleName: "安全事件 - " + securityCategoryName(category),
+		Node:     node,
+		NodeIP:   nodeIP,
+		Metric:   "security_event",
+		Severity: severity,
+		Message:  message,
+		State:    model.AlertStateFiring,
+		StartsAt: now,
+		Notify:   append([]string(nil), notify...),
 	}
 	// 抑制匹配（与目标节点/指标匹配的规则会抑制本事件）
 	e.mu.Lock()
@@ -1302,7 +1510,7 @@ func (e *Engine) TestEmail() error {
 }
 
 // notify 按规则配置的渠道发送通知。维护窗口活跃时跳过通知（事件仍记录）。
-// 规则未指定渠道（Notify 为空）时发给全部已启用渠道（与 model 文档语义一致）。
+// 规则未指定渠道（Notify 为空）时仅保留平台消息，不发送外部通知。
 func (e *Engine) notify(ev model.AlertEvent) {
 	// 维护窗口检查：活跃时跳过通知发送
 	if e.maintenance != nil && e.maintenance.IsActive(model.NowMillis()) {
@@ -1311,8 +1519,8 @@ func (e *Engine) notify(ev model.AlertEvent) {
 	}
 	chs := e.ruleNotifyChannels(ev.RuleID)
 	if len(chs) == 0 {
-		// 规则未指定渠道：发给全部已启用渠道
-		chs = e.allChannels()
+		slog.Info("未配置通知渠道，仅平台展示", "rule", ev.RuleName, "event", ev.ID)
+		return
 	}
 	ns := append([]Notifier(nil), e.notifiers...)
 	go func() {
@@ -1325,15 +1533,6 @@ func (e *Engine) notify(ev model.AlertEvent) {
 			}
 		}
 	}()
-}
-
-// allChannels 返回当前所有已启用渠道名。
-func (e *Engine) allChannels() []string {
-	chs := make([]string, 0, len(e.notifiers))
-	for _, n := range e.notifiers {
-		chs = append(chs, n.Channel())
-	}
-	return chs
 }
 
 // SetNotifiers 热加载通知器列表。在 e.mu 锁内替换，与 evaluate/notify 共用同一把锁，
@@ -1599,10 +1798,6 @@ func (e *Engine) flushGroup(events []model.AlertEvent) {
 	e.mu.Lock()
 	ns := append([]Notifier(nil), e.notifiers...)
 	e.mu.Unlock()
-	all := make([]string, 0, len(ns))
-	for _, n := range ns {
-		all = append(all, n.Channel())
-	}
 	groups := map[string][]model.AlertEvent{}
 	groupChannels := map[string][]string{}
 	for _, ev := range events {
@@ -1611,7 +1806,7 @@ func (e *Engine) flushGroup(events []model.AlertEvent) {
 			chs = e.ruleNotifyChannels(ev.RuleID)
 		}
 		if len(chs) == 0 {
-			chs = all
+			continue
 		}
 		sort.Strings(chs)
 		key := strings.Join(chs, "|")

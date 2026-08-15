@@ -1,10 +1,13 @@
 package api
 
 import (
+	"encoding/csv"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/audit"
 )
 
 // handleSecuritySummary 返回安全态势概览：合规评分均值、事件总数、风险主机数、FIM 变化数。
@@ -26,6 +29,45 @@ func (a *API) handleSecuritySummary(w http.ResponseWriter, r *http.Request) {
 		"generatedAt":   s.GeneratedAt,
 		"enabled":       true,
 	})
+}
+
+// handleAuditEvents 返回管理操作审计记录，支持 limit/user/path/category 筛选和 CSV 导出。
+func (a *API) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
+	if AuthenticatedUser(r) == "" && a.auth.Enabled {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未认证"})
+		return
+	}
+	if a.audit == nil {
+		if r.URL.Query().Get("format") == "csv" {
+			writeAuditCSV(w, nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"events": []interface{}{}})
+		return
+	}
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	events := a.audit.ListFiltered(limit, q.Get("user"), q.Get("path"), q.Get("category"))
+	if q.Get("format") == "csv" {
+		writeAuditCSV(w, events)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"events": events})
+}
+
+func writeAuditCSV(w http.ResponseWriter, events []audit.Event) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"audit-events.csv\"")
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{"time", "user", "method", "path", "status", "remote_ip", "succeeded", "category", "action", "detail"})
+	for _, event := range events {
+		_ = writer.Write([]string{
+			event.Time.Format(time.RFC3339), event.User, event.Method, event.Path,
+			strconv.Itoa(event.Status), event.RemoteIP, strconv.FormatBool(event.Succeeded),
+			event.Category, event.Action, event.Detail,
+		})
+	}
+	writer.Flush()
 }
 
 // handleSecurityEvents 返回安全事件列表（按时间倒序），支持 limit/category/node 筛选。
@@ -69,6 +111,7 @@ func (a *API) handleSecurityBaselines(w http.ResponseWriter, r *http.Request) {
 		if baselines[i].NodeIP == "" && baselines[i].Node != "" {
 			baselines[i].NodeIP = a.nodeIP(baselines[i].Node)
 		}
+		baselines[i].DisplayName = a.nodeDisplayName(baselines[i].Node)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"baselines": baselines, "enabled": true})
 }

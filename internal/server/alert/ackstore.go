@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"sync"
 	"time"
-)
 
-// AckInfo 记录一条告警事件的确认（认领）信息。
+	"github.com/nebula/monitor/internal/server/config"
+) // AckInfo 记录一条告警事件的确认（认领）信息。
 type AckInfo struct {
 	Rule     string `json:"rule"`
 	Host     string `json:"host"`
@@ -89,5 +89,7 @@ func (s *AckStore) persistLocked() {
 	if err := os.MkdirAll(dirOf(s.path), 0o755); err != nil {
 		return
 	}
-	_ = os.WriteFile(s.path, data, 0o644)
+	if err := config.AtomicWrite(s.path, data); err != nil {
+		return
+	}
 }

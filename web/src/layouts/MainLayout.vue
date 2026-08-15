@@ -106,6 +106,8 @@ const pageTitle = computed(() => {
     node: '主机详情',
     middleware: '中间件监控',
     alerts: '告警中心',
+    security: '安全中心',
+    audit: '操作审计',
     dialtest: '服务拨测',
     report: '巡检报告',
     'system-upgrade': '系统升级',

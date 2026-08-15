@@ -16,6 +16,7 @@ import (
 	"github.com/nebula/monitor/internal/server/agentdist"
 	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/api"
+	"github.com/nebula/monitor/internal/server/audit"
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/dialtest"
@@ -24,8 +25,8 @@ import (
 	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/receiver"
 	"github.com/nebula/monitor/internal/server/report"
-	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/screencfg"
+	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/uicfg"
 	"github.com/nebula/monitor/internal/server/upgrade"
@@ -167,6 +168,7 @@ func main() {
 				cfg.ScreenFile,
 				cfg.UIFile,
 				cfg.GeoIPFile,
+				filepath.Join(filepath.Dir(*cfgPath), "audit_events.json"),
 			},
 		}, nodeMgr)
 		if err != nil {
@@ -176,7 +178,8 @@ func main() {
 	}
 
 	// API
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath, securityStore)
+	auditStore := audit.New(filepath.Join(filepath.Dir(*cfgPath), "audit_events.json"))
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath, securityStore, auditStore)
 	rest.SetDashboardManager(dashMgr)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
@@ -199,6 +202,7 @@ func main() {
 	var handler http.Handler = mux
 	if cfg.Auth.Enabled {
 		handler = api.AuthMiddleware(mux, cfg.Auth)
+		handler = api.AuditMiddleware(handler, auditStore)
 	}
 
 	srv := &http.Server{

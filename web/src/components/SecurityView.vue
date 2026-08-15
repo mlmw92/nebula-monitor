@@ -1,5 +1,7 @@
 <template>
   <div class="security-view">
+    <RefreshBar :loading="loading" @refresh="refreshAll" />
+
     <!-- 顶部 KPI 概览 -->
     <div class="glass panel kpi-row" v-loading="loading">
       <div class="kpi-card" :class="scoreClass">
@@ -56,7 +58,7 @@
         </div>
       </div>
 
-      <el-table :data="events" style="width: 100%" empty-text="暂无安全事件" :row-class-name="rowClass" max-height="460">
+      <el-table :data="pagedEvents" style="width: 100%" empty-text="暂无安全事件" :row-class-name="rowClass" max-height="460">
         <el-table-column label="级别" width="90">
           <template #default="{ row }">
             <span class="sev-tag" :class="'sev-' + row.severity">{{ sevLabel(row.severity) }}</span>
@@ -84,6 +86,16 @@
           <template #default="{ row }">{{ fmtTime(row.timestamp) }}</template>
         </el-table-column>
       </el-table>
+      <div style="margin-top: 12px; display: flex; justify-content: flex-end">
+        <el-pagination
+          v-model:current-page="evCurrentPage"
+          v-model:page-size="evPageSize"
+          :total="events.length"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+        />
+      </div>
     </div>
 
     <!-- 基线与 FIM 区 -->
@@ -96,7 +108,7 @@
         <el-empty v-if="!baselines.length" description="暂无基线数据" :image-size="60" />
         <div v-for="b in baselines" :key="b.node" class="baseline-node">
           <div class="baseline-head">
-            <span class="node-name">{{ b.node }}</span>
+            <span class="node-name">{{ b.displayName || b.node }}<span v-if="b.nodeIp" class="node-ip"> · {{ b.nodeIp }}</span></span>
             <span class="score-pill" :class="scorePillClass(b.score)">{{ b.score.toFixed(0) }}</span>
           </div>
           <div class="baseline-items">
@@ -130,13 +142,25 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { getSecuritySummary, getSecurityEvents, getSecurityBaselines } from '../api/security'
+import RefreshBar from './RefreshBar.vue'
 
 const loading = ref(false)
 const summary = ref({ score: 0, eventCount: 0, riskNodes: 0, fimChanges: 0, baselineHosts: 0 })
 const events = ref([])
 const baselines = ref([])
+// 安全事件前端分页
+const evCurrentPage = ref(1)
+const evPageSize = ref(10)
+const pagedEvents = computed(() => {
+  const start = (evCurrentPage.value - 1) * evPageSize.value
+  return events.value.slice(start, start + evPageSize.value)
+})
+watch(events, () => {
+  const max = Math.max(1, Math.ceil(events.value.length / evPageSize.value))
+  if (evCurrentPage.value > max) evCurrentPage.value = max
+})
 const filterCategory = ref('')
 const filterNode = ref('')
 
@@ -210,8 +234,9 @@ async function loadSummary() {
 }
 async function loadEvents() {
   try {
-    const d = await getSecurityEvents({ limit: 200, category: filterCategory.value, node: filterNode.value })
+    const d = await getSecurityEvents({ limit: 2000, category: filterCategory.value, node: filterNode.value })
     events.value = d.events || []
+    evCurrentPage.value = 1
   } catch (e) {
     events.value = []
   }
@@ -230,13 +255,8 @@ async function refreshAll() {
   loading.value = false
 }
 
-let timer = null
 onMounted(() => {
   refreshAll()
-  timer = setInterval(refreshAll, 15000)
-})
-onBeforeUnmount(() => {
-  if (timer) clearInterval(timer)
 })
 </script>
 
@@ -398,6 +418,11 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
+}
+.node-ip {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-dim);
 }
 .score-pill {
   font-size: 13px;

@@ -43,6 +43,43 @@ func TestVMAlertStoreResolvedUsesEndsAt(t *testing.T) {
 	}
 }
 
+func TestEngineClosesActiveAlertsForDeletedRule(t *testing.T) {
+	storage := &captureAlertStorage{}
+	engine := &Engine{
+		alerts: NewVMAlertStore(storage),
+		states: map[string]*ruleState{"rule-1|node-1|": {firing: true}},
+		firing: map[string]*firingEntry{},
+	}
+	event := model.AlertEvent{
+		ID:       "event-1",
+		RuleID:   "rule-1",
+		RuleName: "旧规则名称",
+		Node:     "node-1",
+		State:    model.AlertStateFiring,
+		StartsAt: 100,
+	}
+	engine.firing[firingKey(event)] = &firingEntry{event: event}
+
+	engine.CloseRuleAlerts(model.AlertRule{ID: "rule-1"}, "规则已删除，告警状态已关闭")
+
+	if len(engine.firing) != 0 {
+		t.Fatalf("firing entries = %d, want 0", len(engine.firing))
+	}
+	if len(engine.states) != 0 {
+		t.Fatalf("rule states = %d, want 0", len(engine.states))
+	}
+	if len(storage.writes) != 1 {
+		t.Fatalf("event writes = %d, want 1", len(storage.writes))
+	}
+	labels := storage.writes[0].Labels
+	if labels["state"] != string(model.AlertStateResolved) {
+		t.Fatalf("written state = %q, want resolved", labels["state"])
+	}
+	if labels["message"] != "规则已删除，告警状态已关闭" {
+		t.Fatalf("written message = %q", labels["message"])
+	}
+}
+
 func TestVMAlertStoreActiveKeepsLongRunningAlert(t *testing.T) {
 	old := time.Now().Add(-8 * 24 * time.Hour).UnixMilli()
 	storage := &captureAlertStorage{active: []model.Series{{

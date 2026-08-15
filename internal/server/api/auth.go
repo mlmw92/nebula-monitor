@@ -20,7 +20,8 @@ import (
 
 type authUserContextKey struct{}
 
-func authenticatedUser(r *http.Request) string {
+// AuthenticatedUser 返回当前请求通过认证的用户名。
+func AuthenticatedUser(r *http.Request) string {
 	if v, ok := r.Context().Value(authUserContextKey{}).(string); ok {
 		return v
 	}
@@ -187,6 +188,7 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	ip := clientIP(r)
 	if !loginAllowed(ip) {
+		a.recordLoginAudit(r, "", http.StatusTooManyRequests, false)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "登录失败次数过多，请稍后再试"})
@@ -197,6 +199,7 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// 对未迁移的旧明文配置自动按明文常量时间比较兜底（与启动时迁移互补）。
 	passOK := servercrypto.VerifyPassword(a.auth.Password, body.Password)
 	if !userOK || !passOK {
+		a.recordLoginAudit(r, "", http.StatusUnauthorized, false)
 		loginFail(ip)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -212,7 +215,12 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		MaxAge:   int(tokenTTL.Seconds()),
 	})
+	a.recordLoginAudit(r, body.Username, http.StatusOK, true)
 	writeJSON(w, 200, map[string]interface{}{"token": tok, "username": body.Username, "authEnabled": true})
+}
+
+func (a *API) recordLoginAudit(r *http.Request, user string, status int, succeeded bool) {
+	RecordLoginAudit(a.audit, r, user, status, succeeded)
 }
 
 // handleLogout 注销（前端清 token 即可，后端无状态）

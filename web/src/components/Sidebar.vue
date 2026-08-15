@@ -10,20 +10,12 @@
 
     <nav class="nav">
       <router-link
-        v-for="item in flatItems"
-        :key="item.key"
-        :to="item.to"
+        to="/"
         class="nav-item"
-        :class="{ active: isActiveItem(item) }"
+        :class="{ active: route.path === '/' }"
       >
-        <el-icon :size="18"><component :is="item.icon" /></el-icon>
-        <span class="label" v-show="!collapsed">{{ item.label }}</span>
-        <el-badge
-          v-if="item.key === 'alerts' && alertCount > 0"
-          :value="alertCount"
-          :max="99"
-          class="nav-badge"
-        />
+        <el-icon :size="18"><Odometer /></el-icon>
+        <span class="label" v-show="!collapsed">首页概览</span>
       </router-link>
 
       <div
@@ -47,6 +39,12 @@
           >
             <span class="sub-dot"></span>
             <span class="label">{{ sub.label }}</span>
+            <el-badge
+              v-if="sub.key === 'alerts' && alertCount > 0"
+              :value="alertCount"
+              :max="99"
+              class="nav-badge"
+            />
           </router-link>
         </div>
       </div>
@@ -85,6 +83,8 @@ import {
   DataLine,
   Grid,
   Lock,
+  List,
+  Aim,
 } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { useBrand } from '../composables/useBrand'
@@ -101,22 +101,39 @@ const { brand } = useBrand()
 
 const serverVersion = ref(WEB_VERSION) // 初始用构建内嵌版本，加载后覆盖为 Server 实际运行版本
 
-// 普通一级菜单项
-const flatItems = [
-  { key: 'overview', to: '/', label: '首页概览', icon: Odometer },
-  { key: 'hosts', to: '/hosts', label: '主机列表', icon: Monitor },
-  { key: 'middleware', to: '/middleware', label: '中间件监控', icon: Connection },
-  { key: 'alerts', to: '/alerts', label: '告警中心', icon: Bell },
-  { key: 'security', to: '/security', label: '安全中心', icon: Lock },
-  { key: 'dialtest', to: '/dialtest', label: '服务拨测', icon: Connection },
-  { key: 'report', to: '/report', label: '巡检报告', icon: Document },
-  { key: 'notify', to: '/notify', label: '通知配置', icon: Message },
-  { key: 'metrics-explore', to: '/metrics/explore', label: '指标浏览', icon: DataLine },
-  { key: 'dashboards', to: '/system/dashboards', label: '自定义仪表盘', icon: Grid },
-]
-
-// 分组菜单：一级菜单 + 二级子菜单
+// 分组菜单：一级分组 + 二级子菜单
 const groups = [
+  {
+    key: 'monitoring',
+    label: '观测监控',
+    icon: DataLine,
+    items: [
+      { key: 'hosts', to: '/hosts', label: '主机列表', icon: Monitor },
+      { key: 'middleware', to: '/middleware', label: '中间件监控', icon: Connection },
+      { key: 'dialtest', to: '/dialtest', label: '服务拨测', icon: Aim },
+      { key: 'metrics-explore', to: '/metrics/explore', label: '指标浏览', icon: DataLine },
+      { key: 'dashboards', to: '/system/dashboards', label: '自定义仪表盘', icon: Grid },
+    ],
+  },
+  {
+    key: 'alerting',
+    label: '告警运维',
+    icon: Bell,
+    items: [
+      { key: 'alerts', to: '/alerts', label: '告警中心', icon: Bell },
+      { key: 'notify', to: '/notify', label: '通知配置', icon: Message },
+      { key: 'report', to: '/report', label: '巡检报告', icon: Document },
+    ],
+  },
+  {
+    key: 'security',
+    label: '安全治理',
+    icon: Lock,
+    items: [
+      { key: 'security', to: '/security', label: '安全中心', icon: Lock },
+      { key: 'audit', to: '/audit', label: '操作审计', icon: List },
+    ],
+  },
   {
     key: 'system',
     label: '系统设置',
@@ -129,7 +146,7 @@ const groups = [
   },
 ]
 
-// 用户手动展开/收起的分组状态
+// 用户手动展开/收起的分组状态（默认展开当前路由所在分组）
 const openGroups = ref({})
 
 function isActiveItem(item) {
@@ -142,7 +159,7 @@ function isGroupActive(g) {
 }
 
 function isGroupOpen(g) {
-  // 完全由用户手动状态控制，默认不展开
+  // 默认展开当前路由所在分组；用户可手动收起/展开
   return openGroups.value[g.key] === true
 }
 
@@ -165,7 +182,12 @@ async function loadVersion() {
   }
 }
 
-onMounted(loadVersion)
+onMounted(() => {
+  loadVersion()
+  // 默认展开当前路由所在的分组
+  const active = groups.find(isGroupActive)
+  if (active) openGroups.value[active.key] = true
+})
 </script>
 
 <style scoped>

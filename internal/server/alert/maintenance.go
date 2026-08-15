@@ -1,12 +1,14 @@
 package alert
 
 import (
+	"log/slog"
 	"os"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/config"
 )
 
 // MaintenanceStore 管理维护窗口配置，持久化到 YAML 文件。
@@ -61,6 +63,7 @@ func (s *MaintenanceStore) persistLocked() {
 	if err != nil {
 		return
 	}
-	_ = os.MkdirAll(dirOf(s.path), 0o755)
-	_ = os.WriteFile(s.path, data, 0o644)
+	if err := config.AtomicWrite(s.path, data); err != nil {
+		slog.Warn("写入维护窗口配置失败", "err", err, "path", s.path)
+	}
 }

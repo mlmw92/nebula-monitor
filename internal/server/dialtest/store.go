@@ -55,12 +55,7 @@ func (s *Store) Create(t Task) Task {
 	if t.ID == "" {
 		t.ID = "dt-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	}
-	if t.Interval <= 0 {
-		t.Interval = 60
-	}
-	if t.Timeout <= 0 {
-		t.Timeout = 10
-	}
+	t = normalizeTask(t)
 	s.tasks[t.ID] = t
 	s.persistLocked()
 	return t
@@ -73,7 +68,7 @@ func (s *Store) Update(t Task) error {
 	if _, ok := s.tasks[t.ID]; !ok {
 		return os.ErrNotExist
 	}
-	s.tasks[t.ID] = t
+	s.tasks[t.ID] = normalizeTask(t)
 	s.persistLocked()
 	return nil
 }
@@ -103,8 +98,18 @@ func (s *Store) load() {
 		if t.ID == "" {
 			t.ID = "dt-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 		}
-		s.tasks[t.ID] = t
+		s.tasks[t.ID] = normalizeTask(t)
 	}
+}
+
+func normalizeTask(t Task) Task {
+	if t.Interval <= 0 {
+		t.Interval = defaultIntervalSeconds
+	}
+	if t.Timeout <= 0 {
+		t.Timeout = 10
+	}
+	return t
 }
 
 func (s *Store) persistLocked() {

@@ -6,10 +6,10 @@ import (
 	"regexp"
 	"sync"
 
+	"github.com/nebula/monitor/internal/server/config"
 	"gopkg.in/yaml.v3"
 )
 
-// MatchSet 匹配的标签集合，支持精确匹配（match）与正则匹配（matchRegex）。
 type MatchSet struct {
 	Match       map[string]string `yaml:"match" json:"match"`
 	MatchRegexp map[string]string `yaml:"matchRegex" json:"matchRegex"`
@@ -112,7 +112,7 @@ func (s *InhibitStore) Save(rules []InhibitRule) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(s.path, data, 0644); err != nil {
+	if err := config.AtomicWrite(s.path, data); err != nil {
 		return err
 	}
 	s.mu.Lock()

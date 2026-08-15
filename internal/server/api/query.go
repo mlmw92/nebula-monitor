@@ -16,6 +16,7 @@ import (
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/alert"
+	"github.com/nebula/monitor/internal/server/audit"
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/dialtest"
@@ -97,15 +98,16 @@ type API struct {
 	serverProvince string              // server 自动探测到的所在地（省级行政区）
 	configPath     string              // server.yaml 路径，用于改密码时持久化
 	dashMgr        *dashboard.Manager  // 自定义仪表盘配置（可空）
-	security       *security.Store    // 安全事件/基线存储（可空，关闭安全能力）
+	security       *security.Store     // 安全事件/基线存储（可空，关闭安全能力）
+	audit          *audit.Store        // 管理操作审计存储（可空）
 }
 
 // SetDashboardManager 注入仪表盘配置管理器（可选，不注入则相关接口返回空列表）。
 func (a *API) SetDashboardManager(m *dashboard.Manager) { a.dashMgr = m }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string, sec *security.Store) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince(), configPath: configPath, security: sec}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string, sec *security.Store, auditStore *audit.Store) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince(), configPath: configPath, security: sec, audit: auditStore}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -154,7 +156,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/rules/{id}/toggle-silence", a.handleRuleToggleSilence)
 	mux.HandleFunc("DELETE /api/v1/rules/{id}", a.handleRuleDelete)
 
-	// 安全中心：态势概览 / 事件列表 / 基线明细
+	// 管理操作审计
+	mux.HandleFunc("GET /api/v1/audit/events", a.handleAuditEvents)
+
 	mux.HandleFunc("GET /api/v1/security/summary", a.handleSecuritySummary)
 	mux.HandleFunc("GET /api/v1/security/events", a.handleSecurityEvents)
 	mux.HandleFunc("GET /api/v1/security/baselines", a.handleSecurityBaselines)
@@ -816,6 +820,7 @@ func (a *API) handleRuleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	rule.ID = ""
 	created := a.rules.Create(rule)
+	RecordChangeAudit(a.audit, r, "create_rule", nil, created)
 	writeJSON(w, 200, created)
 }
 
@@ -825,7 +830,9 @@ func (a *API) handleRuleUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	rule.ID = r.PathValue("id")
+	id := r.PathValue("id")
+	before, _ := a.rules.Get(id)
+	rule.ID = id
 	if err := alert.ValidateRule(rule); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -834,14 +841,25 @@ func (a *API) handleRuleUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "rule not found", http.StatusNotFound)
 		return
 	}
+	RecordChangeAudit(a.audit, r, "update_rule", before, rule)
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
 func (a *API) handleRuleDelete(w http.ResponseWriter, r *http.Request) {
-	if err := a.rules.Delete(r.PathValue("id")); err != nil {
+	id := r.PathValue("id")
+	before, ok := a.rules.Get(id)
+	if !ok {
 		http.Error(w, "rule not found", http.StatusNotFound)
 		return
 	}
+	if err := a.rules.Delete(id); err != nil {
+		http.Error(w, "rule not found", http.StatusNotFound)
+		return
+	}
+	if a.engine != nil {
+		a.engine.CloseRuleAlerts(before, "规则已删除，告警状态已关闭")
+	}
+	RecordChangeAudit(a.audit, r, "delete_rule", before, nil)
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
@@ -868,7 +886,7 @@ func (a *API) handleAlertAck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "rule, host and startsAt required", http.StatusBadRequest)
 		return
 	}
-	user := authenticatedUser(r)
+	user := AuthenticatedUser(r)
 	if user == "" {
 		user = "anonymous"
 	}

@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/config"
 )
 
 // RulesStore 管理告警规则，持久化到 YAML 文件。
@@ -56,6 +57,7 @@ func DefaultTemplates() []model.AlertRule {
 		{Name: "MySQL 集群状态损坏", Type: model.RuleTypeClusterFault, Service: "mysql", Topology: "cluster", For: "2m", Severity: model.SeverityCritical, Scope: "all", Enabled: true,
 			Escalation: &model.Escalation{Enabled: true, AfterMinutes: 10, ToSeverity: model.SeverityCritical, RepeatMinutes: 20}},
 		{Name: "Kubernetes 集群状态损坏", Type: model.RuleTypeClusterFault, Service: "k8s", Topology: "cluster", For: "2m", Severity: model.SeverityCritical, Scope: "all", Enabled: true},
+		{Name: "安全事件", Type: model.RuleTypeSecurityEvent, Category: "", For: "0s", Severity: model.SeverityWarning, Scope: "all", Enabled: true},
 	}
 }
 
@@ -302,7 +304,7 @@ func (s *RulesStore) persistLocked() {
 		slog.Warn("创建规则目录失败", "err", err)
 		return
 	}
-	if err := os.WriteFile(s.path, data, 0o644); err != nil {
+	if err := config.AtomicWrite(s.path, data); err != nil {
 		slog.Warn("写入规则文件失败", "err", err, "path", s.path)
 	}
 }
@@ -351,6 +353,10 @@ func ValidateRule(r model.AlertRule) error {
 	case model.RuleTypeServiceDown, model.RuleTypeRoleChange, model.RuleTypeClusterFault:
 		if !validService(r.Service) {
 			return fmt.Errorf("无效中间件类型: %q", r.Service)
+		}
+	case model.RuleTypeSecurityEvent:
+		if r.Category != "" && !validSecurityCategory(r.Category) {
+			return fmt.Errorf("无效安全事件类别: %q", r.Category)
 		}
 	default:
 		return fmt.Errorf("无效规则类型: %q", r.Type)
@@ -403,6 +409,16 @@ func validOperator(op string) bool {
 func validService(s string) bool {
 	switch s {
 	case "mysql", "postgres", "redis", "nginx", "kafka", "rocketmq", "docker", "k8s":
+		return true
+	default:
+		return false
+	}
+}
+
+func validSecurityCategory(category string) bool {
+	switch category {
+	case model.SecurityCatSSHBruteforce, model.SecurityCatSSHAudit, model.SecurityCatFIM,
+		model.SecurityCatProcessAnomaly, model.SecurityCatSudoAudit:
 		return true
 	default:
 		return false

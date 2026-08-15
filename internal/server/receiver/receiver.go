@@ -104,12 +104,12 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 			group = payload.Group
 		}
 		labels := map[string]string{
-			"group":     group,
-			"instance":  ri.Instance,
-			"name":      ri.Name,
-			"role":      ri.Role,
-			"topology":  ri.Topology,
-			"version":   ri.Version,
+			"group":    group,
+			"instance": ri.Instance,
+			"name":     ri.Name,
+			"role":     ri.Role,
+			"topology": ri.Topology,
+			"version":  ri.Version,
 		}
 		if ri.ReplicaOf != "" {
 			labels["replica_of"] = ri.ReplicaOf
@@ -201,6 +201,9 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 	// 保证前端「节点」列始终展示服务器 IP。
 	if r.sec != nil && (len(payload.SecurityEvents) > 0 || payload.SecurityBaseline != nil) {
 		for i := range payload.SecurityEvents {
+			if payload.SecurityEvents[i].Node == "" {
+				payload.SecurityEvents[i].Node = payload.Node
+			}
 			if payload.SecurityEvents[i].NodeIP == "" {
 				payload.SecurityEvents[i].NodeIP = payload.IP
 			}
@@ -211,10 +214,7 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		r.sec.Ingest(payload.Node, payload.SecurityEvents, payload.SecurityBaseline)
 	}
 	if r.alerts != nil {
-		for i := range payload.SecurityEvents {
-			ev := &payload.SecurityEvents[i]
-			r.alerts.EmitSecurityAlert(ev.Node, payload.IP, ev.Category, ev.Severity, ev.Message, nil)
-		}
+		r.alerts.IngestSecurityEvents(payload.SecurityEvents)
 	}
 
 	// 响应：若节点仍需升级（agent 版本未达标），持续下发 upgrade 指令

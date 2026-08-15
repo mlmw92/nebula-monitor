@@ -441,18 +441,19 @@ const (
 
 // 告警规则类型。空字符串与 "threshold" 等价，表示基于指标阈值的传统规则（向后兼容旧数据）。
 const (
-	RuleTypeThreshold    string = ""              // 阈值规则（默认）
-	RuleTypeNodeOffline  string = "node_offline"  // 主机离线
-	RuleTypeServiceDown  string = "service_down"  // 中间件/服务离线
-	RuleTypeRoleChange   string = "role_change"   // 数据库主从切换
-	RuleTypeClusterFault string = "cluster_fault" // 集群状态损坏
+	RuleTypeThreshold     string = ""               // 阈值规则（默认）
+	RuleTypeNodeOffline   string = "node_offline"   // 主机离线
+	RuleTypeServiceDown   string = "service_down"   // 中间件/服务离线
+	RuleTypeRoleChange    string = "role_change"    // 数据库主从切换
+	RuleTypeClusterFault  string = "cluster_fault"  // 集群状态损坏
+	RuleTypeSecurityEvent string = "security_event" // 安全事件
 )
 
 // AlertRule 告警规则（阈值 + 场景化类型共用）。
 type AlertRule struct {
 	ID           string   `json:"id"`                     // 规则 ID
 	Name         string   `json:"name"`                   // 规则名称
-	Type         string   `json:"type,omitempty"`         // 规则类型：空/threshold|node_offline|service_down|role_change|cluster_fault
+	Type         string   `json:"type,omitempty"`         // 规则类型：空/threshold|node_offline|service_down|role_change|cluster_fault|security_event
 	Metric       string   `json:"metric"`                 // 指标名，如 cpu_usage
 	Operator     string   `json:"operator"`               // 比较运算符: > >= < <= == !=
 	Threshold    float64  `json:"threshold"`              // 阈值
@@ -461,13 +462,14 @@ type AlertRule struct {
 	Group        string   `json:"group"`                  // 作用的节点分组（空表示全部）
 	Scope        string   `json:"scope"`                  // 应用范围：all（全部主机，默认）或 specified（指定主机）
 	Nodes        []string `json:"nodes"`                  // 指定主机列表（scope=specified 时生效）
-	Notify       []string `json:"notify"`                 // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示全部已启用渠道
+	Notify       []string `json:"notify"`                 // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示仅平台展示、不推送外部渠道
 	Enabled      bool     `json:"enabled"`                // 是否启用
 	Silenced     bool     `json:"silenced"`               // 是否静默（临时停止评估触发）
 	SilenceUntil int64    `json:"silenceUntil,omitempty"` // 静默截止时间（毫秒），0 表示不限时
 	// ===== 场景化规则参数 =====
 	Service      string        `json:"service,omitempty"`      // 服务离线/主从切换/集群损坏的中间件类型：mysql|postgres|redis|nginx|kafka|rocketmq|docker|k8s
 	Topology     string        `json:"topology,omitempty"`     // 主从切换/集群损坏的拓扑：cluster|replication
+	Category     string        `json:"category,omitempty"`     // 安全事件规则类别：见 SecurityCat*；为空表示全部安全类别
 	QuietPeriods []QuietPeriod `json:"quietPeriods,omitempty"` // 按周重复的静默时段（与单次静默、全局维护窗口构成三层静默）
 	Escalation   *Escalation   `json:"escalation,omitempty"`   // 告警升级策略（持续未恢复时升级级别/渠道并重复提醒）
 	CreatedAt    int64         `json:"createdAt"`              // 创建时间（毫秒）

@@ -19,7 +19,7 @@ npm run build
 cd "$ROOT"
 
 echo "==> 平铺拷贝到 $OUT_DIR"
-rm -rf "$OUT_DIR"
+rm -rf "$OUT_DIR" || true
 mkdir -p "$OUT_DIR"
 cp -a web/dist/. "$OUT_DIR/"
 

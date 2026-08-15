@@ -29,16 +29,6 @@
           <div class="kpi-value cyan">{{ stats.total }}</div>
         </div>
       </div>
-      <div class="stats-extra">
-        <div class="stats-col">
-          <div class="mini-title">Top 规则</div>
-          <div v-if="!stats.topRules.length" class="muted">暂无数据</div>
-          <div v-for="r in stats.topRules" :key="r.ruleId" class="top-rule">
-            <span class="top-name">{{ r.name }}</span>
-            <span class="top-badge">共 {{ r.total }} / 活跃 {{ r.firing }}</span>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- 维护窗口 -->
@@ -132,7 +122,7 @@
             <template v-if="row.notify && row.notify.length">
               <el-tag v-for="c in row.notify" :key="c" size="small" style="margin: 0 4px 4px 0">{{ channelLabel(c) }}</el-tag>
             </template>
-              <span v-else class="muted">全部启用渠道</span>
+            <span v-else class="muted">仅平台展示</span>
           </template>
         </el-table-column>
         <el-table-column label="应用范围" min-width="140">
@@ -266,6 +256,7 @@
 
     <!-- 告警事件 -->
     <div class="glass panel">
+      <div v-if="refreshError" class="alert-refresh-error">{{ refreshError }}</div>
       <div class="panel-title-row">
         <span class="panel-title" style="margin-bottom: 0">告警事件</span>
         <div class="event-toolbar">
@@ -444,9 +435,11 @@ const CHANNEL_META = [
 ]
 const channelOptions = ref(CHANNEL_META.map((c) => ({ ...c, enabled: true })))
 let timer = null
+let loadGeneration = 0
+const refreshError = ref('')
 
 // P4：统计看板 / 抑制规则 / 分组配置
-const stats = ref({ firing: 0, suppressed: 0, total: 0, bySeverity: { critical: 0, warning: 0, info: 0 }, topRules: [] })
+const stats = ref({ firing: 0, suppressed: 0, total: 0, bySeverity: { critical: 0, warning: 0, info: 0 } })
 const inhibits = ref([])
 const grouping = ref({ enabled: false, groupBy: ['name'], groupWait: '30s', groupInterval: '5m' })
 const inhibitDialog = ref(false)
@@ -478,6 +471,7 @@ watch(filteredAlerts, () => {
 })
 watch([evPageSize, eventFilter], () => {
   evCurrentPage.value = 1
+  loadAlerts()
 })
 
 function ackKey(e) {
@@ -530,13 +524,31 @@ async function saveMaintenance() {
   }
 }
 
+async function loadAlerts() {
+  const generation = ++loadGeneration
+  try {
+    const state = eventFilter.value === 'firing' ? 'active' : eventFilter.value
+    const suffix = state ? `?state=${encodeURIComponent(state)}` : ''
+    const data = await http.get('/api/v1/alerts' + suffix)
+    if (generation !== loadGeneration) return
+    alerts.value = data.alerts || []
+    refreshError.value = ''
+    if (detail.value && !alerts.value.some((item) => item.ruleName === detail.value.ruleName && item.node === detail.value.node && item.state === detail.value.state && (item.startsAt || item.endsAt) === (detail.value.startsAt || detail.value.endsAt))) {
+      drawer.value = false
+    }
+  } catch (e) {
+    if (generation !== loadGeneration) return
+    alerts.value = []
+    refreshError.value = '告警数据刷新失败：' + (e.message || '请重新登录后重试')
+    if (drawer.value && detail.value && detail.value.state === 'firing') drawer.value = false
+  }
+}
+
 async function load() {
   try {
     rules.value = (await http.get('/api/v1/rules')).rules || []
   } catch (e) { /* ignore */ }
-  try {
-    alerts.value = (await http.get('/api/v1/alerts')).alerts || []
-  } catch (e) { /* ignore */ }
+  await loadAlerts()
   try {
     groups.value = (await http.get('/api/v1/groups')).groups || []
   } catch (e) { /* ignore */ }
@@ -717,7 +729,7 @@ const TYPE_LABELS = {
   service_down: '服务离线',
   role_change: '主从切换',
   cluster_fault: '集群损坏',
-}
+  security_event: '安全事件',}
 const SERVICE_LABELS = {
   mysql: 'MySQL', postgres: 'PostgreSQL', redis: 'Redis', nginx: 'Nginx',
   kafka: 'Kafka', rocketmq: 'RocketMQ', docker: 'Docker', k8s: 'Kubernetes',
@@ -760,6 +772,8 @@ function conditionText(row) {
         (SERVICE_LABELS[row.service] || row.service) +
         ' 集群状态损坏（' + (row.topology || 'cluster') + '）无主/多主，持续 ' + (row.for || '2m')
       )
+    case 'security_event':
+      return '安全事件：' + (row.category || '全部类别') + '，收到事件即触发'
     default:
       return row.metric + ' ' + (row.operator || '') + ' ' + (row.threshold != null ? row.threshold : '')
   }
@@ -957,6 +971,11 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.alert-refresh-error {
+  color: var(--danger);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
 .panel-title-row {
   display: flex;
   justify-content: space-between;
@@ -1033,21 +1052,6 @@ onUnmounted(() => {
 .kpi-value.gray {
   color: var(--text-dim);
 }
-.stats-extra {
-  display: flex;
-  gap: 24px;
-  margin-top: 14px;
-  flex-wrap: wrap;
-}
-.stats-col {
-  flex: 1;
-  min-width: 240px;
-}
-.mini-title {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-bottom: 8px;
-}
 .sev-bar-wrap {
   font-size: 13px;
   color: var(--text);
@@ -1065,21 +1069,6 @@ onUnmounted(() => {
 .sev-dot.danger { background: var(--danger); }
 .sev-dot.warning { background: var(--warn); }
 .sev-dot.info { background: var(--text-dim); }
-.top-rule {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4px 0;
-  font-size: 13px;
-  border-bottom: 1px dashed var(--border);
-}
-.top-name {
-  color: var(--text);
-}
-.top-badge {
-  color: var(--text-dim);
-  font-size: 12px;
-}
 .adv-section {
   padding: 6px 0;
 }

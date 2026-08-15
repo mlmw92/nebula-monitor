@@ -1096,11 +1096,18 @@ defineExpose({ reload: load })
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 .hn-name {
   color: var(--text);
   font-weight: 600;
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 .hn-ip {
   color: var(--text-dim);
@@ -1110,6 +1117,7 @@ defineExpose({ reload: load })
 .hn-edit {
   margin-left: 2px;
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 .hn-edit:hover {
   color: var(--accent);

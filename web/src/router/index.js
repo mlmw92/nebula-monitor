@@ -30,6 +30,7 @@ const routes = [
       { path: 'metrics/explore', name: 'metrics-explore', component: () => import('../components/metrics/MetricsExploreView.vue') },
       { path: 'system/dashboards', name: 'system-dashboards', component: () => import('../components/dashboard/DashboardView.vue') },
       { path: 'security', name: 'security', component: () => import('../components/SecurityView.vue') },
+      { path: 'audit', name: 'audit', component: () => import('../components/AuditView.vue') },
     ],
   },
 ]

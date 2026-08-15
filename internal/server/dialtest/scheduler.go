@@ -10,15 +10,24 @@ import (
 	"github.com/nebula/monitor/internal/server/storage"
 )
 
+const defaultIntervalSeconds = 60
+
 // Scheduler 定时拨测调度器。
 type Scheduler struct {
-	store   *Store
-	storage storage.Storage
-	dialer  *Dialer
-	mu      sync.Mutex
-	stop    chan struct{}
-	sink    AlertSink       // 告警联动回调（可选，由 alert.Engine 实现）
-	upState map[string]bool // 记录上一轮各任务的 up 状态（兼容保留）
+	store    *Store
+	storage  storage.Storage
+	dialer   *Dialer
+	run      func(Task) Result // 可替换的执行器，便于调度测试
+	mu       sync.Mutex
+	stop     chan struct{}
+	stopOnce sync.Once
+	sink     AlertSink       // 告警联动回调（可选，由 alert.Engine 实现）
+	upState  map[string]bool // 记录上一轮各任务的 up 状态（兼容保留）
+
+	// 每个任务独立维护下次执行时间；ticker 只负责唤醒调度器，不决定拨测频率。
+	nextRun  map[string]time.Time
+	interval map[string]time.Duration
+	known    map[string]Task
 
 	// 故障确认防抖：连续失败达到阈值才触发故障告警，避免单次网络抖动产生
 	// “故障→恢复”邮件对。firedDown 标记已发出故障，需在恢复时清除。
@@ -28,12 +37,17 @@ type Scheduler struct {
 
 // NewScheduler 创建调度器。
 func NewScheduler(store *Store, st storage.Storage) *Scheduler {
+	dialer := NewDialer()
 	return &Scheduler{
 		store:     store,
 		storage:   st,
-		dialer:    NewDialer(),
+		dialer:    dialer,
+		run:       dialer.Run,
 		stop:      make(chan struct{}),
 		upState:   map[string]bool{},
+		nextRun:   map[string]time.Time{},
+		interval:  map[string]time.Duration{},
+		known:     map[string]Task{},
 		failCount: map[string]int{},
 		firedDown: map[string]bool{},
 	}
@@ -49,7 +63,8 @@ func (s *Scheduler) SetSink(sink AlertSink) {
 // Start 启动调度循环。
 func (s *Scheduler) Start(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
+		// 一秒只作为唤醒粒度；实际执行时间由每个任务的 interval 决定。
+		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		s.runOnce()
 		for {
@@ -67,28 +82,61 @@ func (s *Scheduler) Start(ctx context.Context) {
 
 // Stop 停止调度。
 func (s *Scheduler) Stop() {
-	close(s.stop)
+	s.stopOnce.Do(func() { close(s.stop) })
 }
 
-// runOnce 执行一轮拨测。
+// runOnce 执行到期任务。
 func (s *Scheduler) runOnce() {
+	s.runDue(time.Now())
+}
+
+// runDue 执行指定时刻到期的任务。时间参数独立出来，便于验证 interval 调度行为。
+func (s *Scheduler) runDue(now time.Time) {
 	tasks := s.store.List()
-	if len(tasks) == 0 {
-		return
-	}
-	now := model.NowMillis()
-	var allMetrics []model.Metric
+	s.reconcileTasks(tasks)
+
+	s.mu.Lock()
+	current := make(map[string]bool, len(tasks))
+	due := make([]Task, 0, len(tasks))
 	for _, task := range tasks {
+		current[task.ID] = true
 		if !task.Enabled {
+			s.clearTaskStateLocked(task.ID)
+			s.known[task.ID] = task
 			continue
 		}
-		result := s.dialer.Run(task)
-		metrics := ResultToMetrics(result, task, now)
+		interval := taskInterval(task)
+		oldInterval, hadInterval := s.interval[task.ID]
+		next, hadNext := s.nextRun[task.ID]
+		// 新任务或 interval 被修改时立即执行一次，随后按新 interval 调度。
+		if !hadInterval || oldInterval != interval || !hadNext || !now.Before(next) {
+			due = append(due, task)
+			s.nextRun[task.ID] = now.Add(interval)
+		}
+		s.interval[task.ID] = interval
+		s.known[task.ID] = task
+	}
+	for id := range s.known {
+		if current[id] {
+			continue
+		}
+		s.clearTaskStateLocked(id)
+		delete(s.known, id)
+	}
+	s.mu.Unlock()
+
+	if len(due) == 0 {
+		return
+	}
+	nowMillis := now.UnixMilli()
+	var allMetrics []model.Metric
+	for _, task := range due {
+		result := s.run(task)
+		metrics := ResultToMetrics(result, task, nowMillis)
 		allMetrics = append(allMetrics, metrics...)
 		s.store.RecordResult(result)
 		slog.Debug("拨测完成", "task", task.Name, "up", result.Up, "latency", result.Latency, "err", result.Error)
 
-		// 告警联动：基于连续失败次数做防抖，单次抖动不会触发“故障/恢复”邮件对。
 		s.mu.Lock()
 		s.upState[task.ID] = result.Up
 		sink := s.sink
@@ -101,11 +149,40 @@ func (s *Scheduler) runOnce() {
 			}
 		}
 	}
-	if len(allMetrics) > 0 {
+	if len(allMetrics) > 0 && s.storage != nil {
 		if err := s.storage.Write(allMetrics); err != nil {
 			slog.Warn("拨测结果写入失败", "err", err)
 		}
 	}
+}
+
+// reconcileTasks 将任务生命周期同步给告警引擎，关闭删除/禁用任务遗留的活跃告警。
+func (s *Scheduler) reconcileTasks(tasks []Task) {
+	s.mu.Lock()
+	sink := s.sink
+	s.mu.Unlock()
+	if sink == nil {
+		return
+	}
+	if reconciler, ok := sink.(TaskReconciler); ok {
+		reconciler.ReconcileDialtestTasks(tasks)
+	}
+}
+
+func (s *Scheduler) clearTaskStateLocked(id string) {
+	delete(s.nextRun, id)
+	delete(s.interval, id)
+	delete(s.upState, id)
+	delete(s.failCount, id)
+	delete(s.firedDown, id)
+}
+
+func taskInterval(task Task) time.Duration {
+	seconds := task.Interval
+	if seconds <= 0 {
+		seconds = defaultIntervalSeconds
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 // evaluateAlert 基于连续失败次数决定是否触发故障/恢复告警，抑制单次网络抖动产生的误报。
@@ -144,6 +221,10 @@ func (s *Scheduler) evaluateAlert(task Task, result Result, sink AlertSink) {
 	s.mu.Unlock()
 	if wasFired {
 		sink.EmitDialtestAlert(task, result, true)
+	} else if reconciler, ok := sink.(DialtestSuccessReconciler); ok {
+		// 进程重启后 Scheduler 的内存状态为空，但 Engine 可能从 VM 恢复了旧 firing。
+		// 让一次成功探测幂等地清理这类旧告警，避免永久活跃。
+		reconciler.ReconcileDialtestSuccess(task, result)
 	}
 }
 
@@ -154,4 +235,14 @@ type AlertSink interface {
 	EmitDialtestAlert(task Task, result Result, up bool)
 	// EmitCertAlert 在检测到 HTTPS 任务 SSL 证书剩余天数低于阈值时调用（证书过期预警）。
 	EmitCertAlert(task Task, result Result)
+}
+
+// TaskReconciler 是可选的告警生命周期同步接口。
+type TaskReconciler interface {
+	ReconcileDialtestTasks(tasks []Task)
+}
+
+// DialtestSuccessReconciler 是可选的成功结果对账接口。
+type DialtestSuccessReconciler interface {
+	ReconcileDialtestSuccess(task Task, result Result)
 }

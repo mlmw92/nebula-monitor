@@ -183,5 +183,11 @@ func (a *API) handleRulesImport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	RecordChangeAudit(a.audit, r, "import_rules", nil, map[string]interface{}{
+		"replace": body.Replace,
+		"created": created,
+		"updated": updated,
+		"rules":   body.Rules,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "created": created, "updated": updated})
 }

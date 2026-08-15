@@ -44,9 +44,10 @@ type SecurityBaselineItem struct {
 
 // SecurityBaseline 主机安全基线检查结果，含 0-100 合规评分与逐项明细。
 type SecurityBaseline struct {
-	Node      string                 `json:"node"`      // 节点名
-	NodeIP    string                 `json:"nodeIp,omitempty"` // 节点 IP（服务器 IP）
-	Score     float64                `json:"score"`     // 合规评分 0-100
+	Node         string                 `json:"node"`                  // 节点名
+	NodeIP       string                 `json:"nodeIp,omitempty"`      // 节点 IP（服务器 IP）
+	DisplayName  string                 `json:"displayName,omitempty"` // 节点别名（用户自定义显示名，优先于主机名展示）
+	Score        float64                `json:"score"`                 // 合规评分 0-100
 	Items     []SecurityBaselineItem `json:"items"`     // 各项检查结果
 	CheckedAt int64                  `json:"checkedAt"` // 检查时间（毫秒）
 }

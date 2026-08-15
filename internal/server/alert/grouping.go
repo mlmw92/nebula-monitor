@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -78,7 +79,7 @@ func (s *GroupingStore) Save(cfg GroupingConfig) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(s.path, data, 0644); err != nil {
+	if err := config.AtomicWrite(s.path, data); err != nil {
 		return err
 	}
 	s.mu.Lock()

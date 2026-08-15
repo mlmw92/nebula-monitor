@@ -26,6 +26,7 @@
                 <el-option value="service_down" label="服务离线" />
                 <el-option value="role_change" label="主从切换" />
                 <el-option value="cluster_fault" label="集群损坏" />
+                <el-option value="security_event" label="安全事件" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -117,6 +118,20 @@
             </el-col>
           </el-row>
           <div class="field-hint">主机心跳超时（由服务端离线判定）持续上述时长后告警；恢复在线即自动解除。</div>
+        </template>
+
+        <!-- 安全事件 -->
+        <template v-else-if="form.type === 'security_event'">
+          <el-form-item label="安全类别">
+            <el-select v-model="form.category" clearable placeholder="全部安全类别" style="width: 280px">
+              <el-option value="ssh_bruteforce" label="SSH 暴力破解" />
+              <el-option value="ssh_audit" label="SSH 登录审计" />
+              <el-option value="fim" label="文件完整性" />
+              <el-option value="process_anomaly" label="异常进程" />
+              <el-option value="sudo_audit" label="sudo 提权审计" />
+            </el-select>
+          </el-form-item>
+          <div class="field-hint">匹配类别的安全事件到达后，按照本规则的级别、通知渠道、主机范围、静默和升级策略触发统一告警。</div>
         </template>
 
         <!-- 服务离线 / 主从切换 / 集群损坏 -->
@@ -230,7 +245,7 @@
               {{ c.enabled ? c.label : `${c.label}（未启用）` }}
             </el-checkbox>
           </el-checkbox-group>
-          <div class="field-hint">留空则发送到全部已启用渠道；未启用的渠道需先在「通知配置」中开启。</div>
+          <div class="field-hint">不选择通知渠道时仅在平台消息中展示；选择后仅发送到所选的已启用渠道。</div>
         </el-form-item>
       </div>
 
@@ -315,7 +330,7 @@
                     {{ c.enabled ? c.label : `${c.label}（未启用）` }}
                   </el-checkbox>
                 </el-checkbox-group>
-                <div class="field-hint">留空则沿用规则的通知渠道</div>
+                <div class="field-hint">留空则沿用规则渠道；规则渠道也为空时仅在平台消息中展示。</div>
               </div>
             </template>
           </div>
@@ -348,6 +363,7 @@ const TYPE_HINTS = {
   service_down: '当中间件探测不可达（*_instance_up = 0）时触发。',
   role_change: '监测数据库主从角色变化（PRIMARY ↔ SECONDARY），发生切换即告警。',
   cluster_fault: '按集群聚合各实例角色，出现无主或多主（脑裂）时告警。',
+  security_event: '安全中心事件按照此规则的类别、级别、范围和通知渠道触发告警。',
 }
 const typeHint = computed(() => TYPE_HINTS[form.type] || '')
 const serviceMetricHint = computed(() => {
@@ -363,7 +379,7 @@ const form = reactive({
   id: '', name: '', type: '', metric: '', operator: '>', threshold: null, for: '5m',
   severity: '', group: '', scope: 'all', nodes: [], enabled: true, notify: [],
   silenced: false, silenceUntil: 0,
-  service: 'mysql', topology: 'cluster',
+  service: 'mysql', topology: 'cluster', category: '',
   quietPeriods: [],
   escalation: { enabled: false, afterMinutes: 15, toSeverity: 'critical', repeatMinutes: 30, channels: [] },
 })
@@ -391,7 +407,7 @@ watch(() => props.rule, (r) => {
   form.silenceUntil = r?.silenceUntil || 0
   form.service = r?.service ?? 'mysql'
   form.topology = r?.topology ?? 'cluster'
-  form.quietPeriods = r?.quietPeriods ? r.quietPeriods.map((q) => ({ ...q, days: [...(q.days || [])] })) : []
+  form.category = r?.category ?? ''
   const e = r?.escalation ?? null
   form.escalation = {
     enabled: !!e?.enabled,
@@ -429,7 +445,7 @@ async function submit() {
   if (['service_down','role_change','cluster_fault'].includes(form.type) && !form.service) { ElMessage.warning('请选择中间件类型'); return }
   if (form.scope === 'specified' && (!form.nodes || form.nodes.length === 0)) { ElMessage.warning('指定主机时请至少选择一台'); return }
   const body = {
-    name: form.name, type: form.type || '', metric: form.metric, operator: form.operator,
+    name: form.name, type: form.type || '', metric: form.metric, category: form.category || '', operator: form.operator,
     threshold: form.threshold == null ? 0 : Number(form.threshold), for: form.for || '5m',
     severity: form.severity, group: form.group, scope: form.scope || 'all',
     nodes: form.scope === 'specified' ? form.nodes : [], enabled: form.enabled,

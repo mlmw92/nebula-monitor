@@ -827,6 +827,18 @@ func (a *API) nodeIP(node string) string {
 	return n.IP
 }
 
+// nodeDisplayName 返回指定节点的自定义显示名（别名）；未设置别名时返回空串，调用方应回退到真实主机名。
+func (a *API) nodeDisplayName(node string) string {
+	if node == "" {
+		return ""
+	}
+	n, ok := a.nodeMgr.GetNode(node)
+	if !ok {
+		return ""
+	}
+	return n.DisplayName
+}
+
 // ---- Kafka ----
 
 func (a *API) handleKafkaInstances(w http.ResponseWriter, r *http.Request) {
