@@ -94,6 +94,30 @@
         </el-dropdown>
         </div>
       </div>
+      <div class="rule-filter-bar" style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap">
+        <el-input
+          v-model="ruleSearch"
+          placeholder="搜索规则名称"
+          clearable
+          size="small"
+          style="width: 220px"
+        />
+        <el-select
+          v-model="ruleTypeFilter"
+          placeholder="全部类型"
+          clearable
+          size="small"
+          style="width: 150px"
+        >
+          <el-option label="阈值" value="" />
+          <el-option label="主机离线" value="node_offline" />
+          <el-option label="服务离线" value="service_down" />
+          <el-option label="主从切换" value="role_change" />
+          <el-option label="集群损坏" value="cluster_fault" />
+          <el-option label="安全事件" value="security_event" />
+        </el-select>
+        <span class="muted" style="font-size: 12px">共 {{ filteredRules.length }} 条</span>
+      </div>
       <el-table :data="pagedRules" stripe style="width: 100%" empty-text="暂无规则">
         <el-table-column prop="name" label="名称" min-width="140" />
         <el-table-column label="类型" width="120">
@@ -164,7 +188,7 @@
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
-          :total="rules.length"
+          :total="filteredRules.length"
           :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
           background
@@ -401,15 +425,26 @@ const rules = ref([])
 // 告警规则前端分页
 const currentPage = ref(1)
 const pageSize = ref(10)
+const ruleSearch = ref('')
+const ruleTypeFilter = ref('')
+const filteredRules = computed(() => {
+  const kw = ruleSearch.value.trim().toLowerCase()
+  const t = ruleTypeFilter.value
+  return rules.value.filter((r) => {
+    if (t && (r.type || '') !== t) return false
+    if (kw && !((r.name || '').toLowerCase().includes(kw))) return false
+    return true
+  })
+})
 const pagedRules = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return rules.value.slice(start, start + pageSize.value)
+  return filteredRules.value.slice(start, start + pageSize.value)
 })
-watch(rules, () => {
-  const max = Math.max(1, Math.ceil(rules.value.length / pageSize.value))
+watch([rules, filteredRules], () => {
+  const max = Math.max(1, Math.ceil(filteredRules.value.length / pageSize.value))
   if (currentPage.value > max) currentPage.value = max
 })
-watch(pageSize, () => {
+watch([ruleSearch, ruleTypeFilter, pageSize], () => {
   currentPage.value = 1
 })
 const alerts = ref([])
