@@ -31,6 +31,13 @@ func AuditMiddleware(next http.Handler, store *audit.Store) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// 跳过文件上传类接口（升级包 / GeoIP 库等）：这类请求体大、耗时长（解压），
+		// 若纳入审计会拖慢响应返回，导致反代 / 网闸隧道（ZMQ）超时 RST（ERR_CONNECTION_RESET）；
+		// 且上传本身不产生有意义的审计摘要，故完全排除，不写审计。
+		if strings.HasSuffix(r.URL.Path, "/upload") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		// 标记本请求：若后续 handler 已显式调用 RecordChangeAudit 记录（含变更摘要），
 		// 则中间件不再重复记录，避免同一次操作产生两条审计（如规则增删改）。
 		recorded := new(bool)
