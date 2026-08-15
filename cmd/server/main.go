@@ -198,11 +198,13 @@ func main() {
 	}
 	go offlineChecker(ctx, nodeMgr, 10*time.Second)
 
-	// 认证中间件（启用 auth 时保护 /api/v1/* 业务接口）
+	// 认证中间件（启用 auth 时保护 /api/v1/* 业务接口）。
+	// 注意顺序：AuthMiddleware 必须在 AuditMiddleware 外层，
+	// 由其先解析 token 写入操作者，审计中间件才能取到正确的登录用户。
 	var handler http.Handler = mux
 	if cfg.Auth.Enabled {
-		handler = api.AuthMiddleware(mux, cfg.Auth)
-		handler = api.AuditMiddleware(handler, auditStore)
+		handler = api.AuditMiddleware(mux, auditStore)
+		handler = api.AuthMiddleware(handler, cfg.Auth)
 	}
 
 	srv := &http.Server{

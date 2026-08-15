@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,9 @@ import (
 
 	"github.com/nebula/monitor/internal/server/audit"
 )
+
+// auditDedupKey 用于标记某次请求已由 handler 显式记录审计，避免中间件重复记录。
+type auditDedupKey struct{}
 
 const maxAuditBodyBytes = 1 << 20
 
@@ -27,9 +31,16 @@ func AuditMiddleware(next http.Handler, store *audit.Store) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// 标记本请求：若后续 handler 已显式调用 RecordChangeAudit 记录（含变更摘要），
+		// 则中间件不再重复记录，避免同一次操作产生两条审计（如规则增删改）。
+		recorded := new(bool)
+		r = r.WithContext(context.WithValue(r.Context(), auditDedupKey{}, recorded))
 		detail := auditRequestDetail(r)
 		recorder := &auditResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(recorder, r)
+		if *recorded {
+			return
+		}
 		if recorder.status >= 200 && recorder.status < 400 {
 			detail = enrichChangeDetail(r, detail)
 		}
@@ -74,9 +85,13 @@ func auditRequestDetail(r *http.Request) string {
 }
 
 // RecordChangeAudit 记录持久化对象的语义化变更摘要，不保存对象原文。
+// 同时标记本次请求已由 handler 记录，避免 AuditMiddleware 重复记录同一次操作。
 func RecordChangeAudit(store *audit.Store, r *http.Request, action string, before, after interface{}) {
 	if store == nil {
 		return
+	}
+	if v, ok := r.Context().Value(auditDedupKey{}).(*bool); ok {
+		*v = true
 	}
 	_ = store.Record(audit.Event{
 		User:      AuthenticatedUser(r),
