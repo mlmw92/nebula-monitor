@@ -450,7 +450,8 @@ async function submit() {
     severity: form.severity, group: form.group, scope: form.scope || 'all',
     nodes: form.scope === 'specified' ? form.nodes : [], enabled: form.enabled,
     notify: form.notify || [], silenced: form.silenced, silenceUntil: form.silenceUntil,
-    service: form.service, topology: form.topology,
+    service: ['service_down', 'role_change', 'cluster_fault'].includes(form.type) ? form.service : '',
+    topology: ['role_change', 'cluster_fault'].includes(form.type) ? form.topology : '',
     quietPeriods: form.quietPeriods.filter((q) => q.start && q.end),
     escalation: form.escalation.enabled ? { enabled: true, afterMinutes: Number(form.escalation.afterMinutes) || 0, toSeverity: form.escalation.toSeverity || '', repeatMinutes: Number(form.escalation.repeatMinutes) || 0, channels: form.escalation.channels || [] } : null,
   }
