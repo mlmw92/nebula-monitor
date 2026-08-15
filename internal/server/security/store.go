@@ -24,10 +24,11 @@ const (
 
 // Store 安全事件/基线存储。
 type Store struct {
-	mu       sync.RWMutex
-	events   []model.SecurityEvent            // 全量事件（按时间倒序追加，裁剪到 maxEvents）
-	baseline map[string]model.SecurityBaseline // node -> 最新基线
-	path     string                            // 持久化文件路径
+	mu            sync.RWMutex
+	events        []model.SecurityEvent            // 全量事件（按时间倒序追加，裁剪到 maxEvents）
+	baseline      map[string]model.SecurityBaseline // node -> 最新基线
+	defenseStatus map[string]*model.DefenseStatus   // node -> 最新入侵防护状态
+	path          string                            // 持久化文件路径
 }
 
 // New 创建安全存储；若 file 为空使用默认文件名。加载已持久化数据（若存在）。
@@ -36,8 +37,9 @@ func New(file string) *Store {
 		file = defaultStoreFile
 	}
 	s := &Store{
-		baseline: map[string]model.SecurityBaseline{},
-		path:     file,
+		baseline:      map[string]model.SecurityBaseline{},
+		defenseStatus: map[string]*model.DefenseStatus{},
+		path:          file,
 	}
 	s.load()
 	return s
@@ -50,8 +52,9 @@ func (s *Store) load() {
 		return
 	}
 	var snap struct {
-		Events   []model.SecurityEvent            `json:"events"`
-		Baseline map[string]model.SecurityBaseline `json:"baseline"`
+		Events        []model.SecurityEvent            `json:"events"`
+		Baseline      map[string]model.SecurityBaseline `json:"baseline"`
+		DefenseStatus map[string]*model.DefenseStatus   `json:"defenseStatus"`
 	}
 	if err := json.Unmarshal(data, &snap); err != nil {
 		slog.Warn("安全存储加载失败，忽略旧数据", "path", s.path, "err", err)
@@ -63,18 +66,25 @@ func (s *Store) load() {
 	if snap.Baseline != nil {
 		s.baseline = snap.Baseline
 	}
-	slog.Info("已加载安全存储", "events", len(s.events), "baselines", len(s.baseline))
+	if snap.DefenseStatus != nil {
+		s.defenseStatus = snap.DefenseStatus
+	}
+	slog.Info("已加载安全存储", "events", len(s.events), "baselines", len(s.baseline), "defense", len(s.defenseStatus))
 }
 
 // save 持久化事件与基线到磁盘。失败时仅记日志，不阻塞上报链路。
 func (s *Store) save() {
+	s.mu.RLock()
 	snap := struct {
-		Events   []model.SecurityEvent            `json:"events"`
-		Baseline map[string]model.SecurityBaseline `json:"baseline"`
+		Events        []model.SecurityEvent            `json:"events"`
+		Baseline      map[string]model.SecurityBaseline `json:"baseline"`
+		DefenseStatus map[string]*model.DefenseStatus   `json:"defenseStatus"`
 	}{
-		Events:   s.events,
-		Baseline: s.baseline,
+		Events:        s.events,
+		Baseline:      s.baseline,
+		DefenseStatus: s.defenseStatus,
 	}
+	s.mu.RUnlock()
 	data, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		slog.Warn("安全存储序列化失败", "err", err)
@@ -209,4 +219,36 @@ type SecuritySummary struct {
 	FIMChanges    int     `json:"fimChanges"`    // FIM 变化数
 	BaselineHosts int     `json:"baselineHosts"` // 已上报基线的主机数
 	GeneratedAt   int64   `json:"generatedAt"`   // 统计时间（毫秒）
+}
+
+// SaveDefenseStatus 更新某节点最新入侵防护状态并持久化。
+func (s *Store) SaveDefenseStatus(node string, st *model.DefenseStatus) {
+	if st == nil || node == "" {
+		return
+	}
+	if st.Node == "" {
+		st.Node = node
+	}
+	s.mu.Lock()
+	s.defenseStatus[node] = st
+	s.mu.Unlock()
+	s.save()
+}
+
+// GetDefenseStatus 返回某节点最新入侵防护状态（无则 nil）。
+func (s *Store) GetDefenseStatus(node string) *model.DefenseStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.defenseStatus[node]
+}
+
+// ListDefenseStatus 返回所有节点的入侵防护状态。
+func (s *Store) ListDefenseStatus() []*model.DefenseStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*model.DefenseStatus, 0, len(s.defenseStatus))
+	for _, st := range s.defenseStatus {
+		out = append(out, st)
+	}
+	return out
 }

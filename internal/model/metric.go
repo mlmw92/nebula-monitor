@@ -68,6 +68,9 @@ type ReportPayload struct {
 	NginxAccessStats  []NginxAccessStat  `json:"nginxAccessStats,omitempty"`  // Nginx access log 聚合统计
 	SecurityEvents    []SecurityEvent    `json:"securityEvents,omitempty"`    // 安全事件（结构化，非时序）
 	SecurityBaseline  *SecurityBaseline  `json:"securityBaseline,omitempty"`  // 安全基线检查结果
+	Capabilities      *ClientCapability  `json:"capabilities,omitempty"`      // Agent 能力声明（旧 Agent 不报此字段，前端据此判断兼容）
+	DefenseStatus     *DefenseStatus     `json:"defenseStatus,omitempty"`     // 入侵防护当前状态（由 Agent 定期采集上报）
+	DefenseResult     *DefenseCommandResult `json:"defenseResult,omitempty"`  // 防护指令执行结果回执
 	ReportAt          int64              `json:"reportAt"`                    // 上报时间（毫秒）
 }
 

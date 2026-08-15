@@ -29,14 +29,16 @@ type Receiver struct {
 	ngx     *nginxaccess.Window // Nginx access log 地理聚合窗口（可空）
 	sec     *security.Store     // 安全事件/基线存储（可空，传 nil 关闭安全能力）
 	alerts  *alert.Engine       // 告警引擎（安全事件注入告警中心，可空）
+	defense *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空）
 }
 
 // New 创建 Receiver。auth 为 Agent 接入授权配置（参考哪吒探针密钥机制）；
 // ngx 为 Nginx access log 聚合窗口，可传 nil 关闭该能力；
-// sec/alerts 为安全能力依赖，可传 nil 关闭安全事件落库与告警。
+// sec/alerts 为安全能力依赖，可传 nil 关闭安全事件落库与告警；
+// defense 为受控入侵防御任务存储，可传 nil 关闭防护能力。
 func New(s storage.Storage, mgr *node.Manager, auth config.AgentAuthConfig, ngx *nginxaccess.Window,
-	sec *security.Store, alerts *alert.Engine) *Receiver {
-	return &Receiver{storage: s, nodeMgr: mgr, auth: auth, ngx: ngx, sec: sec, alerts: alerts}
+	sec *security.Store, alerts *alert.Engine, defense *security.DefenseStore) *Receiver {
+	return &Receiver{storage: s, nodeMgr: mgr, auth: auth, ngx: ngx, sec: sec, alerts: alerts, defense: defense}
 }
 
 // HandleReport 处理 POST /api/v1/report。
@@ -217,11 +219,38 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		r.alerts.IngestSecurityEvents(payload.SecurityEvents)
 	}
 
+	// 受控入侵防御：处理 Agent 上报的防护状态、指令执行结果回执，并下发待执行指令。
+	if r.defense != nil {
+		if payload.DefenseStatus != nil && r.sec != nil {
+			r.sec.SaveDefenseStatus(payload.Node, payload.DefenseStatus)
+		}
+		if payload.Capabilities != nil {
+			r.defense.SaveCap(payload.Node, payload.Capabilities.Defense)
+		}
+		if payload.DefenseResult != nil && payload.DefenseResult.CommandID != "" {
+			r.defense.UpdateResult(*payload.DefenseResult)
+			slog.Info("防护指令结果回执", "node", payload.Node,
+				"commandId", payload.DefenseResult.CommandID,
+				"state", payload.DefenseResult.State,
+				"msg", payload.DefenseResult.Message)
+		}
+		r.defense.ExpireOverdue()
+	}
+
 	// 响应：若节点仍需升级（agent 版本未达标），持续下发 upgrade 指令
 	resp := map[string]interface{}{"status": "ok"}
 	if r.nodeMgr.ConsumeUpgrade(payload.Node, payload.Version, payload.BinSHA256) {
 		resp["command"] = "upgrade"
 		slog.Info("已下发升级指令", "node", payload.Node, "agentVersion", payload.Version)
+	}
+
+	// 受控入侵防御：仅当 Agent 声明支持 Defense 能力时，下发结构化防护指令。
+	// 旧 Agent 未上报 Capabilities，不会收到 defense 字段，保持兼容。
+	if r.defense != nil && payload.Capabilities != nil && payload.Capabilities.Defense {
+		if cmd := r.defense.Take(payload.Node); cmd != nil {
+			resp["defense"] = cmd
+			slog.Info("已下发防护指令", "node", payload.Node, "type", cmd.Type, "id", cmd.ID)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

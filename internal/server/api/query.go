@@ -100,14 +100,15 @@ type API struct {
 	dashMgr        *dashboard.Manager  // 自定义仪表盘配置（可空）
 	security       *security.Store     // 安全事件/基线存储（可空，关闭安全能力）
 	audit          *audit.Store        // 管理操作审计存储（可空）
+	defenseStore   *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空，关闭防护能力）
 }
 
 // SetDashboardManager 注入仪表盘配置管理器（可选，不注入则相关接口返回空列表）。
 func (a *API) SetDashboardManager(m *dashboard.Manager) { a.dashMgr = m }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string, sec *security.Store, auditStore *audit.Store) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince(), configPath: configPath, security: sec, audit: auditStore}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string, sec *security.Store, defenseStore *security.DefenseStore, auditStore *audit.Store) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince(), configPath: configPath, security: sec, defenseStore: defenseStore, audit: auditStore}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -162,6 +163,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/security/summary", a.handleSecuritySummary)
 	mux.HandleFunc("GET /api/v1/security/events", a.handleSecurityEvents)
 	mux.HandleFunc("GET /api/v1/security/baselines", a.handleSecurityBaselines)
+
+	// 受控 fail2ban 入侵防御（仅管理 nebula 专属 SSH jail）
+	mux.HandleFunc("GET /api/v1/security/defense/status", a.handleDefenseStatusList)
+	mux.HandleFunc("GET /api/v1/security/defense/status/{node}", a.handleDefenseStatus)
+	mux.HandleFunc("POST /api/v1/security/defense/{node}/{action}", a.handleDefenseAction)
+	mux.HandleFunc("GET /api/v1/security/defense/tasks", a.handleDefenseTasks)
+	mux.HandleFunc("GET /api/v1/security/defense/tasks/{node}", a.handleDefenseTasks)
 
 	mux.HandleFunc("GET /api/v1/install-info", a.handleInstallInfo)
 	mux.HandleFunc("GET /api/v1/version", a.handleVersion)

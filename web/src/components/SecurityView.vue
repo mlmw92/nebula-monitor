@@ -45,6 +45,80 @@
       </div>
     </div>
 
+    <!-- 入侵防御（受控 fail2ban 专属 SSH 防护） -->
+    <div class="glass panel section" v-loading="defenseLoading">
+      <div class="panel-title-row">
+        <span class="panel-title">入侵防御</span>
+        <span class="defense-tip">仅托管 nebula-monitor-sshd 专属 jail，不覆盖既有 fail2ban 配置</span>
+      </div>
+
+      <div class="defense-kpi" v-if="defenseSummary">
+        <div class="dk-card"><span class="dk-val ok">{{ defenseSummary.protected }}</span><span class="dk-label">已防护</span></div>
+        <div class="dk-card"><span class="dk-val">{{ defenseSummary.unmanaged }}</span><span class="dk-label">未启用</span></div>
+        <div class="dk-card"><span class="dk-val warn">{{ defenseSummary.running }}</span><span class="dk-label">执行中</span></div>
+        <div class="dk-card"><span class="dk-val bad">{{ defenseSummary.exception }}</span><span class="dk-label">异常</span></div>
+      </div>
+
+      <el-table :data="defenseStatuses" style="width: 100%; margin-top: 12px" empty-text="暂无节点" max-height="420">
+        <el-table-column label="节点" min-width="180">
+          <template #default="{ row }">
+            <span class="node-cell">{{ row.node }}</span>
+            <span v-if="!row.agentSupported" class="need-upgrade">需升级 Agent</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="防护状态" width="140">
+          <template #default="{ row }">
+            <span class="def-badge" :class="defenseBadgeClass(row)">{{ defenseStateText(row) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="jail" min-width="160">
+          <template #default="{ row }">
+            <span v-if="row.managedJail" class="jail-tag">nebula-monitor-sshd</span>
+            <span v-else-if="row.jails && row.jails.length" class="dim">{{ row.jails.join(', ') }}</span>
+            <span v-else class="muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="说明" min-width="200">
+          <template #default="{ row }">
+            <span class="dim">{{ row.message || (row.agentSupported ? '' : 'Agent 版本过低，不支持防护指令') }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="160" align="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.agentSupported && !row.managedJail"
+              size="small" type="primary" plain
+              :loading="actionId === row.node + '-enable'"
+              @click="confirmDefense(row, 'enable')">启用防护</el-button>
+            <el-button
+              v-else-if="row.agentSupported && row.managedJail"
+              size="small" type="warning" plain
+              :loading="actionId === row.node + '-disable'"
+              @click="confirmDefense(row, 'disable')">停用防护</el-button>
+            <el-button v-else size="small" disabled>需升级 Agent</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <!-- 防护操作确认 -->
+    <el-dialog v-model="defDialogVisible" title="入侵防御操作确认" width="460px">
+      <div v-if="defTarget">
+        <p>即将对节点 <b>{{ defTarget.node }}</b> 执行
+          <b>{{ defTarget.action === 'enable' ? '启用' : '停用' }}</b> 防护。</p>
+        <ul class="def-confirm">
+          <li>仅托管 <code>nebula-monitor-sshd</code> 专属 jail，不会修改你的 jail.local 或既有 jail。</li>
+          <li>启用后会自动将你的操作来源 IP 加入 fail2ban 白名单，避免误封自己。</li>
+          <li v-if="defTarget.action === 'disable'">停用只移除 nebula 专属配置并重载，<b>不卸载 fail2ban 软件包</b>。</li>
+          <li>任务将在节点下次上报后由 Agent 异步执行，可在状态栏观察结果。</li>
+        </ul>
+      </div>
+      <template #footer>
+        <el-button @click="defDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="doDefenseAction">确认{{ defTarget && defTarget.action === 'enable' ? '启用' : '停用' }}</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 安全事件区 -->
     <div class="glass panel section" v-loading="loading">
       <div class="panel-title-row">
@@ -146,7 +220,8 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { getSecuritySummary, getSecurityEvents, getSecurityBaselines } from '../api/security'
+import { ElMessage } from 'element-plus'
+import { getSecuritySummary, getSecurityEvents, getSecurityBaselines, getDefenseStatuses, postDefenseAction } from '../api/security'
 import RefreshBar from './RefreshBar.vue'
 
 const loading = ref(false)
@@ -166,6 +241,71 @@ watch(events, () => {
 })
 const filterCategory = ref('')
 const filterNode = ref('')
+
+// 受控入侵防御状态
+const defenseLoading = ref(false)
+const defenseStatuses = ref([])
+const defDialogVisible = ref(false)
+const defTarget = ref(null) // { node, action }
+const actionId = ref('')
+
+const defenseSummary = computed(() => {
+  const s = { protected: 0, unmanaged: 0, running: 0, exception: 0 }
+  for (const d of defenseStatuses.value) {
+    if (!d.agentSupported) s.exception++
+    else if (d.managedJail && d.running) s.protected++
+    else if (d.managedJail && !d.running) s.unmanaged++
+    else if (!d.supported) s.exception++
+    else if (!d.managedJail) s.unmanaged++
+  }
+  return s
+})
+
+function defenseStateText(row) {
+  if (!row.agentSupported) return '需升级 Agent'
+  if (row.managedJail && row.running) return '已防护'
+  if (row.managedJail && !row.running) return '已停用'
+  if (row.agentSupported && !row.managedJail) return '未启用'
+  if (!row.supported) return '不支持'
+  return '未知'
+}
+function defenseBadgeClass(row) {
+  if (!row.agentSupported) return 'bad'
+  if (row.managedJail && row.running) return 'good'
+  if (row.managedJail) return 'warn'
+  return 'neutral'
+}
+
+async function loadDefense() {
+  try {
+    const d = await getDefenseStatuses()
+    defenseStatuses.value = d.statuses || []
+  } catch (e) {
+    defenseStatuses.value = []
+  }
+}
+
+function confirmDefense(row, action) {
+  defTarget.value = { node: row.node, action }
+  defDialogVisible.value = true
+}
+async function doDefenseAction() {
+  const t = defTarget.value
+  if (!t) return
+  actionId.value = t.node + '-' + t.action
+  try {
+    await postDefenseAction(t.node, t.action)
+    ElMessage.success(t.action === 'enable' ? '已提交启用任务，节点将在下次上报后执行' : '已提交停用任务')
+    defDialogVisible.value = false
+    setTimeout(loadDefense, 1500)
+  } catch (e) {
+    const need = e && e.response && e.response.data && e.response.data.needAgentUpgrade
+    ElMessage.error((e && e.response && e.response.data && e.response.data.error) || '操作失败')
+    if (need) setTimeout(loadDefense, 800)
+  } finally {
+    actionId.value = ''
+  }
+}
 
 const categoryOptions = [
   { value: 'ssh_bruteforce', label: 'SSH 暴力破解' },
@@ -254,7 +394,7 @@ async function loadBaselines() {
 }
 async function refreshAll() {
   loading.value = true
-  await Promise.all([loadSummary(), loadEvents(), loadBaselines()])
+  await Promise.all([loadSummary(), loadEvents(), loadBaselines(), loadDefense()])
   loading.value = false
 }
 
@@ -525,5 +665,79 @@ onMounted(() => {
 @media (max-width: 1100px) {
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
   .grid-2 { grid-template-columns: 1fr; }
+}
+
+/* 入侵防御面板 */
+.panel-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.defense-tip {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.defense-kpi {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.dk-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.dk-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+}
+.dk-val.ok { color: #00D9A3; }
+.dk-val.warn { color: #FFB454; }
+.dk-val.bad { color: #FF5D6C; }
+.dk-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.def-badge {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-weight: 600;
+}
+.def-badge.good { background: rgba(0,217,163,0.16); color: #00D9A3; }
+.def-badge.warn { background: rgba(255,180,84,0.16); color: #FFB454; }
+.def-badge.bad { background: rgba(255,93,108,0.16); color: #FF5D6C; }
+.def-badge.neutral { background: rgba(255,255,255,0.08); color: var(--text-dim); }
+.node-cell { font-weight: 600; color: var(--text); margin-right: 8px; }
+.need-upgrade { font-size: 11px; color: #FFB454; border: 1px solid rgba(255,180,84,0.4); border-radius: 10px; padding: 1px 8px; }
+.jail-tag {
+  font-size: 11px;
+  color: #00D9A3;
+  background: rgba(0,217,163,0.12);
+  border-radius: 8px;
+  padding: 2px 8px;
+}
+.dim { color: var(--text-dim); }
+.muted { color: var(--text-muted); }
+.def-confirm {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.def-confirm code {
+  background: rgba(255,255,255,0.08);
+  padding: 0 4px;
+  border-radius: 4px;
+  color: #4A9DF0;
 }
 </style>

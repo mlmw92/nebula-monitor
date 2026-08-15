@@ -17,6 +17,7 @@ import (
 
 	"github.com/nebula/monitor/internal/agent/collector"
 	"github.com/nebula/monitor/internal/agent/config"
+	"github.com/nebula/monitor/internal/agent/defense"
 	"github.com/nebula/monitor/internal/agent/proxy"
 	"github.com/nebula/monitor/internal/agent/reporter"
 	"github.com/nebula/monitor/internal/agent/upgrader"
@@ -25,6 +26,13 @@ import (
 )
 
 const pidFile = "/var/run/monitor-agent.pid"
+
+// 受控 fail2ban 入侵防御相关全局组件（agent 单例）。
+var (
+	defenseExec   = defense.NewExecutor()
+	banCollector  = defense.NewBanEventCollector()
+	pendingResult *model.DefenseCommandResult // 已执行指令的结果，将在下一次 report 带回
+)
 
 // agentBinSHA 是当前 agent 二进制的 SHA256，随上报提交给 Server，
 // 作为升级成功的确认依据（与版本号解耦：CDN 里的二进制是什么，目标就是什么）。
@@ -265,6 +273,12 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 	metrics = append(metrics, fastdfsMetrics...)
 	securityEvents, securityBaseline := coll.CollectSecurity()
 
+	// 采集 fail2ban 封禁/解封事件（增量 JSONL 审计），合并进安全事件
+	banEvents := banCollector.Collect(cfg.Node)
+	if len(banEvents) > 0 {
+		securityEvents = append(securityEvents, banEvents...)
+	}
+
 	osName, arch, ip := coll.HostInfo()
 	payload := model.ReportPayload{
 		Node:              cfg.Node,
@@ -292,14 +306,24 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 		NginxAccessStats:  nginxAccessStats,
 		SecurityEvents:    securityEvents,
 		SecurityBaseline:  securityBaseline,
-		ReportAt:          model.NowMillis(),
+		// 声明 Agent 能力：支持结构化入侵防护指令（旧 Server 忽略此字段）
+		Capabilities: &model.ClientCapability{Defense: true},
+		// 上报当前 nebula 托管 SSH 防护状态
+		DefenseStatus: defenseExec.Status(),
+		// 携带上一次指令执行结果回执（若有）
+		DefenseResult: pendingResult,
+		ReportAt:      model.NowMillis(),
 	}
 	resp, err := rep.ReportFull(payload)
 	if err != nil {
 		// 错误已在 reporter 内记录，这里仅跳过本轮
 		return
 	}
-	slog.Debug("上报成功", "metrics", len(metrics), "procs", len(procs))
+	// 回执已随本次上报发出，清空待发结果
+	if pendingResult != nil {
+		pendingResult = nil
+	}
+	slog.Debug("上报成功", "metrics", len(metrics), "procs", len(procs), "banEvents", len(banEvents))
 
 	// 检查 Server 下发的指令
 	if resp.Command == "upgrade" {
@@ -309,5 +333,22 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 		// 准备就绪后通过 systemctl stop 或升级信号文件停止本进程再替换。
 		// 若脚本失败，agent 保持运行，等待 Server 下次心跳重试，不会假死。
 		slog.Debug("自升级已在后台执行，agent 继续运行")
+	}
+
+	// 处理结构化入侵防护指令（enable/disable/status）
+	if resp.Defense != nil {
+		cmd := *resp.Defense
+		slog.Info("收到防护指令", "type", cmd.Type, "id", cmd.ID, "node", cmd.Node)
+		go func() {
+			// 先回传 running，再异步执行；执行结果暂存至下一次 report 带回
+			running := model.DefenseCommandResult{
+				CommandID: cmd.ID,
+				State:     model.DefenseStateRunning,
+				UpdatedAt: model.NowMillis(),
+			}
+			pendingResult = &running
+			res := defenseExec.Execute(cmd)
+			pendingResult = &res
+		}()
 	}
 }

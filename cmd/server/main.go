@@ -112,7 +112,8 @@ func main() {
 	ngxWin := nginxaccess.NewWindow(nginxaccess.NewGeo(), time.Hour)
 	// 安全事件/基线存储（JSON 持久化，默认安全能力启用）
 	securityStore := security.New(cfg.SecurityStoreFile)
-	recv := receiver.New(store, nodeMgr, cfg.AgentAuth, ngxWin, securityStore, engine)
+	defenseStore := security.NewDefenseStore(filepath.Join(filepath.Dir(cfg.SecurityStoreFile), "defense_tasks.json"))
+	recv := receiver.New(store, nodeMgr, cfg.AgentAuth, ngxWin, securityStore, engine, defenseStore)
 
 	// 拨测模块
 	dialtestStore := dialtest.NewStore(cfg.DialtestFile)
@@ -179,7 +180,7 @@ func main() {
 
 	// API
 	auditStore := audit.New(filepath.Join(filepath.Dir(*cfgPath), "audit_events.json"))
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath, securityStore, auditStore)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath, securityStore, defenseStore, auditStore)
 	rest.SetDashboardManager(dashMgr)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}

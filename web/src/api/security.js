@@ -18,3 +18,20 @@ export const getSecurityEvents = (params = {}) => {
 
 // 各主机安全基线评分与检查项明细
 export const getSecurityBaselines = () => http.get('/api/v1/security/baselines')
+
+// 受控 fail2ban 入侵防御：各节点防护状态（含 Agent 是否支持）
+export const getDefenseStatuses = () => http.get('/api/v1/security/defense/status')
+
+// 单节点防护状态
+export const getDefenseStatus = (node) => http.get(`/api/v1/security/defense/status/${encodeURIComponent(node)}`)
+
+// 创建防护任务：action 为 enable / disable / status
+export const postDefenseAction = (node, action) =>
+  http.post(`/api/v1/security/defense/${encodeURIComponent(node)}/${encodeURIComponent(action)}`)
+
+// 防护任务列表（可按节点过滤）
+export const getDefenseTasks = (node) => {
+  const s = node ? `?node=${encodeURIComponent(node)}` : ''
+  return http.get('/api/v1/security/defense/tasks' + s)
+}
+

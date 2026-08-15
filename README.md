@@ -237,6 +237,65 @@ security:                    # 可选，全部字段均有默认值时可省略
 - FIM 首次采集会在 Agent 本地建立哈希基线，之后每次比对；基线文件建议随 Agent 一并备份；
 - 安全事件由 Server 接收后落库（默认存储文件 `securityStoreFile`，见 `server.yaml`，默认 `/var/lib/monitor-server/security_store.json`），并在触发阈值时告警；数据仅存于 Server 侧，不上报第三方。
 
+**一键入侵防御（fail2ban 托管 SSH）**
+
+Web 端「安全中心」提供受控的 fail2ban 入侵防御能力，用于自动封禁反复 SSH 爆破的来源 IP。该能力仅托管由本系统创建的专属 jail，不接管或覆盖你既有 fail2ban 配置。
+
+功能范围与约束：
+
+- 仅支持 **Linux + systemd + SSHD** 环境。不满足时，「安全中心」对应节点会提示「不支持」并给出手动配置说明，不会执行任何改动。
+- 启用防护只创建并使用专属配置：
+  - jail：`/etc/fail2ban/jail.d/nebula-monitor-sshd.conf`（仅保护 SSH，阈值 `maxretry=5`、`findtime=10m`、`bantime=1h`，backend 优先 `systemd`）；
+  - action：`/etc/fail2ban/action.d/nebula-monitor.conf`（仅向受控审计文件追加封禁/解封记录，不改变 fail2ban 既有动作）。
+- 启用后，系统会把**当前操作人的真实来源 IP** 与回环地址加入 fail2ban 白名单（`ignoreip`），避免误封你自己；不会自动放行整个内网段。
+- 封禁（ban）事件以「警告」、解封（unban）事件以「信息」级别进入「安全中心」与告警中心，可在「通知配置」中按规则 `security-cat_ban` 接收通知。
+- **停用防护**仅停止并移除 nebula 专属 jail 与配置文件，随后重载 fail2ban；**不会卸载 fail2ban 软件包**，也不会删除你的 `jail.local` 或其他 jail 配置。
+
+操作方式：
+
+1. 进入「安全中心」→「入侵防御」面板；
+2. 在目标节点点击「启用防护」或「停用防护」，按弹窗提示确认；
+3. 任务由节点 Agent 在下一次上报后异步执行，面板实时展示「等待领取 / 执行中 / 已防护 / 停用 / 失败原因」；
+4. 若节点 Agent 版本过低不支持该能力，面板提示「需升级 Agent」，请先升级 Agent（见「Agent 升级」章节）。
+
+手动配置（兜底路径）：
+
+当节点不被支持、或你希望自行管理 fail2ban 时，可按如下步骤手动部署等价防护：
+
+```bash
+# 1. 安装 fail2ban（发行版自适应）
+# Debian/Ubuntu：
+apt-get install -y fail2ban
+# RHEL/CentOS：
+dnf install -y fail2ban      # 旧版可用 yum install -y fail2ban
+
+# 2. 编写专属 jail（仅保护 SSH，含白名单）
+cat > /etc/fail2ban/jail.d/nebula-manual-sshd.conf <<'EOF'
+[DEFAULT]
+ignoreip = 127.0.0.1/8 ::1 <你的运维来源IP>
+
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+backend = systemd
+maxretry = 5
+findtime = 10m
+bantime = 1h
+EOF
+
+# 3. 启动并设置开机自启
+systemctl enable --now fail2ban
+fail2ban-client reload
+
+# 4. 校验
+fail2ban-client status sshd
+```
+
+如需将手动部署的 jail 接入「安全中心」的封禁事件展示，可在 action 中以同样格式向 `/var/lib/nebula-monitor/defense/ban_audit.jsonl` 追加记录，由 Agent 增量采集回流。
+
+> **版本要求**：一键入侵防御需 Agent 与 Server 同时升级到包含该能力的版本；旧 Agent 在「安全中心」显示「需升级 Agent」，不影响其他功能。
+
 Server 端如需修改安全数据持久化路径，在 `server.yaml` 中配置：
 
 ```yaml
