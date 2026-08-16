@@ -3,10 +3,12 @@ package defense
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -180,7 +182,10 @@ func (m *Manager) Enable(ignoreIPs []string) (string, error) {
 	}
 
 	// 4. 写入专属 jail 配置（仅保护 SSH，含精确白名单）。
-	jail := buildJailConf(ignoreIPs, firewallAction)
+	jail, err := buildJailConf(ignoreIPs, firewallAction)
+	if err != nil {
+		return "", fmt.Errorf("生成 jail 配置失败: %w", err)
+	}
 	if err := os.WriteFile(jailConfPath, []byte(jail), 0644); err != nil {
 		return "", fmt.Errorf("写入 jail 配置失败: %w", err)
 	}
@@ -277,23 +282,36 @@ func cmdExists(name string) bool {
 	return err == nil
 }
 
-// installFail2ban 自适应包管理器安装 fail2ban。
+// installFail2ban 自适应包管理器安装 fail2ban，并尽量附带 systemd 后端依赖。
+// Debian 系 fail2ban 仅 Recommends python3-systemd，缺失时 systemd 后端不可用，
+// 会导致 jail 报 “Have not found any log file”；因此显式安装该依赖以确保 journal 可用。
+// 依赖包不可用时仅告警（核心 fail2ban 已安装，探测逻辑会回退到文件日志后端）。
 func installFail2ban() error {
 	pkg := detectPkgManager()
-	var cmd *exec.Cmd
+	var baseArgs []string
+	var dep string
 	switch pkg {
 	case "apt":
-		cmd = exec.Command("apt-get", "install", "-y", "fail2ban")
+		baseArgs = []string{"apt-get", "install", "-y", "fail2ban"}
+		dep = "python3-systemd"
 	case "dnf":
-		cmd = exec.Command("dnf", "install", "-y", "fail2ban")
+		baseArgs = []string{"dnf", "install", "-y", "fail2ban"}
+		dep = "systemd-python"
 	case "yum":
-		cmd = exec.Command("yum", "install", "-y", "fail2ban")
+		baseArgs = []string{"yum", "install", "-y", "fail2ban"}
+		dep = "systemd-python"
 	default:
 		return fmt.Errorf("无法识别的包管理器，请手动安装 fail2ban")
 	}
-	out, err := cmd.CombinedOutput()
+	out, err := exec.Command(baseArgs[0], baseArgs[1:]...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v: %s", err, string(out))
+	}
+	// 额外尝试安装 systemd 后端依赖；缺失时不影响核心安装。
+	if dep != "" {
+		if dout, derr := exec.Command(baseArgs[0], append([]string{"install", "-y"}, dep)...).CombinedOutput(); derr != nil {
+			log.Printf("[defense] 安装 %s 失败（systemd 后端可能不可用，将回退文件日志）：%v %s", dep, derr, string(dout))
+		}
 	}
 	return nil
 }
@@ -349,33 +367,253 @@ func waitFail2banReady(attempts int, interval time.Duration) error {
 }
 
 // buildJailConf 生成 nebula 专属 jail 配置（仅 sshd，含精确白名单）。
-// 根据系统实际日志文件选择 backend：优先 /var/log/auth.log（Debian/Ubuntu）
-// 或 /var/log/secure（RHEL/CentOS）；不存在时回退到 systemd journal。
-func buildJailConf(ignoreIPs []string, firewallAction string) string {
+// 自动探测：SSH 实际监听端口、SSH 服务单元、可用的认证日志后端。
+//   - 端口：默认 22 不可靠（本机可能使用非标准端口），必须自动探测，否则封禁会落到错误端口；
+//   - 日志后端：必须真实可用，否则 fail2ban 会报 “Have not found any log file for sshd jail”。
+//
+// 探测不到任何可用日志来源时返回错误，避免写入无法生效的 jail 配置。
+func buildJailConf(ignoreIPs []string, firewallAction string) (string, error) {
 	ips := []string{"127.0.0.1", "::1"}
 	for _, ip := range ignoreIPs {
 		if ip != "" {
 			ips = append(ips, ip)
 		}
 	}
-	logPath, backend := detectAuthLogBackend()
-	logConfig := "backend = systemd\njournalmatch = _SYSTEMD_UNIT=sshd.service + _SYSTEMD_UNIT=ssh.service"
-	if backend == "auto" {
-		logConfig = fmt.Sprintf("logpath = %s\nbackend = auto", logPath)
+
+	// 1) SSH 实际端口（逗号分隔；回退 "ssh" 即 22）
+	portCfg := strings.Join(detectSSHPorts(), ",")
+
+	// 2) 认证日志后端：必须真实可用
+	logCfg, err := detectLogConfig()
+	if err != nil {
+		return "", err
 	}
-	return fmt.Sprintf(jailConfTmpl, strings.Join(ips, " "), jailName, logConfig, firewallAction)
+
+	return fmt.Sprintf(jailConfTmpl, strings.Join(ips, " "), jailName, portCfg, logCfg, firewallAction), nil
 }
 
-// detectAuthLogBackend 返回 SSH 认证日志路径与对应 backend。
-func detectAuthLogBackend() (logPath, backend string) {
-	candidates := []string{"/var/log/auth.log", "/var/log/secure"}
-	for _, p := range candidates {
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			return p, "auto"
+// detectLogConfig 选择可用的 SSH 认证日志后端，返回 jail 的日志配置段落。
+// 优先使用 systemd journal（需 python3-systemd 可由 fail2ban 导入），其次使用
+// 真实存在的认证日志文件（/var/log/auth.log 或 /var/log/secure）；两者皆不可用时
+// 返回明确错误，避免写入无法生效的 jail 配置。
+func detectLogConfig() (string, error) {
+	if systemdBackendAvailable() {
+		unit := detectSSHUnit()
+		match := "_SYSTEMD_UNIT=sshd.service"
+		if unit != "" && unit != "sshd.service" {
+			match = "_SYSTEMD_UNIT=" + unit
+		}
+		return "backend = systemd\njournalmatch = " + match, nil
+	}
+	if p := firstExistingFile("/var/log/auth.log", "/var/log/secure"); p != "" {
+		return fmt.Sprintf("logpath = %s\nbackend = auto", p), nil
+	}
+	return "", fmt.Errorf("未找到可用的 SSH 认证日志来源：既无法使用 systemd journal（缺失 python3-systemd），也不存在 /var/log/auth.log 或 /var/log/secure。请先执行 `apt-get install -y python3-systemd`（Debian/Ubuntu）或 `dnf install -y systemd-python`（RHEL/CentOS），也可确保认证日志已写入文件后再重试")
+}
+
+// detectSSHPorts 探测本机 sshd 实际监听端口。
+// 探测链路：sshd -T 生效配置 → 解析 /etc/ssh/sshd_config → 监听套接字反查；
+// 均失败则回退 ["ssh"]（fail2ban 解析为 22）。返回端口字符串列表（可含多个）。
+func detectSSHPorts() []string {
+	if ports := parseSSHDEffectivePorts(sshdDumpConfig()); len(ports) > 0 {
+		return ports
+	}
+	if ports := parseSSHDPortsFromConfig(readFileOrEmpty("/etc/ssh/sshd_config")); len(ports) > 0 {
+		return ports
+	}
+	if ports := sshdListeningPorts(); len(ports) > 0 {
+		return ports
+	}
+	return []string{"ssh"}
+}
+
+// sshdDumpConfig 通过 `sshd -T` 获取生效配置全文（失败返回空串）。
+func sshdDumpConfig() string {
+	sshd, err := exec.LookPath("sshd")
+	if err != nil {
+		return ""
+	}
+	out, err := exec.Command(sshd, "-T").Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
+// parseSSHDEffectivePorts 解析 `sshd -T` 输出中的 port 行（可一行多端口）。
+func parseSSHDEffectivePorts(cfg string) []string {
+	var ports []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(cfg, "\n") {
+		t := strings.TrimSpace(line)
+		if !strings.HasPrefix(t, "port ") {
+			continue
+		}
+		for _, p := range strings.Fields(t)[1:] {
+			if !seen[p] {
+				seen[p] = true
+				ports = append(ports, p)
+			}
 		}
 	}
-	// 文件不存在时回退 journal
-	return "", "systemd"
+	return ports
+}
+
+// parseSSHDPortsFromConfig 解析 sshd_config 文本中的 Port 指令（支持多行多值）。
+func parseSSHDPortsFromConfig(cfg string) []string {
+	var ports []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(cfg, "\n") {
+		t := strings.TrimSpace(line)
+		if !(strings.HasPrefix(t, "Port ") || strings.HasPrefix(t, "port ")) {
+			continue
+		}
+		for _, p := range strings.Fields(t)[1:] {
+			if !seen[p] {
+				seen[p] = true
+				ports = append(ports, p)
+			}
+		}
+	}
+	return ports
+}
+
+// sshdListeningPorts 通过 ss/netstat 反查 sshd 监听端口（兜底探测）。
+func sshdListeningPorts() []string {
+	for _, c := range [][]string{{"ss", "-tlnp"}, {"netstat", "-tlnp"}} {
+		if !cmdExists(c[0]) {
+			continue
+		}
+		out, err := exec.Command(c[0], c[1:]...).Output()
+		if err != nil {
+			continue
+		}
+		if ports := parseListenPortsFor(string(out), "sshd"); len(ports) > 0 {
+			return ports
+		}
+	}
+	return nil
+}
+
+// parseListenPortsFor 从 ss/netstat 输出中解析指定进程名的监听端口。
+func parseListenPortsFor(out, proc string) []string {
+	var ports []string
+	seen := map[string]bool{}
+	re := regexp.MustCompile(`:(\d+)\s`)
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, proc) {
+			continue
+		}
+		for _, m := range re.FindAllStringSubmatch(line, -1) {
+			p := m[1]
+			if !seen[p] {
+				seen[p] = true
+				ports = append(ports, p)
+			}
+		}
+	}
+	return ports
+}
+
+// detectSSHUnit 返回实际运行（或存在）的 sshd systemd 单元名，用于 journalmatch。
+// 优先选“已激活”的单元，否则回退到存在的单元；皆无则返回空串。
+func detectSSHUnit() string {
+	out, err := exec.Command("systemctl", "list-unit-files", "sshd.service", "ssh.service").Output()
+	if err != nil {
+		return ""
+	}
+	s := string(out)
+	hasSshd := strings.Contains(s, "sshd.service")
+	hasSsh := strings.Contains(s, "ssh.service")
+	for _, u := range []string{"sshd.service", "ssh.service"} {
+		if st, e := exec.Command("systemctl", "is-active", u).Output(); e == nil && strings.TrimSpace(string(st)) == "active" {
+			return u
+		}
+	}
+	if hasSshd {
+		return "sshd.service"
+	}
+	if hasSsh {
+		return "ssh.service"
+	}
+	return ""
+}
+
+// firstExistingFile 返回首个存在的普通文件路径（用于认证日志探测）。
+func firstExistingFile(paths ...string) string {
+	for _, p := range paths {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+// readFileOrEmpty 读取文件内容，失败返回空串（用于配置解析兜底）。
+func readFileOrEmpty(p string) string {
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// systemdBackendAvailable 检查 fail2ban 能否使用 systemd 后端（依赖 python3-systemd）。
+// Debian 系 fail2ban 仅 Recommends python3-systemd，缺失时 systemd 后端不可用，
+// 会导致 jail 报 “Have not found any log file”。这里实测能否导入 systemd.journal。
+func systemdBackendAvailable() bool {
+	if !cmdExists("journalctl") {
+		return false
+	}
+	cands := []string{}
+	if p := fail2banPython(); p != "" {
+		cands = append(cands, p)
+	}
+	for _, p := range []string{"python3", "python"} {
+		if p != "" && !strSliceContains(cands, p) {
+			cands = append(cands, p)
+		}
+	}
+	for _, py := range cands {
+		if _, err := exec.Command(py, "-c", "import systemd.journal").CombinedOutput(); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// fail2banPython 返回 fail2ban-client 脚本使用的 Python 解释器（解析 shebang）。
+func fail2banPython() string {
+	path, err := exec.LookPath("fail2ban-client")
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.SplitN(string(data), "\n", 2)
+	if len(lines) == 0 || !strings.HasPrefix(lines[0], "#!") {
+		return ""
+	}
+	fields := strings.Fields(lines[0][2:])
+	if len(fields) == 0 {
+		return ""
+	}
+	if filepath.Base(fields[0]) == "env" && len(fields) > 1 {
+		return fields[1]
+	}
+	return fields[0]
+}
+
+// strSliceContains 判断字符串切片是否包含指定值。
+func strSliceContains(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 // selectFirewallAction 选择 Fail2Ban 自带的实际封禁 action。
@@ -509,14 +747,14 @@ func ensureDir(p string) {
 }
 
 // jailConfTmpl 为 nebula 专属 SSH jail 配置模板。
-// 参数：ignoreip 白名单、jail 名称、日志配置、原生防火墙 action。
+// 参数：ignoreip 白名单、jail 名称、实际 SSH 端口、日志配置、原生防火墙 action。
 const jailConfTmpl = `[DEFAULT]
 # nebula-monitor 托管：仅保护 SSH，勿手动修改本文件
 ignoreip = %s
 
 [%s]
 enabled = true
-port = ssh
+port = %s
 filter = sshd
 %s
 maxretry = 5

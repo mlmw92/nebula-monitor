@@ -245,7 +245,7 @@ Web 端「安全中心」提供受控的 fail2ban 入侵防御能力，用于自
 
 - 仅支持 **Linux + systemd + SSHD** 环境。不满足时，「安全中心」对应节点会提示「不支持」并给出手动配置说明，不会执行任何改动。
 - 启用防护只创建并使用专属配置：
-  - jail：`/etc/fail2ban/jail.d/nebula-monitor-sshd.conf`（仅保护 SSH，阈值 `maxretry=5`、`findtime=10m`、`bantime=1h`，backend 优先 `systemd`）；
+  - jail：`/etc/fail2ban/jail.d/nebula-monitor-sshd.conf`（仅保护 SSH，阈值 `maxretry=5`、`findtime=10m`、`bantime=1h`；`port` 自动探测本机 sshd 实际监听端口，不再固定为 22；backend 自动选择：`systemd`（需安装 `python3-systemd`，见下方安装说明）当可用时优先，否则回退到真实存在的认证日志文件 `/var/log/auth.log` 或 `/var/log/secure`）；
   - action：由 Fail2Ban 发行版原生防火墙 action（firewalld / nftables / iptables）与 Nebula 审计 action 组合；原生 action 负责实际封禁，审计 action 仅把 ban/unban 记录到受控文件。若节点没有可用的原生 action，启用会失败，不会退回“仅审计”模式。
 - 启用后，系统会把**当前操作人的真实来源 IP** 与回环地址加入 fail2ban 白名单（`ignoreip`），避免误封你自己；不会自动放行整个内网段。
 - 封禁事件（`cat_ban`）只是历史动作记录；当前是否仍被封禁以入侵防御面板中的 `Banned IP list` 为准。面板显示“已防护”前会确认 jail 已加载原生防火墙 action；“当前无封禁”表示当前列表为空，不表示防护未启用。
@@ -264,25 +264,33 @@ Web 端「安全中心」提供受控的 fail2ban 入侵防御能力，用于自
 
 ```bash
 # 1. 安装 fail2ban（发行版自适应）
+# systemd 后端依赖 python3-systemd：Debian/Ubuntu 需显式安装（fail2ban 仅 Recommends，
+# 缺失时 systemd 后端不可用，jail 会报 “Have not found any log file for sshd jail”）。
 # Debian/Ubuntu：
-apt-get install -y fail2ban
+apt-get install -y fail2ban python3-systemd
 # RHEL/CentOS：
-dnf install -y fail2ban      # 旧版可用 yum install -y fail2ban
+dnf install -y fail2ban systemd-python      # 旧版可用 yum install -y fail2ban systemd-python
 
 # 2. 编写专属 jail（仅保护 SSH，含白名单）
+# 注意：port 须填本机 sshd 实际监听端口（非 22 时请替换，例如 3741）；
+# 使用 systemd 后端时须已安装 python3-systemd，并按实际服务单元写 journalmatch。
 cat > /etc/fail2ban/jail.d/nebula-manual-sshd.conf <<'EOF'
 [DEFAULT]
 ignoreip = 127.0.0.1/8 ::1 <你的运维来源IP>
 
 [sshd]
 enabled = true
-port = ssh
+port = <实际SSH端口，如 3741 或 ssh>
 filter = sshd
 backend = systemd
+journalmatch = _SYSTEMD_UNIT=sshd.service
 maxretry = 5
 findtime = 10m
 bantime = 1h
 EOF
+# 若未安装 python3-systemd，改用文件日志后端：
+# backend = auto
+# logpath = /var/log/auth.log     # RHEL/CentOS 为 /var/log/secure
 
 # 3. 启动并设置开机自启
 systemctl enable --now fail2ban
