@@ -1,15 +1,12 @@
 <template>
   <div class="security-view">
-    <RefreshBar :loading="loading" @refresh="refreshAll" />
+    <RefreshBar :loading="refreshing" @refresh="refreshAll" />
 
     <!-- 顶部 KPI 概览 -->
     <div class="glass panel kpi-row" v-loading="loading">
-      <div class="kpi-card" :class="scoreClass">
+      <div class="kpi-card score-kpi" :class="scoreClass">
         <div class="kpi-ring" :style="ringStyle">
-          <div class="kpi-ring-inner">
-            <div class="kpi-score">{{ summary.score.toFixed(0) }}</div>
-            <div class="kpi-ring-label">合规评分</div>
-          </div>
+          <div class="kpi-score">{{ summary.score.toFixed(0) }}</div>
         </div>
         <div class="kpi-meta">
           <div class="kpi-title">安全合规评分</div>
@@ -17,32 +14,17 @@
         </div>
       </div>
 
-      <div class="kpi-card">
-        <div class="kpi-icon" style="--c: #FF5D6C">⚠</div>
-        <div class="kpi-meta">
-          <div class="kpi-value red">{{ summary.eventCount }}</div>
-          <div class="kpi-title">安全事件</div>
-          <div class="kpi-sub">累计监测记录</div>
-        </div>
-      </div>
+      <KpiCard :value="summary.eventCount" label="安全事件" tone="alert">
+        <template #icon>⚠</template>
+      </KpiCard>
 
-      <div class="kpi-card">
-        <div class="kpi-icon" style="--c: #FFB454">🛡</div>
-        <div class="kpi-meta">
-          <div class="kpi-value amber">{{ summary.riskNodes }}</div>
-          <div class="kpi-title">风险主机</div>
-          <div class="kpi-sub">含关键/警告事件</div>
-        </div>
-      </div>
+      <KpiCard :value="summary.riskNodes" label="风险主机" tone="warn">
+        <template #icon>🛡</template>
+      </KpiCard>
 
-      <div class="kpi-card">
-        <div class="kpi-icon" style="--c: #4A9DF0">📄</div>
-        <div class="kpi-meta">
-          <div class="kpi-value cyan">{{ summary.fimChanges }}</div>
-          <div class="kpi-title">文件完整性变化</div>
-          <div class="kpi-sub">新增 / 修改 / 删除</div>
-        </div>
-      </div>
+      <KpiCard :value="summary.fimChanges" label="文件完整性变化" tone="conn">
+        <template #icon>📄</template>
+      </KpiCard>
     </div>
 
     <!-- 入侵防御（受控 fail2ban 专属 SSH 防护） -->
@@ -60,9 +42,12 @@
       </div>
 
       <el-table :data="defenseStatuses" style="width: 100%; margin-top: 12px" empty-text="暂无节点" max-height="420">
-        <el-table-column label="节点" min-width="180">
+        <el-table-column label="节点" min-width="200">
           <template #default="{ row }">
-            <span class="node-cell">{{ row.node }}</span>
+            <div class="node-cell">
+              <span class="node-ip">{{ row.nodeIp || row.node }}</span>
+              <span v-if="row.displayName && row.displayName !== row.node" class="node-alias">· {{ row.displayName }}</span>
+            </div>
             <span v-if="!row.agentSupported" class="need-upgrade">需升级 Agent</span>
           </template>
         </el-table-column>
@@ -76,6 +61,17 @@
             <span v-if="row.managedJail" class="jail-tag">nebula-monitor-sshd</span>
             <span v-else-if="row.jails && row.jails.length" class="dim">{{ row.jails.join(', ') }}</span>
             <span v-else class="muted">-</span>
+            <div v-if="row.firewallAction" class="dim defense-action">{{ row.firewallAction }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="当前封禁" min-width="180">
+          <template #default="{ row }">
+            <template v-if="row.managedJail && row.firewallVerified">
+              <span v-if="row.bannedIps && row.bannedIps.length" class="ban-count">{{ row.bannedIps.length }} 个 IP</span>
+              <span v-else class="dim">当前无封禁</span>
+              <div v-if="row.bannedIps && row.bannedIps.length" class="dim ban-ips" :title="row.bannedIps.join(', ')">{{ row.bannedIps.join(', ') }}</div>
+            </template>
+            <span v-else class="dim">未验证实际封禁</span>
           </template>
         </el-table-column>
         <el-table-column label="说明" min-width="200">
@@ -181,18 +177,29 @@
       <div class="glass panel section" v-loading="loading">
         <div class="panel-title-row">
           <span class="panel-title">基线合规明细</span>
-        </div>
-        <el-empty v-if="!baselines.length" description="暂无基线数据" :image-size="60" />
-        <div v-for="b in baselines" :key="b.node" class="baseline-node">
-          <div class="baseline-head">
-            <span class="node-name">{{ b.displayName || b.node }}<span v-if="b.nodeIp" class="node-ip"> · {{ b.nodeIp }}</span></span>
-            <span class="score-pill" :class="scorePillClass(b.score)">{{ b.score.toFixed(0) }}</span>
+          <div class="panel-tools">
+            <el-switch
+              v-model="onlyFailedBaseline"
+              size="small"
+              inline-prompt
+              active-text="仅未通过"
+              inactive-text="全部"
+            />
           </div>
-          <div class="baseline-items">
-            <div v-for="it in b.items" :key="it.key" class="bl-item" :class="it.pass ? 'pass' : 'fail'">
-              <span class="bl-dot"></span>
-              <span class="bl-name">{{ it.name }}</span>
-              <span class="bl-state">{{ it.pass ? '通过' : '未通过' }}</span>
+        </div>
+        <el-empty v-if="!filteredBaselines.length" :description="baselines.length ? '没有未通过的节点' : '暂无基线数据'" :image-size="60" />
+        <div class="baseline-scroll">
+          <div v-for="b in filteredBaselines" :key="b.node" class="baseline-node">
+            <div class="baseline-head">
+              <span class="node-name">{{ b.displayName || b.node }}<span v-if="b.nodeIp" class="node-ip"> · {{ b.nodeIp }}</span></span>
+              <span class="score-pill" :class="scorePillClass(b.score)">{{ b.score.toFixed(0) }}</span>
+            </div>
+            <div class="baseline-items">
+              <div v-for="it in b.items" :key="it.key" class="bl-item" :class="it.pass ? 'pass' : 'fail'">
+                <span class="bl-dot"></span>
+                <span class="bl-name">{{ it.name }}</span>
+                <span class="bl-state">{{ it.pass ? '通过' : '未通过' }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -223,11 +230,18 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getSecuritySummary, getSecurityEvents, getSecurityBaselines, getDefenseStatuses, postDefenseAction } from '../api/security'
 import RefreshBar from './RefreshBar.vue'
+import KpiCard from './KpiCard.vue'
 
 const loading = ref(false)
+const refreshing = ref(false)
 const summary = ref({ score: 0, eventCount: 0, riskNodes: 0, fimChanges: 0, baselineHosts: 0 })
 const events = ref([])
 const baselines = ref([])
+const onlyFailedBaseline = ref(false)
+const filteredBaselines = computed(() => {
+  if (!onlyFailedBaseline.value) return baselines.value
+  return baselines.value.filter((b) => !b.items || b.items.some((it) => !it.pass))
+})
 // 安全事件前端分页
 const evCurrentPage = ref(1)
 const evPageSize = ref(10)
@@ -253,25 +267,27 @@ const defenseSummary = computed(() => {
   const s = { protected: 0, unmanaged: 0, running: 0, exception: 0 }
   for (const d of defenseStatuses.value) {
     if (!d.agentSupported) s.exception++
-    else if (d.managedJail && d.running) s.protected++
-    else if (d.managedJail && !d.running) s.unmanaged++
+    else if (d.managedJail && d.running && d.firewallVerified) s.protected++
+    else if (d.managedJail && d.running) s.running++
     else if (!d.supported) s.exception++
-    else if (!d.managedJail) s.unmanaged++
+    else s.unmanaged++
   }
   return s
 })
 
 function defenseStateText(row) {
   if (!row.agentSupported) return '需升级 Agent'
-  if (row.managedJail && row.running) return '已防护'
+  if (row.managedJail && row.running && row.firewallVerified) return '已防护'
+  if (row.managedJail && row.running) return '仅审计/未验证'
   if (row.managedJail && !row.running) return '已停用'
   if (row.agentSupported && !row.managedJail) return '未启用'
   if (!row.supported) return '不支持'
   return '未知'
 }
 function defenseBadgeClass(row) {
-  if (!row.agentSupported) return 'bad'
-  if (row.managedJail && row.running) return 'good'
+  if (!row.agentSupported || !row.supported) return 'bad'
+  if (row.managedJail && row.running && row.firewallVerified) return 'good'
+  if (row.managedJail && row.running) return 'warn'
   if (row.managedJail) return 'warn'
   return 'neutral'
 }
@@ -313,6 +329,7 @@ const categoryOptions = [
   { value: 'fim', label: '文件完整性' },
   { value: 'process_anomaly', label: '异常进程' },
   { value: 'sudo_audit', label: 'sudo 提权审计' },
+  { value: 'cat_ban', label: 'fail2ban 封禁' },
 ]
 
 const fimEvents = computed(() => events.value.filter((e) => e.category === 'fim').slice(0, 40))
@@ -348,6 +365,7 @@ function catLabel(c) {
     fim: '文件完整性',
     process_anomaly: '异常进程',
     sudo_audit: 'sudo 审计',
+    cat_ban: 'fail2ban 封禁',
   }
   return m[c] || c
 }
@@ -393,13 +411,15 @@ async function loadBaselines() {
   }
 }
 async function refreshAll() {
-  loading.value = true
+  refreshing.value = true
   await Promise.all([loadSummary(), loadEvents(), loadBaselines(), loadDefense()])
-  loading.value = false
+  refreshing.value = false
 }
 
-onMounted(() => {
-  refreshAll()
+onMounted(async () => {
+  loading.value = true
+  await refreshAll()
+  loading.value = false
 })
 </script>
 
@@ -415,13 +435,18 @@ onMounted(() => {
   gap: 16px;
   padding: 18px;
 }
-.kpi-card {
+.kpi-row > :deep(.kpi-card) {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.score-kpi {
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 6px 4px;
 }
-.kpi-ring {
+.score-kpi .kpi-ring {
   width: 72px;
   height: 72px;
   border-radius: 50%;
@@ -429,59 +454,33 @@ onMounted(() => {
   place-items: center;
   flex-shrink: 0;
 }
-.kpi-ring-inner {
+.score-kpi .kpi-score {
   width: 56px;
   height: 56px;
   border-radius: 50%;
   background: var(--bg-deep, #070D1A);
   display: grid;
   place-items: center;
-  text-align: center;
-}
-.kpi-score {
   font-size: 22px;
   font-weight: 700;
   color: var(--text);
   line-height: 1;
 }
-.kpi-ring-label {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-.kpi-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  display: grid;
-  place-items: center;
-  font-size: 20px;
-  background: color-mix(in srgb, var(--c) 18%, transparent);
-  box-shadow: 0 0 14px color-mix(in srgb, var(--c) 45%, transparent);
-  flex-shrink: 0;
-}
-.kpi-meta {
+.score-kpi .kpi-meta {
   min-width: 0;
 }
-.kpi-value {
-  font-size: 26px;
-  font-weight: 700;
-  line-height: 1.1;
-}
-.kpi-value.red { color: #FF5D6C; }
-.kpi-value.amber { color: #FFB454; }
-.kpi-value.cyan { color: #4A9DF0; }
-.kpi-title {
+.score-kpi .kpi-title {
   font-size: 13px;
   color: var(--text);
   margin-top: 2px;
 }
-.kpi-sub {
+.score-kpi .kpi-sub {
   font-size: 11px;
   color: var(--text-muted);
 }
-.kpi-card.good .kpi-score { color: #00D9A3; }
-.kpi-card.warn .kpi-score { color: #FFB454; }
-.kpi-card.bad .kpi-score { color: #FF5D6C; }
+.score-kpi.good .kpi-score { color: #00D9A3; }
+.score-kpi.warn .kpi-score { color: #FFB454; }
+.score-kpi.bad .kpi-score { color: #FF5D6C; }
 
 .panel-title-row {
   display: flex;
@@ -561,6 +560,17 @@ onMounted(() => {
 }
 
 /* 基线 */
+.panel-tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+.baseline-scroll {
+  max-height: 460px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
 .baseline-node {
   border: 1px solid var(--border, rgba(255,255,255,0.08));
   border-radius: 10px;
@@ -725,6 +735,8 @@ onMounted(() => {
   border-radius: 8px;
   padding: 2px 8px;
 }
+.defense-action, .ban-ips { margin-top: 4px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ban-count { color: #FFB454; font-size: 12px; font-weight: 600; }
 .dim { color: var(--text-dim); }
 .muted { color: var(--text-muted); }
 .def-confirm {
