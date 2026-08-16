@@ -41,7 +41,7 @@
         <div class="dk-card"><span class="dk-val bad">{{ defenseSummary.exception }}</span><span class="dk-label">异常</span></div>
       </div>
 
-      <el-table :data="defenseStatuses" style="width: 100%; margin-top: 12px" empty-text="暂无节点" max-height="420">
+      <el-table :data="sortedDefenses" style="width: 100%; margin-top: 12px" empty-text="暂无节点" max-height="420">
         <el-table-column label="节点" min-width="200">
           <template #default="{ row }">
             <div class="node-cell">
@@ -300,6 +300,27 @@ async function loadDefense() {
     defenseStatuses.value = []
   }
 }
+
+// IP 升序比较：点分十进制按四段数值比较，非标准 IP 退化为字符串比较
+function ipCompare(a, b) {
+  const pa = String(a || '').split('.')
+  const pb = String(b || '').split('.')
+  const isNum = (p) => p.length === 4 && p.every((x) => /^\d+$/.test(x))
+  if (isNum(pa) && isNum(pb)) {
+    for (let i = 0; i < 4; i++) {
+      const x = +pa[i]
+      const y = +pb[i]
+      if (x !== y) return x - y
+    }
+    return 0
+  }
+  return String(a || '').localeCompare(String(b || ''))
+}
+
+// 稳定默认顺序：参考主机列表，按节点 IP 升序（不依赖后端顺序，刷新后保持一致）
+const sortedDefenses = computed(() =>
+  defenseStatuses.value.slice().sort((a, b) => ipCompare(a.nodeIp, b.nodeIp))
+)
 
 function confirmDefense(row, action) {
   defTarget.value = { node: row.node, action }
