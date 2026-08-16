@@ -15,6 +15,7 @@
         <el-select v-model="filters.category" clearable placeholder="全部分类" size="small" style="width: 150px" @change="loadEvents">
           <el-option value="authentication" label="认证" />
           <el-option value="management" label="管理操作" />
+          <el-option value="security" label="安全中心" />
         </el-select>
         <el-input v-model="filters.user" clearable placeholder="操作者" size="small" @keyup.enter="loadEvents" />
         <el-input v-model="filters.path" clearable placeholder="接口路径" size="small" @keyup.enter="loadEvents" />
@@ -80,8 +81,13 @@ const exporting = ref(false)
 const events = ref([])
 const filters = reactive({ category: '', user: '', path: '', limit: 100 })
 
+const categoryMap = {
+  authentication: '认证',
+  management: '管理操作',
+  security: '安全中心'
+}
 function categoryLabel(value) {
-  return value === 'authentication' ? '认证' : value === 'management' ? '管理操作' : value || '其他'
+  return categoryMap[value] || value || '其他'
 }
 
 function changeSummary(detail) {
