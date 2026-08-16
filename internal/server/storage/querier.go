@@ -100,9 +100,9 @@ func (s *PromStorage) QueryInstant(node, name string, labels map[string]string) 
 	return parsePromResult(body)
 }
 
-// QueryInstantWithLookback 查询稀疏样本。普通 instant vector 受 PromQL lookback
-// 限制，告警事件可能数天没有新样本，因此这里用 last_over_time 保留长期事件；
-// 另查询 timestamp(last_over_time(...)) 取回原始样本时间，而不是表达式求值时间。
+// QueryInstantWithLookback 查询稀疏样本，并保留窗口内最后一个真实样本的时间戳。
+// 直接向 instant query 端点发送 range-vector 表达式，避免把
+// timestamp(last_over_time(...)) 的表达式求值时间误当成原始样本时间。
 func (s *PromStorage) QueryInstantWithLookback(node, name string, labels map[string]string, lookback time.Duration) ([]model.Series, error) {
 	if lookback <= 0 {
 		lookback = 30 * 24 * time.Hour
@@ -111,31 +111,25 @@ func (s *PromStorage) QueryInstantWithLookback(node, name string, labels map[str
 	if err != nil {
 		return nil, err
 	}
-	rangeExpr := "[" + promDuration(lookback) + "]"
-	values, err := s.queryExpr("last_over_time(" + expr + rangeExpr + ")")
+
+	series, err := s.queryExpr(expr + "[" + promDuration(lookback) + "]")
 	if err != nil {
 		return nil, err
 	}
-	times, err := s.queryExpr("timestamp(last_over_time(" + expr + rangeExpr + "))")
-	if err != nil {
-		return nil, err
-	}
-	timeBySeries := make(map[string]int64, len(times))
-	for _, ser := range times {
-		if len(ser.Points) == 0 {
+	for i := range series {
+		if len(series[i].Points) <= 1 {
 			continue
 		}
-		timeBySeries[seriesKey(ser.Labels)] = int64(ser.Points[len(ser.Points)-1].Value * 1000)
-	}
-	for i := range values {
-		if len(values[i].Points) == 0 {
-			continue
+		latest := 0
+		for j := 1; j < len(series[i].Points); j++ {
+			if series[i].Points[j].Timestamp > series[i].Points[latest].Timestamp {
+				latest = j
+			}
 		}
-		if ts, ok := timeBySeries[seriesKey(values[i].Labels)]; ok {
-			values[i].Points[len(values[i].Points)-1].Timestamp = ts
-		}
+		series[i].Points[0] = series[i].Points[latest]
+		series[i].Points = series[i].Points[:1]
 	}
-	return values, nil
+	return series, nil
 }
 
 func (s *PromStorage) queryExpr(expr string) ([]model.Series, error) {

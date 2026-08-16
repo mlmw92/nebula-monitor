@@ -92,6 +92,54 @@ func TestVMAlertStoreActiveKeepsLongRunningAlert(t *testing.T) {
 	}
 }
 
+func TestVMAlertStoreRecentAndActivePreferLatestResolvedState(t *testing.T) {
+	old := time.Now().Add(-2 * time.Hour).UnixMilli()
+	resolvedAt := old + 30*60*1000
+	storage := &captureAlertStorage{active: []model.Series{
+		{
+			Labels: map[string]string{"rule": "r1", "name": "r1", "host": "n1", "instance": "event-1", "state": "firing", "severity": "critical", "message": "firing"},
+			Points: []model.Point{{Timestamp: old, Value: 1}},
+		},
+		{
+			Labels: map[string]string{"rule": "r1", "name": "r1", "host": "n1", "instance": "event-1", "state": "resolved", "severity": "critical", "message": "resolved"},
+			Points: []model.Point{{Timestamp: resolvedAt, Value: 1}},
+		},
+	}}
+	store := NewVMAlertStore(storage)
+
+	recent := store.Recent(10)
+	if len(recent) != 1 || recent[0].State != model.AlertStateResolved || recent[0].EndsAt != resolvedAt {
+		t.Fatalf("recent = %+v, want one resolved event at %d", recent, resolvedAt)
+	}
+	if active := store.Active(); len(active) != 0 {
+		t.Fatalf("active = %+v, want no active event", active)
+	}
+}
+
+func TestVMAlertStoreRecentAndActivePreferLatestFiringState(t *testing.T) {
+	old := time.Now().Add(-2 * time.Hour).UnixMilli()
+	firingAt := old + 30*60*1000
+	storage := &captureAlertStorage{active: []model.Series{
+		{
+			Labels: map[string]string{"rule": "r1", "name": "r1", "host": "n1", "instance": "event-1", "state": "resolved", "severity": "critical", "message": "resolved"},
+			Points: []model.Point{{Timestamp: old, Value: 1}},
+		},
+		{
+			Labels: map[string]string{"rule": "r1", "name": "r1", "host": "n1", "instance": "event-1", "state": "firing", "severity": "critical", "message": "firing"},
+			Points: []model.Point{{Timestamp: firingAt, Value: 1}},
+		},
+	}}
+	store := NewVMAlertStore(storage)
+
+	recent := store.Recent(10)
+	if len(recent) != 1 || recent[0].State != model.AlertStateFiring || recent[0].StartsAt != firingAt {
+		t.Fatalf("recent = %+v, want one firing event at %d", recent, firingAt)
+	}
+	active := store.Active()
+	if len(active) != 1 || active[0].State != model.AlertStateFiring || active[0].StartsAt != firingAt {
+		t.Fatalf("active = %+v, want firing event at %d", active, firingAt)
+	}
+}
 func TestEngineRestoresSpecialAlertFiringIndex(t *testing.T) {
 	active := []model.Series{
 		{
