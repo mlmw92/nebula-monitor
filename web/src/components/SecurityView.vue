@@ -41,7 +41,7 @@
         <div class="dk-card"><span class="dk-val bad">{{ defenseSummary.exception }}</span><span class="dk-label">异常</span></div>
       </div>
 
-      <el-table :data="sortedDefenses" style="width: 100%; margin-top: 12px" empty-text="暂无节点" max-height="420">
+      <el-table :data="pagedDefenses" style="width: 100%; margin-top: 12px" empty-text="暂无节点">
         <el-table-column label="节点" min-width="200">
           <template #default="{ row }">
             <div class="node-cell">
@@ -95,6 +95,16 @@
           </template>
         </el-table-column>
       </el-table>
+      <div style="margin-top: 12px; display: flex; justify-content: flex-end">
+        <el-pagination
+          v-model:current-page="defCurrentPage"
+          v-model:page-size="defPageSize"
+          :total="sortedDefenses.length"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+        />
+      </div>
     </div>
 
     <!-- 防护操作确认 -->
@@ -321,6 +331,18 @@ function ipCompare(a, b) {
 const sortedDefenses = computed(() =>
   defenseStatuses.value.slice().sort((a, b) => ipCompare(a.nodeIp, b.nodeIp))
 )
+
+// 入侵防御列表前端分页
+const defCurrentPage = ref(1)
+const defPageSize = ref(10)
+const pagedDefenses = computed(() => {
+  const start = (defCurrentPage.value - 1) * defPageSize.value
+  return sortedDefenses.value.slice(start, start + defPageSize.value)
+})
+watch(sortedDefenses, () => {
+  const max = Math.max(1, Math.ceil(sortedDefenses.value.length / defPageSize.value))
+  if (defCurrentPage.value > max) defCurrentPage.value = max
+})
 
 function confirmDefense(row, action) {
   defTarget.value = { node: row.node, action }
