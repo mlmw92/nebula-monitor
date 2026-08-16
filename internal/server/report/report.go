@@ -16,6 +16,7 @@ import (
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/node"
+	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/storage"
 )
 
@@ -91,6 +92,12 @@ type nodeStat struct {
 	DiskMax     float64 `json:"diskMax"`
 	LoadAvg     float64 `json:"loadAvg"`
 	LastSeen    int64   `json:"lastSeen"`
+
+	// 深化指标：网络流量、磁盘 IO、磁盘分区、Top 进程
+	NetIfaces  []netIfaceStat `json:"netIfaces"`
+	DiskIO     []diskIOStat   `json:"diskIO"`
+	Partitions []diskPartStat `json:"partitions"`
+	Processes  []procStat     `json:"processes"`
 }
 
 // mwInstance 单个中间件实例巡检明细，覆盖「连接数 / 响应时间 / 内存使用率 / 命中率」。
@@ -110,9 +117,10 @@ type mwInstance struct {
 	MemUsedMB  float64     `json:"memUsedMB"`  // 内存用量（MB）
 	HitRate    float64     `json:"hitRate"`    // 命中率 %
 	Throughput float64     `json:"throughput"` // 吞吐（ops/s 或 qps）
-	Extra      string      `json:"extra"`
-	Status     string      `json:"status"`
-	Trend      []linePoint `json:"trend"`
+	Extra      string             `json:"extra"`
+	Status     string             `json:"status"`
+	Trend      []linePoint        `json:"trend"`
+	Metrics    map[string]float64 `json:"metrics"`
 }
 
 // finding 一条具体巡检发现：问题描述 + 影响范围 + 修复建议。
@@ -135,25 +143,105 @@ type reportData struct {
 	Nodes      []nodeStat    `json:"nodes"`
 	Middleware []mwInstance  `json:"middleware"`
 	Findings   []finding     `json:"findings"`
+
+	// 增强段：巡检结论/健康评级、环比、安全中心
+	Conclusion Conclusion       `json:"conclusion"`
+	Comparison *Comparison      `json:"comparison,omitempty"`
+	Security   *SecuritySection `json:"security,omitempty"`
+}
+
+// netIfaceStat 单网卡流量统计。
+type netIfaceStat struct {
+	Name     string  `json:"name"`
+	RecvMBps float64 `json:"recvMBps"`
+	SentMBps float64 `json:"sentMBps"`
+	DropPps  float64 `json:"dropPps"`
+}
+
+// diskIOStat 单磁盘设备 IO 统计。
+type diskIOStat struct {
+	Device    string  `json:"device"`
+	ReadMBps  float64 `json:"readMBps"`
+	WriteMBps float64 `json:"writeMBps"`
+	ReadIOPS  float64 `json:"readIOPS"`
+	WriteIOPS float64 `json:"writeIOPS"`
+}
+
+// diskPartStat 单挂载点使用情况。
+type diskPartStat struct {
+	Mount   string  `json:"mount"`
+	Device  string  `json:"device"`
+	Fstype  string  `json:"fstype"`
+	UsedPct float64 `json:"usedPct"`
+	UsedGB  float64 `json:"usedGB"`
+	TotalGB float64 `json:"totalGB"`
+}
+
+// procStat 进程资源占用快照。
+type procStat struct {
+	PID    int32  `json:"pid"`
+	Name   string  `json:"name"`
+	CPUPct float64 `json:"cpuPct"`
+	MemPct float64 `json:"memPct"`
+}
+
+// Conclusion 巡检结论与健康评级。
+type Conclusion struct {
+	Rating         string         `json:"rating"`       // 健康/关注/预警
+	RatingClass    string         `json:"ratingClass"`  // healthy/warning/critical
+	Score          float64        `json:"score"`        // 综合健康评分
+	TotalFindings  int            `json:"totalFindings"`
+	SeverityCounts map[string]int `json:"severityCounts"`
+	TopRisks       []string       `json:"topRisks"`
+	Summary        string         `json:"summary"`
+}
+
+// Comparison 与上一周期的环比对比。
+type Comparison struct {
+	OnlineRate     float64 `json:"onlineRate"`
+	PrevOnlineRate float64 `json:"prevOnlineRate"`
+	CPUAvg         float64 `json:"cpuAvg"`
+	PrevCPUAvg     float64 `json:"prevCPUAvg"`
+	MemAvg         float64 `json:"memAvg"`
+	PrevMemAvg     float64 `json:"prevMemAvg"`
+	DiskMax        float64 `json:"diskMax"`
+	PrevDiskMax    float64 `json:"prevDiskMax"`
+	HealthScore    float64 `json:"healthScore"`
+	PrevHealthScore float64 `json:"prevHealthScore"`
+}
+
+// SecuritySection 安全中心巡检发现。
+type SecuritySection struct {
+	HasData       bool            `json:"hasData"`
+	NodeCount     int             `json:"nodeCount"`
+	AvgScore      float64         `json:"avgScore"`
+	LowScoreNodes int             `json:"lowScoreNodes"`
+	CriticalEvents int            `json:"criticalEvents"`
+	WarningEvents int             `json:"warningEvents"`
+	CVECount      int             `json:"cveCount"`
+	RiskNodes     []string             `json:"riskNodes"`
+	LowScores     map[string]float64   `json:"lowScores"`
+	Events        []model.SecurityEvent `json:"events"`
 }
 
 // Generator 巡检报告生成服务。
 type Generator struct {
-	store   storage.Storage
-	nodeMgr *node.Manager
-	dir     string
+	store    storage.Storage
+	nodeMgr  *node.Manager
+	secStore *security.Store
+	dir      string
 
 	mu      sync.Mutex
 	history []ReportMeta
 }
 
 // NewGenerator 构造报告生成器。dir 为报告 HTML 存储目录。
-func NewGenerator(store storage.Storage, mgr *node.Manager, dir string) *Generator {
+func NewGenerator(store storage.Storage, mgr *node.Manager, secStore *security.Store, dir string) *Generator {
 	if dir == "" {
 		dir = "reports"
 	}
 	_ = os.MkdirAll(dir, 0o755)
-	g := &Generator{store: store, nodeMgr: mgr, dir: dir}
+	g := &Generator{store: store, nodeMgr: mgr, secStore: secStore, dir: dir}
 	g.history = g.loadHistory()
 	return g
 }
@@ -282,6 +370,21 @@ func (g *Generator) collectData(start, end time.Time, period string) reportData 
 				ns.LoadAvg = v
 			}
 		}
+		// 深化指标：网络流量、磁盘 IO、磁盘分区、Top 进程
+		ns.NetIfaces = g.collectNetwork(n.Hostname, startMs, endMs, step)
+		ns.DiskIO = g.collectDiskIO(n.Hostname, startMs, endMs, step)
+		ns.Partitions = g.collectPartitions(n.Hostname, startMs, endMs)
+		if pl := g.nodeMgr.LastPayload(n.Hostname); pl != nil {
+			procs := make([]procStat, 0, len(pl.Processes))
+			for _, p := range pl.Processes {
+				procs = append(procs, procStat{PID: p.PID, Name: p.Name, CPUPct: p.CPU, MemPct: p.Mem})
+			}
+			sort.Slice(procs, func(i, j int) bool { return procs[i].CPUPct > procs[j].CPUPct })
+			if len(procs) > 10 {
+				procs = procs[:10]
+			}
+			ns.Processes = procs
+		}
 		ns.Health, ns.HealthScore = evalHostHealth(ns)
 		nodeStats = append(nodeStats, ns)
 		if n.Status == "online" {
@@ -313,7 +416,15 @@ func (g *Generator) collectData(start, end time.Time, period string) reportData 
 
 	mw := g.collectMiddleware(startMs, endMs, step)
 	charts := buildCharts(nodeStats, trends)
+	sec := g.collectSecurity(startMs, endMs)
 	findings := buildFindings(nodeStats, mw)
+	findings = append(findings, buildSecurityFindings(sec)...)
+	sevOrder := map[string]int{"critical": 0, "warning": 1, "info": 2}
+	sort.SliceStable(findings, func(i, j int) bool {
+		return sevOrder[findings[i].Severity] < sevOrder[findings[j].Severity]
+	})
+	conclusion := g.buildConclusion(nodeStats, findings, sec)
+	comparison := g.buildComparison(start, end, nodeStats, summary)
 
 	return reportData{
 		Period:     fmt.Sprintf("%s ~ %s", start.Format("2006-01-02 15:04"), end.Format("2006-01-02 15:04")),
@@ -323,30 +434,406 @@ func (g *Generator) collectData(start, end time.Time, period string) reportData 
 		Nodes:      nodeStats,
 		Middleware: mw,
 		Findings:   findings,
+		Conclusion: conclusion,
+		Comparison: comparison,
+		Security:   sec,
+	}
+}
+
+// ---- 主机深化指标采集 ----
+
+// collectNetwork 聚合单主机各网卡的最新收发速率与丢包速率。
+func (g *Generator) collectNetwork(node string, startMs, endMs, step int64) []netIfaceStat {
+	recv, _ := g.store.QueryAllLatest("network_recv_rate", map[string]string{"node": node})
+	sent, _ := g.store.QueryAllLatest("network_sent_rate", map[string]string{"node": node})
+	drop, _ := g.store.QueryAllLatest("network_drop_rate", map[string]string{"node": node})
+	byIface := map[string]*netIfaceStat{}
+	get := func(iface string) *netIfaceStat {
+		if iface == "" {
+			iface = "eth0"
+		}
+		if byIface[iface] == nil {
+			byIface[iface] = &netIfaceStat{Name: iface}
+		}
+		return byIface[iface]
+	}
+	add := func(series []model.Series, kind string) {
+		for _, s := range series {
+			iface := s.Labels["iface"]
+			if iface == "" {
+				iface = s.Labels["device"]
+			}
+			st := get(iface)
+			if len(s.Points) > 0 {
+				v := s.Points[len(s.Points)-1].Value
+				switch kind {
+				case "recv":
+					st.RecvMBps = v / 1e6
+				case "sent":
+					st.SentMBps = v / 1e6
+				case "drop":
+					st.DropPps = v
+				}
+			}
+		}
+	}
+	add(recv, "recv")
+	add(sent, "sent")
+	add(drop, "drop")
+	out := make([]netIfaceStat, 0, len(byIface))
+	for _, st := range byIface {
+		out = append(out, *st)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].RecvMBps+out[i].SentMBps > out[j].RecvMBps+out[j].SentMBps
+	})
+	return out
+}
+
+// collectDiskIO 聚合单主机各磁盘设备的最新读写速率与 IOPS。
+func (g *Generator) collectDiskIO(node string, startMs, endMs, step int64) []diskIOStat {
+	read, _ := g.store.QueryAllLatest("disk_read_rate", map[string]string{"node": node})
+	write, _ := g.store.QueryAllLatest("disk_write_rate", map[string]string{"node": node})
+	riops, _ := g.store.QueryAllLatest("disk_read_iops", map[string]string{"node": node})
+	wiops, _ := g.store.QueryAllLatest("disk_write_iops", map[string]string{"node": node})
+	byDev := map[string]*diskIOStat{}
+	get := func(dev string) *diskIOStat {
+		if dev == "" {
+			dev = "sda"
+		}
+		if byDev[dev] == nil {
+			byDev[dev] = &diskIOStat{Device: dev}
+		}
+		return byDev[dev]
+	}
+	add := func(series []model.Series, kind string) {
+		for _, s := range series {
+			dev := s.Labels["device"]
+			if dev == "" {
+				dev = s.Labels["disk"]
+			}
+			st := get(dev)
+			if len(s.Points) > 0 {
+				v := s.Points[len(s.Points)-1].Value
+				switch kind {
+				case "read":
+					st.ReadMBps = v / 1e6
+				case "write":
+					st.WriteMBps = v / 1e6
+				case "riops":
+					st.ReadIOPS = v
+				case "wiops":
+					st.WriteIOPS = v
+				}
+			}
+		}
+	}
+	add(read, "read")
+	add(write, "write")
+	add(riops, "riops")
+	add(wiops, "wiops")
+	out := make([]diskIOStat, 0, len(byDev))
+	for _, st := range byDev {
+		out = append(out, *st)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ReadMBps+out[i].WriteMBps > out[j].ReadMBps+out[j].WriteMBps
+	})
+	return out
+}
+
+// collectPartitions 聚合单主机各挂载点的磁盘使用率与容量（按使用率降序取 Top）。
+func (g *Generator) collectPartitions(node string, startMs, endMs int64) []diskPartStat {
+	pct, _ := g.store.QueryAllLatest("disk_used_percent", map[string]string{"node": node})
+	used, _ := g.store.QueryAllLatest("disk_used", map[string]string{"node": node})
+	total, _ := g.store.QueryAllLatest("disk_total", map[string]string{"node": node})
+	byMount := map[string]*diskPartStat{}
+	get := func(mount string) *diskPartStat {
+		if mount == "" {
+			mount = "/"
+		}
+		if byMount[mount] == nil {
+			byMount[mount] = &diskPartStat{Mount: mount}
+		}
+		return byMount[mount]
+	}
+	for _, s := range pct {
+		mount := s.Labels["mount"]
+		if mount == "" {
+			mount = s.Labels["device"]
+		}
+		st := get(mount)
+		st.Device = s.Labels["device"]
+		st.Fstype = s.Labels["fstype"]
+		if len(s.Points) > 0 {
+			st.UsedPct = s.Points[len(s.Points)-1].Value
+		}
+	}
+	for _, s := range used {
+		mount := s.Labels["mount"]
+		if mount == "" {
+			mount = s.Labels["device"]
+		}
+		st := get(mount)
+		if len(s.Points) > 0 {
+			st.UsedGB = s.Points[len(s.Points)-1].Value / 1e9
+		}
+	}
+	for _, s := range total {
+		mount := s.Labels["mount"]
+		if mount == "" {
+			mount = s.Labels["device"]
+		}
+		st := get(mount)
+		if len(s.Points) > 0 {
+			st.TotalGB = s.Points[len(s.Points)-1].Value / 1e9
+		}
+	}
+	out := make([]diskPartStat, 0, len(byMount))
+	for _, st := range byMount {
+		out = append(out, *st)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UsedPct > out[j].UsedPct })
+	if len(out) > 8 {
+		out = out[:8]
+	}
+	return out
+}
+
+// ---- 安全中心聚合 ----
+
+// collectSecurity 汇总巡检周期内的安全基线评分与告警事件。
+func (g *Generator) collectSecurity(startMs, endMs int64) *SecuritySection {
+	if g.secStore == nil {
+		return nil
+	}
+	baselines := g.secStore.Baselines()
+	events := g.secStore.Events(0, "", "")
+	sec := &SecuritySection{HasData: len(baselines) > 0 || len(events) > 0}
+	var sumScore float64
+	for _, b := range baselines {
+		sumScore += b.Score
+		if b.Score < 70 {
+			sec.RiskNodes = append(sec.RiskNodes, b.Node)
+			sec.LowScores[b.Node] = b.Score
+		}
+	}
+	if len(baselines) > 0 {
+		sec.NodeCount = len(baselines)
+		sec.AvgScore = round1(sumScore / float64(len(baselines)))
+	}
+	sec.LowScoreNodes = len(sec.RiskNodes)
+	for _, e := range events {
+		if e.Timestamp < startMs || e.Timestamp > endMs {
+			continue
+		}
+		switch e.Severity {
+		case model.SeverityCritical:
+			sec.CriticalEvents++
+		case model.SeverityWarning:
+			sec.WarningEvents++
+		}
+		if strings.Contains(strings.ToLower(e.Category), "cve") || strings.Contains(strings.ToUpper(e.Message), "CVE") {
+			sec.CVECount++
+		}
+		sec.Events = append(sec.Events, e)
+	}
+	if len(sec.Events) > 20 {
+		sec.Events = sec.Events[:20]
+	}
+	return sec
+}
+
+// buildSecurityFindings 将安全中心告警转化为报告发现项。
+func buildSecurityFindings(sec *SecuritySection) []finding {
+	if sec == nil {
+		return nil
+	}
+	var fs []finding
+	for _, e := range sec.Events {
+		sev := "info"
+		switch e.Severity {
+		case model.SeverityCritical:
+			sev = "critical"
+		case model.SeverityWarning:
+			sev = "warning"
+		}
+		fs = append(fs, finding{
+			Severity:   sev,
+			Category:   "安全中心",
+			Resource:   e.Node,
+			Title:      fmt.Sprintf("安全事件：%s", e.Category),
+			Detail:     fmt.Sprintf("%s（来源：%s）", e.Message, e.SourceLocation),
+			Suggestion: "结合安全中心对应事件的处理建议及时处置，必要时联动封禁或隔离。",
+		})
+	}
+	for node, score := range sec.LowScores {
+		fs = append(fs, finding{
+			Severity:   "warning",
+			Category:   "安全中心",
+			Resource:   node,
+			Title:      fmt.Sprintf("%s 安全基线评分偏低", node),
+			Detail:     fmt.Sprintf("安全基线评分 %d，低于阈值 70，存在配置或漏洞风险。", int(score)),
+			Suggestion: "进入安全中心查看基线检查明细，按项修复后重新评估评分。",
+		})
+	}
+	return fs
+}
+
+// ---- 巡检结论与环比 ----
+
+// buildConclusion 汇总整体健康评级、各级别发现数、Top 风险与一句话结论。
+func (g *Generator) buildConclusion(nodes []nodeStat, findings []finding, sec *SecuritySection) Conclusion {
+	c := Conclusion{
+		SeverityCounts: map[string]int{"critical": 0, "warning": 0, "info": 0},
+		TopRisks:       []string{},
+	}
+	for _, f := range findings {
+		c.SeverityCounts[f.Severity]++
+		c.TotalFindings++
+	}
+	var sumHost float64
+	onlineCnt := 0
+	for _, n := range nodes {
+		if n.Status == "online" {
+			sumHost += n.HealthScore
+			onlineCnt++
+		}
+	}
+	if onlineCnt > 0 {
+		c.Score = round1(sumHost / float64(onlineCnt))
+	}
+	rating, cls := "健康", "healthy"
+	if c.SeverityCounts["critical"] > 0 {
+		rating, cls = "预警", "critical"
+	} else if c.SeverityCounts["warning"] > 0 {
+		rating, cls = "关注", "warning"
+	}
+	c.Rating, c.RatingClass = rating, cls
+	for _, f := range findings {
+		if f.Severity == "critical" || f.Severity == "warning" {
+			c.TopRisks = append(c.TopRisks, fmt.Sprintf("[%s] %s", f.Resource, f.Title))
+		}
+		if len(c.TopRisks) >= 5 {
+			break
+		}
+	}
+	c.Summary = fmt.Sprintf("本周期共纳管 %d 台主机（在线 %d），发现 %d 项风险（严重 %d / 警告 %d / 提示 %d）。综合健康评分 %.0f 分，整体评级：%s。",
+		len(nodes), onlineCnt, c.TotalFindings, c.SeverityCounts["critical"], c.SeverityCounts["warning"], c.SeverityCounts["info"], c.Score, rating)
+	return c
+}
+
+// windowAgg 计算指定窗口内的主机聚合指标（用于环比）。
+func (g *Generator) windowAgg(start, end time.Time) (cpuAvg, memAvg, diskMax, healthAvg, onlineRate float64) {
+	nodes := g.nodeMgr.ListNodes()
+	if len(nodes) == 0 {
+		return
+	}
+	startMs, endMs, step := start.UnixMilli(), end.UnixMilli(), oneHourMs
+	on := 0
+	var sCPU, sMem, sDisk, sHealth float64
+	for _, n := range nodes {
+		ns := nodeStat{Status: n.Status}
+		if s, err := g.store.QueryRange(n.Hostname, "cpu_usage", nil, startMs, endMs, step); err == nil {
+			ns.CPUAvg, ns.CPUMax = avgMax(s)
+		}
+		if s, err := g.store.QueryRange(n.Hostname, "mem_used_percent", nil, startMs, endMs, step); err == nil {
+			ns.MemAvg, ns.MemMax = avgMax(s)
+		}
+		if s, err := g.store.QueryRange(n.Hostname, "disk_used_percent", nil, startMs, endMs, step); err == nil {
+			ns.DiskAvg, ns.DiskMax = avgMax(s)
+		}
+		ns.Health, ns.HealthScore = evalHostHealth(ns)
+		if n.Status == "online" {
+			on++
+			sCPU += ns.CPUAvg
+			sMem += ns.MemAvg
+			sDisk += ns.DiskMax
+			sHealth += ns.HealthScore
+		}
+	}
+	onN := on
+	if onN == 0 {
+		onN = 1
+	}
+	return sCPU / float64(onN), sMem / float64(onN), sDisk / float64(onN), sHealth / float64(onN), float64(on) / float64(len(nodes)) * 100
+}
+
+// buildComparison 对比上一周期（等长窗口）的关键指标。
+func (g *Generator) buildComparison(start, end time.Time, nodes []nodeStat, summary summaryStat) *Comparison {
+	dur := end.Sub(start)
+	prevCPU, prevMem, prevDisk, prevHealth, prevOnline := g.windowAgg(start.Add(-dur), start)
+	var sumHealth float64
+	online := 0
+	for _, n := range nodes {
+		if n.Status == "online" {
+			sumHealth += n.HealthScore
+			online++
+		}
+	}
+	curHealth := 0.0
+	if online > 0 {
+		curHealth = round1(sumHealth / float64(online))
+	}
+	curOnline := 0.0
+	if summary.Total > 0 {
+		curOnline = round1(float64(summary.Online) / float64(summary.Total) * 100)
+	}
+	return &Comparison{
+		OnlineRate:     curOnline,
+		PrevOnlineRate: round1(prevOnline),
+		CPUAvg:         summary.CPUAvg,
+		PrevCPUAvg:     prevCPU,
+		MemAvg:         summary.MemAvg,
+		PrevMemAvg:     prevMem,
+		DiskMax:        summary.DiskMax,
+		PrevDiskMax:    prevDisk,
+		HealthScore:    curHealth,
+		PrevHealthScore: round1(prevHealth),
 	}
 }
 
 // ---- 中间件采集 ----
 
-// mwDefs 报告所需的中间件指标定义（类型、实例存活指标、负载指标及趋势指标）。
+// mwDefs 报告所需的中间件指标定义（类型、实例存活指标、负载指标、关键指标、展示名与图标）。
 var mwDefs = []mwDef{
 	{"redis", "redis_instance_up", "redis_connected_clients", []string{
 		"redis_connected_clients", "redis_max_clients", "redis_used_memory_percent",
 		"redis_used_memory_bytes", "redis_hit_rate", "redis_cmd_latency_ms", "redis_ops_per_sec",
 		"redis_replication_lag_seconds", "redis_evicted_keys", "redis_rejected_connections",
-	}},
+	}, "Redis", "🗄️"},
 	{"mysql", "mysql_instance_up", "mysql_threads_connected", []string{
 		"mysql_threads_connected", "mysql_max_connections", "mysql_buffer_pool_hit_rate",
 		"mysql_queries_per_sec", "mysql_seconds_behind_master", "mysql_slow_queries",
 		"mysql_query_latency_ms",
-	}},
+	}, "MySQL", "🛢️"},
 	{"postgres", "postgres_instance_up", "postgres_numbackends", []string{
 		"postgres_numbackends", "postgres_max_connections", "postgres_cache_hit_ratio",
 		"postgres_replication_lag_bytes", "postgres_query_latency_ms",
-	}},
+	}, "PostgreSQL", "🐘"},
 	{"nginx", "nginx_instance_up", "nginx_active_connections", []string{
 		"nginx_active_connections", "nginx_5xx",
-	}},
+	}, "Nginx", "🌐"},
+	{"kafka", "kafka_instance_up", "", []string{
+		"kafka_broker_count", "kafka_offline_partitions", "kafka_under_replicated_partitions",
+		"kafka_consumer_lag", "kafka_active_controller_count", "kafka_topic_count",
+	}, "Kafka", "📨"},
+	{"rocketmq", "rocketmq_instance_up", "", []string{
+		"rocketmq_broker_count", "rocketmq_message_accumulation", "rocketmq_consumer_lag",
+		"rocketmq_topic_count",
+	}, "RocketMQ", "🚀"},
+	{"mongodb", "mongodb_up", "", []string{
+		"mongodb_connections_current", "mongodb_connections_available",
+		"mongodb_repl_lag", "mongodb_repl_health", "mongodb_mem_resident_bytes",
+	}, "MongoDB", "🍃"},
+	{"kubernetes", "k8s_cluster_up", "", []string{
+		"k8s_nodes_total", "k8s_nodes_ready", "k8s_pods_running",
+		"k8s_pods_pending", "k8s_pods_failed", "k8s_deployments_unhealthy",
+	}, "Kubernetes", "☸️"},
+	{"docker", "docker_containers_total", "", []string{
+		"docker_containers_total", "docker_containers_running", "docker_containers_stopped",
+		"docker_images_total",
+	}, "Docker", "🐳"},
 }
 
 type mwDef struct {
@@ -354,6 +841,8 @@ type mwDef struct {
 	up         string
 	connMetric string
 	metrics    []string
+	title      string
+	icon       string
 }
 
 func (d mwDef) throughputMetric() string {
@@ -384,6 +873,10 @@ func (g *Generator) collectMiddleware(startMs, endMs, step int64) []mwInstance {
 			up := false
 			if len(s.Points) > 0 {
 				up = s.Points[len(s.Points)-1].Value > 0
+			}
+			if d.typ == "docker" {
+				// docker 守护进程以容器总数指标存在与否判定存活，避免 0 容器误判离线
+				up = true
 			}
 			key := node + "|" + inst
 			mi := mwInstance{
@@ -435,6 +928,79 @@ func (g *Generator) collectMiddleware(startMs, endMs, step int64) []mwInstance {
 				mi.ConnUsed = lv("nginx_active_connections")
 				if c5 := lv("nginx_5xx"); c5 > 0 {
 					mi.Extra = fmt.Sprintf("5xx 响应 %d", int(c5))
+				}
+			case "kafka":
+				brokers := lv("kafka_broker_count")
+				mi.ConnUsed, mi.ConnMax = brokers, brokers
+				var kp []string
+				if v := lv("kafka_offline_partitions"); v > 0 {
+					kp = append(kp, fmt.Sprintf("离线分区 %d", int(v)))
+				}
+				if v := lv("kafka_under_replicated_partitions"); v > 0 {
+					kp = append(kp, fmt.Sprintf("欠副本分区 %d", int(v)))
+				}
+				if v := lv("kafka_consumer_lag"); v > 0 {
+					kp = append(kp, fmt.Sprintf("消费滞后 %.0f", v))
+				}
+				if v := lv("kafka_active_controller_count"); v != 1 {
+					kp = append(kp, fmt.Sprintf("活跃控制器 %d（应为1）", int(v)))
+				}
+				mi.Extra = strings.Join(kp, "；")
+			case "rocketmq":
+				brokers := lv("rocketmq_broker_count")
+				mi.ConnUsed, mi.ConnMax = brokers, brokers
+				var rp []string
+				if v := lv("rocketmq_message_accumulation"); v > 0 {
+					rp = append(rp, fmt.Sprintf("消息堆积 %d", int(v)))
+				}
+				if v := lv("rocketmq_consumer_lag"); v > 0 {
+					rp = append(rp, fmt.Sprintf("消费滞后 %.0f", v))
+				}
+				mi.Extra = strings.Join(rp, "；")
+			case "mongodb":
+				cur := lv("mongodb_connections_current")
+				avail := lv("mongodb_connections_available")
+				mi.ConnUsed, mi.ConnMax = cur, cur+avail
+				var mp []string
+				if h := lv("mongodb_repl_health"); h > 0 && h < 1 {
+					mp = append(mp, fmt.Sprintf("复制健康 %.2f（异常）", h))
+				}
+				if v := lv("mongodb_repl_lag"); v > 0 {
+					mp = append(mp, fmt.Sprintf("复制延迟 %.1fs", v))
+				}
+				mi.Extra = strings.Join(mp, "；")
+			case "kubernetes":
+				nt := lv("k8s_nodes_total")
+				nr := lv("k8s_nodes_ready")
+				mi.ConnUsed, mi.ConnMax = nr, nt
+				var kdp []string
+				if nt > 0 && nr < nt {
+					kdp = append(kdp, fmt.Sprintf("未就绪节点 %d", int(nt-nr)))
+				}
+				if v := lv("k8s_pods_failed"); v > 0 {
+					kdp = append(kdp, fmt.Sprintf("失败 Pod %d", int(v)))
+				}
+				if v := lv("k8s_pods_pending"); v > 0 {
+					kdp = append(kdp, fmt.Sprintf("Pending Pod %d", int(v)))
+				}
+				if v := lv("k8s_deployments_unhealthy"); v > 0 {
+					kdp = append(kdp, fmt.Sprintf("异常 Deployment %d", int(v)))
+				}
+				mi.Extra = strings.Join(kdp, "；")
+			case "docker":
+				total := lv("docker_containers_total")
+				running := lv("docker_containers_running")
+				mi.ConnUsed, mi.ConnMax = running, total
+				var dp []string
+				if v := lv("docker_containers_stopped"); v > 0 {
+					dp = append(dp, fmt.Sprintf("已停止容器 %d", int(v)))
+				}
+				mi.Extra = strings.Join(dp, "；")
+			}
+			mi.Metrics = map[string]float64{}
+			for _, m := range d.metrics {
+				if v, ok := latest[m][key]; ok {
+					mi.Metrics[m] = v
 				}
 			}
 			if mi.ConnMax > 0 {
@@ -838,8 +1404,83 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 					Suggestion: "结合 pg_stat_statements 定位高耗时 SQL 与执行计划；优化索引、避免全表扫描与顺序扫描；排查锁等待与长事务；必要时扩容或读写分离。",
 				})
 			}
+	case "kafka":
+		if offline := m.Metrics["kafka_offline_partitions"]; offline > 0 {
+			fs = append(fs, finding{Severity: "critical", Category: "中间件",
+				Resource: name, Title: fmt.Sprintf("%s 存在离线分区", m.Instance),
+				Detail: fmt.Sprintf("离线分区数 %d，可能导致数据不可用。", int(offline))})
 		}
-		if strings.Contains(m.Extra, "主从延迟") || strings.Contains(m.Extra, "复制延迟") {
+		if ur := m.Metrics["kafka_under_replicated_partitions"]; ur > 0 {
+			fs = append(fs, finding{Severity: "warning", Category: "中间件",
+				Resource: name, Title: fmt.Sprintf("%s 存在欠副本分区", m.Instance),
+				Detail: fmt.Sprintf("欠副本分区数 %d，副本同步异常。", int(ur))})
+		}
+		if lag := m.Metrics["kafka_consumer_lag"]; lag > 100000 {
+			fs = append(fs, finding{Severity: "warning", Category: "中间件",
+				Resource: name, Title: fmt.Sprintf("%s 消费滞后偏高", m.Instance),
+				Detail: fmt.Sprintf("消费滞后 %.0f 条，消费能力或下游处理存在瓶颈。", lag)})
+		}
+		if ctrl := m.Metrics["kafka_active_controller_count"]; ctrl != 1 {
+			fs = append(fs, finding{Severity: "critical", Category: "中间件",
+				Resource: name, Title: fmt.Sprintf("%s 控制器状态异常", m.Instance),
+				Detail: fmt.Sprintf("活跃控制器数 %d（应为 1），集群选主异常。", int(ctrl))})
+		}
+	case "rocketmq":
+		if acc := m.Metrics["rocketmq_message_accumulation"]; acc > 0 {
+			fs = append(fs, finding{Severity: "warning", Category: "中间件",
+				Resource: name, Title: fmt.Sprintf("%s 消息堆积", m.Instance),
+				Detail: fmt.Sprintf("消息堆积 %d 条，消费速率不足。", int(acc))})
+		}
+		if lag := m.Metrics["rocketmq_consumer_lag"]; lag > 100000 {
+			fs = append(fs, finding{Severity: "warning", Category: "中间件",
+				Resource: name, Title: fmt.Sprintf("%s 消费滞后偏高", m.Instance),
+				Detail: fmt.Sprintf("消费滞后 %.0f 条。", lag)})
+		}
+	case "mongodb":
+		if h := m.Metrics["mongodb_repl_health"]; h > 0 && h < 1 {
+			fs = append(fs, finding{Severity: "critical", Category: "中间件",
+				Resource: name, Title: fmt.Sprintf("%s 复制健康异常", m.Instance),
+				Detail: fmt.Sprintf("复制健康度 %.2f（正常为 1），副本集异常。", h)})
+		}
+		if lag := m.Metrics["mongodb_repl_lag"]; lag > 30 {
+			fs = append(fs, finding{Severity: "warning", Category: "中间件",
+				Resource: name, Title: fmt.Sprintf("%s 复制延迟偏高", m.Instance),
+				Detail: fmt.Sprintf("复制延迟 %.1fs。", lag)})
+		}
+		if cur := m.Metrics["mongodb_connections_current"]; cur > 0 {
+			avail := m.Metrics["mongodb_connections_available"]
+			if cur+avail > 0 && cur/(cur+avail) > 0.9 {
+				fs = append(fs, finding{Severity: "warning", Category: "中间件",
+					Resource: name, Title: fmt.Sprintf("%s 连接使用率偏高", m.Instance),
+					Detail: fmt.Sprintf("当前连接 %d，可用 %d，使用率 %.0f%%。", int(cur), int(avail), cur/(cur+avail)*100)})
+			}
+		}
+	case "kubernetes":
+		nt := m.Metrics["k8s_nodes_total"]
+		nr := m.Metrics["k8s_nodes_ready"]
+		if nt > 0 && nr < nt {
+			fs = append(fs, finding{Severity: "warning", Category: "中间件",
+				Resource: name, Title: fmt.Sprintf("%s 集群存在未就绪节点", m.Instance),
+				Detail: fmt.Sprintf("节点总数 %d，就绪 %d。", int(nt), int(nr))})
+		}
+		if v := m.Metrics["k8s_pods_failed"]; v > 0 {
+			fs = append(fs, finding{Severity: "warning", Category: "中间件",
+				Resource: name, Title: fmt.Sprintf("%s 存在失败 Pod", m.Instance),
+				Detail: fmt.Sprintf("失败 Pod 数 %d。", int(v))})
+		}
+		if v := m.Metrics["k8s_deployments_unhealthy"]; v > 0 {
+			fs = append(fs, finding{Severity: "warning", Category: "中间件",
+				Resource: name, Title: fmt.Sprintf("%s 存在异常 Deployment", m.Instance),
+				Detail: fmt.Sprintf("异常 Deployment 数 %d。", int(v))})
+		}
+	case "docker":
+		if v := m.Metrics["docker_containers_stopped"]; v > 0 {
+			fs = append(fs, finding{Severity: "info", Category: "中间件",
+				Resource: name, Title: fmt.Sprintf("%s 存在已停止容器", m.Instance),
+				Detail: fmt.Sprintf("已停止容器 %d 个。", int(v))})
+		}
+	}
+	if strings.Contains(m.Extra, "主从延迟") || strings.Contains(m.Extra, "复制延迟") {
 			fs = append(fs, finding{
 				Severity: "warning",
 				Category: "中间件",
@@ -990,6 +1631,68 @@ func renderHTML(data reportData) string {
 			}
 		},
 		"f1": func(v float64) string { return formatNum(v) },
+		"sevText": func(v interface{}) string {
+			switch fmt.Sprintf("%v", v) {
+			case "critical":
+				return "严重"
+			case "warning":
+				return "警告"
+			case "info":
+				return "提示"
+			default:
+				return fmt.Sprintf("%v", v)
+			}
+		},
+		"sevClass": func(v interface{}) string {
+			switch fmt.Sprintf("%v", v) {
+			case "critical":
+				return "critical"
+			case "warning":
+				return "warning"
+			default:
+				return "info"
+			}
+		},
+		"catLabel": func(cat string) string {
+			m := map[string]string{
+				"ssh_bruteforce":  "SSH 暴力破解",
+				"ssh_audit":       "SSH 登录审计",
+				"fim":             "文件完整性",
+				"process_anomaly": "异常进程",
+				"sudo_audit":      "sudo 审计",
+				"cat_ban":         "fail2ban 封禁",
+			}
+			if s, ok := m[cat]; ok {
+				return s
+			}
+			return cat
+		},
+		"cmpGood": func(cur, prev float64) string {
+			d := cur - prev
+			absd := d
+			if absd < 0 {
+				absd = -absd
+			}
+			if d > 0.0001 {
+				return fmt.Sprintf(`<span class="cmp good">▲ %s</span>`, formatNum(absd))
+			} else if d < -0.0001 {
+				return fmt.Sprintf(`<span class="cmp bad">▼ %s</span>`, formatNum(absd))
+			}
+			return `<span class="cmp flat">—</span>`
+		},
+		"cmpBad": func(cur, prev float64) string {
+			d := cur - prev
+			absd := d
+			if absd < 0 {
+				absd = -absd
+			}
+			if d > 0.0001 {
+				return fmt.Sprintf(`<span class="cmp bad">▲ %s</span>`, formatNum(absd))
+			} else if d < -0.0001 {
+				return fmt.Sprintf(`<span class="cmp good">▼ %s</span>`, formatNum(absd))
+			}
+			return `<span class="cmp flat">—</span>`
+		},
 		"spark": func(pts []linePoint) template.HTML {
 			if len(pts) == 0 {
 				return template.HTML("")

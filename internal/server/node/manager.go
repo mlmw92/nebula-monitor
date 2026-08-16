@@ -34,6 +34,7 @@ type Manager struct {
 	metaPath       string
 	offlineTimeout time.Duration
 	upgradeQueue   map[string]*upgradeTask // 待升级节点集合（内存态，重启丢失）
+	lastPayloads   map[string]*model.ReportPayload // 各节点最近一次上报快照（含 Top 进程）
 }
 
 // New 创建 Manager 并从 meta 文件加载已有节点/分组。
@@ -44,6 +45,7 @@ func New(metaPath string, offlineTimeout time.Duration) *Manager {
 		metaPath:       metaPath,
 		offlineTimeout: offlineTimeout,
 		upgradeQueue:   map[string]*upgradeTask{},
+		lastPayloads:   map[string]*model.ReportPayload{},
 	}
 	m.load()
 	// 默认分组
@@ -101,7 +103,15 @@ func (m *Manager) Register(p *model.ReportPayload) {
 	}
 	n.Status = "online"
 	n.LastSeen = now
+	m.lastPayloads[p.Node] = p
 	m.persistLocked()
+}
+
+// LastPayload 返回指定节点最近一次上报的完整快照（含 Top 进程），无则返回 nil。
+func (m *Manager) LastPayload(node string) *model.ReportPayload {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.lastPayloads[node]
 }
 
 func hasHostInfo(info model.HostInfo) bool {

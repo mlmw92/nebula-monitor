@@ -125,7 +125,7 @@ func main() {
 	dialtestSched.Start(ctx)
 
 	// 报告生成模块
-	reportGen := report.NewGenerator(store, nodeMgr, cfg.ReportDir)
+	reportGen := report.NewGenerator(store, nodeMgr, securityStore, cfg.ReportDir)
 
 	// 数据大屏模块显隐配置管理：独立文件（Web 端设置写入），不存在则用默认全开初始化并落盘。
 	screenMgr, err := screencfg.New(cfg.ScreenFile, config.DefaultScreenConfig())
