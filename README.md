@@ -246,9 +246,9 @@ Web 端「安全中心」提供受控的 fail2ban 入侵防御能力，用于自
 - 仅支持 **Linux + systemd + SSHD** 环境。不满足时，「安全中心」对应节点会提示「不支持」并给出手动配置说明，不会执行任何改动。
 - 启用防护只创建并使用专属配置：
   - jail：`/etc/fail2ban/jail.d/nebula-monitor-sshd.conf`（仅保护 SSH，阈值 `maxretry=5`、`findtime=10m`、`bantime=1h`，backend 优先 `systemd`）；
-  - action：`/etc/fail2ban/action.d/nebula-monitor.conf`（仅向受控审计文件追加封禁/解封记录，不改变 fail2ban 既有动作）。
+  - action：由 Fail2Ban 发行版原生防火墙 action（firewalld / nftables / iptables）与 Nebula 审计 action 组合；原生 action 负责实际封禁，审计 action 仅把 ban/unban 记录到受控文件。若节点没有可用的原生 action，启用会失败，不会退回“仅审计”模式。
 - 启用后，系统会把**当前操作人的真实来源 IP** 与回环地址加入 fail2ban 白名单（`ignoreip`），避免误封你自己；不会自动放行整个内网段。
-- 封禁（ban）事件以「警告」、解封（unban）事件以「信息」级别进入「安全中心」与告警中心，可在「通知配置」中按规则 `security-cat_ban` 接收通知。
+- 封禁事件（`cat_ban`）只是历史动作记录；当前是否仍被封禁以入侵防御面板中的 `Banned IP list` 为准。面板显示“已防护”前会确认 jail 已加载原生防火墙 action；“当前无封禁”表示当前列表为空，不表示防护未启用。
 - **停用防护**仅停止并移除 nebula 专属 jail 与配置文件，随后重载 fail2ban；**不会卸载 fail2ban 软件包**，也不会删除你的 `jail.local` 或其他 jail 配置。
 
 操作方式：
@@ -288,11 +288,17 @@ EOF
 systemctl enable --now fail2ban
 fail2ban-client reload
 
-# 4. 校验
-fail2ban-client status sshd
+# 4. 校验（必须确认实际封禁 action，而不只是 jail 存在）
+fail2ban-client -t
+fail2ban-client status nebula-monitor-sshd
+fail2ban-client get nebula-monitor-sshd actions
+# 触发测试封禁后，按实际后端检查：
+# firewall-cmd --list-rich-rules / --get-ipsets
+# nft list ruleset
+# iptables -S
 ```
 
-如需将手动部署的 jail 接入「安全中心」的封禁事件展示，可在 action 中以同样格式向 `/var/lib/nebula-monitor/defense/ban_audit.jsonl` 追加记录，由 Agent 增量采集回流。
+如需将手动部署的 jail 接入「安全中心」的封禁事件展示，可在 action 中以同样格式向 `/var/lib/nebula-monitor/defense/ban_audit.jsonl` 追加记录，由 Agent 增量采集回流；这只提供历史事件展示，不能替代 `iptables`、`nftables` 或 `firewalld` 的实际封禁 action。
 
 > **版本要求**：一键入侵防御需 Agent 与 Server 同时升级到包含该能力的版本；旧 Agent 在「安全中心」显示「需升级 Agent」，不影响其他功能。
 
