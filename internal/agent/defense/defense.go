@@ -396,7 +396,8 @@ const actionConf = `# nebula-monitor 专属审计 action：仅记录封禁/解�
 actionstart =
 actionstop =
 actioncheck =
-# 注意：fail2ban 用 ConfigParser，%(name)s 会被当作变量插值，故时间改用 bash $(date ...) 注入，避免 %(now)s 解析报错
-actionban = echo '{"action":"ban","ip":"<ip>","jail":"nebula-monitor-sshd","failures":"<failures>","time":"'"$(date +%Y-%m-%dT%H:%M:%S%z)"'"}' >> /var/lib/nebula-monitor/defense/ban_audit.jsonl
-actionunban = echo '{"action":"unban","ip":"<ip>","jail":"nebula-monitor-sshd","time":"'"$(date +%Y-%m-%dT%H:%M:%S%z)"'"}' >> /var/lib/nebula-monitor/defense/ban_audit.jsonl
+# 注意：fail2ban 用 ConfigParser 解析 action，% 会被当作插值起始符（如 %(name)s）。
+# 即使时间用 bash $(date ...) 注入，配置解析阶段仍会对 % 做插值，故所有格式符必须写成 %%。
+actionban = echo '{"action":"ban","ip":"<ip>","jail":"nebula-monitor-sshd","failures":"<failures>","time":"'"$(date +%%Y-%%m-%%dT%%H:%%M:%%S%%z)"'"}' >> /var/lib/nebula-monitor/defense/ban_audit.jsonl
+actionunban = echo '{"action":"unban","ip":"<ip>","jail":"nebula-monitor-sshd","time":"'"$(date +%%Y-%%m-%%dT%%H:%%M:%%S%%z)"'"}' >> /var/lib/nebula-monitor/defense/ban_audit.jsonl
 `
