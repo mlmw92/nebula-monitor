@@ -2,7 +2,6 @@
   <footer v-if="visible" class="site-footer">
     <div class="site-footer__inner">
       <div class="site-footer__brand">
-        <span class="site-footer__mark" aria-hidden="true">✦</span>
         <span>{{ brandName }}</span>
       </div>
 
@@ -74,17 +73,6 @@ const links = computed(() => {
   font-weight: 600;
   letter-spacing: .02em;
   white-space: nowrap;
-}
-
-.site-footer__mark {
-  display: inline-grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  color: #83a7ff;
-  border: 1px solid color-mix(in srgb, #83a7ff 45%, transparent);
-  border-radius: 7px;
-  background: color-mix(in srgb, #83a7ff 12%, transparent);
 }
 
 .site-footer__links {

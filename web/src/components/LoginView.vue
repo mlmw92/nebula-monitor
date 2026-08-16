@@ -6,7 +6,6 @@
     <div class="login-card glass">
       <div class="brand">
         <img v-if="brand.logo" :src="brand.logo" class="logo-img" alt="logo" />
-        <div v-else class="logo-mark"></div>
         <div class="brand-text">
           <h1>{{ brand.name || 'NebulaEye' }}</h1>
           <p>服务器监控系统</p>
@@ -146,24 +145,6 @@ async function doLogin() {
   align-items: center;
   gap: 14px;
   margin-bottom: 30px;
-}
-.logo-mark {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: var(--brand-grad);
-  position: relative;
-  box-shadow: 0 0 24px var(--accent-glow);
-}
-.logo-mark::after {
-  content: '';
-  position: absolute;
-  inset: 10px;
-  border: 2px solid var(--brand-ink);
-  border-radius: 4px;
-  border-top-color: transparent;
-  border-right-color: transparent;
-  transform: rotate(-45deg);
 }
 .logo-img {
   width: 44px;
