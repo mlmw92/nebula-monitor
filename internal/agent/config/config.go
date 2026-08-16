@@ -14,9 +14,12 @@ import (
 
 // Agent 运行模式。
 const (
-	ModeCollect = "collect" // 普通采集模式（默认，现状不变）
-	ModeEdge    = "edge"    // 网闸区 A 边界代理：本地监听汇聚采集 Agent 上报，TLS 隧道转发至 Hub
-	ModeHub     = "hub"     // 网闸区 B 边界代理：TLS 监听接收 Edge 隧道，还原请求转发至真实 Server
+	// ModeCollect 普通采集模式（默认，现状不变）。
+	ModeCollect = "collect"
+	// ModeEdge 网闸区 A 边界代理：本地监听汇聚采集 Agent 上报，TLS 隧道转发至 Hub。
+	ModeEdge    = "edge"
+	// ModeHub 网闸区 B 边界代理：TLS 监听接收 Edge 隧道，还原请求转发至真实 Server。
+	ModeHub     = "hub"
 )
 
 // Config 是 Agent 运行配置。

@@ -16,10 +16,14 @@ import (
 )
 
 const (
+	// encPrefix 加密值前缀，用于标识该字段已加密。
 	encPrefix = "enc:"
-	blockSize = 16 // SM4 分组长度 128 位
+	// blockSize SM4 分组长度（16 字节 / 128 位）。
+	blockSize = 16
+	// ivSize 初始向量长度（字节），与分组长度一致。
 	ivSize    = blockSize
-	macSize   = 32 // SM3 摘要长度
+	// macSize 消息认证码长度（字节），等于 SM3 摘要长度。
+	macSize   = 32
 )
 
 // defaultKey 内置派生的默认主密钥（编译进二进制，仅作本机配置混淆防护）。

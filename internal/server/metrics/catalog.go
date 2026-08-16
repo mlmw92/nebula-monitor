@@ -17,33 +17,54 @@ import (
 type Category string
 
 const (
-	CatHost     Category = "host"      // 主机总览
-	CatCPU      Category = "cpu"       // CPU
-	CatMemory   Category = "memory"    // 内存
-	CatDisk     Category = "disk"      // 磁盘
-	CatNetwork  Category = "network"   // 网络
-	CatLoad     Category = "load"      // 系统负载
-	CatProcess  Category = "process"   // 进程
-	CatRedis    Category = "redis"     // 中间件：Redis
-	CatMySQL    Category = "mysql"     // 中间件：MySQL
-	CatPostgres Category = "postgres"  // 中间件：PostgreSQL
-	CatNginx    Category = "nginx"     // 中间件：Nginx
-	CatKafka    Category = "kafka"     // 中间件：Kafka
-	CatDocker   Category = "docker"    // 中间件：Docker
-	CatMongo    Category = "mongodb"   // 中间件：MongoDB
-	CatRocketMQ Category = "rocketmq"  // 中间件：RocketMQ
-	CatK8s      Category = "kubernetes" // 中间件：Kubernetes
+	// CatHost 主机总览分类。
+	CatHost Category = "host"
+	// CatCPU CPU 分类。
+	CatCPU Category = "cpu"
+	// CatMemory 内存分类。
+	CatMemory Category = "memory"
+	// CatDisk 磁盘分类。
+	CatDisk Category = "disk"
+	// CatNetwork 网络分类。
+	CatNetwork Category = "network"
+	// CatLoad 系统负载分类。
+	CatLoad Category = "load"
+	// CatProcess 进程分类。
+	CatProcess Category = "process"
+	// CatRedis 中间件：Redis。
+	CatRedis Category = "redis"
+	// CatMySQL 中间件：MySQL。
+	CatMySQL Category = "mysql"
+	// CatPostgres 中间件：PostgreSQL。
+	CatPostgres Category = "postgres"
+	// CatNginx 中间件：Nginx。
+	CatNginx Category = "nginx"
+	// CatKafka 中间件：Kafka。
+	CatKafka Category = "kafka"
+	// CatDocker 中间件：Docker。
+	CatDocker Category = "docker"
+	// CatMongo 中间件：MongoDB。
+	CatMongo Category = "mongodb"
+	// CatRocketMQ 中间件：RocketMQ。
+	CatRocketMQ Category = "rocketmq"
+	// CatK8s 中间件：Kubernetes。
+	CatK8s Category = "kubernetes"
 )
 
 // ChartType 推荐图表类型。
 type ChartType string
 
 const (
-	ChartLine   ChartType = "line"
-	ChartArea   ChartType = "area"
-	ChartBar    ChartType = "bar"
-	ChartGauge  ChartType = "gauge"
-	ChartPie    ChartType = "pie"
+	// ChartLine 折线图。
+	ChartLine ChartType = "line"
+	// ChartArea 面积图。
+	ChartArea ChartType = "area"
+	// ChartBar 柱状图。
+	ChartBar ChartType = "bar"
+	// ChartGauge 仪表盘（单值）。
+	ChartGauge ChartType = "gauge"
+	// ChartPie 饼图。
+	ChartPie ChartType = "pie"
 )
 
 // MetricMeta 单条指标的元数据。
@@ -58,9 +79,12 @@ type MetricMeta struct {
 
 // catalog 全局指标目录，Register 在 init/启动时调用。
 var (
+	// mu 保护 entries 与 order 的并发读写。
 	mu      sync.RWMutex
-	entries = map[string]MetricMeta{} // name -> meta
-	order   []string                  // 保持注册顺序
+	// entries 指标元数据映射（name -> meta）。
+	entries = map[string]MetricMeta{}
+	// order 指标注册顺序，保证目录展示稳定。
+	order   []string
 )
 
 // Register 注册（或覆盖）一条指标元数据。可安全重复调用。

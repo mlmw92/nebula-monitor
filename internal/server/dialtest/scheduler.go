@@ -10,6 +10,7 @@ import (
 	"github.com/nebula/monitor/internal/server/storage"
 )
 
+// defaultIntervalSeconds 拨测任务默认执行间隔（秒）。
 const defaultIntervalSeconds = 60
 
 // Scheduler 定时拨测调度器。

@@ -15,6 +15,7 @@ import (
 // 持久化到 JSON 文件，server 重启不丢失请求；agent 按 Command.ID 幂等执行。
 
 const (
+	// defaultDefenseStoreFile 防护任务持久化文件名（JSON）。
 	defaultDefenseStoreFile = "defense_tasks.json"
 	// defenseTaskTTL 任务从创建到过期的最长存活时间（毫秒）。超过则回收为 expired。
 	defenseTaskTTL = 30 * time.Minute

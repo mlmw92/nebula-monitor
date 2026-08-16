@@ -10,6 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// MatchSet 描述一组标签匹配条件，用于告警抑制规则的判定。
 type MatchSet struct {
 	Match       map[string]string `yaml:"match" json:"match"`
 	MatchRegexp map[string]string `yaml:"matchRegex" json:"matchRegex"`

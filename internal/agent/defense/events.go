@@ -20,6 +20,7 @@ type banEventCollector struct {
 }
 
 const (
+	// maxBanEventsPerCycle 单个采集周期最多处理的封禁事件条数。
 	maxBanEventsPerCycle = 200
 )
 

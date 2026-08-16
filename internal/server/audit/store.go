@@ -15,6 +15,7 @@ import (
 	"github.com/nebula/monitor/internal/server/config"
 )
 
+// maxEvents 内存中保留的最大审计事件条数，超出按时间淘汰。
 const maxEvents = 2000
 
 // Event 记录一次管理接口操作，不保存请求体或敏感参数。
@@ -31,12 +32,14 @@ type Event struct {
 	Detail    string    `json:"detail,omitempty"`
 }
 
+// Store 以 JSON 文件持久化审计事件，提供记录与查询能力。
 type Store struct {
 	mu     sync.RWMutex
 	path   string
 	events []Event
 }
 
+// New 创建审计存储并加载已有事件；path 为空时仅内存模式。
 func New(path string) *Store {
 	s := &Store{path: path, events: make([]Event, 0)}
 	if path == "" {
@@ -53,6 +56,7 @@ func New(path string) *Store {
 	return s
 }
 
+// Record 追加一条审计事件并持久化（超过上限自动截断到最近 maxEvents 条）。
 func (s *Store) Record(event Event) error {
 	if event.Time.IsZero() {
 		event.Time = time.Now()
@@ -71,10 +75,12 @@ func (s *Store) Record(event Event) error {
 	return config.AtomicWrite(s.path, data)
 }
 
+// List 返回最近的审计事件（按时间倒序），可按用户与路径子串过滤。
 func (s *Store) List(limit int, user, path string) []Event {
 	return s.ListFiltered(limit, user, path, "")
 }
 
+// ListFiltered 在 List 基础上额外按事件分类过滤。
 func (s *Store) ListFiltered(limit int, user, path, category string) []Event {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -176,6 +182,7 @@ func trim(events []Event) []Event {
 	return events[len(events)-maxEvents:]
 }
 
+// ClientIP 从请求中提取客户端 IP（去除端口部分）。
 func ClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil {
@@ -184,4 +191,5 @@ func ClientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+// RedactPath 返回请求路径，用于审计记录。
 func RedactPath(r *http.Request) string { return r.URL.Path }

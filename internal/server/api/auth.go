@@ -30,9 +30,13 @@ func AuthenticatedUser(r *http.Request) string {
 
 // 登录失败限流：每个源 IP 在窗口内最多允许 loginLimitMax 次失败，超出返回 429。
 var (
+	// loginMu 保护登录限流状态的并发访问。
 	loginMu       sync.Mutex
+	// loginFails 记录各来源 IP 的登录失败计数与窗口起始时间。
 	loginFails    = map[string]*loginAttempt{}
+	// loginLimitMax 窗口内允许的登录失败最大次数，超出返回 429。
 	loginLimitMax = 5
+	// loginLimitWin 登录失败计数的滑动窗口时长。
 	loginLimitWin = 5 * time.Minute
 )
 
@@ -290,6 +294,7 @@ func atoi(s string) (int64, error) {
 	return i, nil
 }
 
+// errInvalid 表示字符串转数字失败的错误实例。
 var errInvalid = &invalidErr{}
 
 type invalidErr struct{}

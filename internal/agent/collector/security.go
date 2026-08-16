@@ -38,10 +38,15 @@ const (
 //   Connection closed by authenticating user root 1.2.3.4 port 5678 [preauth]
 //   Invalid user admin from 1.2.3.4 port 5678
 var (
+	// reSSHFailed 匹配 SSH 登录失败（含无效用户），捕获用户名与来源 IP。
 	reSSHFailed      = regexp.MustCompile(`Failed password for (?:invalid user )?(\S+) from (\S+) port (\d+)`)
+	// reSSHInvalidUser 匹配 "Invalid user" 探测，捕获被猜解的用户名与来源 IP。
 	reSSHInvalidUser = regexp.MustCompile(`Invalid user (\S+) from (\S+)`)
+	// reSSHClosedBy 匹配认证阶段被关闭的连接，捕获用户名与来源 IP。
 	reSSHClosedBy    = regexp.MustCompile(`Connection closed by authenticating user (\S+) (\S+) port (\d+)`)
+	// reSSHAccepted 匹配 SSH 登录成功，捕获用户名与来源 IP。
 	reSSHAccepted    = regexp.MustCompile(`Accepted password for (\S+) from (\S+) port (\d+)`)
+	// reSSHRootLogin 匹配 root 登录被拒绝/接受（不区分大小写）。
 	reSSHRootLogin   = regexp.MustCompile(`(?i)root login (?:refused|accepted)`)
 	// sudo 审计：记录提权用户、执行的命令与来源 IP（如 sudo -u）。
 	// 示例：sudo:   ops : TTY=... ; PWD=... ; USER=root ; COMMAND=/bin/ls /etc

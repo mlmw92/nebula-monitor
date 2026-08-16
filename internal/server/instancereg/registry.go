@@ -34,6 +34,7 @@ type Registry struct {
 // Default 全局默认注册表，由 receiver 在每次上报时写入，API 在查询时读取。
 var Default = New()
 
+// New 创建空的中间件实例注册表。
 func New() *Registry {
 	return &Registry{
 		mysql:    map[string][]model.MySQLInstance{},
@@ -60,12 +61,14 @@ func normalizeNode(node string) string {
 
 // ---- MySQL ----
 
+// SetMySQL 写入指定节点最近一次上报的 MySQL 实例清单。
 func (r *Registry) SetMySQL(node string, instances []model.MySQLInstance) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.mysql[normalizeNode(node)] = instances
 }
 
+// MySQLInstances 返回全部节点已注册的 MySQL 实例（合并所有节点）。
 func (r *Registry) MySQLInstances() []model.MySQLInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -78,12 +81,14 @@ func (r *Registry) MySQLInstances() []model.MySQLInstance {
 
 // ---- Redis ----
 
+// SetRedis 写入指定节点最近一次上报的 Redis 实例清单。
 func (r *Registry) SetRedis(node string, instances []model.RedisInstance) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.redis[normalizeNode(node)] = instances
 }
 
+// RedisInstances 返回全部节点已注册的 Redis 实例（合并所有节点）。
 func (r *Registry) RedisInstances() []model.RedisInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -96,12 +101,14 @@ func (r *Registry) RedisInstances() []model.RedisInstance {
 
 // ---- PostgreSQL ----
 
+// SetPostgres 写入指定节点最近一次上报的 PostgreSQL 实例清单。
 func (r *Registry) SetPostgres(node string, instances []model.PostgresInstance) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.postgres[normalizeNode(node)] = instances
 }
 
+// PostgresInstances 返回全部节点已注册的 PostgreSQL 实例（合并所有节点）。
 func (r *Registry) PostgresInstances() []model.PostgresInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -114,12 +121,14 @@ func (r *Registry) PostgresInstances() []model.PostgresInstance {
 
 // ---- Nginx ----
 
+// SetNginx 写入指定节点最近一次上报的 Nginx 实例清单。
 func (r *Registry) SetNginx(node string, instances []model.NginxInstance) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.nginx[normalizeNode(node)] = instances
 }
 
+// NginxInstances 返回全部节点已注册的 Nginx 实例（合并所有节点）。
 func (r *Registry) NginxInstances() []model.NginxInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -132,12 +141,14 @@ func (r *Registry) NginxInstances() []model.NginxInstance {
 
 // ---- Kafka ----
 
+// SetKafka 写入指定节点最近一次上报的 Kafka 实例清单。
 func (r *Registry) SetKafka(node string, instances []model.KafkaInstance) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.kafka[normalizeNode(node)] = instances
 }
 
+// KafkaInstances 返回全部节点已注册的 Kafka 实例（合并所有节点）。
 func (r *Registry) KafkaInstances() []model.KafkaInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -150,12 +161,14 @@ func (r *Registry) KafkaInstances() []model.KafkaInstance {
 
 // ---- Docker ----
 
+// SetDocker 写入指定节点最近一次上报的 Docker 实例清单。
 func (r *Registry) SetDocker(node string, instances []model.DockerInstance) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.docker[normalizeNode(node)] = instances
 }
 
+// DockerInstances 返回全部节点已注册的 Docker 实例（合并所有节点）。
 func (r *Registry) DockerInstances() []model.DockerInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -168,12 +181,14 @@ func (r *Registry) DockerInstances() []model.DockerInstance {
 
 // ---- RocketMQ ----
 
+// SetRocketMQ 写入指定节点最近一次上报的 RocketMQ 实例清单。
 func (r *Registry) SetRocketMQ(node string, instances []model.RocketMQInstance) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.rocketmq[normalizeNode(node)] = instances
 }
 
+// RocketMQInstances 返回全部节点已注册的 RocketMQ 实例（合并所有节点）。
 func (r *Registry) RocketMQInstances() []model.RocketMQInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -186,12 +201,14 @@ func (r *Registry) RocketMQInstances() []model.RocketMQInstance {
 
 // ---- Kubernetes ----
 
+// SetK8s 写入指定节点最近一次上报的 Kubernetes 实例清单。
 func (r *Registry) SetK8s(node string, instances []model.K8sInstance) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.k8s[normalizeNode(node)] = instances
 }
 
+// K8sInstances 返回全部节点已注册的 Kubernetes 实例（合并所有节点）。
 func (r *Registry) K8sInstances() []model.K8sInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -204,12 +221,14 @@ func (r *Registry) K8sInstances() []model.K8sInstance {
 
 // ---- MongoDB ----
 
+// SetMongoDB 写入指定节点最近一次上报的 MongoDB 实例清单。
 func (r *Registry) SetMongoDB(node string, instances []model.MongoDBInstance) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.mongodb[normalizeNode(node)] = instances
 }
 
+// MongoDBInstances 返回全部节点已注册的 MongoDB 实例（合并所有节点）。
 func (r *Registry) MongoDBInstances() []model.MongoDBInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -222,12 +241,14 @@ func (r *Registry) MongoDBInstances() []model.MongoDBInstance {
 
 // ---- FastDFS ----
 
+// SetFastDFS 写入指定节点最近一次上报的 FastDFS 实例清单。
 func (r *Registry) SetFastDFS(node string, instances []model.FastDFSInstance) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.fastdfs[normalizeNode(node)] = instances
 }
 
+// FastDFSInstances 返回全部节点已注册的 FastDFS 实例（合并所有节点）。
 func (r *Registry) FastDFSInstances() []model.FastDFSInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

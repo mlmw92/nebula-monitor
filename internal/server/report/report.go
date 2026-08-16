@@ -22,14 +22,18 @@ import (
 //go:embed template.html
 var reportFS embed.FS
 
+// oneHourMs 一小时的毫秒数，用于报告时间窗口换算。
 const oneHourMs = int64(3600 * 1000)
 
 // ReportType 报告类型。
 type ReportType string
 
 const (
-	ReportDaily   ReportType = "daily"
-	ReportWeekly  ReportType = "weekly"
+	// ReportDaily 日报。
+	ReportDaily ReportType = "daily"
+	// ReportWeekly 周报。
+	ReportWeekly ReportType = "weekly"
+	// ReportMonthly 月报。
 	ReportMonthly ReportType = "monthly"
 )
 
@@ -324,6 +328,7 @@ func (g *Generator) collectData(start, end time.Time, period string) reportData 
 
 // ---- 中间件采集 ----
 
+// mwDefs 报告所需的中间件指标定义（类型、实例存活指标、负载指标及趋势指标）。
 var mwDefs = []mwDef{
 	{"redis", "redis_instance_up", "redis_connected_clients", []string{
 		"redis_connected_clients", "redis_max_clients", "redis_used_memory_percent",
@@ -1007,12 +1012,20 @@ func renderHTML(data reportData) string {
 // ---- 阈值常量 ----
 
 const (
+	// cpuWarn/cpuCrit CPU 使用率告警阈值（警告/紧急，%）。
 	cpuWarn, cpuCrit         = 70.0, 85.0
+	// memWarn/memCrit 内存使用率告警阈值（警告/紧急，%）。
 	memWarn, memCrit         = 80.0, 90.0
+	// diskWarn/diskCrit 磁盘使用率告警阈值（警告/紧急，%）。
 	diskWarn, diskCrit       = 80.0, 90.0
+	// connWarn/connCrit TCP 连接数使用率告警阈值（警告/紧急，%）。
 	connWarn, connCrit       = 80.0, 90.0 // 连接数使用率 %
+	// hitWarn/hitCrit 缓存命中率低于该值即告警（%，警告/紧急）。
 	hitWarn, hitCrit         = 90.0, 80.0 // 命中率低于该值告警（%）
+	// redisMemWarn/redisMemCrit Redis 内存使用率告警阈值（警告/紧急，%）。
 	redisMemWarn, redisMemCrit = 80.0, 90.0
+	// redisLatWarn/redisLatCrit Redis 命令时延告警阈值（警告/紧急，ms）。
 	redisLatWarn, redisLatCrit = 5.0, 20.0 // ms
+	// dbLatWarn/dbLatCrit 关系型数据库平均语句时延告警阈值（警告/紧急，ms）。
 	dbLatWarn, dbLatCrit     = 50.0, 200.0 // ms，关系型数据库平均语句时延
 )

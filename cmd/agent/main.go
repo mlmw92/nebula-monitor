@@ -25,13 +25,17 @@ import (
 	"github.com/nebula/monitor/internal/version"
 )
 
+// pidFile Agent 进程 PID 文件路径。
 const pidFile = "/var/run/monitor-agent.pid"
 
 // 受控 fail2ban 入侵防御相关全局组件（agent 单例）。
 var (
+	// defenseExec 受控 fail2ban 入侵防御执行器单例。
 	defenseExec   = defense.NewExecutor()
+	// banCollector 封禁事件采集器单例。
 	banCollector  = defense.NewBanEventCollector()
-	pendingResult *model.DefenseCommandResult // 已执行指令的结果，将在下一次 report 带回
+	// pendingResult 已执行指令的结果，将在下一次 report 带回服务端。
+	pendingResult *model.DefenseCommandResult
 )
 
 // agentBinSHA 是当前 agent 二进制的 SHA256，随上报提交给 Server，

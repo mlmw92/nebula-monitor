@@ -14,10 +14,14 @@ import (
 type TaskType string
 
 const (
-	TaskTypeHTTP  TaskType = "http"
+	// TaskTypeHTTP 普通 HTTP 拨测。
+	TaskTypeHTTP TaskType = "http"
+	// TaskTypeHTTPS 带 TLS 的 HTTPS 拨测。
 	TaskTypeHTTPS TaskType = "https"
-	TaskTypeTCP   TaskType = "tcp"
-	TaskTypeICMP  TaskType = "icmp"
+	// TaskTypeTCP TCP 端口连通性拨测。
+	TaskTypeTCP TaskType = "tcp"
+	// TaskTypeICMP ICMP 存活探测（ping）。
+	TaskTypeICMP TaskType = "icmp"
 )
 
 // Task 拨测任务定义。

@@ -53,6 +53,7 @@ func aggregateNetworkMetric(store storage.Storage, node, name string) (*model.Po
 	return &model.Point{Timestamp: ts, Value: sum}, nil
 }
 
+// upgrader 将 HTTP 连接升级为 WebSocket 的 Upgrader，校验同源。
 var upgrader = websocket.Upgrader{
 	CheckOrigin: checkWSLSameOrigin,
 }

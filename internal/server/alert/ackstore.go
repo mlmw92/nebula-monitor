@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/server/config"
-) // AckInfo 记录一条告警事件的确认（认领）信息。
+)
+
+// AckInfo 记录一条告警事件的确认（认领）信息。
 type AckInfo struct {
 	Rule     string `json:"rule"`
 	Host     string `json:"host"`

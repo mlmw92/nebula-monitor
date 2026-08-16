@@ -16,10 +16,14 @@ import (
 type FrameType string
 
 const (
-	FrameData  FrameType = "data"  // Edge→Hub: 转发原始 HTTP 请求
-	FrameResp  FrameType = "resp"  // Hub→Edge: 响应回传
-	FramePing  FrameType = "ping"  // 心跳
-	FrameClose FrameType = "close" // 主动关闭
+	// FrameData 数据帧：Edge→Hub，转发原始 HTTP 请求。
+	FrameData FrameType = "data"
+	// FrameResp 响应帧：Hub→Edge，回传代理响应。
+	FrameResp FrameType = "resp"
+	// FramePing 心跳帧，用于保活隧道连接。
+	FramePing FrameType = "ping"
+	// FrameClose 关闭帧，主动关闭一条隧道请求。
+	FrameClose FrameType = "close"
 )
 
 // Frame 是隧道上传输的单个帧。

@@ -27,11 +27,17 @@ type Broadcaster interface {
 
 // 规则类型别名（来自 model 包），便于引擎内分支判断。
 const (
+	// RuleTypeThreshold 阈值规则类型别名，等价于 model.RuleTypeThreshold。
 	RuleTypeThreshold     = model.RuleTypeThreshold
+	// RuleTypeNodeOffline 主机离线规则类型别名。
 	RuleTypeNodeOffline   = model.RuleTypeNodeOffline
+	// RuleTypeServiceDown 中间件/服务离线规则类型别名。
 	RuleTypeServiceDown   = model.RuleTypeServiceDown
+	// RuleTypeRoleChange 数据库主从切换规则类型别名。
 	RuleTypeRoleChange    = model.RuleTypeRoleChange
+	// RuleTypeClusterFault 集群状态损坏规则类型别名。
 	RuleTypeClusterFault  = model.RuleTypeClusterFault
+	// RuleTypeSecurityEvent 安全事件规则类型别名。
 	RuleTypeSecurityEvent = model.RuleTypeSecurityEvent
 )
 
@@ -1058,6 +1064,8 @@ func (e *Engine) resolve(r model.AlertRule, node, instance string, value float64
 	slog.Info("告警恢复", "rule", r.Name, "node", node, "metric", r.Metric, "value", value)
 }
 
+// ReconcileDialtestTasks 对账拨测告警：依据当前启用的拨测任务集合，
+// 清理已禁用或目标已变化的 dialtest- 前缀告警，使 firing 状态与实际任务保持一致。
 func (e *Engine) ReconcileDialtestTasks(tasks []dialtest.Task) {
 	active := make(map[string]dialtest.Task, len(tasks))
 	for _, task := range tasks {

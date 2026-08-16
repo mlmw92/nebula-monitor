@@ -23,13 +23,21 @@ import (
 //   - 白名单由服务端下发（操作人真实来源 IP + 回环），不自动放行整个内网段。
 
 const (
+	// jailConfPath nebula 专属 fail2ban jail 配置文件路径。
 	jailConfPath    = "/etc/fail2ban/jail.d/nebula-monitor-sshd.conf"
+	// actionConfPath nebula 专属 fail2ban action 配置文件路径。
 	actionConfPath  = "/etc/fail2ban/action.d/nebula-monitor.conf"
+	// jailName nebula 专属 jail 名称。
 	jailName        = "nebula-monitor-sshd"
+	// auditDir 防护审计数据根目录。
 	auditDir        = "/var/lib/nebula-monitor/defense"
+	// auditPath 封禁审计流水文件路径（JSONL）。
 	auditPath       = auditDir + "/ban_audit.jsonl"
+	// stateDir 防护状态目录（与 auditDir 相同）。
 	stateDir        = auditDir
+	// executedPath 已执行指令记录文件路径，用于幂等。
 	executedPath    = stateDir + "/executed.json"
+	// managedMarkPath 标记目录由 nebula 管理的标记文件路径。
 	managedMarkPath = stateDir + "/managed_by_nebula"
 )
 

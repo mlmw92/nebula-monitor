@@ -25,6 +25,7 @@ const (
 
 	// 支持的日志格式名称
 	nginxLogFormatCombined      = "combined"
+	// nginxLogFormatCombinedTimed 带时间戳的 combined 变体格式名。
 	nginxLogFormatCombinedTimed = "combined_timed"
 )
 

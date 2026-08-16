@@ -18,6 +18,7 @@ import (
 // auditDedupKey 用于标记某次请求已由 handler 显式记录审计，避免中间件重复记录。
 type auditDedupKey struct{}
 
+// maxAuditBodyBytes 审计中间件记录请求体时的最大字节数（约 1MB），超出部分截断。
 const maxAuditBodyBytes = 1 << 20
 
 // AuditMiddleware 记录认证后的管理写请求，避免把查询参数和请求体敏感值写入审计日志。

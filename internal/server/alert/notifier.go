@@ -253,6 +253,7 @@ func htmlEscape(s string) string {
 	return htmlReplacer.Replace(s)
 }
 
+// htmlReplacer 对 HTML 文本中的特殊字符进行转义，防止 XSS。
 var htmlReplacer = strings.NewReplacer(
 	"&", "&amp;",
 	"<", "&lt;",
@@ -575,12 +576,15 @@ type DingTalkNotifier struct {
 	cfg config.DingTalkConfig
 }
 
+// NewDingTalkNotifier 创建钉钉机器人通知器。
 func NewDingTalkNotifier(cfg config.DingTalkConfig) *DingTalkNotifier {
 	return &DingTalkNotifier{cfg: cfg}
 }
 
+// Channel 返回渠道标识 "dingtalk"。
 func (n *DingTalkNotifier) Channel() string { return "dingtalk" }
 
+// Notify 向所有配置的钉钉机器人发送单条告警（支持加签与 @）。
 func (n *DingTalkNotifier) Notify(e model.AlertEvent) error {
 	if !n.cfg.Enabled || len(n.cfg.URLs) == 0 {
 		return nil
@@ -673,12 +677,15 @@ type FeishuNotifier struct {
 	cfg config.FeishuConfig
 }
 
+// NewFeishuNotifier 创建飞书机器人通知器。
 func NewFeishuNotifier(cfg config.FeishuConfig) *FeishuNotifier {
 	return &FeishuNotifier{cfg: cfg}
 }
 
+// Channel 返回渠道标识 "feishu"。
 func (n *FeishuNotifier) Channel() string { return "feishu" }
 
+// Notify 向所有配置的飞书机器人发送单条告警（支持签名）。
 func (n *FeishuNotifier) Notify(e model.AlertEvent) error {
 	if !n.cfg.Enabled || len(n.cfg.URLs) == 0 {
 		return nil
@@ -743,12 +750,15 @@ type WeComNotifier struct {
 	cfg config.WeComConfig
 }
 
+// NewWeComNotifier 创建企业微信机器人通知器。
 func NewWeComNotifier(cfg config.WeComConfig) *WeComNotifier {
 	return &WeComNotifier{cfg: cfg}
 }
 
+// Channel 返回渠道标识 "wecom"。
 func (n *WeComNotifier) Channel() string { return "wecom" }
 
+// Notify 向所有配置的企业微信机器人发送单条告警（支持 @）。
 func (n *WeComNotifier) Notify(e model.AlertEvent) error {
 	if !n.cfg.Enabled || len(n.cfg.URLs) == 0 {
 		return nil

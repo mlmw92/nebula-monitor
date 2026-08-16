@@ -105,6 +105,7 @@ func skipPartition(p disk.PartitionStat) bool {
 	return false
 }
 
+// skippedFSTypes 采集磁盘指标时忽略的文件系统类型（伪/虚拟文件系统）。
 var skippedFSTypes = map[string]bool{
 	"autofs":      true,
 	"binfmt_misc": true,
@@ -132,6 +133,7 @@ var skippedFSTypes = map[string]bool{
 	"tracefs":     true,
 }
 
+// skippedMountPrefixes 采集时忽略的挂载点前缀（设备与运行时目录等）。
 var skippedMountPrefixes = []string{
 	"/dev",
 	"/proc",

@@ -8,7 +8,10 @@ import "runtime"
 
 // 以下变量通过 -ldflags "-X ...=xxx" 注入，默认值为 dev/unknown。
 var (
-	Version   = "dev"     // 语义化版本号，如 v1.0.0
-	BuildTime = "unknown" // 构建时间，如 2026-07-26T12:00:00Z
+	// Version 语义化版本号（如 v1.0.0），构建时通过 -ldflags -X 注入，默认 "dev"。
+	Version   = "dev"
+	// BuildTime 构建时间（如 2026-07-26T12:00:00Z），构建时注入，默认 "unknown"。
+	BuildTime = "unknown"
+	// GoVersion 构建所用 Go 运行时版本。
 	GoVersion = runtime.Version()
 )

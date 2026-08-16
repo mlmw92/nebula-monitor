@@ -5,9 +5,12 @@ import "time"
 
 // Agent 运行模式常量。
 const (
-	ModeCollect = "collect" // 普通采集节点
-	ModeEdge    = "edge"    // 网闸代理-边缘端
-	ModeHub     = "hub"     // 网闸代理-中心端
+	// ModeCollect 普通采集节点模式。
+	ModeCollect = "collect"
+	// ModeEdge 网闸代理-边缘端模式。
+	ModeEdge    = "edge"
+	// ModeHub 网闸代理-中心端模式。
+	ModeHub     = "hub"
 )
 
 // Metric 是单个指标采样点，贯穿 Agent 采集→上报→存储→查询→前端全链路。
@@ -428,27 +431,39 @@ type Group struct {
 type Severity string
 
 const (
-	SeverityCritical Severity = "critical" // 紧急
-	SeverityWarning  Severity = "warning"  // 警告
-	SeverityInfo     Severity = "info"     // 信息
+	// SeverityCritical 紧急级别，需立即处理。
+	SeverityCritical Severity = "critical"
+	// SeverityWarning 警告级别。
+	SeverityWarning Severity = "warning"
+	// SeverityInfo 信息级别。
+	SeverityInfo Severity = "info"
 )
 
 // AlertState 告警状态。
 type AlertState string
 
 const (
-	AlertStatePending  AlertState = "pending"  // 待触发（未达持续时间）
-	AlertStateFiring   AlertState = "firing"   // 已触发
-	AlertStateResolved AlertState = "resolved" // 已恢复
+	// AlertStatePending 待触发：条件已满足但持续时长未达阈值。
+	AlertStatePending AlertState = "pending"
+	// AlertStateFiring 已触发：持续满足条件，正在告警。
+	AlertStateFiring AlertState = "firing"
+	// AlertStateResolved 已恢复：条件不再满足。
+	AlertStateResolved AlertState = "resolved"
 )
 
 // 告警规则类型。空字符串与 "threshold" 等价，表示基于指标阈值的传统规则（向后兼容旧数据）。
 const (
+	// RuleTypeThreshold 阈值规则（默认）；空字符串与其等价，向后兼容旧数据。
 	RuleTypeThreshold     string = ""               // 阈值规则（默认）
+	// RuleTypeNodeOffline 主机离线规则。
 	RuleTypeNodeOffline   string = "node_offline"   // 主机离线
+	// RuleTypeServiceDown 中间件/服务离线规则。
 	RuleTypeServiceDown   string = "service_down"   // 中间件/服务离线
+	// RuleTypeRoleChange 数据库主从切换规则。
 	RuleTypeRoleChange    string = "role_change"    // 数据库主从切换
+	// RuleTypeClusterFault 集群状态损坏规则。
 	RuleTypeClusterFault  string = "cluster_fault"  // 集群状态损坏
+	// RuleTypeSecurityEvent 安全事件规则。
 	RuleTypeSecurityEvent string = "security_event" // 安全事件
 )
 

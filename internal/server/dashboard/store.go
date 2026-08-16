@@ -18,9 +18,13 @@ import (
 type ChartType string
 
 const (
-	ChartLine  ChartType = "line"
-	ChartArea  ChartType = "area"
-	ChartBar   ChartType = "bar"
+	// ChartLine 折线图。
+	ChartLine ChartType = "line"
+	// ChartArea 面积图。
+	ChartArea ChartType = "area"
+	// ChartBar 柱状图。
+	ChartBar ChartType = "bar"
+	// ChartGauge 仪表盘（单值）。
 	ChartGauge ChartType = "gauge"
 )
 

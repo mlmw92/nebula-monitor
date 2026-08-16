@@ -39,6 +39,7 @@ type geoDB struct {
 	once         sync.Once
 }
 
+// defaultDB 内置 GeoIP 数据库单例。
 var defaultDB = &geoDB{}
 
 // probeIPs 用于校验一份 xdb 是否可正常查询。
