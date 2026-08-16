@@ -153,17 +153,13 @@ func (m *Manager) Enable(ignoreIPs []string) (string, error) {
 		return "", fmt.Errorf("启动 fail2ban 失败: %w", err)
 	}
 
-	// 5. 重载并校验 nebula jail 已启用
-	if out, err := exec.Command("fail2ban-client", "reload", jailName).CombinedOutput(); err != nil {
-		// 某些版本 jail 尚未注册，先 reload all 再 start
-		_, _ = exec.Command("fail2ban-client", "reload").CombinedOutput()
-		if out2, e2 := exec.Command("fail2ban-client", "start", jailName).CombinedOutput(); e2 != nil {
-			return "", fmt.Errorf("启用 jail 失败: %s / %s", string(out), string(out2))
-		}
+	// 5. 确保 server 就绪并启用 nebula 专属 jail
+	if err := m.enableJail(jailName); err != nil {
+		return "", err
 	}
 
 	if _, err := exec.Command("fail2ban-client", "status", jailName).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("校验 jail 状态失败，可能未生效")
+		return "", fmt.Errorf("校验 jail 状态失败，可能未生效（请检查 fail2ban 日志）")
 	}
 
 	// 标记由 nebula 托管
@@ -194,6 +190,29 @@ func (m *Manager) Disable() (string, error) {
 	_ = os.Remove(managedMarkPath)
 
 	return "已停用 nebula 专属 SSH 防护（保留 fail2ban 软件包与既有配置）", nil
+}
+
+// enableJail 确保 fail2ban server 运行并启用指定 jail。
+// 即便 server 已由 enableStartFail2ban 拉起，仍在此二次确认就绪，避免初始化竞态。
+func (m *Manager) enableJail(jail string) error {
+	// 先确认 server 是否已就绪
+	if err := waitFail2banReady(3, time.Second); err != nil {
+		// server 未运行则尝试直接启动 server 自身（无参 start 启动 server）
+		if out, e := exec.Command("fail2ban-client", "start").CombinedOutput(); e != nil {
+			return fmt.Errorf("fail2ban 服务未运行且无法启动: %s（请检查 systemctl status fail2ban / journalctl -u fail2ban）", string(out))
+		}
+		if err := waitFail2banReady(5, time.Second); err != nil {
+			return fmt.Errorf("fail2ban 服务启动后仍未就绪: %w", err)
+		}
+	}
+	// 重载使专属 jail 配置生效；若失败则尝试 start 单个 jail
+	if out, err := exec.Command("fail2ban-client", "reload", jail).CombinedOutput(); err != nil {
+		_, _ = exec.Command("fail2ban-client", "reload").CombinedOutput()
+		if out2, e2 := exec.Command("fail2ban-client", "start", jail).CombinedOutput(); e2 != nil {
+			return fmt.Errorf("启用 jail 失败（fail2ban 已运行但 jail 未生效）: %s / %s；请检查 fail2ban 日志", string(out), string(out2))
+		}
+	}
+	return nil
 }
 
 // EnableIfNeeded 供 executor 调用：先做幂等判断，再执行 enable。
@@ -259,10 +278,35 @@ func enableStartFail2ban() error {
 		// 重试 start
 		out2, e2 := exec.Command("systemctl", "start", "fail2ban").CombinedOutput()
 		if e2 != nil {
-			return fmt.Errorf("restart: %s; start: %s", string(out), string(out2))
+			return fmt.Errorf("systemctl 启动 fail2ban 失败: restart=%s; start=%s（请检查 systemctl status fail2ban 与 journalctl -u fail2ban）", string(out), string(out2))
 		}
 	}
+	// systemctl 返回成功不代表 fail2ban server 已就绪；需等待 socket 可达再继续，
+	// 否则后续 reload/start jail 会报 "Could not find server" / socket 不存在。
+	if err := waitFail2banReady(15, time.Second); err != nil {
+		return fmt.Errorf("fail2ban 服务启动后未就绪: %w", err)
+	}
 	return nil
+}
+
+// waitFail2banReady 轮询 fail2ban server 是否就绪（fail2ban-client ping 返回 pong）。
+// 某些发行版 systemctl start 返回成功后 server 仍需数秒初始化 socket，故需重试等待。
+func waitFail2banReady(attempts int, interval time.Duration) error {
+	var last string
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			time.Sleep(interval)
+		}
+		out, err := exec.Command("fail2ban-client", "ping").CombinedOutput()
+		if err == nil && strings.Contains(strings.ToLower(string(out)), "pong") {
+			return nil
+		}
+		last = string(out)
+	}
+	if last == "" {
+		last = "(无输出)"
+	}
+	return fmt.Errorf("fail2ban-client ping 超时（socket 可能未创建）。最后输出: %s；请检查 systemctl status fail2ban 与 journalctl -u fail2ban", last)
 }
 
 // buildJailConf 生成 nebula 专属 jail 配置（仅 sshd，含精确白名单）。
@@ -355,4 +399,3 @@ actioncheck =
 actionban = echo '{"action":"ban","ip":"<ip>","jail":"nebula-monitor-sshd","failures":"<failures>","time":"%(now)s"}' >> /var/lib/nebula-monitor/defense/ban_audit.jsonl
 actionunban = echo '{"action":"unban","ip":"<ip>","jail":"nebula-monitor-sshd","time":"%(now)s"}' >> /var/lib/nebula-monitor/defense/ban_audit.jsonl
 `
-
