@@ -16,7 +16,21 @@ import (
 // 前端据此区分“未启用 / 需升级 Agent”。
 type DefenseStatusView struct {
 	*model.DefenseStatus
-	AgentSupported bool `json:"agentSupported"`
+	AgentSupported bool   `json:"agentSupported"`
+	NodeIP         string `json:"nodeIp,omitempty"`     // 节点 IP（服务器 IP）
+	DisplayName    string `json:"displayName,omitempty"` // 节点别名
+}
+
+// enrichDefenseView 为单条防护状态补充节点 IP 与别名（来自节点管理器）。
+func (a *API) enrichDefenseView(st *model.DefenseStatus, caps map[string]bool) DefenseStatusView {
+	v := DefenseStatusView{DefenseStatus: st, AgentSupported: caps[st.Node]}
+	if a.nodeMgr != nil {
+		if nd, ok := a.nodeMgr.GetNode(st.Node); ok {
+			v.NodeIP = nd.IP
+			v.DisplayName = nd.DisplayName
+		}
+	}
+	return v
 }
 
 // handleDefenseStatusList 返回所有节点的入侵防护状态与 Agent 兼容情况。
@@ -29,10 +43,7 @@ func (a *API) handleDefenseStatusList(w http.ResponseWriter, r *http.Request) {
 	var out []DefenseStatusView
 	if a.security != nil {
 		for _, st := range a.security.ListDefenseStatus() {
-			out = append(out, DefenseStatusView{
-				DefenseStatus:  st,
-				AgentSupported: caps[st.Node],
-			})
+			out = append(out, a.enrichDefenseView(st, caps))
 		}
 	}
 	// 补充未上报过状态的节点（仅返回其 Agent 兼容情况）
@@ -45,10 +56,7 @@ func (a *API) handleDefenseStatusList(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !found {
-			out = append(out, DefenseStatusView{
-				DefenseStatus:  &model.DefenseStatus{Node: n, Supported: false, Installed: false, Running: false, ManagedJail: false},
-				AgentSupported: caps[n],
-			})
+			out = append(out, a.enrichDefenseView(&model.DefenseStatus{Node: n, Supported: false, Installed: false, Running: false, ManagedJail: false}, caps))
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"statuses": out})
@@ -68,10 +76,7 @@ func (a *API) handleDefenseStatus(w http.ResponseWriter, r *http.Request) {
 	if st == nil {
 		st = &model.DefenseStatus{Node: nodeName}
 	}
-	writeJSON(w, http.StatusOK, DefenseStatusView{
-		DefenseStatus:  st,
-		AgentSupported: a.defenseStore.GetCap(nodeName),
-	})
+	writeJSON(w, http.StatusOK, a.enrichDefenseView(st, a.defenseStore.AllCaps()))
 }
 
 // handleDefenseAction 创建防护任务（enable/disable/status）。

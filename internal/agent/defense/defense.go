@@ -3,6 +3,7 @@ package defense
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,21 +25,24 @@ import (
 
 const (
 	// jailConfPath nebula 专属 fail2ban jail 配置文件路径。
-	jailConfPath    = "/etc/fail2ban/jail.d/nebula-monitor-sshd.conf"
+	jailConfPath = "/etc/fail2ban/jail.d/nebula-monitor-sshd.conf"
 	// actionConfPath nebula 专属 fail2ban action 配置文件路径。
-	actionConfPath  = "/etc/fail2ban/action.d/nebula-monitor.conf"
+	actionConfPath       = "/etc/fail2ban/action.d/nebula-monitor-audit.conf"
+	legacyActionConfPath = "/etc/fail2ban/action.d/nebula-monitor.conf"
 	// jailName nebula 专属 jail 名称。
-	jailName        = "nebula-monitor-sshd"
+	jailName = "nebula-monitor-sshd"
 	// auditDir 防护审计数据根目录。
-	auditDir        = "/var/lib/nebula-monitor/defense"
+	auditDir = "/var/lib/nebula-monitor/defense"
 	// auditPath 封禁审计流水文件路径（JSONL）。
-	auditPath       = auditDir + "/ban_audit.jsonl"
+	auditPath = auditDir + "/ban_audit.jsonl"
 	// stateDir 防护状态目录（与 auditDir 相同）。
-	stateDir        = auditDir
+	stateDir = auditDir
 	// executedPath 已执行指令记录文件路径，用于幂等。
-	executedPath    = stateDir + "/executed.json"
+	executedPath = stateDir + "/executed.json"
 	// managedMarkPath 标记目录由 nebula 管理的标记文件路径。
 	managedMarkPath = stateDir + "/managed_by_nebula"
+	// firewallActionPath 记录启用时选定的原生防火墙 action。
+	firewallActionPath = stateDir + "/firewall_action"
 )
 
 // Manager 管理节点上的 nebula 专属 SSH 防护。
@@ -96,17 +100,34 @@ func (m *Manager) Status() *model.DefenseStatus {
 	}
 	st.Supported = true
 	st.Installed = cmdExists("fail2ban-client")
-	if st.Installed {
-		out, err := exec.Command("fail2ban-client", "status").Output()
-		if err == nil && strings.Contains(string(out), "Status") {
-			st.Running = true
-			st.Jails = parseJailList(string(out))
-			if _, e := exec.Command("fail2ban-client", "status", jailName).Output(); e == nil {
-				st.ManagedJail = true
-			}
-		} else {
-			st.Message = "fail2ban 已安装但未运行"
+	if !st.Installed {
+		st.Message = "未安装 fail2ban"
+		return st
+	}
+	out, err := exec.Command("fail2ban-client", "status").Output()
+	if err != nil || !strings.Contains(string(out), "Status") {
+		st.Message = "fail2ban 已安装但未运行"
+		return st
+	}
+	st.Running = true
+	st.Jails = parseJailList(string(out))
+	jailOut, err := exec.Command("fail2ban-client", "status", jailName).CombinedOutput()
+	if err != nil {
+		st.Message = "fail2ban 正在运行，但 nebula 专属 jail 未启用"
+		return st
+	}
+	st.ManagedJail = true
+	st.BannedIPs = parseBannedIPs(string(jailOut))
+	st.FirewallAction = configuredFirewallAction()
+	if st.FirewallAction != "" && isNativeFirewallAction(st.FirewallAction) {
+		// get ... actions 是 Fail2Ban 官方查询接口；只有能看到原生 action
+		// 才把状态标记为已验证，避免把 audit-only jail 显示成已防护。
+		if actionOut, actionErr := exec.Command("fail2ban-client", "get", jailName, "actions").CombinedOutput(); actionErr == nil && strings.Contains(string(actionOut), st.FirewallAction) {
+			st.FirewallVerified = true
 		}
+	}
+	if !st.FirewallVerified {
+		st.Message = "专属 jail 已运行，但未确认实际防火墙 action；当前仅视为审计/未验证"
 	}
 	return st
 }
@@ -145,58 +166,68 @@ func (m *Manager) Enable(ignoreIPs []string) (string, error) {
 		}
 	}
 
-	// 2. 写入专属 action 配置（向受控 JSONL 审计文件追加 ban/unban 记录）
+	// 2. 选择发行版提供的真实封禁 action；没有可用后端时拒绝启用，不能退回审计-only。
+	firewallAction, err := selectFirewallAction()
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(firewallActionPath, []byte(firewallAction+"\n"), 0600); err != nil {
+		return "", fmt.Errorf("记录防火墙 action 失败: %w", err)
+	}
+	// 3. 写入专属审计 action 配置（仅记录 ban/unban，实际封禁由原生 action 执行）。
 	if err := os.WriteFile(actionConfPath, []byte(actionConf), 0644); err != nil {
 		return "", fmt.Errorf("写入 action 配置失败: %w", err)
 	}
 
-	// 3. 写入专属 jail 配置（仅保护 SSH，含精确白名单）
-	jail := buildJailConf(ignoreIPs)
+	// 4. 写入专属 jail 配置（仅保护 SSH，含精确白名单）。
+	jail := buildJailConf(ignoreIPs, firewallAction)
 	if err := os.WriteFile(jailConfPath, []byte(jail), 0644); err != nil {
 		return "", fmt.Errorf("写入 jail 配置失败: %w", err)
 	}
 
-	// 4. 确保 fail2ban 服务启用并运行
+	// 5. 确保 fail2ban 服务启用并运行。
 	if err := enableStartFail2ban(); err != nil {
 		return "", fmt.Errorf("启动 fail2ban 失败: %w", err)
 	}
 
-	// 5. 确保 server 就绪并启用 nebula 专属 jail
+	// 6. 确保 server 就绪并启用 nebula 专属 jail
 	if err := m.enableJail(jailName); err != nil {
 		return "", err
 	}
-
-	if _, err := exec.Command("fail2ban-client", "status", jailName).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("校验 jail 状态失败，可能未生效（请检查 fail2ban 日志）")
+	if err := validateJailAction(firewallAction); err != nil {
+		return "", err
 	}
 
 	// 标记由 nebula 托管
-	_ = os.WriteFile(managedMarkPath, []byte(fmt.Sprintf("enabled at %d\n", time.Now().Unix())), 0600)
+	if err := os.WriteFile(managedMarkPath, []byte(fmt.Sprintf("enabled at %d\n", time.Now().Unix())), 0600); err != nil {
+		return "", fmt.Errorf("写入托管标记失败: %w", err)
+	}
 
-	return fmt.Sprintf("已启用 %s 专属 SSH 防护，白名单: %s", jailName, strings.Join(ignoreIPs, ",")), nil
+	return fmt.Sprintf("已启用 %s 专属 SSH 防护，防火墙 action: %s，白名单: %s", jailName, firewallAction, strings.Join(ignoreIPs, ",")), nil
 }
 
 // Disable 停用 nebula 专属 SSH 防护。仅移除 nebula 配置并重载，不卸载 fail2ban 包。
 func (m *Manager) Disable() (string, error) {
 	if _, err := os.Stat(managedMarkPath); err != nil {
-		// 非 nebula 托管，避免误删用户配置
 		return "", fmt.Errorf("未检测到由 nebula 托管的防护配置，跳过停用")
 	}
-	// 1. 停止专属 jail（忽略错误，可能已停止）
-	_, _ = exec.Command("fail2ban-client", "stop", jailName).CombinedOutput()
-	// 解除当前封禁（清理，避免遗留）
-	_ = unbanAll(jailName)
-
-	// 2. 删除 nebula 专属配置
-	_ = os.Remove(jailConfPath)
-	_ = os.Remove(actionConfPath)
-
-	// 3. 重载 fail2ban 以移除 jail
-	_, _ = exec.Command("fail2ban-client", "reload").CombinedOutput()
-
-	// 4. 清理托管标记与审计状态（保留 ban_audit.jsonl 供排障，不强制删除）
-	_ = os.Remove(managedMarkPath)
-
+	if out, err := exec.Command("fail2ban-client", "stop", jailName).CombinedOutput(); err != nil && !strings.Contains(strings.ToLower(string(out)), "not found") {
+		return "", fmt.Errorf("停止 jail 失败: %s", strings.TrimSpace(string(out)))
+	}
+	if err := unbanAll(jailName); err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
+		return "", fmt.Errorf("清理封禁失败: %w", err)
+	}
+	for _, path := range []string{jailConfPath, actionConfPath, legacyActionConfPath, firewallActionPath} {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("删除托管配置 %s 失败: %w", path, err)
+		}
+	}
+	if out, err := exec.Command("fail2ban-client", "reload").CombinedOutput(); err != nil {
+		return "", fmt.Errorf("重载 fail2ban 失败: %s", strings.TrimSpace(string(out)))
+	}
+	if err := os.Remove(managedMarkPath); err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("清理托管标记失败: %w", err)
+	}
 	return "已停用 nebula 专属 SSH 防护（保留 fail2ban 软件包与既有配置）", nil
 }
 
@@ -318,14 +349,126 @@ func waitFail2banReady(attempts int, interval time.Duration) error {
 }
 
 // buildJailConf 生成 nebula 专属 jail 配置（仅 sshd，含精确白名单）。
-func buildJailConf(ignoreIPs []string) string {
+// 根据系统实际日志文件选择 backend：优先 /var/log/auth.log（Debian/Ubuntu）
+// 或 /var/log/secure（RHEL/CentOS）；不存在时回退到 systemd journal。
+func buildJailConf(ignoreIPs []string, firewallAction string) string {
 	ips := []string{"127.0.0.1", "::1"}
 	for _, ip := range ignoreIPs {
 		if ip != "" {
 			ips = append(ips, ip)
 		}
 	}
-	return fmt.Sprintf(jailConfTmpl, strings.Join(ips, " "), jailName)
+	logPath, backend := detectAuthLogBackend()
+	logConfig := "backend = systemd\njournalmatch = _SYSTEMD_UNIT=sshd.service + _SYSTEMD_UNIT=ssh.service"
+	if backend == "auto" {
+		logConfig = fmt.Sprintf("logpath = %s\nbackend = auto", logPath)
+	}
+	return fmt.Sprintf(jailConfTmpl, strings.Join(ips, " "), jailName, logConfig, firewallAction)
+}
+
+// detectAuthLogBackend 返回 SSH 认证日志路径与对应 backend。
+func detectAuthLogBackend() (logPath, backend string) {
+	candidates := []string{"/var/log/auth.log", "/var/log/secure"}
+	for _, p := range candidates {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, "auto"
+		}
+	}
+	// 文件不存在时回退 journal
+	return "", "systemd"
+}
+
+// selectFirewallAction 选择 Fail2Ban 自带的实际封禁 action。
+// 不提供 audit-only 回退：无法找到原生 action 时必须拒绝启用。
+func selectFirewallAction() (string, error) {
+	candidates := []struct {
+		name string
+		path string
+		cmd  string
+	}{
+		{"firewallcmd-ipset", "/etc/fail2ban/action.d/firewallcmd-ipset.conf", "firewall-cmd"},
+		{"firewallcmd-rich-rules", "/etc/fail2ban/action.d/firewallcmd-rich-rules.conf", "firewall-cmd"},
+		{"nftables-multiport", "/etc/fail2ban/action.d/nftables-multiport.conf", "nft"},
+		{"iptables-multiport", "/etc/fail2ban/action.d/iptables-multiport.conf", "iptables"},
+	}
+	firewalldActive := false
+	if cmdExists("firewall-cmd") {
+		if out, err := exec.Command("firewall-cmd", "--state").Output(); err == nil && strings.TrimSpace(string(out)) == "running" {
+			firewalldActive = true
+		}
+	}
+	for i, c := range candidates {
+		if i < 2 && !firewalldActive {
+			continue
+		}
+		if _, err := os.Stat(c.path); err == nil && cmdExists(c.cmd) {
+			return c.name, nil
+		}
+	}
+	return "", fmt.Errorf("未找到可用的 Fail2Ban 原生防火墙 action（需要 firewalld、nftables 或 iptables；不会退回仅审计模式）")
+}
+
+func isNativeFirewallAction(action string) bool {
+	switch action {
+	case "firewallcmd-ipset", "firewallcmd-rich-rules", "nftables-multiport", "iptables-multiport":
+		return true
+	default:
+		return false
+	}
+}
+
+func configuredFirewallAction() string {
+	data, err := os.ReadFile(firewallActionPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func validateJailAction(firewallAction string) error {
+	out, err := exec.Command("fail2ban-client", "get", jailName, "actions").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("校验 jail action 失败: %s", strings.TrimSpace(string(out)))
+	}
+	if !strings.Contains(string(out), firewallAction) {
+		return fmt.Errorf("jail 已加载但未发现原生防火墙 action %q: %s", firewallAction, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// parseBannedIPs 解析 fail2ban-client status <jail> 的封禁 IP 列表。
+// 兼容空列表、列表换行以及 IPv4/IPv6 地址。
+func parseBannedIPs(statusOut string) []string {
+	lines := strings.Split(statusOut, "\n")
+	var ips []string
+	inList := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, "Banned IP list:") {
+			inList = true
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				ips = appendValidIPs(ips, strings.Fields(parts[1]))
+			}
+			continue
+		}
+		if inList {
+			if trimmed == "" || strings.HasPrefix(trimmed, "Number of") || strings.Contains(trimmed, ":") && strings.Contains(trimmed, "Currently") {
+				break
+			}
+			ips = appendValidIPs(ips, strings.Fields(trimmed))
+		}
+	}
+	return ips
+}
+
+func appendValidIPs(dst []string, values []string) []string {
+	for _, value := range values {
+		if net.ParseIP(value) != nil {
+			dst = append(dst, value)
+		}
+	}
+	return dst
 }
 
 // unbanAll 解除 jail 当前所有封禁（停用前清理）。
@@ -334,21 +477,9 @@ func unbanAll(jail string) error {
 	if err != nil {
 		return err
 	}
-	// 解析 "Banned IP list: 1.2.3.4 5.6.7.8" 或 "Banned IP list:\n"
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, "Banned IP list:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) < 2 {
-				continue
-			}
-			ips := strings.Fields(strings.TrimSpace(parts[1]))
-			for _, ip := range ips {
-				if ip == "" {
-					continue
-				}
-				_, _ = exec.Command("fail2ban-client", "set", jail, "unbanip", ip).CombinedOutput()
-			}
+	for _, ip := range parseBannedIPs(string(out)) {
+		if _, err := exec.Command("fail2ban-client", "set", jail, "unbanip", ip).CombinedOutput(); err != nil {
+			return fmt.Errorf("解除 IP %s 封禁失败: %w", ip, err)
 		}
 	}
 	return nil
@@ -378,9 +509,7 @@ func ensureDir(p string) {
 }
 
 // jailConfTmpl 为 nebula 专属 SSH jail 配置模板。
-// 参数：ignoreip 白名单、jail 名称、action 配置文件路径。
-// 仅保护 SSH（port=ssh），使用 systemd backend 优先，失败回退 auto；
-// maxretry=5 / findtime=10m / bantime=1h 为保守阈值；action 使用 nebula 专属审计 action。
+// 参数：ignoreip 白名单、jail 名称、日志配置、原生防火墙 action。
 const jailConfTmpl = `[DEFAULT]
 # nebula-monitor 托管：仅保护 SSH，勿手动修改本文件
 ignoreip = %s
@@ -389,23 +518,22 @@ ignoreip = %s
 enabled = true
 port = ssh
 filter = sshd
-logpath = /var/log/auth.log
-backend = systemd
+%s
 maxretry = 5
 findtime = 10m
 bantime = 1h
-action = nebula-monitor
+action = %s
+         nebula-monitor-audit
 `
 
-// actionConf 为 nebula 专属 fail2ban action 配置。
-// actionban / actionunban 仅向受控 JSONL 审计文件追加结构化记录，由 Agent 增量采集回流。
-const actionConf = `# nebula-monitor 专属审计 action：仅记录封禁/解封到受控 JSONL，不影响 fail2ban 既有动作
+// actionConf 为 nebula 专属 fail2ban 审计 action 配置。
+// 实际封禁由 jail 中的发行版原生 action 执行；该 action 只记录结构化事件。
+const actionConf = `# nebula-monitor 审计 action：记录封禁/解封，不承担实际防火墙封禁
 [Definition]
 actionstart =
 actionstop =
 actioncheck =
-# 注意：fail2ban 用 ConfigParser 解析 action，% 会被当作插值起始符（如 %(name)s）。
-# 即使时间用 bash $(date ...) 注入，配置解析阶段仍会对 % 做插值，故所有格式符必须写成 %%。
+# fail2ban ConfigParser 要求 shell date 的百分号写成 %%。
 actionban = echo '{"action":"ban","ip":"<ip>","jail":"nebula-monitor-sshd","failures":"<failures>","time":"'"$(date +%%Y-%%m-%%dT%%H:%%M:%%S%%z)"'"}' >> /var/lib/nebula-monitor/defense/ban_audit.jsonl
 actionunban = echo '{"action":"unban","ip":"<ip>","jail":"nebula-monitor-sshd","time":"'"$(date +%%Y-%%m-%%dT%%H:%%M:%%S%%z)"'"}' >> /var/lib/nebula-monitor/defense/ban_audit.jsonl
 `

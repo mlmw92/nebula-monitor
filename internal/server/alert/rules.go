@@ -418,7 +418,7 @@ func validService(s string) bool {
 func validSecurityCategory(category string) bool {
 	switch category {
 	case model.SecurityCatSSHBruteforce, model.SecurityCatSSHAudit, model.SecurityCatFIM,
-		model.SecurityCatProcessAnomaly, model.SecurityCatSudoAudit:
+		model.SecurityCatProcessAnomaly, model.SecurityCatSudoAudit, model.SecurityCatBan:
 		return true
 	default:
 		return false

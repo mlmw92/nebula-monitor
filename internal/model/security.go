@@ -21,17 +21,17 @@ const (
 
 // SecurityEvent 单条安全事件，由 Agent 采集并随上报体提交，Server 端持久化与告警。
 type SecurityEvent struct {
-	ID        string            `json:"id"`                  // 事件唯一 ID（node|category|hash）
-	Node      string            `json:"node"`                // 节点名
-	NodeIP    string            `json:"nodeIp,omitempty"`    // 节点 IP（服务器 IP）
-	Category  string            `json:"category"`            // 类别：见 SecurityCat* 常量
-	Severity  Severity          `json:"severity"`            // 严重级别
-	Message   string            `json:"message"`             // 人类可读描述
-	Detail    map[string]string `json:"detail,omitempty"`    // 结构化细节（不含敏感内容）
-	SourceIP        string            `json:"sourceIp,omitempty"`        // 来源 IP（SSH/sudo 场景）
-	SourceLocation  string            `json:"sourceLocation,omitempty"`  // 来源 IP 属地（国家/省份/城市，由 Server 端经 ip2region 补全）
-	User            string            `json:"user,omitempty"`            // 关联账户（不含口令）
-	Timestamp int64             `json:"timestamp"`           // 事件时间（毫秒）
+	ID             string            `json:"id"`                       // 事件唯一 ID（node|category|hash）
+	Node           string            `json:"node"`                     // 节点名
+	NodeIP         string            `json:"nodeIp,omitempty"`         // 节点 IP（服务器 IP）
+	Category       string            `json:"category"`                 // 类别：见 SecurityCat* 常量
+	Severity       Severity          `json:"severity"`                 // 严重级别
+	Message        string            `json:"message"`                  // 人类可读描述
+	Detail         map[string]string `json:"detail,omitempty"`         // 结构化细节（不含敏感内容）
+	SourceIP       string            `json:"sourceIp,omitempty"`       // 来源 IP（SSH/sudo 场景）
+	SourceLocation string            `json:"sourceLocation,omitempty"` // 来源 IP 属地（国家/省份/城市，由 Server 端经 ip2region 补全）
+	User           string            `json:"user,omitempty"`           // 关联账户（不含口令）
+	Timestamp      int64             `json:"timestamp"`                // 事件时间（毫秒）
 	// BanInfo 仅当 Category 为 SecurityCatBan 时存在，描述封禁/解封细节。
 	BanInfo *BanInfo `json:"banInfo,omitempty"`
 }
@@ -53,23 +53,23 @@ type BanInfo struct {
 
 // SecurityBaselineItem 单项基线检查结果。
 type SecurityBaselineItem struct {
-	Key      string  `json:"key"`             // 检查项标识（如 ssh_root_login）
-	Name     string  `json:"name"`            // 检查项名称（中文）
-	Pass     bool    `json:"pass"`            // 是否通过
-	Severity Severity `json:"severity"`       // 未通过时的严重级别
-	Weight   float64 `json:"weight"`          // 该项在总评分中的权重
-	Score    float64 `json:"score"`           // 该项得分（0 或 weight）
-	Detail   string  `json:"detail,omitempty"` // 检查说明（可选）
+	Key      string   `json:"key"`              // 检查项标识（如 ssh_root_login）
+	Name     string   `json:"name"`             // 检查项名称（中文）
+	Pass     bool     `json:"pass"`             // 是否通过
+	Severity Severity `json:"severity"`         // 未通过时的严重级别
+	Weight   float64  `json:"weight"`           // 该项在总评分中的权重
+	Score    float64  `json:"score"`            // 该项得分（0 或 weight）
+	Detail   string   `json:"detail,omitempty"` // 检查说明（可选）
 }
 
 // SecurityBaseline 主机安全基线检查结果，含 0-100 合规评分与逐项明细。
 type SecurityBaseline struct {
-	Node         string                 `json:"node"`                  // 节点名
-	NodeIP       string                 `json:"nodeIp,omitempty"`      // 节点 IP（服务器 IP）
-	DisplayName  string                 `json:"displayName,omitempty"` // 节点别名（用户自定义显示名，优先于主机名展示）
-	Score        float64                `json:"score"`                 // 合规评分 0-100
-	Items     []SecurityBaselineItem `json:"items"`     // 各项检查结果
-	CheckedAt int64                  `json:"checkedAt"` // 检查时间（毫秒）
+	Node        string                 `json:"node"`                  // 节点名
+	NodeIP      string                 `json:"nodeIp,omitempty"`      // 节点 IP（服务器 IP）
+	DisplayName string                 `json:"displayName,omitempty"` // 节点别名（用户自定义显示名，优先于主机名展示）
+	Score       float64                `json:"score"`                 // 合规评分 0-100
+	Items       []SecurityBaselineItem `json:"items"`                 // 各项检查结果
+	CheckedAt   int64                  `json:"checkedAt"`             // 检查时间（毫秒）
 }
 
 // 受控 fail2ban 入侵防御（仅管理 nebula-monitor-sshd 专属 jail）相关模型。
@@ -149,6 +149,12 @@ type DefenseStatus struct {
 	ManagedJail bool `json:"managedJail"`
 	// Jails 当前启用的 jail 列表（含非 nebula 托管项，仅展示）。
 	Jails []string `json:"jails,omitempty"`
+	// BannedIPs 当前 nebula jail 仍处于封禁状态的 IP 快照；不代表历史封禁事件。
+	BannedIPs []string `json:"bannedIps,omitempty"`
+	// FirewallAction 实际加载的 Fail2Ban 原生防火墙 action 名称。
+	FirewallAction string `json:"firewallAction,omitempty"`
+	// FirewallVerified 表示已确认 jail 加载了原生防火墙 action，而非仅审计 action。
+	FirewallVerified bool `json:"firewallVerified"`
 	// Message 不支持或异常时的可读说明。
 	Message string `json:"message,omitempty"`
 	// UpdatedAt 状态采集时间（毫秒）。
@@ -164,4 +170,3 @@ type ClientCapability struct {
 
 // ReportPayload 扩展：新增 Capabilities 与 DefenseResult 字段（不影响既有字段）。
 // 见 metric.go 中 ReportPayload 的定义，本类型仅作说明已在 metric.go 同步修改。
-
