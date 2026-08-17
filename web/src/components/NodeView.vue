@@ -1157,10 +1157,9 @@ onUnmounted(() => {
 .breadcrumb .bc-link:hover { color: var(--el-color-primary); }
 
 .status-pill { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-.status-pill .dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
-.status-pill.online { color: var(--accent); background: var(--accent-dim); }
-.status-pill.offline { color: var(--text-dim); background: rgba(255,255,255,0.06); }
-.status-pill.offline .dot { background: var(--text-dim); }
+.status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+.status-pill.online { color: var(--chart-green); background: rgba(34, 197, 94, 0.12); }
+.status-pill.offline { color: var(--danger); background: var(--danger-dim); }
 
 /* 复制按钮 */
 .copyable { display: inline-flex; align-items: center; gap: 4px; }
