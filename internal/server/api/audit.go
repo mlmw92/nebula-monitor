@@ -55,9 +55,12 @@ func AuditMiddleware(next http.Handler, store *audit.Store) http.Handler {
 		if *recorded {
 			return
 		}
-		if recorder.status >= 200 && recorder.status < 400 {
-			detail = enrichChangeDetail(r, detail)
+		// 仅记录成功的写操作（2xx/3xx）；4xx/5xx 多为外部扫描或错误请求，
+		// 记录只会污染审计日志（如 POST 不存在的路径返回 405）。
+		if recorder.status < 200 || recorder.status >= 400 {
+			return
 		}
+		detail = enrichChangeDetail(r, detail)
 		_ = store.Record(audit.Event{
 			User:      AuthenticatedUser(r),
 			Method:    r.Method,
