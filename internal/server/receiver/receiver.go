@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/alert"
@@ -20,6 +22,40 @@ import (
 
 // itoa 整型转字符串。
 func itoa(v int) string { return strconv.Itoa(v) }
+
+// processCache 节点进程快照缓存（内存），供 API 实时查询。
+// 进程列表是高基数快照数据，不适合写入时序库，采用最新值覆盖策略。
+type processCache struct {
+	mu       sync.RWMutex
+	entries  map[string]processEntry // key: node name
+}
+
+type processEntry struct {
+	Processes []model.ProcessStat
+	UpdatedAt time.Time
+}
+
+// ProcessCache 全局进程缓存实例。
+var ProcessCache = &processCache{
+	entries: make(map[string]processEntry),
+}
+
+// Set 更新指定节点的进程快照。
+func (c *processCache) Set(node string, procs []model.ProcessStat) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[node] = processEntry{Processes: procs, UpdatedAt: time.Now()}
+}
+
+// Get 获取指定节点的最新进程快照。返回空切片表示无数据。
+func (c *processCache) Get(node string) []model.ProcessStat {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if e, ok := c.entries[node]; ok {
+		return e.Processes
+	}
+	return nil
+}
 
 // Receiver 接收 Agent 上报并写入存储、更新节点索引。
 type Receiver struct {
@@ -92,6 +128,10 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 			model.Metric{Node: payload.Node, Name: "proc_cpu", Labels: labels, Value: p.CPU, Timestamp: payload.ReportAt},
 			model.Metric{Node: payload.Node, Name: "proc_mem", Labels: labels, Value: p.Mem, Timestamp: payload.ReportAt},
 		)
+	}
+	// 更新进程快照缓存（供 API 实时查询完整进程列表）
+	if len(payload.Processes) > 0 {
+		ProcessCache.Set(payload.Node, payload.Processes)
 	}
 	// Redis 实例元信息转为 redis_instance_up 指标写入 VM，供前端聚合查询
 	for _, ri := range payload.RedisInstances {

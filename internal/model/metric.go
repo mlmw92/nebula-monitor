@@ -35,12 +35,24 @@ type Series struct {
 	Points []Point           `json:"points"` // 数据点列表
 }
 
-// ProcessStat 表示单个进程的资源占用快照（用于进程 TOP 榜）。
+// ProcessStat 表示单个进程的资源占用快照（用于进程列表展示）。
+// 字段覆盖 CPU/内存/IO/状态/文件描述符等，支持完整的进程监控 Tab。
 type ProcessStat struct {
-	PID  int32   `json:"pid"`  // 进程 PID
-	Name string  `json:"name"` // 进程名/命令
-	CPU  float64 `json:"cpu"`  // CPU 占用百分比
-	Mem  float64 `json:"mem"`  // 内存占用百分比
+	PID        int32   `json:"pid"`         // 进程 PID
+	Name       string  `json:"name"`        // 进程名/命令
+	CPU        float64 `json:"cpu"`         // CPU 占用百分比
+	Mem        float64 `json:"mem"`         // 内存占用百分比
+	MemBytes   uint64  `json:"memBytes"`    // 内存占用（字节）
+	Status     string  `json:"status"`      // 进程状态：Running / Sleep / Stop / Zombie 等
+	NumThreads int32   `json:"numThreads"`  // 线程数
+	Fds        uint64  `json:"fds"`         // 打开文件描述符数
+	ReadBytes  uint64  `json:"readBytes"`   // 磁盘读取字节
+	WriteBytes uint64  `json:"writeBytes"`  // 磁盘写入字节
+	NetRead    uint64  `json:"netRead"`     // 网络接收字节
+	NetWrite   uint64  `json:"netWrite"`    // 网络发送字节
+	Cmdline    string  `json:"cmdline"`     // 启动命令（截断）
+	Username   string  `json:"username"`    // 运行用户
+	CreateTime int64   `json:"createTime"`  // 进程启动时间戳(秒)
 }
 
 // ReportPayload 是 Agent 上报的请求体。

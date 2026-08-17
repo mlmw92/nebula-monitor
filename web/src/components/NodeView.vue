@@ -227,13 +227,59 @@
           </div>
         </div>
       </el-tab-pane>
+
+      <!-- ============ Tab 3：进程监控 ============ -->
+      <el-tab-pane label="进程监控" name="processes">
+        <div class="tab-header">
+          <span class="panel-title" style="margin: 0">进程监控</span>
+          <div class="process-tools">
+            <el-input v-model="procFullSearch" placeholder="搜索进程名 / PID / 命令" clearable size="small" :prefix-icon="Search" class="proc-full-search" />
+            <el-button size="small" @click="loadProcessFull(selected.value)" :loading="loadingProcessFull">
+              <el-icon><Refresh /></el-icon> 刷新
+            </el-button>
+          </div>
+        </div>
+        <el-table :data="filteredProcessFull" stripe size="small" v-loading="loadingProcessFull" max-height="calc(100vh - 320px)"
+          :default-sort="{ prop: 'cpu', order: 'descending' }" table-layout="fixed">
+          <el-table-column prop="name" label="进程名" min-width="140" show-overflow-tooltip sortable />
+          <el-table-column label="CPU %" width="90" sortable :sort-method="(a, b) => a.cpu - b.cpu">
+            <template #default="{ row }"><span class="mono">{{ row.cpu.toFixed(1) }}%</span></template>
+          </el-table-column>
+          <el-table-column label="内存" width="100" sortable :sort-method="(a, b) => (a.memBytes || 0) - (b.memBytes || 0)">
+            <template #default="{ row }"><span class="mono">{{ fmtBytes(row.memBytes) }}</span></template>
+          </el-table-column>
+          <el-table-column label="网络IO ↓|↑" width="110">
+            <template #default="{ row }">
+              <span class="mono io-cell">{{ fmtBytes(row.netRead) }}</span> / <span class="mono io-cell">{{ fmtBytes(row.netWrite) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="磁盘IO ↓|↑" width="110">
+            <template #default="{ row }">
+              <span class="mono io-cell">{{ fmtBytes(row.readBytes) }}</span> / <span class="mono io-cell">{{ fmtBytes(row.writeBytes) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="85" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-tag :type="statusTagType(row.status)" size="small" effect="dark">{{ statusLabel(row.status) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="打开文件" width="80" sortable :sort-method="(a, b) => (a.fds || 0) - (b.fds || 0)">
+            <template #default="{ row }"><span class="mono">{{ row.fds || 0 }}</span></template>
+          </el-table-column>
+          <el-table-column prop="cmdline" label="启动命令" min-width="220" show-overflow-tooltip />
+        </el-table>
+        <div class="process-footer" v-if="processFullList.length > 0">
+          <span class="process-count">共 {{ processFullList.length }} 条进程</span>
+        </div>
+        <el-empty v-if="!loadingProcessFull && !filteredProcessFull.length" description="无进程数据" :image-size="50" />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { Connection, Cpu, HomeFilled, ArrowRight, DocumentCopy, Search } from '@element-plus/icons-vue'
+import { Connection, Cpu, HomeFilled, ArrowRight, DocumentCopy, Search, Refresh } from '@element-plus/icons-vue'
 import OsIcon from './OsIcon.vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
@@ -523,6 +569,56 @@ function updateGauges() {
 }
 
 // ---------- 数据加载 ----------
+// ============ 进程监控（完整列表） ============
+const processFullList = ref([])
+const procFullSearch = ref('')
+const loadingProcessFull = ref(false)
+
+async function loadProcessFull(hostname) {
+  if (!hostname) return
+  loadingProcessFull.value = true
+  try {
+    const res = await fetch(`/api/v1/query/processes?hostname=${encodeURIComponent(hostname)}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    processFullList.value = Array.isArray(data.processes) ? data.processes : []
+  } catch (err) {
+    console.error('加载进程列表失败:', err)
+    processFullList.value = []
+  } finally {
+    loadingProcessFull.value = false
+  }
+}
+
+const filteredProcessFull = computed(() => {
+  const q = procFullSearch.value.trim().toLowerCase()
+  if (!q) return processFullList.value
+  return processFullList.value.filter(p =>
+    (p.name || '').toLowerCase().includes(q) ||
+    String(p.pid || '').includes(q) ||
+    (p.cmdline || '').toLowerCase().includes(q)
+  )
+})
+
+function statusTagType(status) {
+  switch ((status || '').toLowerCase()) {
+    case 'running': return 'success'
+    case 'sleep': case 'sleeping': return 'info'
+    case 'stop': case 'stopped': return 'warning'
+    case 'zombie': return 'danger'
+    default: return ''
+  }
+}
+function statusLabel(status) {
+  switch ((status || '').toLowerCase()) {
+    case 'running': return '运行中'
+    case 'sleep': case 'sleeping': return '休眠中'
+    case 'stop': case 'stopped': return '已停止'
+    case 'zombie': return '僵尸'
+    default: return status || '-'
+  }
+}
+
 async function loadNodes() {
   try {
     const data = await http.get('/api/v1/nodes')
@@ -572,6 +668,7 @@ function onSelect(name) {
   selected.value = name
   connectWS(name)
   loadProcesses(name)
+  loadProcessFull(name)
   loadAlerts(name)
   loadPortStatuses(name)
   if (activeTab.value === 'monitor') {
@@ -770,6 +867,8 @@ watch(activeTab, (t) => {
       loadMonitor(selected.value)
       setTimeout(() => Object.values(monitorCharts).forEach((c) => c.resize()), 200)
     })
+  } else if (t === 'processes') {
+    loadProcessFull(selected.value)
   } else if (t === 'overview') {
     // 切回概览页时重建实时图/环形图（v-if 会销毁旧 DOM，需重新绑定）
     nextTick(() => {
@@ -833,6 +932,7 @@ onMounted(async () => {
   if (selected.value) {
     connectWS(selected.value)
     loadProcesses(selected.value)
+    loadProcessFull(selected.value)
     loadAlerts(selected.value)
     loadPortStatuses(selected.value)
   }
@@ -1008,4 +1108,11 @@ onUnmounted(() => {
 @media (max-width: 640px) {
   .device-grid, .gauge-row, .metric-grid { grid-template-columns: 1fr; }
 }
+
+/* 进程监控 Tab */
+.process-tools { display: flex; align-items: center; gap: 8px; }
+.proc-full-search { width: 280px; }
+.process-footer { margin-top: 10px; font-size: 12px; color: var(--text-dim); }
+.process-count { font-family: var(--mono); }
+.io-cell { color: var(--text-muted); }
 </style>

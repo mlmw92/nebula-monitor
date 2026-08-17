@@ -24,6 +24,7 @@ import (
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
+	"github.com/nebula/monitor/internal/server/receiver"
 	"github.com/nebula/monitor/internal/server/report"
 	"github.com/nebula/monitor/internal/server/screencfg"
 	"github.com/nebula/monitor/internal/server/security"
@@ -733,6 +734,13 @@ func (a *API) handleProcesses(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "node required", http.StatusBadRequest)
 		return
 	}
+	// 优先从进程快照缓存获取完整字段（内存/IO/状态/fd 等）
+	procs := receiver.ProcessCache.Get(node)
+	if len(procs) > 0 {
+		writeJSON(w, 200, map[string]interface{}{"processes": procs})
+		return
+	}
+	// 回退：从时序库查询 proc_cpu + proc_mem（旧版 Agent 或缓存未命中）
 	cpuSeries, err := a.store.QueryInstant(node, "proc_cpu", nil)
 	if err != nil {
 		http.Error(w, "query failed", http.StatusInternalServerError)
