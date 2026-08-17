@@ -812,19 +812,7 @@ async function loadPortStatuses(name) {
 }
 
 function onSelect(name) {
-  selected.value = name
-  connectWS(name)
-  loadProcesses(name)
-  loadProcessFull(name)
-  loadAlerts(name)
-  loadPortStatuses(name)
-  if (activeTab.value === 'monitor') {
-    nextTick(() => {
-      initMonitorCharts()
-      loadMonitor(name)
-      setTimeout(() => Object.values(monitorCharts).forEach((c) => c.resize()), 200)
-    })
-  }
+  reloadHost(name)
 }
 
 // ---------- 基础监控历史 ----------
@@ -993,26 +981,49 @@ function onPanelRangeChange(key) {
   if (activeTab.value === 'monitor') loadMonitor(selected.value, key)
 }
 
-watch(activeTab, (t) => {
-  if (t === 'monitor') {
-    nextTick(() => {
-      initMonitorCharts()
-      loadMonitor(selected.value)
-      setTimeout(() => Object.values(monitorCharts).forEach((c) => c.resize()), 200)
-    })
-  } else if (t === 'processes') {
-    loadProcessFull(selected.value)
-  } else if (t === 'ports') {
-    loadListeners(selected.value)
-  } else if (t === 'firewall') {
-    loadFirewallRules(selected.value)
-  } else if (t === 'overview') {
-    // 切回概览页时重建实时图/环形图（v-if 会销毁旧 DOM，需重新绑定）
-    nextTick(() => {
-      initRealtimeCharts()
-      setTimeout(() => rtChartKeys.forEach((k) => charts[k] && charts[k].resize()), 200)
-    })
+// 切换/进入主机或切换 Tab 时，按当前激活的 Tab 重新拉取对应快照数据，
+// 避免切主机后端口/防火墙等 Tab 仍显示上一台主机的数据（不刷新）。
+function loadActiveTab(node) {
+  if (!node) return
+  switch (activeTab.value) {
+    case 'monitor':
+      nextTick(() => {
+        initMonitorCharts()
+        loadMonitor(node)
+        setTimeout(() => Object.values(monitorCharts).forEach((c) => c.resize()), 200)
+      })
+      break
+    case 'processes':
+      loadProcessFull(node)
+      break
+    case 'ports':
+      loadListeners(node)
+      break
+    case 'firewall':
+      loadFirewallRules(node)
+      break
+    case 'overview':
+      // 切回概览页时重建实时图/环形图（v-if 会销毁旧 DOM，需重新绑定）
+      nextTick(() => {
+        initRealtimeCharts()
+        setTimeout(() => rtChartKeys.forEach((k) => charts[k] && charts[k].resize()), 200)
+      })
+      break
   }
+}
+
+// 主机切换（下拉框或路由变化）时的公共刷新逻辑
+function reloadHost(name) {
+  selected.value = name
+  connectWS(name)
+  loadProcesses(name)
+  loadAlerts(name)
+  loadPortStatuses(name)
+  loadActiveTab(name)
+}
+
+watch(activeTab, () => {
+  loadActiveTab(selected.value)
 })
 
 function initRealtimeCharts() {
@@ -1049,17 +1060,7 @@ watch(
   () => route.params.name,
   (name) => {
     if (!name) return
-    selected.value = name
-    connectWS(name)
-    loadProcesses(name)
-    loadAlerts(name)
-    loadPortStatuses(name)
-    if (activeTab.value === 'monitor') {
-      nextTick(() => {
-        initMonitorCharts()
-        loadMonitor(name)
-      })
-    }
+    reloadHost(name)
   }
 )
 

@@ -252,18 +252,16 @@ func (c *Collector) CollectSecurity() ([]model.SecurityEvent, *model.SecurityBas
 }
 
 // CollectListeners 采集监听端口列表（TCP/UDP），用于端口监控 Tab。
+// 该采集为只读本地端口快照（类似 ss -tlnp），开销极小，
+// 不依赖 port 存活探测开关（cfg.Port），默认即开启。
 func (c *Collector) CollectListeners() []model.ListenerStat {
-	if !c.cfg.Port {
-		return nil
-	}
 	return collectListeners()
 }
 
 // CollectFirewallRules 采集防火墙规则列表，用于防火墙监控 Tab。
+// 该采集为只读本地规则快照（iptables/nftables/ufw），开销极小，
+// 不依赖 security 安全扫描开关（cfg.Security），默认即开启。
 func (c *Collector) CollectFirewallRules() []model.FirewallRule {
-	if !c.cfg.Security {
-		return nil
-	}
 	return collectFirewallRules()
 }
 
