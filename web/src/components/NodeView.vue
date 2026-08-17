@@ -250,7 +250,7 @@
               <el-tag :type="statusTagType(row.status)" size="small" effect="dark">{{ statusLabel(row.status) }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="打开文件" width="80" sortable :sort-method="(a, b) => (a.fds || 0) - (b.fds || 0)">
+          <el-table-column label="打开文件" width="100" sortable :sort-method="(a, b) => (a.fds || 0) - (b.fds || 0)">
             <template #default="{ row }"><span class="mono">{{ row.fds || 0 }}</span></template>
           </el-table-column>
           <el-table-column prop="cmdline" label="启动命令" min-width="220" show-overflow-tooltip />
