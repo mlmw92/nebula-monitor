@@ -4,7 +4,6 @@
       <div class="ring" :class="'score-' + rank(health.score)" :style="{ '--p': clamp(health.score) }">
         <div class="ring-inner">
           <span class="score">{{ Math.round(health.score) }}</span>
-          <span class="score-unit">分</span>
         </div>
       </div>
       <div class="hb-meta">
@@ -152,10 +151,6 @@ function rank(score) {
   font-size: 30px;
   font-weight: 800;
   line-height: 1;
-}
-.score-unit {
-  font-size: 12px;
-  color: var(--text-dim);
 }
 .ring.score-good {
   --ring-color: var(--chart-green);
