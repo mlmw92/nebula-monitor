@@ -260,6 +260,81 @@
         </div>
         <el-empty v-if="!loadingProcessFull && !filteredProcessFull.length" description="无进程数据" :image-size="50" />
       </el-tab-pane>
+
+      <!-- ============ Tab 4：端口监控 ============ -->
+      <el-tab-pane label="端口监控" name="ports">
+        <div class="tab-header">
+          <span class="panel-title" style="margin: 0">端口监控</span>
+          <div class="process-tools">
+            <el-input v-model="portSearch" placeholder="搜索地址 / 端口 / 进程" clearable size="small" :prefix-icon="Search" class="proc-full-search" />
+            <el-button size="small" @click="loadListeners(selected.value)" :loading="loadingListeners">
+              <el-icon><Refresh /></el-icon> 刷新
+            </el-button>
+          </div>
+        </div>
+        <el-table :data="filteredListeners" stripe size="small" v-loading="loadingListeners" max-height="calc(100vh - 320px)"
+          :default-sort="{ prop: 'port', order: 'ascending' }" table-layout="fixed">
+          <el-table-column label="监听地址" min-width="140" show-overflow-tooltip>
+            <template #default="{ row }"><span class="mono">{{ formatListenerAddr(row) }}</span></template>
+          </el-table-column>
+          <el-table-column prop="port" label="端口" width="80" sortable />
+          <el-table-column prop="protocol" label="协议" width="75" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-tag :type="row.protocol.includes('tcp') ? '' : 'warning'" size="small">{{ row.protocol }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="process" label="使用端口的进程" min-width="120" show-overflow-tooltip />
+          <el-table-column prop="exePath" label="进程路径" min-width="200" show-overflow-tooltip>
+            <template #default="{ row }"><span class="mono">{{ row.exePath || '-' }}</span></template>
+          </el-table-column>
+        </el-table>
+        <div class="process-footer" v-if="listenerList.length > 0">
+          <span class="process-count">共 {{ listenerList.length }} 条监听</span>
+        </div>
+        <el-empty v-if="!loadingListeners && !filteredListeners.length" description="无监听端口数据" :image-size="50" />
+      </el-tab-pane>
+
+      <!-- ============ Tab 5：防火墙监控 ============ -->
+      <el-tab-pane label="防火墙监控" name="firewall">
+        <div class="tab-header">
+          <span class="panel-title" style="margin: 0">防火墙规则</span>
+          <div class="process-tools">
+            <el-input v-model="fwSearch" placeholder="搜索协议 / 端口 / 动作 / 链" clearable size="small" :prefix-icon="Search" class="proc-full-search" />
+            <el-button size="small" @click="loadFirewallRules(selected.value)" :loading="loadingFirewall">
+              <el-icon><Refresh /></el-icon> 刷新
+            </el-button>
+          </div>
+        </div>
+        <el-table :data="filteredFirewall" stripe size="small" v-loading="loadingFirewall" max-height="calc(100vh - 320px)"
+          table-layout="fixed">
+          <el-table-column prop="backend" label="后端" width="95" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-tag size="small" effect="dark">{{ row.backend }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="chain" label="链/区域" width="100" show-overflow-tooltip />
+          <el-table-column prop="ruleNum" label="#" width="45" align="center" />
+          <el-table-column prop="action" label="动作" width="85" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-tag :type="fwActionType(row.action)" size="small">{{ row.action || '-' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="protocol" label="协议" width="70" show-overflow-tooltip />
+          <el-table-column prop="srcAddr" label="源地址" width="120" show-overflow-tooltip>
+            <template #default="{ row }"><span class="mono">{{ row.srcAddr || '-' }}</span></template>
+          </el-table-column>
+          <el-table-column prop="dstPort" label="目标端口" width="90" show-overflow-tooltip>
+            <template #default="{ row }"><span class="mono">{{ row.dstPort || '-' }}</span></template>
+          </el-table-column>
+          <el-table-column prop="options" label="完整规则" min-width="250" show-overflow-tooltip>
+            <template #default="{ row }"><span class="mono fw-options">{{ row.options || '-' }}</span></template>
+          </el-table-column>
+        </el-table>
+        <div class="process-footer" v-if="firewallRuleList.length > 0">
+          <span class="process-count">共 {{ firewallRuleList.length }} 条规则（{{ firewallBackend }}）</span>
+        </div>
+        <el-empty v-if="!loadingFirewall && !filteredFirewall.length" description="无防火墙数据或未启用防火墙" :image-size="50" />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -605,6 +680,92 @@ function statusLabel(status) {
   }
 }
 
+// ============ 端口监控（监听端口列表） ============
+const listenerList = ref([])
+const portSearch = ref('')
+const loadingListeners = ref(false)
+
+async function loadListeners(hostname) {
+  if (!hostname) return
+  loadingListeners.value = true
+  try {
+    const res = await fetch(`/api/v1/query/listeners?hostname=${encodeURIComponent(hostname)}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    listenerList.value = Array.isArray(data.listeners) ? data.listeners : []
+  } catch (err) {
+    console.error('加载监听端口失败:', err)
+    listenerList.value = []
+  } finally {
+    loadingListeners.value = false
+  }
+}
+
+const filteredListeners = computed(() => {
+  const q = portSearch.value.trim().toLowerCase()
+  if (!q) return listenerList.value
+  return listenerList.value.filter(l =>
+    l.addr.toLowerCase().includes(q) ||
+    String(l.port).includes(q) ||
+    (l.process || '').toLowerCase().includes(q)
+  )
+})
+
+function formatListenerAddr(row) {
+  if (!row.addr || row.addr === '0.0.0.0' || row.addr === '::') return ':' + row.port
+  return row.addr + ':' + row.port
+}
+
+// ============ 防火墙监控（规则列表） ============
+const firewallRuleList = ref([])
+const fwSearch = ref('')
+const loadingFirewall = ref(false)
+
+async function loadFirewallRules(hostname) {
+  if (!hostname) return
+  loadingFirewall.value = true
+  try {
+    const res = await fetch(`/api/v1/query/firewall?hostname=${encodeURIComponent(hostname)}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    firewallRuleList.value = Array.isArray(data.rules) ? data.rules : []
+  } catch (err) {
+    console.error('加载防火墙规则失败:', err)
+    firewallRuleList.value = []
+  } finally {
+    loadingFirewall.value = false
+  }
+}
+
+const filteredFirewall = computed(() => {
+  const q = fwSearch.value.trim().toLowerCase()
+  if (!q) return firewallRuleList.value
+  return firewallRuleList.value.filter(r =>
+    (r.backend || '').toLowerCase().includes(q) ||
+    (r.chain || '').toLowerCase().includes(q) ||
+    (r.action || '').toLowerCase().includes(q) ||
+    (r.protocol || '').toLowerCase().includes(q) ||
+    (r.dstPort || '').toLowerCase().includes(q) ||
+    (r.options || '').toLowerCase().includes(q)
+  )
+})
+
+const firewallBackend = computed(() => {
+  if (!firewallRuleList.value.length) return '-'
+  return firewallRuleList.value[0].backend || '-'
+})
+
+function fwActionType(action) {
+  switch ((action || '').toUpperCase()) {
+    case 'ACCEPT': return 'success'
+    case 'DROP': return 'danger'
+    case 'REJECT': return 'danger'
+    case 'LOG': return 'warning'
+    case 'RETURN': return 'info'
+    default: return ''
+  }
+}
+
 async function loadNodes() {
   try {
     const data = await http.get('/api/v1/nodes')
@@ -841,6 +1002,10 @@ watch(activeTab, (t) => {
     })
   } else if (t === 'processes') {
     loadProcessFull(selected.value)
+  } else if (t === 'ports') {
+    loadListeners(selected.value)
+  } else if (t === 'firewall') {
+    loadFirewallRules(selected.value)
   } else if (t === 'overview') {
     // 切回概览页时重建实时图/环形图（v-if 会销毁旧 DOM，需重新绑定）
     nextTick(() => {
@@ -1076,4 +1241,5 @@ onUnmounted(() => {
 .process-footer { margin-top: 10px; font-size: 12px; color: var(--text-dim); }
 .process-count { font-family: var(--mono); }
 .io-cell { color: var(--text-muted); }
+.fw-options { color: var(--text-dim); font-size: 12px; }
 </style>

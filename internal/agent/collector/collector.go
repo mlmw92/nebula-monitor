@@ -251,6 +251,22 @@ func (c *Collector) CollectSecurity() ([]model.SecurityEvent, *model.SecurityBas
 	return c.security.Collect()
 }
 
+// CollectListeners 采集监听端口列表（TCP/UDP），用于端口监控 Tab。
+func (c *Collector) CollectListeners() []model.ListenerStat {
+	if !c.cfg.Port {
+		return nil
+	}
+	return collectListeners()
+}
+
+// CollectFirewallRules 采集防火墙规则列表，用于防火墙监控 Tab。
+func (c *Collector) CollectFirewallRules() []model.FirewallRule {
+	if !c.cfg.Security {
+		return nil
+	}
+	return collectFirewallRules()
+}
+
 // HostInfo 返回主机静态信息（OS/Arch/IP），用于上报体。
 func (c *Collector) HostInfo() (os, arch, ip string) {
 	info, err := host.Info()

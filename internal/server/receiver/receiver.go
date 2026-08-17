@@ -57,6 +57,43 @@ func (c *processCache) Get(node string) []model.ProcessStat {
 	return nil
 }
 
+// snapshotCache 通用快照缓存（泛型替代，用于监听端口/防火墙规则等高基数数据）。
+type snapshotCache[T any] struct {
+	mu      sync.RWMutex
+	entries map[string]snapshotEntry[T]
+}
+
+type snapshotEntry[T any] struct {
+	Data      T
+	UpdatedAt time.Time
+}
+
+func newSnapshotCache[T any]() *snapshotCache[T] {
+	return &snapshotCache[T]{entries: make(map[string]snapshotEntry[T])}
+}
+
+func (c *snapshotCache[T]) Set(node string, data T) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[node] = snapshotEntry[T]{Data: data, UpdatedAt: time.Now()}
+}
+
+func (c *snapshotCache[T]) Get(node string) T {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if e, ok := c.entries[node]; ok {
+		return e.Data
+	}
+	var zero T
+	return zero
+}
+
+// ListenerCache 监听端口快照缓存。
+var ListenerCache = newSnapshotCache[[]model.ListenerStat]()
+
+// FirewallCache 防火墙规则快照缓存。
+var FirewallCache = newSnapshotCache[[]model.FirewallRule]()
+
 // Receiver 接收 Agent 上报并写入存储、更新节点索引。
 type Receiver struct {
 	storage storage.Storage
@@ -132,6 +169,14 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 	// 更新进程快照缓存（供 API 实时查询完整进程列表）
 	if len(payload.Processes) > 0 {
 		ProcessCache.Set(payload.Node, payload.Processes)
+	}
+	// 更新监听端口快照缓存
+	if len(payload.Listeners) > 0 {
+		ListenerCache.Set(payload.Node, payload.Listeners)
+	}
+	// 更新防火墙规则快照缓存
+	if len(payload.FirewallRules) > 0 {
+		FirewallCache.Set(payload.Node, payload.FirewallRules)
 	}
 	// Redis 实例元信息转为 redis_instance_up 指标写入 VM，供前端聚合查询
 	for _, ri := range payload.RedisInstances {

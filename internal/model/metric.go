@@ -55,6 +55,32 @@ type ProcessStat struct {
 	CreateTime int64   `json:"createTime"`  // 进程启动时间戳(秒)
 }
 
+// ListenerStat 表示一个监听端口（TCP/UDP），用于端口监控 Tab。
+// 类似 ss -tlnp / netstat -tlnp 的输出。
+type ListenerStat struct {
+	Addr      string `json:"addr"`      // 监听地址（如 0.0.0.0、127.0.0.1、::、:1 等）
+	Port      uint32 `json:"port"`      // 端口号
+	Protocol  string `json:"protocol"`  // 协议：tcp / tcp6 / udp / udp6
+	State     string `json:"state"`     // 状态：LISTEN / ESTABLISHED 等（通常为 LISTEN）
+	PID       int32  `json:"pid"`       // 占用端口的进程 PID（可能为 0）
+	Process   string `json:"process"`   // 占用端口的进程名（如 sshd, master, local）
+	ExePath   string `json:"exePath"`   // 进程可执行路径（如 /usr/sbin/sshd）
+	Family    string `json:"family"`    // 地址族：ipv4 / ipv6
+}
+
+// FirewallRule 表示一条防火墙规则，用于防火墙监控 Tab。
+// 支持多后端：iptables / firewalld / nftables / ufw。
+type FirewallRule struct {
+	Backend   string `json:"backend"`    // 防火墙后端：iptables / firewalld / nftables / ufw
+	Chain     string `json:"chain"`      // 链名（INPUT/FORWARD/OUTPUT/public/drop 等）
+	RuleNum   int    `json:"ruleNum"`    // 规则序号
+	Action    string `json:"action"`     // 动作：ACCEPT / DROP / REJECT / LOG / RETURN
+	Protocol  string `json:"protocol"`   // 协议：tcp / udp / icmp / all
+	SrcAddr   string `json:"srcAddr"`    // 源地址（0.0.0.0/0 或具体 IP/CIDR）
+	DstPort   string `json:"dstPort"`    // 目标端口或范围（22, 80, 443, 1:65535 等）
+	Options   string `json:"options"`    // 其他选项（完整规则文本，用于展示复杂规则）
+}
+
 // ReportPayload 是 Agent 上报的请求体。
 type ReportPayload struct {
 	Node              string             `json:"node"`                        // 主机名
@@ -86,7 +112,9 @@ type ReportPayload struct {
 	Capabilities      *ClientCapability  `json:"capabilities,omitempty"`      // Agent 能力声明（旧 Agent 不报此字段，前端据此判断兼容）
 	DefenseStatus     *DefenseStatus     `json:"defenseStatus,omitempty"`     // 入侵防护当前状态（由 Agent 定期采集上报）
 	DefenseResult     *DefenseCommandResult `json:"defenseResult,omitempty"`  // 防护指令执行结果回执
-	ReportAt          int64              `json:"reportAt"`                    // 上报时间（毫秒）
+	Listeners         []ListenerStat        `json:"listeners,omitempty"`         // 监听端口列表（TCP/UDP）
+	FirewallRules     []FirewallRule        `json:"firewallRules,omitempty"`     // 防火墙规则列表
+	ReportAt          int64                 `json:"reportAt"`                    // 上报时间（毫秒）
 }
 
 // RedisInstanceConfig 是 Agent 本地配置的 Redis 实例连接信息。

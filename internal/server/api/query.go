@@ -130,6 +130,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/query/range", a.handleQueryRange)
 	mux.HandleFunc("GET /api/v1/query/latest", a.handleQueryLatest)
 	mux.HandleFunc("GET /api/v1/processes", a.handleProcesses)
+	mux.HandleFunc("GET /api/v1/query/listeners", a.handleListeners)
+	mux.HandleFunc("GET /api/v1/query/firewall", a.handleFirewall)
 
 	mux.HandleFunc("GET /api/v1/middleware/redis/instances", a.handleRedisInstances)
 	mux.HandleFunc("GET /api/v1/middleware/mysql/instances", a.handleMySQLInstances)
@@ -772,6 +774,28 @@ func (a *API) handleProcesses(w http.ResponseWriter, r *http.Request) {
 		out = append(out, proc{PID: pid, Name: comm, CPU: cpu, Mem: memByKey[pid+"|"+comm]})
 	}
 	writeJSON(w, 200, map[string]interface{}{"processes": out})
+}
+
+// handleListeners 返回指定节点的监听端口列表（TCP/UDP）。
+func (a *API) handleListeners(w http.ResponseWriter, r *http.Request) {
+	node := r.URL.Query().Get("hostname")
+	if node == "" {
+		http.Error(w, "node required", http.StatusBadRequest)
+		return
+	}
+	listeners := receiver.ListenerCache.Get(node)
+	writeJSON(w, 200, map[string]interface{}{"listeners": listeners})
+}
+
+// handleFirewall 返回指定节点的防火墙规则列表。
+func (a *API) handleFirewall(w http.ResponseWriter, r *http.Request) {
+	node := r.URL.Query().Get("hostname")
+	if node == "" {
+		http.Error(w, "node required", http.StatusBadRequest)
+		return
+	}
+	rules := receiver.FirewallCache.Get(node)
+	writeJSON(w, 200, map[string]interface{}{"rules": rules})
 }
 
 // parseLabelQuery 从 URL 查询中提取 labels.<name>=<value> 形式的标签过滤。

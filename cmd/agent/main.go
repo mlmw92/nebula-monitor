@@ -277,6 +277,11 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 	metrics = append(metrics, fastdfsMetrics...)
 	securityEvents, securityBaseline := coll.CollectSecurity()
 
+	// 监听端口列表（用于端口监控 Tab）
+	listeners := coll.CollectListeners()
+	// 防火墙规则列表（用于防火墙监控 Tab）
+	firewallRules := coll.CollectFirewallRules()
+
 	// 采集 fail2ban 封禁/解封事件（增量 JSONL 审计），合并进安全事件
 	banEvents := banCollector.Collect(cfg.Node)
 	if len(banEvents) > 0 {
@@ -316,6 +321,8 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 		DefenseStatus: defenseExec.Status(),
 		// 携带上一次指令执行结果回执（若有）
 		DefenseResult: pendingResult,
+		Listeners:     listeners,
+		FirewallRules: firewallRules,
 		ReportAt:      model.NowMillis(),
 	}
 	resp, err := rep.ReportFull(payload)
