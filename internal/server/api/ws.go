@@ -137,6 +137,16 @@ func (h *Hub) RegisterWS(mux *http.ServeMux, store storage.Storage) {
 func (h *Hub) handleWS(store storage.Storage, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		// 握手失败：常见原因
+		//  1) CheckOrigin 拒绝（Origin 与 Host 不一致，多为反代未透传 Host / 跨域）；
+		//  2) 前置认证中间件已返回 401/403（会话过期或未登录）。
+		// 记录日志便于定位，避免仅靠浏览器侧 “closed before established” 难懂报错。
+		slog.Warn("WebSocket 握手失败",
+			"remote", r.RemoteAddr,
+			"host", r.Host,
+			"origin", r.Header.Get("Origin"),
+			"topic", r.URL.Query().Get("topic"),
+			"err", err.Error())
 		return
 	}
 	client := &Client{hub: h, conn: conn, send: make(chan []byte, 16)}
