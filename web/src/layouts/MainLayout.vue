@@ -46,7 +46,12 @@
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item>{{ username }}</el-dropdown-item>
+                <el-dropdown-item disabled>{{ username }}</el-dropdown-item>
+                <el-dropdown-item v-if="auth.principal.roles.length" disabled>
+                  <span class="role-tags">
+                    <el-tag v-for="r in roleLabels" :key="r" size="small" type="info" effect="dark">{{ r }}</el-tag>
+                  </span>
+                </el-dropdown-item>
                 <el-dropdown-item divided @click="logout">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -75,13 +80,28 @@ import Sidebar from '../components/Sidebar.vue'
 import SiteFooter from '../components/SiteFooter.vue'
 import http, { setToken } from '../api/http'
 import { connectWS } from '../api/ws'
+import { useAuth } from '../composables/useAuth'
 
 const router = useRouter()
 const route = useRoute()
+const auth = useAuth()
 const collapsed = ref(false)
 const alertCount = ref(0)
 const username = ref(localStorage.getItem('nebula_user') || 'admin')
 const view = ref(null)
+
+// 角色名 → 中文展示标签
+const ROLE_LABELS = {
+  super_admin: '超级管理员',
+  ops_admin: '运维管理员',
+  alert_admin: '告警管理员',
+  security_admin: '安全管理员',
+  read_only: '只读用户',
+  audit: '审计用户',
+}
+const roleLabels = computed(() =>
+  auth.principal.roles.map((r) => ROLE_LABELS[r] || r)
+)
 
 /* ===== 换肤 ===== */
 const THEMES = { b: '#4a9df0', a: '#00d9a3', c: '#8b5cf6' }
@@ -160,6 +180,7 @@ function refresh() {
 function logout() {
   setToken('')
   localStorage.removeItem('nebula_user')
+  auth.clear()
   ws && ws.close()
   router.replace('/login')
 }
@@ -331,5 +352,11 @@ onUnmounted(() => {
   flex: 1;
   padding: 18px 20px;
   width: 100%;
+}
+.role-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 220px;
 }
 </style>

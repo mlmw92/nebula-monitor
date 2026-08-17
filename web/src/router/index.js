@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { getToken } from '../api/http'
+import { useAuth } from '../composables/useAuth'
 
 const routes = [
   {
@@ -31,6 +32,8 @@ const routes = [
       { path: 'system/dashboards', name: 'system-dashboards', component: () => import('../components/dashboard/DashboardView.vue') },
       { path: 'security', name: 'security', component: () => import('../components/SecurityView.vue') },
       { path: 'audit', name: 'audit', component: () => import('../components/AuditView.vue') },
+      { path: 'system/users', name: 'system-users', component: () => import('../components/rbac/UsersView.vue'), meta: { perm: 'users:manage' } },
+      { path: 'system/roles', name: 'system-roles', component: () => import('../components/rbac/RolesView.vue'), meta: { perm: 'roles:read' } },
     ],
   },
 ]
@@ -43,10 +46,16 @@ const router = createRouter({
   },
 })
 
-// 全局前置守卫：未登录跳 /login（auth-info 由 App.vue 异步检查，这里先按 token 简单判断）
+// 全局前置守卫：未登录跳 /login；带权限要求的路由做二次校验（菜单已隐藏时再兜底）。
+// 注意：前端隐藏仅为体验，真正鉴权以服务端为准；principal 未加载（单管理员/未启用 RBAC）
+// 时放行，避免误拦。
+const auth = useAuth()
 router.beforeEach((to) => {
   if (to.meta.public) return true
-  // auth 未启用时 token 可能为空，允许进入（后端不拦截）
+  if (to.meta.perm) {
+    // 已加载授权且明确无权限：拦截到首页
+    if (auth.principal.loaded && !auth.can(to.meta.perm)) return { path: '/' }
+  }
   return true
 })
 

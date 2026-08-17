@@ -19,7 +19,7 @@
       </router-link>
 
       <div
-        v-for="g in groups"
+        v-for="g in visibleGroups"
         :key="g.key"
         class="nav-group"
         :class="{ 'group-open': isGroupOpen(g), 'group-active': isGroupActive(g) }"
@@ -30,22 +30,23 @@
           <el-icon v-show="!collapsed" class="caret"><ArrowDown v-if="isGroupOpen(g)" /><ArrowRight v-else /></el-icon>
         </div>
         <div v-show="!collapsed && isGroupOpen(g)" class="nav-group-items">
-          <router-link
-            v-for="sub in g.items"
-            :key="sub.key"
-            :to="sub.to"
-            class="nav-subitem"
-            :class="{ active: isActiveItem(sub) }"
-          >
-            <span class="sub-dot"></span>
-            <span class="label">{{ sub.label }}</span>
-            <el-badge
-              v-if="sub.key === 'alerts' && alertCount > 0"
-              :value="alertCount"
-              :max="99"
-              class="nav-badge"
-            />
-          </router-link>
+          <template v-for="sub in g.items" :key="sub.key">
+            <router-link
+              v-if="isItemVisible(sub)"
+              :to="sub.to"
+              class="nav-subitem"
+              :class="{ active: isActiveItem(sub) }"
+            >
+              <span class="sub-dot"></span>
+              <span class="label">{{ sub.label }}</span>
+              <el-badge
+                v-if="sub.key === 'alerts' && alertCount > 0"
+                :value="alertCount"
+                :max="99"
+                class="nav-badge"
+              />
+            </router-link>
+          </template>
         </div>
       </div>
     </nav>
@@ -68,7 +69,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Odometer,
@@ -88,6 +89,7 @@ import {
 } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { useBrand } from '../composables/useBrand'
+import { useAuth } from '../composables/useAuth'
 import { WEB_VERSION } from '../version'
 
 const props = defineProps({
@@ -98,6 +100,7 @@ const emit = defineEmits(['toggle', 'logout'])
 
 const route = useRoute()
 const { brand } = useBrand()
+const auth = useAuth()
 
 const serverVersion = ref(WEB_VERSION) // 初始用构建内嵌版本，加载后覆盖为 Server 实际运行版本
 
@@ -142,9 +145,21 @@ const groups = [
       { key: 'settings', to: '/system/settings', label: '站点与品牌' },
       { key: 'change-password', to: '/system/settings?tab=password', label: '修改密码' },
       { key: 'upgrade', to: '/system/upgrade', label: '系统升级' },
+      { key: 'users', to: '/system/users', label: '用户管理', perm: 'users:manage' },
+      { key: 'roles', to: '/system/roles', label: '角色与权限', perm: 'roles:read' },
     ],
   },
 ]
+
+// 按当前用户权限过滤可见的菜单项（前端隐藏仅为体验，真正鉴权以服务端为准）。
+// principal 未加载（单管理员/未启用 RBAC）时 auth.can 恒为 true，不隐藏。
+function isItemVisible(sub) {
+  if (!sub.perm) return true
+  return auth.can(sub.perm)
+}
+
+// 仅含可见子项的菜单分组（无可见子项的分组标题不显示）
+const visibleGroups = computed(() => groups.filter((g) => g.items.some(isItemVisible)))
 
 // 用户手动展开/收起的分组状态（默认展开当前路由所在分组）
 const openGroups = ref({})

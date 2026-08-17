@@ -133,6 +133,24 @@ const api = {
         URL.revokeObjectURL(href)
       })
   },
+  // —— 角色权限管理（RBAC）——
+  me: () => request('/api/v1/auth/me'),
+  listUsers: () => request('/api/v1/users'),
+  createUser: (payload) => api.post('/api/v1/users', payload),
+  getUser: (username) => request('/api/v1/users/' + encodeURIComponent(username)),
+  updateUser: (username, payload) => api.put('/api/v1/users/' + encodeURIComponent(username), payload),
+  resetUserPassword: (username, newPassword) =>
+    api.post('/api/v1/users/' + encodeURIComponent(username) + '/reset-password', { newPassword }),
+  disableUser: (username) => api.post('/api/v1/users/' + encodeURIComponent(username) + '/disable', {}),
+  enableUser: (username) => api.post('/api/v1/users/' + encodeURIComponent(username) + '/enable', {}),
+  deleteUser: (username) => api.del('/api/v1/users/' + encodeURIComponent(username)),
+  listRoles: () => request('/api/v1/roles'),
+  createRole: (payload) => api.post('/api/v1/roles', payload),
+  getRole: (name) => request('/api/v1/roles/' + encodeURIComponent(name)),
+  updateRole: (name, payload) => api.put('/api/v1/roles/' + encodeURIComponent(name), payload),
+  deleteRole: (name) => api.del('/api/v1/roles/' + encodeURIComponent(name)),
+  permissionCatalog: () => request('/api/v1/permissions/catalog'),
+  listGroups: () => request('/api/v1/groups'),
 }
 
 export default api

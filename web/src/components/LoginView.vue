@@ -68,9 +68,11 @@ import { User, Lock } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import http, { setToken } from '../api/http'
 import { useBrand } from '../composables/useBrand'
+import { useAuth } from '../composables/useAuth'
 
 const router = useRouter()
 const { brand, loadBrand } = useBrand()
+const auth = useAuth()
 // 拉取最新品牌配置（含系统名称、Logo、页脚），确保登录页即时反映设置
 loadBrand()
 
@@ -89,6 +91,7 @@ async function doLogin() {
     })
     if (d.token) {
       setToken(d.token)
+      try { await auth.loadMe() } catch (e) { /* 授权信息非阻塞 */ }
       ElMessage.success('登录成功')
       router.replace('/')
     } else if (d.authEnabled === false) {
