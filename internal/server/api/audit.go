@@ -165,6 +165,24 @@ func RecordLoginAudit(store *audit.Store, r *http.Request, user string, status i
 	})
 }
 
+// RecordPermissionDenied 记录权限拒绝（不记录敏感内容）。
+func RecordPermissionDenied(store *audit.Store, r *http.Request, user, perm string) {
+	if store == nil {
+		return
+	}
+	_ = store.Record(audit.Event{
+		User:      user,
+		Method:    r.Method,
+		Path:      r.URL.Path,
+		Status:    http.StatusForbidden,
+		RemoteIP:  audit.ClientIP(r),
+		Succeeded: false,
+		Category:  "authorization",
+		Action:    "deny",
+		Detail:    "permission=" + perm,
+	})
+}
+
 type auditResponseWriter struct {
 	http.ResponseWriter
 	status int

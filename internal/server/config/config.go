@@ -111,9 +111,13 @@ func DefaultScreenConfig() ScreenConfig {
 // AuthConfig 登录认证配置（启用后访问需登录，token 有效期 24h）
 type AuthConfig struct {
 	Enabled  bool   `yaml:"enabled"`  // 是否启用登录认证
-	Username string `yaml:"username"` // 登录用户名
+	Username string `yaml:"username"` // 登录用户名（单管理员种子；多用户迁移后运行态以 UsersFile 为准）
 	Password string `yaml:"password"` // 登录密码（国密 SM3 加盐哈希，形如 sm3:<salt>:<hash>；旧明文配置会在启动时自动迁移为哈希）
 	Secret   string `yaml:"secret"`   // token 签名密钥（留空时启动自动生成）
+	UsersFile string `yaml:"usersFile"` // 多用户数据文件（users.yaml）；默认 <DataDir>/users.yaml
+	// MigrateSingleAdmin 控制首次启动是否将单管理员账号迁移为超级管理员。
+	// 设为 false 可回退到单管理员模式（运行态以本配置为准）。默认 true。
+	MigrateSingleAdmin bool `yaml:"migrateSingleAdmin"`
 }
 
 // MigratePasswordIfNeeded 在登录密码仍为旧明文（非国密 SM3 哈希前缀）时，
@@ -333,7 +337,7 @@ func Default() *Config {
 		DashboardsFile:  "/etc/monitor-server/dashboards.yaml",
 		SecurityStoreFile: "/var/lib/monitor-server/security_store.json",
 		GeoIPFile:       "/var/lib/monitor-server/geoip/ip2region_v4.xdb",
-		Auth:            AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: ""},
+		Auth:            AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: "", UsersFile: "/var/lib/monitor-server/users.yaml", MigrateSingleAdmin: true},
 		Upgrade: UpgradeConfig{
 			Enabled:    true,
 			Dir:        "/var/lib/monitor-server/upgrades",

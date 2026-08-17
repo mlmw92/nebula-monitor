@@ -16,6 +16,7 @@ import (
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/alert"
+	"github.com/nebula/monitor/internal/server/auth"
 	"github.com/nebula/monitor/internal/server/audit"
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/dashboard"
@@ -102,14 +103,15 @@ type API struct {
 	security       *security.Store        // 安全事件/基线存储（可空，关闭安全能力）
 	audit          *audit.Store           // 管理操作审计存储（可空）
 	defenseStore   *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空，关闭防护能力）
+	authStore      *auth.Store            // 多用户角色权限存储（可空：未启用登录认证时为 nil）
 }
 
 // SetDashboardManager 注入仪表盘配置管理器（可选，不注入则相关接口返回空列表）。
 func (a *API) SetDashboardManager(m *dashboard.Manager) { a.dashMgr = m }
 
 // New 创建 API。
-func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string, sec *security.Store, defenseStore *security.DefenseStore, auditStore *audit.Store) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince(), configPath: configPath, security: sec, defenseStore: defenseStore, audit: auditStore}
+func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string, sec *security.Store, defenseStore *security.DefenseStore, auditStore *audit.Store, authStore *auth.Store) *API {
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince(), configPath: configPath, security: sec, defenseStore: defenseStore, audit: auditStore, authStore: authStore}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -196,6 +198,27 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/logout", a.handleLogout)
 	mux.HandleFunc("GET /api/v1/auth-info", a.handleAuthInfo)
 	mux.HandleFunc("POST /api/v1/auth/change-password", a.handleChangePassword)
+
+	// ===== 角色权限管理 API =====
+	// 当前身份（登录即可）
+	mux.HandleFunc("GET /api/v1/auth/me", a.handleMe)
+	// 用户管理（users:manage）
+	mux.HandleFunc("GET /api/v1/users", a.authz(a.handleListUsers, "users:manage"))
+	mux.HandleFunc("POST /api/v1/users", a.authz(a.handleCreateUser, "users:manage"))
+	mux.HandleFunc("GET /api/v1/users/{username}", a.authz(a.handleGetUser, "users:manage"))
+	mux.HandleFunc("PUT /api/v1/users/{username}", a.authz(a.handleUpdateUser, "users:manage"))
+	mux.HandleFunc("POST /api/v1/users/{username}/reset-password", a.authz(a.handleResetUserPassword, "users:manage"))
+	mux.HandleFunc("POST /api/v1/users/{username}/disable", a.authz(a.handleDisableUser, "users:manage"))
+	mux.HandleFunc("POST /api/v1/users/{username}/enable", a.authz(a.handleEnableUser, "users:manage"))
+	mux.HandleFunc("DELETE /api/v1/users/{username}", a.authz(a.handleDeleteUser, "users:manage"))
+	// 角色管理（roles:manage 写；roles:read 列出详情）
+	mux.HandleFunc("GET /api/v1/roles", a.authz(a.handleListRoles, "roles:read"))
+	mux.HandleFunc("POST /api/v1/roles", a.authz(a.handleCreateRole, "roles:manage"))
+	mux.HandleFunc("GET /api/v1/roles/{name}", a.authz(a.handleGetRole, "roles:read"))
+	mux.HandleFunc("PUT /api/v1/roles/{name}", a.authz(a.handleUpdateRole, "roles:manage"))
+	mux.HandleFunc("DELETE /api/v1/roles/{name}", a.authz(a.handleDeleteRole, "roles:manage"))
+	// 权限目录（roles:read）
+	mux.HandleFunc("GET /api/v1/permissions/catalog", a.authz(a.handlePermissionCatalog, "roles:read"))
 
 	mux.HandleFunc("GET /api/v1/notify", a.handleNotifyGet)
 	mux.HandleFunc("PUT /api/v1/notify", a.handleNotifyPut)

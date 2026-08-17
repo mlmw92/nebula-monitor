@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/server/agentdist"
+	"github.com/nebula/monitor/internal/server/auth"
+	servercrypto "github.com/nebula/monitor/internal/server/crypto"
 	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/api"
 	"github.com/nebula/monitor/internal/server/audit"
@@ -76,6 +78,27 @@ func main() {
 	if cfg.Auth.Enabled && cfg.Auth.Secret == "" {
 		cfg.Auth.Secret = genSecret()
 		slog.Warn("auth.secret 未配置，已自动生成随机密钥（重启后登录失效，建议写入配置固定）")
+	}
+
+	// 多用户角色权限数据存储：默认 <DataDir>/users.yaml。
+	usersFile := cfg.Auth.UsersFile
+	if usersFile == "" {
+		usersFile = filepath.Join(cfg.DataDir, "users.yaml")
+	}
+	var authStore *auth.Store
+	if cfg.Auth.Enabled {
+		st, err := auth.NewStore(usersFile)
+		if err != nil {
+			slog.Error("初始化用户权限存储失败", "err", err)
+			os.Exit(1)
+		}
+		// 首次启动将单管理员账号幂等迁移为超级管理员。
+		if cfg.Auth.MigrateSingleAdmin {
+			if _, merr := auth.MigrateSingleAdmin(st, cfg.Auth.Username, cfg.Auth.Password, servercrypto.IsHashed(cfg.Auth.Password)); merr != nil {
+				slog.Warn("单管理员迁移失败", "err", merr)
+			}
+		}
+		authStore = st
 	}
 
 	// 告警相关
@@ -180,7 +203,11 @@ func main() {
 
 	// API
 	auditStore := audit.New(filepath.Join(filepath.Dir(*cfgPath), "audit_events.json"))
-	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath, securityStore, defenseStore, auditStore)
+	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath, securityStore, defenseStore, auditStore, authStore)
+	// 供 AuthMiddleware 解析多用户授权身份（单例 Server 场景）。
+	if authStore != nil {
+		api.SetAuthStore(authStore)
+	}
 	rest.SetDashboardManager(dashMgr)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
