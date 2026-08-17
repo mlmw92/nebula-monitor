@@ -1,34 +1,31 @@
 <template>
   <div class="node-view">
-    <!-- 面包屑 + 状态 -->
-    <div class="breadcrumb" v-if="current">
+    <!-- 面包屑 + 主机切换 + 状态 -->
+    <div class="breadcrumb">
       <el-icon class="bc-home"><HomeFilled /></el-icon>
       <span class="bc-item bc-link" @click="$router.push('/hosts')">主机监控</span>
       <el-icon class="bc-sep"><ArrowRight /></el-icon>
-      <span class="bc-item bc-cur">{{ hostTitle(current) }}<em v-if="current.ip"> · {{ current.ip }}</em></span>
-      <span class="status-pill" :class="currentStatus">
-        <i class="dot"></i>{{ currentStatus === 'online' ? '在线' : '离线' }}
-      </span>
-    </div>
-
-    <!-- 顶部：主机选择 + 概要 -->
-    <div class="head-panel glass">
-      <div class="head-left">
-        <el-select
-          v-model="selected"
-          filterable
-          placeholder="选择主机"
-          style="width: 260px"
-          @change="onSelect"
-        >
-          <el-option
-            v-for="n in nodes"
-            :key="n.hostname"
-            :value="n.hostname"
-            :label="n.hostname + ' (' + (n.group || 'default') + ')'"
-          />
-        </el-select>
-      </div>
+      <el-select
+        v-model="selected"
+        filterable
+        size="small"
+        placeholder="选择主机"
+        class="bc-host-select"
+        @change="onSelect"
+      >
+        <el-option
+          v-for="n in nodes"
+          :key="n.hostname"
+          :value="n.hostname"
+          :label="n.hostname + ' (' + (n.group || 'default') + ')'"
+        />
+      </el-select>
+      <template v-if="current">
+        <span class="bc-ip mono">{{ current.ip }}</span>
+        <span class="status-pill" :class="currentStatus">
+          <i class="dot"></i>{{ currentStatus === 'online' ? '在线' : '离线' }}
+        </span>
+      </template>
     </div>
 
     <el-tabs v-model="activeTab" type="border-card" class="node-tabs">
@@ -931,15 +928,6 @@ onUnmounted(() => {
 
 <style scoped>
 .node-view { display: flex; flex-direction: column; gap: 16px; }
-.head-panel {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 12px 16px;
-}
-.head-left { display: flex; align-items: center; gap: 12px; }
 
 /* Tabs */
 .node-tabs { border-radius: 8px; overflow: hidden; }
@@ -992,14 +980,15 @@ onUnmounted(() => {
 
 /* 环形图 */
 /* 面包屑 */
-.breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); padding: 0 2px; }
+.breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; color: var(--text-dim); padding: 0 2px; }
+.breadcrumb .bc-host-select { width: 220px; }
+.breadcrumb .bc-ip { margin-left: 2px; color: var(--text-muted); font-size: 12px; }
 .breadcrumb .bc-home { color: var(--el-color-primary); }
 .breadcrumb .bc-sep { font-size: 12px; opacity: 0.6; }
 .breadcrumb .bc-item { color: var(--text-dim); }
 .breadcrumb .bc-link { cursor: pointer; transition: color 0.15s; }
 .breadcrumb .bc-link:hover { color: var(--el-color-primary); }
-.breadcrumb .bc-cur { color: var(--text-main); font-weight: 600; }
-.breadcrumb .bc-cur em { font-style: normal; color: var(--text-dim); font-weight: 400; }
+
 .status-pill { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
 .status-pill.online { color: var(--accent); background: var(--accent-dim); }
