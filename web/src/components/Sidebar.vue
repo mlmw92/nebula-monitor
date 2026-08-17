@@ -226,7 +226,7 @@ onMounted(() => {
   overflow: hidden;
 }
 .brand-text h1 {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
   letter-spacing: 0.03em;
   white-space: nowrap;
@@ -234,7 +234,7 @@ onMounted(() => {
   text-overflow: ellipsis;
 }
 .brand-text p {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
 }
 .nav {
@@ -249,7 +249,7 @@ onMounted(() => {
   gap: 12px;
   padding: 10px 12px;
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 15px;
   border-radius: 8px;
   text-decoration: none;
   transition: all 0.15s;
@@ -290,7 +290,7 @@ onMounted(() => {
   gap: 12px;
   padding: 10px 12px;
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 15px;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.15s;
@@ -319,7 +319,7 @@ onMounted(() => {
   gap: 10px;
   padding: 8px 12px;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 14px;
   border-radius: 8px;
   text-decoration: none;
   transition: all 0.15s;
