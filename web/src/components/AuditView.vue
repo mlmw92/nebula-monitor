@@ -58,7 +58,15 @@
             <span v-else class="muted">{{ row.detail || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="remoteIP" label="来源 IP" width="150" />
+        <el-table-column label="来源" min-width="200">
+          <template #default="{ row }">
+            <div class="source-cell">
+              <span class="source-ip">{{ row.remoteIP }}</span>
+              <span v-if="row.sourceLocation" class="source-loc">{{ row.sourceLocation }}</span>
+              <span v-else class="source-loc source-loc--unknown">归属地未知</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态码" width="90" />
         <el-table-column label="结果" width="90">
           <template #default="{ row }">
@@ -166,5 +174,9 @@ onMounted(loadEvents)
 .change-summary span:nth-child(2) { color: #67c23a; }
 .change-summary span:nth-child(3) { color: #f56c6c; }
 .muted { color: var(--text-muted); font-size: 11px; }
+.source-cell { display: flex; flex-direction: column; gap: 2px; line-height: 1.3; }
+.source-ip { font-family: var(--font-mono, monospace); font-size: 12px; }
+.source-loc { font-size: 11px; color: var(--text-muted); }
+.source-loc--unknown { font-style: italic; opacity: 0.7; }
 @media (max-width: 720px) { .panel-title-row { align-items: flex-start; flex-direction: column; } .toolbar { width: 100%; } }
 </style>

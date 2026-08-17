@@ -24,9 +24,10 @@ type Event struct {
 	User      string    `json:"user"`
 	Method    string    `json:"method"`
 	Path      string    `json:"path"`
-	Status    int       `json:"status"`
-	RemoteIP  string    `json:"remoteIP"`
-	Succeeded bool      `json:"succeeded"`
+	Status         int       `json:"status"`
+	RemoteIP       string    `json:"remoteIP"`
+	SourceLocation string    `json:"sourceLocation,omitempty"` // 来源 IP 属地（国家/省份/城市），由 Server 端经 ip2region 补全
+	Succeeded      bool      `json:"succeeded"`
 	Category  string    `json:"category,omitempty"`
 	Action    string    `json:"action,omitempty"`
 	Detail    string    `json:"detail,omitempty"`
