@@ -94,13 +94,13 @@ type API struct {
 	acks           *alert.AckStore
 	inhibit        *alert.InhibitStore
 	grouping       *alert.GroupingStore
-	ngx            *nginxaccess.Window // Nginx access log 地理聚合窗口（可空）
-	uiMgr          *uicfg.Manager      // 系统 UI 品牌配置（系统名称/Logo）
-	serverProvince string              // server 自动探测到的所在地（省级行政区）
-	configPath     string              // server.yaml 路径，用于改密码时持久化
-	dashMgr        *dashboard.Manager  // 自定义仪表盘配置（可空）
-	security       *security.Store     // 安全事件/基线存储（可空，关闭安全能力）
-	audit          *audit.Store        // 管理操作审计存储（可空）
+	ngx            *nginxaccess.Window    // Nginx access log 地理聚合窗口（可空）
+	uiMgr          *uicfg.Manager         // 系统 UI 品牌配置（系统名称/Logo）
+	serverProvince string                 // server 自动探测到的所在地（省级行政区）
+	configPath     string                 // server.yaml 路径，用于改密码时持久化
+	dashMgr        *dashboard.Manager     // 自定义仪表盘配置（可空）
+	security       *security.Store        // 安全事件/基线存储（可空，关闭安全能力）
+	audit          *audit.Store           // 管理操作审计存储（可空）
 	defenseStore   *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空，关闭防护能力）
 }
 
@@ -722,12 +722,19 @@ func (a *API) handleQueryLatest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "node and metric required", http.StatusBadRequest)
 		return
 	}
-	p, err := a.store.QueryLatest(node, name, parseLabelQuery(q))
+	series, err := a.store.QueryInstant(node, name, parseLabelQuery(q))
 	if err != nil {
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, 200, map[string]interface{}{"point": p})
+	var point *model.Point
+	if len(series) > 0 && len(series[0].Points) > 0 {
+		p := series[0].Points[len(series[0].Points)-1]
+		point = &p
+	}
+	// 保留 point 兼容单序列调用，同时返回带 labels 的 series，供端口状态
+	// 等多序列指标一次性读取所有标签维度。
+	writeJSON(w, 200, map[string]interface{}{"point": point, "series": series})
 }
 
 func (a *API) handleProcesses(w http.ResponseWriter, r *http.Request) {
@@ -736,9 +743,9 @@ func (a *API) handleProcesses(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "node required", http.StatusBadRequest)
 		return
 	}
-	// 优先从进程快照缓存获取完整字段（内存/IO/状态/fd 等）
-	procs := receiver.ProcessCache.Get(node)
-	if len(procs) > 0 {
+	// 优先从进程快照缓存获取完整字段（内存/IO/状态/fd 等）。
+	// 缓存命中但为空时也应返回空数组，不应回退到旧时序数据。
+	if procs, ok := receiver.ProcessCache.Get(node); ok {
 		writeJSON(w, 200, map[string]interface{}{"processes": procs})
 		return
 	}

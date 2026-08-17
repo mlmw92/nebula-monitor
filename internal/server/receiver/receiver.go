@@ -26,8 +26,8 @@ func itoa(v int) string { return strconv.Itoa(v) }
 // processCache 节点进程快照缓存（内存），供 API 实时查询。
 // 进程列表是高基数快照数据，不适合写入时序库，采用最新值覆盖策略。
 type processCache struct {
-	mu       sync.RWMutex
-	entries  map[string]processEntry // key: node name
+	mu      sync.RWMutex
+	entries map[string]processEntry // key: node name
 }
 
 type processEntry struct {
@@ -44,17 +44,19 @@ var ProcessCache = &processCache{
 func (c *processCache) Set(node string, procs []model.ProcessStat) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[node] = processEntry{Processes: procs, UpdatedAt: time.Now()}
+	copied := make([]model.ProcessStat, len(procs))
+	copy(copied, procs)
+	c.entries[node] = processEntry{Processes: copied, UpdatedAt: time.Now()}
 }
 
-// Get 获取指定节点的最新进程快照。返回空切片表示无数据。
-func (c *processCache) Get(node string) []model.ProcessStat {
+// Get 获取指定节点的最新进程快照。第二个返回值区分缓存未命中与显式空快照。
+func (c *processCache) Get(node string) ([]model.ProcessStat, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if e, ok := c.entries[node]; ok {
-		return e.Processes
+		return e.Processes, true
 	}
-	return nil
+	return nil, false
 }
 
 // snapshotCache 通用快照缓存（泛型替代，用于监听端口/防火墙规则等高基数数据）。
@@ -99,9 +101,9 @@ type Receiver struct {
 	storage storage.Storage
 	nodeMgr *node.Manager
 	auth    config.AgentAuthConfig
-	ngx     *nginxaccess.Window // Nginx access log 地理聚合窗口（可空）
-	sec     *security.Store     // 安全事件/基线存储（可空，传 nil 关闭安全能力）
-	alerts  *alert.Engine       // 告警引擎（安全事件注入告警中心，可空）
+	ngx     *nginxaccess.Window    // Nginx access log 地理聚合窗口（可空）
+	sec     *security.Store        // 安全事件/基线存储（可空，传 nil 关闭安全能力）
+	alerts  *alert.Engine          // 告警引擎（安全事件注入告警中心，可空）
 	defense *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空）
 }
 
@@ -166,16 +168,17 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 			model.Metric{Node: payload.Node, Name: "proc_mem", Labels: labels, Value: p.Mem, Timestamp: payload.ReportAt},
 		)
 	}
-	// 更新进程快照缓存（供 API 实时查询完整进程列表）
-	if len(payload.Processes) > 0 {
+	// 更新进程快照缓存（供 API 实时查询完整进程列表）。新 Agent 发送 [] 时也要
+	// 清空缓存；旧 Agent 未携带字段时 JSON 解码结果为 nil，保留时序回退。
+	if payload.Processes != nil {
 		ProcessCache.Set(payload.Node, payload.Processes)
 	}
-	// 更新监听端口快照缓存
-	if len(payload.Listeners) > 0 {
+	// 更新监听端口快照缓存；显式空数组表示主机当前没有可见监听端口。
+	if payload.Listeners != nil {
 		ListenerCache.Set(payload.Node, payload.Listeners)
 	}
-	// 更新防火墙规则快照缓存
-	if len(payload.FirewallRules) > 0 {
+	// 更新防火墙规则快照缓存；显式空数组表示未发现规则/后端。
+	if payload.FirewallRules != nil {
 		FirewallCache.Set(payload.Node, payload.FirewallRules)
 	}
 	// Redis 实例元信息转为 redis_instance_up 指标写入 VM，供前端聚合查询

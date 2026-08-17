@@ -8,9 +8,9 @@ const (
 	// ModeCollect 普通采集节点模式。
 	ModeCollect = "collect"
 	// ModeEdge 网闸代理-边缘端模式。
-	ModeEdge    = "edge"
+	ModeEdge = "edge"
 	// ModeHub 网闸代理-中心端模式。
-	ModeHub     = "hub"
+	ModeHub = "hub"
 )
 
 // Metric 是单个指标采样点，贯穿 Agent 采集→上报→存储→查询→前端全链路。
@@ -38,82 +38,82 @@ type Series struct {
 // ProcessStat 表示单个进程的资源占用快照（用于进程列表展示）。
 // 字段覆盖 CPU/内存/IO/状态/文件描述符等，支持完整的进程监控 Tab。
 type ProcessStat struct {
-	PID        int32   `json:"pid"`         // 进程 PID
-	Name       string  `json:"name"`        // 进程名/命令
-	CPU        float64 `json:"cpu"`         // CPU 占用百分比
-	Mem        float64 `json:"mem"`         // 内存占用百分比
-	MemBytes   uint64  `json:"memBytes"`    // 内存占用（字节）
-	Status     string  `json:"status"`      // 进程状态：Running / Sleep / Stop / Zombie 等
-	NumThreads int32   `json:"numThreads"`  // 线程数
-	Fds        uint64  `json:"fds"`         // 打开文件描述符数
-	ReadBytes  uint64  `json:"readBytes"`   // 磁盘读取字节
-	WriteBytes uint64  `json:"writeBytes"`  // 磁盘写入字节
-	NetRead    uint64  `json:"netRead"`     // 网络接收字节
-	NetWrite   uint64  `json:"netWrite"`    // 网络发送字节
-	Cmdline    string  `json:"cmdline"`     // 启动命令（截断）
-	Username   string  `json:"username"`    // 运行用户
-	CreateTime int64   `json:"createTime"`  // 进程启动时间戳(秒)
+	PID        int32   `json:"pid"`        // 进程 PID
+	Name       string  `json:"name"`       // 进程名/命令
+	CPU        float64 `json:"cpu"`        // CPU 占用百分比
+	Mem        float64 `json:"mem"`        // 内存占用百分比
+	MemBytes   uint64  `json:"memBytes"`   // 内存占用（字节）
+	Status     string  `json:"status"`     // 进程状态：Running / Sleep / Stop / Zombie 等
+	NumThreads int32   `json:"numThreads"` // 线程数
+	Fds        uint64  `json:"fds"`        // 打开文件描述符数
+	ReadBytes  uint64  `json:"readBytes"`  // 磁盘读取字节
+	WriteBytes uint64  `json:"writeBytes"` // 磁盘写入字节
+	NetRead    uint64  `json:"netRead"`    // 网络接收字节
+	NetWrite   uint64  `json:"netWrite"`   // 网络发送字节
+	Cmdline    string  `json:"cmdline"`    // 启动命令（截断）
+	Username   string  `json:"username"`   // 运行用户
+	CreateTime int64   `json:"createTime"` // 进程启动时间戳(秒)
 }
 
 // ListenerStat 表示一个监听端口（TCP/UDP），用于端口监控 Tab。
 // 类似 ss -tlnp / netstat -tlnp 的输出。
 type ListenerStat struct {
-	Addr      string `json:"addr"`      // 监听地址（如 0.0.0.0、127.0.0.1、::、:1 等）
-	Port      uint32 `json:"port"`      // 端口号
-	Protocol  string `json:"protocol"`  // 协议：tcp / tcp6 / udp / udp6
-	State     string `json:"state"`     // 状态：LISTEN / ESTABLISHED 等（通常为 LISTEN）
-	PID       int32  `json:"pid"`       // 占用端口的进程 PID（可能为 0）
-	Process   string `json:"process"`   // 占用端口的进程名（如 sshd, master, local）
-	ExePath   string `json:"exePath"`   // 进程可执行路径（如 /usr/sbin/sshd）
-	Family    string `json:"family"`    // 地址族：ipv4 / ipv6
+	Addr     string `json:"addr"`     // 监听地址（如 0.0.0.0、127.0.0.1、::、:1 等）
+	Port     uint32 `json:"port"`     // 端口号
+	Protocol string `json:"protocol"` // 协议：tcp / tcp6 / udp / udp6
+	State    string `json:"state"`    // 状态：LISTEN / ESTABLISHED 等（通常为 LISTEN）
+	PID      int32  `json:"pid"`      // 占用端口的进程 PID（可能为 0）
+	Process  string `json:"process"`  // 占用端口的进程名（如 sshd, master, local）
+	ExePath  string `json:"exePath"`  // 进程可执行路径（如 /usr/sbin/sshd）
+	Family   string `json:"family"`   // 地址族：ipv4 / ipv6
 }
 
 // FirewallRule 表示一条防火墙规则，用于防火墙监控 Tab。
 // 支持多后端：iptables / firewalld / nftables / ufw。
 type FirewallRule struct {
-	Backend   string `json:"backend"`    // 防火墙后端：iptables / firewalld / nftables / ufw
-	Chain     string `json:"chain"`      // 链名（INPUT/FORWARD/OUTPUT/public/drop 等）
-	RuleNum   int    `json:"ruleNum"`    // 规则序号
-	Action    string `json:"action"`     // 动作：ACCEPT / DROP / REJECT / LOG / RETURN
-	Protocol  string `json:"protocol"`   // 协议：tcp / udp / icmp / all
-	SrcAddr   string `json:"srcAddr"`    // 源地址（0.0.0.0/0 或具体 IP/CIDR）
-	DstPort   string `json:"dstPort"`    // 目标端口或范围（22, 80, 443, 1:65535 等）
-	Options   string `json:"options"`    // 其他选项（完整规则文本，用于展示复杂规则）
+	Backend  string `json:"backend"`  // 防火墙后端：iptables / firewalld / nftables / ufw
+	Chain    string `json:"chain"`    // 链名（INPUT/FORWARD/OUTPUT/public/drop 等）
+	RuleNum  int    `json:"ruleNum"`  // 规则序号
+	Action   string `json:"action"`   // 动作：ACCEPT / DROP / REJECT / LOG / RETURN
+	Protocol string `json:"protocol"` // 协议：tcp / udp / icmp / all
+	SrcAddr  string `json:"srcAddr"`  // 源地址（0.0.0.0/0 或具体 IP/CIDR）
+	DstPort  string `json:"dstPort"`  // 目标端口或范围（22, 80, 443, 1:65535 等）
+	Options  string `json:"options"`  // 其他选项（完整规则文本，用于展示复杂规则）
 }
 
 // ReportPayload 是 Agent 上报的请求体。
 type ReportPayload struct {
-	Node              string             `json:"node"`                        // 主机名
-	Mode              string             `json:"mode,omitempty"`              // 运行模式：collect | edge | hub
-	IP                string             `json:"ip"`                          // 主机 IP
-	OS                string             `json:"os"`                          // 操作系统
-	Arch              string             `json:"arch"`                        // CPU 架构
-	Group             string             `json:"group"`                       // 节点分组
-	Secret            string             `json:"secret,omitempty"`            // 接入授权密钥（启用 agentAuth 时校验）
-	Labels            map[string]string  `json:"labels,omitempty"`            // 自定义标签
-	Version           string             `json:"version,omitempty"`           // Agent 版本号
-	BinSHA256         string             `json:"binSHA256,omitempty"`         // Agent 二进制自身 SHA256（升级成功判定依据，与版本号解耦）
-	HostInfo          HostInfo           `json:"hostInfo,omitempty"`          // 主机系统与硬件信息
-	Metrics           []Metric           `json:"metrics"`                     // 指标列表
-	Processes         []ProcessStat      `json:"processes,omitempty"`         // 资源占用 Top 进程
-	RedisInstances    []RedisInstance    `json:"redisInstances,omitempty"`    // Redis 实例元信息（不含密码）
-	MySQLInstances    []MySQLInstance    `json:"mysqlInstances,omitempty"`    // MySQL 实例元信息
-	PostgresInstances []PostgresInstance `json:"postgresInstances,omitempty"` // PostgreSQL 实例元信息
-	NginxInstances    []NginxInstance    `json:"nginxInstances,omitempty"`    // Nginx 实例元信息
-	KafkaInstances    []KafkaInstance    `json:"kafkaInstances,omitempty"`    // Kafka 实例元信息
-	DockerInstances   []DockerInstance   `json:"dockerInstances,omitempty"`   // Docker 容器元信息
-	RocketMQInstances []RocketMQInstance `json:"rocketmqInstances,omitempty"` // RocketMQ 实例元信息
-	K8sInstances      []K8sInstance      `json:"k8sInstances,omitempty"`      // Kubernetes 集群元信息
-	MongoDBInstances  []MongoDBInstance  `json:"mongoInstances,omitempty"`    // MongoDB 实例元信息
-	FastDFSInstances  []FastDFSInstance  `json:"fastdfsInstances,omitempty"`  // FastDFS 实例元信息
-	NginxAccessStats  []NginxAccessStat  `json:"nginxAccessStats,omitempty"`  // Nginx access log 聚合统计
-	SecurityEvents    []SecurityEvent    `json:"securityEvents,omitempty"`    // 安全事件（结构化，非时序）
-	SecurityBaseline  *SecurityBaseline  `json:"securityBaseline,omitempty"`  // 安全基线检查结果
-	Capabilities      *ClientCapability  `json:"capabilities,omitempty"`      // Agent 能力声明（旧 Agent 不报此字段，前端据此判断兼容）
-	DefenseStatus     *DefenseStatus     `json:"defenseStatus,omitempty"`     // 入侵防护当前状态（由 Agent 定期采集上报）
-	DefenseResult     *DefenseCommandResult `json:"defenseResult,omitempty"`  // 防护指令执行结果回执
-	Listeners         []ListenerStat        `json:"listeners,omitempty"`         // 监听端口列表（TCP/UDP）
-	FirewallRules     []FirewallRule        `json:"firewallRules,omitempty"`     // 防火墙规则列表
+	Node              string                `json:"node"`                        // 主机名
+	Mode              string                `json:"mode,omitempty"`              // 运行模式：collect | edge | hub
+	IP                string                `json:"ip"`                          // 主机 IP
+	OS                string                `json:"os"`                          // 操作系统
+	Arch              string                `json:"arch"`                        // CPU 架构
+	Group             string                `json:"group"`                       // 节点分组
+	Secret            string                `json:"secret,omitempty"`            // 接入授权密钥（启用 agentAuth 时校验）
+	Labels            map[string]string     `json:"labels,omitempty"`            // 自定义标签
+	Version           string                `json:"version,omitempty"`           // Agent 版本号
+	BinSHA256         string                `json:"binSHA256,omitempty"`         // Agent 二进制自身 SHA256（升级成功判定依据，与版本号解耦）
+	HostInfo          HostInfo              `json:"hostInfo,omitempty"`          // 主机系统与硬件信息
+	Metrics           []Metric              `json:"metrics"`                     // 指标列表
+	Processes         []ProcessStat         `json:"processes"`                   // 资源占用 Top 进程；null 表示旧 Agent/未启用，[] 表示新 Agent 采集为空
+	RedisInstances    []RedisInstance       `json:"redisInstances,omitempty"`    // Redis 实例元信息（不含密码）
+	MySQLInstances    []MySQLInstance       `json:"mysqlInstances,omitempty"`    // MySQL 实例元信息
+	PostgresInstances []PostgresInstance    `json:"postgresInstances,omitempty"` // PostgreSQL 实例元信息
+	NginxInstances    []NginxInstance       `json:"nginxInstances,omitempty"`    // Nginx 实例元信息
+	KafkaInstances    []KafkaInstance       `json:"kafkaInstances,omitempty"`    // Kafka 实例元信息
+	DockerInstances   []DockerInstance      `json:"dockerInstances,omitempty"`   // Docker 容器元信息
+	RocketMQInstances []RocketMQInstance    `json:"rocketmqInstances,omitempty"` // RocketMQ 实例元信息
+	K8sInstances      []K8sInstance         `json:"k8sInstances,omitempty"`      // Kubernetes 集群元信息
+	MongoDBInstances  []MongoDBInstance     `json:"mongoInstances,omitempty"`    // MongoDB 实例元信息
+	FastDFSInstances  []FastDFSInstance     `json:"fastdfsInstances,omitempty"`  // FastDFS 实例元信息
+	NginxAccessStats  []NginxAccessStat     `json:"nginxAccessStats,omitempty"`  // Nginx access log 聚合统计
+	SecurityEvents    []SecurityEvent       `json:"securityEvents,omitempty"`    // 安全事件（结构化，非时序）
+	SecurityBaseline  *SecurityBaseline     `json:"securityBaseline,omitempty"`  // 安全基线检查结果
+	Capabilities      *ClientCapability     `json:"capabilities,omitempty"`      // Agent 能力声明（旧 Agent 不报此字段，前端据此判断兼容）
+	DefenseStatus     *DefenseStatus        `json:"defenseStatus,omitempty"`     // 入侵防护当前状态（由 Agent 定期采集上报）
+	DefenseResult     *DefenseCommandResult `json:"defenseResult,omitempty"`     // 防护指令执行结果回执
+	Listeners         []ListenerStat        `json:"listeners"`                   // 监听端口列表（TCP/UDP）；null 表示旧 Agent，[] 表示已采集但为空
+	FirewallRules     []FirewallRule        `json:"firewallRules"`               // 防火墙规则列表；null 表示旧 Agent，[] 表示已采集但为空
 	ReportAt          int64                 `json:"reportAt"`                    // 上报时间（毫秒）
 }
 
@@ -494,15 +494,15 @@ const (
 // 告警规则类型。空字符串与 "threshold" 等价，表示基于指标阈值的传统规则（向后兼容旧数据）。
 const (
 	// RuleTypeThreshold 阈值规则（默认）；空字符串与其等价，向后兼容旧数据。
-	RuleTypeThreshold     string = ""               // 阈值规则（默认）
+	RuleTypeThreshold string = "" // 阈值规则（默认）
 	// RuleTypeNodeOffline 主机离线规则。
-	RuleTypeNodeOffline   string = "node_offline"   // 主机离线
+	RuleTypeNodeOffline string = "node_offline" // 主机离线
 	// RuleTypeServiceDown 中间件/服务离线规则。
-	RuleTypeServiceDown   string = "service_down"   // 中间件/服务离线
+	RuleTypeServiceDown string = "service_down" // 中间件/服务离线
 	// RuleTypeRoleChange 数据库主从切换规则。
-	RuleTypeRoleChange    string = "role_change"    // 数据库主从切换
+	RuleTypeRoleChange string = "role_change" // 数据库主从切换
 	// RuleTypeClusterFault 集群状态损坏规则。
-	RuleTypeClusterFault  string = "cluster_fault"  // 集群状态损坏
+	RuleTypeClusterFault string = "cluster_fault" // 集群状态损坏
 	// RuleTypeSecurityEvent 安全事件规则。
 	RuleTypeSecurityEvent string = "security_event" // 安全事件
 )

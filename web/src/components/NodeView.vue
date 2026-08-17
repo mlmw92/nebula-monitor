@@ -221,7 +221,7 @@
           <span class="panel-title" style="margin: 0">进程监控</span>
           <div class="process-tools">
             <el-input v-model="procFullSearch" placeholder="搜索进程名 / PID / 命令" clearable size="small" :prefix-icon="Search" class="proc-full-search" />
-            <el-button size="small" @click="loadProcessFull(selected.value)" :loading="loadingProcessFull">
+            <el-button size="small" @click="loadProcessFull(selected)" :loading="loadingProcessFull">
               <el-icon><Refresh /></el-icon> 刷新
             </el-button>
           </div>
@@ -267,7 +267,7 @@
           <span class="panel-title" style="margin: 0">端口监控</span>
           <div class="process-tools">
             <el-input v-model="portSearch" placeholder="搜索地址 / 端口 / 进程" clearable size="small" :prefix-icon="Search" class="proc-full-search" />
-            <el-button size="small" @click="loadListeners(selected.value)" :loading="loadingListeners">
+            <el-button size="small" @click="loadListeners(selected)" :loading="loadingListeners">
               <el-icon><Refresh /></el-icon> 刷新
             </el-button>
           </div>
@@ -300,7 +300,7 @@
           <span class="panel-title" style="margin: 0">防火墙规则</span>
           <div class="process-tools">
             <el-input v-model="fwSearch" placeholder="搜索协议 / 端口 / 动作 / 链" clearable size="small" :prefix-icon="Search" class="proc-full-search" />
-            <el-button size="small" @click="loadFirewallRules(selected.value)" :loading="loadingFirewall">
+            <el-button size="small" @click="loadFirewallRules(selected)" :loading="loadingFirewall">
               <el-icon><Refresh /></el-icon> 刷新
             </el-button>
           </div>
@@ -639,9 +639,7 @@ async function loadProcessFull(hostname) {
   if (!hostname) return
   loadingProcessFull.value = true
   try {
-    const res = await fetch(`/api/v1/query/processes?hostname=${encodeURIComponent(hostname)}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await http.get('/api/v1/processes?hostname=' + encodeURIComponent(hostname))
     processFullList.value = Array.isArray(data.processes) ? data.processes : []
   } catch (err) {
     console.error('加载进程列表失败:', err)
@@ -689,9 +687,7 @@ async function loadListeners(hostname) {
   if (!hostname) return
   loadingListeners.value = true
   try {
-    const res = await fetch(`/api/v1/query/listeners?hostname=${encodeURIComponent(hostname)}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await http.get('/api/v1/query/listeners?hostname=' + encodeURIComponent(hostname))
     listenerList.value = Array.isArray(data.listeners) ? data.listeners : []
   } catch (err) {
     console.error('加载监听端口失败:', err)
@@ -725,9 +721,7 @@ async function loadFirewallRules(hostname) {
   if (!hostname) return
   loadingFirewall.value = true
   try {
-    const res = await fetch(`/api/v1/query/firewall?hostname=${encodeURIComponent(hostname)}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await http.get('/api/v1/query/firewall?hostname=' + encodeURIComponent(hostname))
     firewallRuleList.value = Array.isArray(data.rules) ? data.rules : []
   } catch (err) {
     console.error('加载防火墙规则失败:', err)
@@ -802,6 +796,13 @@ async function loadPortStatuses(name) {
     if (latData.series) for (const s of latData.series) {
       const port = s.labels?.port
       if (port && s.points?.length > 0) latMap[port] = s.points[s.points.length - 1].value
+    }
+    // 兼容仅返回单点的旧 Server（Point 不携带 labels，通常无法聚合端口）。
+    if (!Object.keys(upMap).length && upData.point?.labels?.port) {
+      upMap[upData.point.labels.port] = upData.point.value > 0
+    }
+    if (!Object.keys(latMap).length && latData.point?.labels?.port) {
+      latMap[latData.point.labels.port] = latData.point.value
     }
     portStatuses.value = Object.keys(upMap).map(port => ({
       port,

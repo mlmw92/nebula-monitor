@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -18,11 +19,12 @@ const processMaxCount = 500
 func collectProcessTop() ([]model.ProcessStat, int) {
 	processes, err := process.Processes()
 	if err != nil {
-		return nil, 0
+		slog.Warn("采集进程列表失败", "err", err)
+		return []model.ProcessStat{}, 0
 	}
 
 	total := len(processes)
-	var stats []model.ProcessStat
+	stats := make([]model.ProcessStat, 0, len(processes))
 
 	for _, p := range processes {
 		pid := p.Pid

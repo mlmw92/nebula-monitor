@@ -28,6 +28,9 @@ func collectFirewallRules() []model.FirewallRule {
 		rules = append(rules, r...)
 	}
 
+	if rules == nil {
+		return []model.FirewallRule{}
+	}
 	return rules
 }
 
@@ -71,12 +74,12 @@ func collectFirewalld() []model.FirewallRule {
 						continue
 					}
 					rules = append(rules, model.FirewallRule{
-						Backend:  "firewalld",
-						Chain:    zone,
-						RuleNum:  i,
-						Action:   "ACCEPT",
-						DstPort:  svc,
-						Options:  line,
+						Backend: "firewalld",
+						Chain:   zone,
+						RuleNum: i,
+						Action:  "ACCEPT",
+						DstPort: svc,
+						Options: line,
 					})
 				}
 			} else if strings.HasPrefix(line, "ports:") {
@@ -87,12 +90,12 @@ func collectFirewalld() []model.FirewallRule {
 						continue
 					}
 					rules = append(rules, model.FirewallRule{
-						Backend:  "firewalld",
-						Chain:    zone,
-						RuleNum:  i,
-						Action:   "ACCEPT",
-						DstPort:  p,
-						Options:  line,
+						Backend: "firewalld",
+						Chain:   zone,
+						RuleNum: i,
+						Action:  "ACCEPT",
+						DstPort: p,
+						Options: line,
 					})
 				}
 			} else if strings.HasPrefix(line, "rich rules:") {
@@ -305,7 +308,7 @@ func parseUfwOutput(output string) []model.FirewallRule {
 		}
 		// [ 1] 22/tcp ALLOW IN Anywhere
 		portProto := parts[1] // 22/tcp
-		action := parts[2]   // ALLOW/DENY
+		action := parts[2]    // ALLOW/DENY
 		direction := parts[3] // IN/OUT
 		srcAddr := ""
 		if len(parts) > 4 {
@@ -321,13 +324,13 @@ func parseUfwOutput(output string) []model.FirewallRule {
 
 		rules = append(rules, model.FirewallRule{
 			Backend:  "ufw",
-			Chain:   direction,
-			RuleNum: i,
-			Action:  action,
+			Chain:    direction,
+			RuleNum:  i,
+			Action:   action,
 			Protocol: proto,
-			SrcAddr: srcAddr,
-			DstPort: dport,
-			Options: line,
+			SrcAddr:  srcAddr,
+			DstPort:  dport,
+			Options:  line,
 		})
 	}
 	return rules
