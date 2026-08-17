@@ -9,7 +9,7 @@
             <circle cx="32" cy="32" r="26" fill="none" :stroke="scoreColor" stroke-width="6"
               stroke-linecap="round" :stroke-dasharray="scoreDash" transform="rotate(-90 32 32)" />
           </svg>
-          <div class="mh-score-val">{{ healthScore }}<span>分</span></div>
+          <div class="mh-score-val">{{ healthScore }}</div>
         </div>
           <div class="mh-score-label">中间件健康评分</div>
       </div>
@@ -538,11 +538,6 @@ onUnmounted(() => {
   font-weight: 700;
   font-family: var(--mono);
   color: var(--text);
-}
-.mh-score-val span {
-  font-size: 10px;
-  margin-left: 2px;
-  color: var(--text-dim);
 }
 .mh-score-label {
   font-size: 11px;

@@ -9,7 +9,6 @@
         </svg>
         <div class="sh-hex-center">
           <span class="sh-num" :style="{ color: hexColor }">{{ score }}</span>
-          <span class="sh-unit">分</span>
           <span class="sh-lv">{{ levelLabel }}</span>
         </div>
       </div>
@@ -119,10 +118,6 @@ const bars = computed(() => [
   font-weight: 800;
   font-family: var(--mono);
   line-height: 1;
-}
-.sh-unit {
-  font-size: 11px;
-  color: var(--text-dim);
 }
 .sh-lv {
   font-size: 11px;
