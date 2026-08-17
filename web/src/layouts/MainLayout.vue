@@ -330,8 +330,6 @@ onUnmounted(() => {
 .content {
   flex: 1;
   padding: 18px 20px;
-  max-width: 1700px;
   width: 100%;
-  margin: 0 auto;
 }
 </style>
