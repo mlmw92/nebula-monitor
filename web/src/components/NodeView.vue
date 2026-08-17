@@ -29,16 +29,6 @@
           />
         </el-select>
       </div>
-      <div class="head-info" v-if="current">
-        <span class="copyable mono"><Connection /> {{ current.ip || '-' }}
-          <el-icon class="copy-btn" title="复制 IP" @click="copyText(current.ip)"><DocumentCopy /></el-icon>
-        </span>
-        <span><OsIcon :os="current.os" /> {{ current.os || '-' }}</span>
-        <span v-if="current.version" class="mono"><el-icon><Cpu /></el-icon> Agent v{{ current.version }}</span>
-        <span class="refresh-switch">
-          <el-switch v-model="autoRefresh" inline-prompt active-text="刷新" inactive-text="暂停" @change="onAutoRefresh" />
-        </span>
-      </div>
     </div>
 
     <el-tabs v-model="activeTab" type="border-card" class="node-tabs">
@@ -279,8 +269,7 @@
 
 <script setup>
 import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { Connection, Cpu, HomeFilled, ArrowRight, DocumentCopy, Search, Refresh } from '@element-plus/icons-vue'
-import OsIcon from './OsIcon.vue'
+import { HomeFilled, ArrowRight, DocumentCopy, Search, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import http from '../api/http'
@@ -846,20 +835,6 @@ function onPanelRangeChange(key) {
   if (activeTab.value === 'monitor') loadMonitor(selected.value, key)
 }
 
-// 自动刷新开关：开启则重连 WS + 轮询，关闭则停止
-function onAutoRefresh(val) {
-  if (val) {
-    if (selected.value) connectWS(selected.value)
-    nodeTimer = setInterval(loadNodes, 15000)
-    alertTimer = setInterval(() => { if (selected.value) loadAlerts(selected.value) }, 30000)
-  } else {
-    if (socket) { try { socket.close() } catch (e) {} socket = null }
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
-    if (nodeTimer) { clearInterval(nodeTimer); nodeTimer = null }
-    if (alertTimer) { clearInterval(alertTimer); alertTimer = null }
-  }
-}
-
 watch(activeTab, (t) => {
   if (t === 'monitor') {
     nextTick(() => {
@@ -965,8 +940,6 @@ onUnmounted(() => {
   padding: 12px 16px;
 }
 .head-left { display: flex; align-items: center; gap: 12px; }
-.head-info { display: flex; gap: 18px; font-size: 12px; color: var(--text-dim); }
-.head-info span { display: flex; align-items: center; gap: 4px; }
 
 /* Tabs */
 .node-tabs { border-radius: 8px; overflow: hidden; }
@@ -1038,7 +1011,6 @@ onUnmounted(() => {
 .copy-btn { cursor: pointer; opacity: 0.45; transition: opacity 0.15s, color 0.15s; }
 .copy-btn:hover { opacity: 1; color: var(--el-color-primary); }
 .with-copy { display: flex; align-items: center; gap: 6px; }
-.refresh-switch { margin-left: auto; display: inline-flex; align-items: center; }
 
 .gauge-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .gauge-card {
