@@ -29,6 +29,13 @@ func (a *API) RegisterDashboard(mux *http.ServeMux) {
 		}
 		fp := filepath.Join(webDir, filepath.Clean(r.URL.Path))
 		if _, err := os.Stat(fp); err != nil {
+			// 带扩展名的静态资源（如 /assets/xxx.js、/xxx.css）缺失应返回 404，
+			// 否则回退 index.html 会被浏览器当作 JS/CSS 模块解析而报
+			// “Failed to fetch dynamically imported module” 等难懂错误。
+			if filepath.Ext(r.URL.Path) != "" {
+				http.NotFound(w, r)
+				return
+			}
 			http.ServeFile(w, r, indexFile)
 			return
 		}
