@@ -81,6 +81,22 @@ type FirewallRule struct {
 	Options  string `json:"options"`  // 其他选项（完整规则文本，用于展示复杂规则）
 }
 
+// FirewallStatus 表示主机的防火墙整体状态，用于在主机详情-防火墙监控 Tab 顶部展示。
+// 支持多后端：firewalld / ufw / nftables / iptables。
+type FirewallStatus struct {
+	Node        string `json:"node"`        // 主机名
+	UpdatedAt   int64  `json:"updatedAt"`   // 采集时间（毫秒）
+	Backend     string `json:"backend"`     // 当前生效的防火墙后端：firewalld / ufw / nftables / iptables / none
+	Running     bool   `json:"running"`     // 防火墙是否处于运行/启用状态
+	Enabled     bool   `json:"enabled"`     // 是否开机自启（systemd enabled）
+	Version     string `json:"version"`     // 防火墙后端版本
+	DefaultZone string `json:"defaultZone"` // firewalld 默认区域（其他后端为空）
+	ActiveZones int    `json:"activeZones"` // firewalld 活动区域数（其他后端为 0）
+	RuleCount   int    `json:"ruleCount"`   // 采集到的防火墙规则条数
+	Supported   bool   `json:"supported"`   // 是否探测到可用的防火墙后端
+	Message     string `json:"message"`     // 说明信息（如未启用、规则集为空、未探测到后端等）
+}
+
 // ReportPayload 是 Agent 上报的请求体。
 type ReportPayload struct {
 	Node              string                `json:"node"`                        // 主机名
@@ -114,6 +130,7 @@ type ReportPayload struct {
 	DefenseResult     *DefenseCommandResult `json:"defenseResult,omitempty"`     // 防护指令执行结果回执
 	Listeners         []ListenerStat        `json:"listeners"`                   // 监听端口列表（TCP/UDP）；null 表示旧 Agent，[] 表示已采集但为空
 	FirewallRules     []FirewallRule        `json:"firewallRules"`               // 防火墙规则列表；null 表示旧 Agent，[] 表示已采集但为空
+	FirewallStatus    *FirewallStatus       `json:"firewallStatus,omitempty"`    // 防火墙整体状态（由 Agent 定期采集上报）
 	ReportAt          int64                 `json:"reportAt"`                    // 上报时间（毫秒）
 }
 

@@ -296,6 +296,44 @@
 
       <!-- ============ Tab 5：防火墙监控 ============ -->
       <el-tab-pane label="防火墙监控" name="firewall">
+        <!-- 防火墙整体状态卡片 -->
+        <div class="fw-status-card" v-loading="loadingFirewallStatus">
+          <template v-if="firewallStatus">
+            <div class="fw-status-row">
+              <div class="fw-status-item">
+                <span class="fw-status-label">防火墙后端</span>
+                <el-tag :type="firewallStatus.supported ? 'success' : 'info'" size="small" effect="dark">{{ fwBackendDisplay }}</el-tag>
+              </div>
+              <div class="fw-status-item">
+                <span class="fw-status-label">运行状态</span>
+                <span :class="['fw-dot', firewallStatus.running ? 'on' : 'off']"></span>
+                <span class="fw-status-val">{{ firewallStatus.running ? '运行中' : '未运行' }}</span>
+              </div>
+              <div class="fw-status-item">
+                <span class="fw-status-label">开机自启</span>
+                <span class="fw-status-val">{{ firewallStatus.enabled ? '是' : '否' }}</span>
+              </div>
+              <div class="fw-status-item" v-if="firewallStatus.version">
+                <span class="fw-status-label">版本</span>
+                <span class="fw-status-val mono">{{ firewallStatus.version }}</span>
+              </div>
+              <div class="fw-status-item" v-if="firewallStatus.defaultZone">
+                <span class="fw-status-label">默认区域</span>
+                <span class="fw-status-val">{{ firewallStatus.defaultZone }}</span>
+              </div>
+              <div class="fw-status-item" v-if="firewallStatus.activeZones">
+                <span class="fw-status-label">活动区域</span>
+                <span class="fw-status-val">{{ firewallStatus.activeZones }}</span>
+              </div>
+              <div class="fw-status-item">
+                <span class="fw-status-label">规则数</span>
+                <span class="fw-status-val">{{ firewallStatus.ruleCount }}</span>
+              </div>
+            </div>
+            <div class="fw-status-msg" v-if="firewallStatus.message">{{ firewallStatus.message }}</div>
+          </template>
+          <el-empty v-else-if="!loadingFirewallStatus" description="无防火墙状态数据（旧版本 Agent 或未上报）" :image-size="40" />
+        </div>
         <div class="tab-header">
           <span class="panel-title" style="margin: 0">防火墙规则</span>
           <div class="process-tools">
@@ -716,6 +754,8 @@ function formatListenerAddr(row) {
 const firewallRuleList = ref([])
 const fwSearch = ref('')
 const loadingFirewall = ref(false)
+const firewallStatus = ref(null)
+const loadingFirewallStatus = ref(false)
 
 async function loadFirewallRules(hostname) {
   if (!hostname) return
@@ -730,6 +770,27 @@ async function loadFirewallRules(hostname) {
     loadingFirewall.value = false
   }
 }
+
+async function loadFirewallStatus(hostname) {
+  if (!hostname) return
+  loadingFirewallStatus.value = true
+  try {
+    const data = await http.get('/api/v1/query/firewall/status?hostname=' + encodeURIComponent(hostname))
+    firewallStatus.value = data.status || null
+  } catch (err) {
+    console.error('加载防火墙状态失败:', err)
+    firewallStatus.value = null
+  } finally {
+    loadingFirewallStatus.value = false
+  }
+}
+
+const fwBackendDisplay = computed(() => {
+  const s = firewallStatus.value
+  if (!s || !s.backend) return '-'
+  if (s.backend === 'none') return s.running ? '未运行' : '未启用'
+  return s.backend
+})
 
 const filteredFirewall = computed(() => {
   const q = fwSearch.value.trim().toLowerCase()
@@ -1002,6 +1063,7 @@ function loadActiveTab(node) {
       break
     case 'firewall':
       loadFirewallRules(node)
+      loadFirewallStatus(node)
       break
     case 'overview':
       // 切回概览页时重建实时图/环形图（v-if 会销毁旧 DOM，需重新绑定）
@@ -1243,4 +1305,22 @@ onUnmounted(() => {
 .process-count { font-family: var(--mono); }
 .io-cell { color: var(--text-muted); }
 .fw-options { color: var(--text-dim); font-size: 12px; }
+
+/* 防火墙状态卡片 */
+.fw-status-card {
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--border, #2a3346);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  min-height: 56px;
+}
+.fw-status-row { display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: center; }
+.fw-status-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.fw-status-label { color: var(--text-muted, #8a93a6); }
+.fw-status-val { color: var(--text, #e6e9f0); font-weight: 500; }
+.fw-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.fw-dot.on { background: #2ec27e; box-shadow: 0 0 6px rgba(46,194,126,.7); }
+.fw-dot.off { background: #8a93a6; }
+.fw-status-msg { margin-top: 8px; font-size: 12px; color: var(--text-dim, #8a93a6); }
 </style>

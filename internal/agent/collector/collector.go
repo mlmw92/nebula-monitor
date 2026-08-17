@@ -265,6 +265,12 @@ func (c *Collector) CollectFirewallRules() []model.FirewallRule {
 	return collectFirewallRules()
 }
 
+// CollectFirewallStatus 采集防火墙整体状态（后端类型/运行/自启/版本等），用于防火墙监控 Tab 顶部状态展示。
+// ruleCount 为本次已采集到的防火墙规则条数。
+func (c *Collector) CollectFirewallStatus(ruleCount int) *model.FirewallStatus {
+	return collectFirewallStatus(ruleCount)
+}
+
 // HostInfo 返回主机静态信息（OS/Arch/IP），用于上报体。
 func (c *Collector) HostInfo() (os, arch, ip string) {
 	info, err := host.Info()

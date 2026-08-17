@@ -132,6 +132,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/processes", a.handleProcesses)
 	mux.HandleFunc("GET /api/v1/query/listeners", a.handleListeners)
 	mux.HandleFunc("GET /api/v1/query/firewall", a.handleFirewall)
+	mux.HandleFunc("GET /api/v1/query/firewall/status", a.handleFirewallStatus)
 
 	mux.HandleFunc("GET /api/v1/middleware/redis/instances", a.handleRedisInstances)
 	mux.HandleFunc("GET /api/v1/middleware/mysql/instances", a.handleMySQLInstances)
@@ -803,6 +804,17 @@ func (a *API) handleFirewall(w http.ResponseWriter, r *http.Request) {
 	}
 	rules := receiver.FirewallCache.Get(node)
 	writeJSON(w, 200, map[string]interface{}{"rules": rules})
+}
+
+// handleFirewallStatus 返回指定节点的防火墙整体状态（后端类型/运行/自启/版本等）。
+func (a *API) handleFirewallStatus(w http.ResponseWriter, r *http.Request) {
+	node := r.URL.Query().Get("hostname")
+	if node == "" {
+		http.Error(w, "node required", http.StatusBadRequest)
+		return
+	}
+	status := receiver.FirewallStatusCache.Get(node)
+	writeJSON(w, 200, map[string]interface{}{"status": status})
 }
 
 // parseLabelQuery 从 URL 查询中提取 labels.<name>=<value> 形式的标签过滤。

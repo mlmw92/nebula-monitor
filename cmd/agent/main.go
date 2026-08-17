@@ -281,6 +281,7 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 	listeners := coll.CollectListeners()
 	// 防火墙规则列表（用于防火墙监控 Tab）
 	firewallRules := coll.CollectFirewallRules()
+	firewallStatus := coll.CollectFirewallStatus(len(firewallRules))
 
 	// 采集 fail2ban 封禁/解封事件（增量 JSONL 审计），合并进安全事件
 	banEvents := banCollector.Collect(cfg.Node)
@@ -323,6 +324,7 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 		DefenseResult: pendingResult,
 		Listeners:     listeners,
 		FirewallRules: firewallRules,
+		FirewallStatus: firewallStatus,
 		ReportAt:      model.NowMillis(),
 	}
 	resp, err := rep.ReportFull(payload)

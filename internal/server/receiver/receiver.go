@@ -96,6 +96,9 @@ var ListenerCache = newSnapshotCache[[]model.ListenerStat]()
 // FirewallCache 防火墙规则快照缓存。
 var FirewallCache = newSnapshotCache[[]model.FirewallRule]()
 
+// FirewallStatusCache 防火墙整体状态快照缓存（用于主机详情-防火墙监控 Tab 顶部状态展示）。
+var FirewallStatusCache = newSnapshotCache[*model.FirewallStatus]()
+
 // Receiver 接收 Agent 上报并写入存储、更新节点索引。
 type Receiver struct {
 	storage storage.Storage
@@ -180,6 +183,11 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 	// 更新防火墙规则快照缓存；显式空数组表示未发现规则/后端。
 	if payload.FirewallRules != nil {
 		FirewallCache.Set(payload.Node, payload.FirewallRules)
+	}
+	// 更新防火墙整体状态快照缓存；nil 表示旧 Agent 不支持上报该字段。
+	if payload.FirewallStatus != nil {
+		payload.FirewallStatus.Node = payload.Node
+		FirewallStatusCache.Set(payload.Node, payload.FirewallStatus)
 	}
 	// Redis 实例元信息转为 redis_instance_up 指标写入 VM，供前端聚合查询
 	for _, ri := range payload.RedisInstances {
