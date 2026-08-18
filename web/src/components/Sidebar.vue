@@ -4,7 +4,7 @@
         <img v-if="brand.logo" :src="brand.logo" alt="logo" style="width:36px;height:36px;border-radius:10px;object-fit:contain;background:rgba(255,255,255,0.05);box-shadow:0 0 16px rgba(64,158,255,0.35)" />
         <div class="brand-text" v-show="!collapsed">
           <h1 :title="brand.name">{{ brand.name }}</h1>
-          <p>监控中心</p>
+          <p v-if="brand.subtitle">{{ brand.subtitle }}</p>
         </div>
       </div>
 

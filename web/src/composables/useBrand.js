@@ -7,7 +7,7 @@ import http from '../api/http'
 const STORAGE_KEY = 'nebula_brand'
 
 function defaults() {
-  return { name: 'NebulaEye', logo: '', footer: '' }
+  return { name: 'NebulaEye', logo: '', footer: '', subtitle: '监控中心' }
 }
 
 function loadCache() {
@@ -15,7 +15,7 @@ function loadCache() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const d = JSON.parse(raw)
-      if (d && typeof d.name === 'string') return { name: d.name, logo: d.logo || '', footer: d.footer || '' }
+      if (d && typeof d.name === 'string') return { name: d.name, logo: d.logo || '', footer: d.footer || '', subtitle: d.subtitle || '' }
     }
   } catch (e) {
     /* 损坏缓存忽略 */
@@ -29,7 +29,7 @@ let loadPromise = null
 
 function persist() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: brand.name, logo: brand.logo, footer: brand.footer }))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: brand.name, logo: brand.logo, footer: brand.footer, subtitle: brand.subtitle }))
   } catch (e) {
     /* 忽略容量错误 */
   }
@@ -50,6 +50,7 @@ export function useBrand() {
           brand.name = d.name
           brand.logo = d.logo || ''
           brand.footer = d.footer || ''
+          brand.subtitle = d.subtitle || ''
           persist()
         }
       } catch (e) {
@@ -62,14 +63,16 @@ export function useBrand() {
   }
 
   // 保存品牌配置（需登录），成功后更新内存与缓存
-  async function saveBrand(name, logo, footer) {
+  async function saveBrand(name, logo, footer, subtitle) {
     const payload = { name, logo }
     if (typeof footer === 'string') payload.footer = footer
+    if (typeof subtitle === 'string') payload.subtitle = subtitle
     const d = await http.put('/api/v1/ui/settings', payload)
     if (d && d.config) {
       brand.name = d.config.name || name
       brand.logo = d.config.logo || ''
       brand.footer = d.config.footer || ''
+      brand.subtitle = d.config.subtitle || ''
       persist()
       applyTitle()
     }

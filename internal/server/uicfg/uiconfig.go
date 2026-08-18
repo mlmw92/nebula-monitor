@@ -1,4 +1,4 @@
-// Package uicfg 管理系统 UI 品牌配置：系统名称与 Logo。
+// Package uicfg 管理系统 UI 品牌配置：系统名称、Logo 与侧栏副标题。
 // 配置独立持久化到文件（默认 /etc/monitor-server/ui.yaml），由 Web 端设置写入，
 // 与 notify/screen 配置同级，独立于 server.yaml，便于运行时修改且不受升级覆盖。
 package uicfg
@@ -19,18 +19,21 @@ const (
 	MaxLogoLen = 4 * 1024 * 1024
 	// MaxFooterLen 页脚文本最大字符数（按 rune 计）。
 	MaxFooterLen = 512
+	// MaxSubtitleLen 侧栏副标题最大字符数（按 rune 计）。
+	MaxSubtitleLen = 32
 )
 
 // UIConfig 系统 UI 品牌配置。
 type UIConfig struct {
-	Name   string `yaml:"name" json:"name"`   // 系统名称
-	Logo   string `yaml:"logo" json:"logo"`   // 可选 Logo：图片 data URL（data:image/...;base64,）或 http(s) 链接
-	Footer string `yaml:"footer" json:"footer"` // 页脚文本（支持 HTML），空则隐藏
+	Name     string `yaml:"name" json:"name"`       // 系统名称
+	Logo     string `yaml:"logo" json:"logo"`       // 可选 Logo：图片 data URL（data:image/...;base64,）或 http(s) 链接
+	Footer   string `yaml:"footer" json:"footer"`   // 页脚文本（支持 HTML），空则隐藏
+	Subtitle string `yaml:"subtitle" json:"subtitle"` // 侧栏副标题（如「监控中心」），留空则不显示
 }
 
 // DefaultUIConfig 返回默认品牌（系统名 NebulaEye，无自定义 Logo 时使用前端默认徽标）。
 func DefaultUIConfig() UIConfig {
-	return UIConfig{Name: "NebulaEye", Logo: "", Footer: ""}
+	return UIConfig{Name: "NebulaEye", Logo: "", Footer: "", Subtitle: "监控中心"}
 }
 
 // Manager 负责 UI 配置的加载与落盘。
@@ -82,6 +85,9 @@ func (m *Manager) Save(c UIConfig) error {
 	}
 	if len([]rune(c.Footer)) > MaxFooterLen {
 		return fmt.Errorf("页脚文本过长（上限 %d 字符）", MaxFooterLen)
+	}
+	if len([]rune(c.Subtitle)) > MaxSubtitleLen {
+		return fmt.Errorf("侧栏副标题过长（上限 %d 字符）", MaxSubtitleLen)
 	}
 	if err := os.MkdirAll(filepath.Dir(m.path), 0o755); err != nil {
 		return err

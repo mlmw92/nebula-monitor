@@ -16,6 +16,18 @@
     <el-form label-position="top" class="two-col-form">
       <el-row :gutter="28">
         <el-col :xs="24" :md="12">
+          <el-form-item label="侧栏副标题">
+            <el-input
+              v-model="form.subtitle"
+              maxlength="32"
+              show-word-limit
+              placeholder="如 监控中心、运维平台"
+            />
+            <div class="field-hint">显示在侧栏品牌区名称下方；留空则不显示</div>
+          </el-form-item>
+        </el-col>
+
+        <el-col :xs="24" :md="12">
           <el-form-item label="系统名称">
             <el-input
               v-model="form.name"
@@ -83,7 +95,7 @@ import { ElMessage } from 'element-plus'
 import { useBrand } from '../../composables/useBrand'
 
 const { brand, saveBrand } = useBrand()
-const form = ref({ name: 'NebulaEye', logo: '', footer: '' })
+const form = ref({ name: 'NebulaEye', logo: '', footer: '', subtitle: '监控中心' })
 const fileInput = ref(null)
 const saving = ref(false)
 
@@ -91,6 +103,7 @@ onMounted(() => {
   form.value.name = brand.name || 'NebulaEye'
   form.value.logo = brand.logo || ''
   form.value.footer = brand.footer || ''
+  form.value.subtitle = brand.subtitle || '监控中心'
 })
 
 function pickFile() {
@@ -124,6 +137,7 @@ function resetDefault() {
   form.value.name = 'NebulaEye'
   form.value.logo = ''
   form.value.footer = ''
+  form.value.subtitle = '监控中心'
 }
 
 async function save() {
@@ -133,7 +147,7 @@ async function save() {
   }
   saving.value = true
   try {
-    await saveBrand(form.value.name.trim(), form.value.logo, form.value.footer)
+    await saveBrand(form.value.name.trim(), form.value.logo, form.value.footer, form.value.subtitle.trim())
     ElMessage.success('已保存，全局即时生效')
   } catch (e) {
     ElMessage.error(e.message || '保存失败')
