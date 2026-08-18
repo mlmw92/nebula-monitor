@@ -135,6 +135,7 @@ const api = {
   },
   // —— 角色权限管理（RBAC）——
   me: () => request('/api/v1/auth/me'),
+  updateMe: (payload) => api.put('/api/v1/auth/me', payload),
   listUsers: () => request('/api/v1/users'),
   createUser: (payload) => api.post('/api/v1/users', payload),
   getUser: (username) => request('/api/v1/users/' + encodeURIComponent(username)),

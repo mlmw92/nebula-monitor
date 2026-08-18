@@ -32,6 +32,41 @@ func (a *API) handleMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleUpdateMe 当前用户自助更新自身资料（仅允许修改昵称 displayName），
+// 不涉及角色、范围、状态或密码（这些需 users:manage 由管理员操作）。登录即可调用。
+func (a *API) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
+	if a.authStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "未启用登录认证"})
+		return
+	}
+	p := Principal(r)
+	if p == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录或会话已失效"})
+		return
+	}
+	var body struct {
+		DisplayName *string `json:"displayName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "请求体解析失败"})
+		return
+	}
+	if body.DisplayName == nil {
+		writeJSON(w, 400, map[string]string{"error": "未提供任何可修改字段"})
+		return
+	}
+	if len([]rune(*body.DisplayName)) > 64 {
+		writeJSON(w, 400, map[string]string{"error": "昵称过长（上限 64 字符）"})
+		return
+	}
+	if err := a.authStore.UpdateUser(p.Username, auth.UserPatch{DisplayName: body.DisplayName}); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	a.recordAuthAudit(r, p.Username, "self.update", p.Username)
+	writeJSON(w, 200, map[string]interface{}{"ok": "true", "displayName": *body.DisplayName})
+}
+
 // handleListUsers 列出全部用户（不含密码哈希）。
 func (a *API) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	users := a.authStore.ListUsers()

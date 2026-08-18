@@ -143,7 +143,7 @@ const groups = [
     icon: Setting,
     items: [
       { key: 'settings', to: '/system/settings', label: '站点与品牌' },
-      { key: 'change-password', to: '/system/settings?tab=password', label: '修改密码' },
+      { key: 'profile', to: '/system/profile', label: '个人中心' },
       { key: 'upgrade', to: '/system/upgrade', label: '系统升级' },
       { key: 'users', to: '/system/users', label: '用户管理', perm: 'users:manage' },
       { key: 'roles', to: '/system/roles', label: '角色与权限', perm: 'roles:read' },

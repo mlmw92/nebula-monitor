@@ -202,6 +202,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// ===== 角色权限管理 API =====
 	// 当前身份（登录即可）
 	mux.HandleFunc("GET /api/v1/auth/me", a.handleMe)
+	mux.HandleFunc("PUT /api/v1/auth/me", a.handleUpdateMe)
 	// 用户管理（users:manage）
 	mux.HandleFunc("GET /api/v1/users", a.authz(a.handleListUsers, "users:manage"))
 	mux.HandleFunc("POST /api/v1/users", a.authz(a.handleCreateUser, "users:manage"))

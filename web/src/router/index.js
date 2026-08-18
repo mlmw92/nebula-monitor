@@ -34,6 +34,7 @@ const routes = [
       { path: 'audit', name: 'audit', component: () => import('../components/AuditView.vue') },
       { path: 'system/users', name: 'system-users', component: () => import('../components/rbac/UsersView.vue'), meta: { perm: 'users:manage' } },
       { path: 'system/roles', name: 'system-roles', component: () => import('../components/rbac/RolesView.vue'), meta: { perm: 'roles:read' } },
+      { path: 'system/profile', name: 'system-profile', component: () => import('../components/profile/ProfileView.vue') },
     ],
   },
 ]
