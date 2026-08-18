@@ -16,18 +16,6 @@
     <el-form label-position="top" class="two-col-form">
       <el-row :gutter="28">
         <el-col :xs="24" :md="12">
-          <el-form-item label="侧栏副标题">
-            <el-input
-              v-model="form.subtitle"
-              maxlength="32"
-              show-word-limit
-              placeholder="如 监控中心、运维平台"
-            />
-            <div class="field-hint">显示在侧栏品牌区名称下方；留空则不显示</div>
-          </el-form-item>
-        </el-col>
-
-        <el-col :xs="24" :md="12">
           <el-form-item label="系统名称">
             <el-input
               v-model="form.name"
@@ -36,6 +24,18 @@
               placeholder="如 星云监控"
             />
             <div class="field-hint">在整个应用程序中显示的名称</div>
+          </el-form-item>
+        </el-col>
+
+        <el-col :xs="24" :md="12">
+          <el-form-item label="侧栏副标题">
+            <el-input
+              v-model="form.subtitle"
+              maxlength="32"
+              show-word-limit
+              placeholder="如 监控中心、运维平台"
+            />
+            <div class="field-hint">显示在侧栏品牌区名称下方；留空则不显示</div>
           </el-form-item>
         </el-col>
 
