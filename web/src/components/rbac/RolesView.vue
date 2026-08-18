@@ -89,18 +89,29 @@
               </template>
             </el-alert>
             <el-collapse v-model="activeDomains" class="perm-collapse">
-              <el-collapse-item v-for="d in catalog.domains" :key="d.domain" :name="d.domain" :title="domainLabel(d.domain)">
-                <div class="perm-grid">
-                  <el-checkbox
+              <el-collapse-item v-for="d in catalog.domains" :key="d.domain" :name="d.domain">
+                <template #title>
+                  <span class="domain-title">{{ domainLabel(d.domain) }}</span>
+                  <span class="domain-count">（{{ d.items.length }} 项）</span>
+                </template>
+                <div class="perm-grid" v-if="d.items && d.items.length">
+                  <label
                     v-for="p in d.items"
                     :key="p.key"
-                    :model-value="form.permissions.includes(p.key)"
-                    @change="(val) => togglePerm(p.key, val)"
+                    class="perm-check"
+                    :class="{ checked: form.permissions.includes(p.key) }"
+                    @click.prevent="togglePerm(p.key, !form.permissions.includes(p.key))"
                   >
-                    <span class="perm-key">{{ p.key }}</span>
-                    <span class="perm-desc">{{ p.description }}</span>
-                  </el-checkbox>
+                    <span class="check-box">
+                      <span v-if="form.permissions.includes(p.key)" class="check-icon">&#10003;</span>
+                    </span>
+                    <span class="perm-body">
+                      <span class="perm-key">{{ p.key }}</span>
+                      <span class="perm-desc">{{ p.description }}</span>
+                    </span>
+                  </label>
                 </div>
+                <div v-else class="perm-empty">该域暂无权限点</div>
               </el-collapse-item>
             </el-collapse>
           </div>
@@ -323,23 +334,93 @@ onMounted(loadAll)
 .perm-collapse {
   border: none;
 }
+.perm-collapse :deep(.el-collapse-item__header) {
+  background: transparent;
+  color: var(--text, #e0e0e0);
+  font-size: 13px;
+  font-weight: 600;
+  padding-left: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.perm-collapse :deep(.el-collapse-item__wrap) {
+  background: transparent;
+  border-bottom: none;
+}
+.perm-collapse :deep(.el-collapse-item__content) {
+  padding: 10px 4px 4px;
+}
+.domain-title {
+  font-weight: 600;
+}
+.domain-count {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim, #999);
+}
 .perm-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 8px 16px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 6px 12px;
   max-height: 360px;
   overflow-y: auto;
   padding-right: 4px;
 }
+.perm-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  user-select: none;
+}
+.perm-check:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.check-box {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--text-muted, #666);
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+  transition: all 0.15s;
+}
+.perm-check.checked .check-box {
+  background: var(--el-color-primary, #409eff);
+  border-color: var(--el-color-primary, #409eff);
+}
+.check-icon {
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+}
+.perm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
 .perm-key {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono, 'Courier New', monospace);
   font-size: 12px;
-  color: var(--text);
+  color: var(--text, #e0e0e0);
+  word-break: break-all;
 }
 .perm-desc {
-  margin-left: 8px;
+  font-size: 11px;
+  color: var(--text-dim, #999);
+  line-height: 1.3;
+}
+.perm-empty {
+  padding: 12px 8px;
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--text-muted, #666);
 }
 .table-card {
   width: 100%;
