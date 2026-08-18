@@ -8,7 +8,8 @@
         <img v-if="brand.logo" :src="brand.logo" class="logo-img" alt="logo" />
         <div class="brand-text">
           <h1>{{ brand.name || 'NebulaEye' }}</h1>
-          <p>服务器监控系统</p>
+          <p v-if="brand.subtitle">{{ brand.subtitle }}</p>
+          <p v-else class="default-sub">服务器监控系统</p>
         </div>
       </div>
 
@@ -167,6 +168,9 @@ async function doLogin() {
   font-size: 12px;
   color: var(--text-dim);
   margin-top: 2px;
+}
+.default-sub {
+  opacity: 0.8;
 }
 .login-form {
   display: flex;
