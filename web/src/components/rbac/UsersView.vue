@@ -38,7 +38,9 @@
             <el-tag v-else size="small" type="success" effect="plain">启用</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" min-width="160" />
+        <el-table-column label="创建时间" min-width="160">
+          <template #default="{ row }">{{ fmtDate(row.created_at) }}</template>
+        </el-table-column>
         <el-table-column label="操作" min-width="220" fixed="right" v-if="auth.can('users:manage')">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
@@ -136,6 +138,19 @@ const ROLE_LABELS = {
 }
 function roleLabel(r) {
   return ROLE_LABELS[r] || r
+}
+
+// 将后端 ISO 时间戳格式化为本地可读日期
+function fmtDate(v) {
+  if (!v) return '—'
+  try {
+    const d = new Date(v)
+    if (isNaN(d.getTime())) return v
+    const pad = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  } catch (e) {
+    return v
+  }
 }
 
 const users = ref([])
