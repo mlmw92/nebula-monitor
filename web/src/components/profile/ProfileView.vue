@@ -7,10 +7,9 @@
       </div>
     </div>
 
-    <el-row :gutter="20">
-      <el-col :xs="24" :md="12">
+    <el-tabs v-model="activeTab" class="profile-tabs">
+      <el-tab-pane label="基本信息" name="basic">
         <el-card class="glass info-card" shadow="never">
-          <template #header><span class="card-title">基本信息</span></template>
           <el-form label-position="top" class="profile-form">
             <el-form-item label="用户名">
               <el-input :model-value="principal.username" disabled />
@@ -37,12 +36,12 @@
             </div>
           </el-form>
         </el-card>
-      </el-col>
+      </el-tab-pane>
 
-      <el-col :xs="24" :md="12">
+      <el-tab-pane label="修改密码" name="password">
         <ChangePasswordSubView />
-      </el-col>
-    </el-row>
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
@@ -55,6 +54,7 @@ import ChangePasswordSubView from '../settings/ChangePasswordSubView.vue'
 
 const auth = useAuth()
 const principal = auth.principal
+const activeTab = ref('basic')
 
 const ROLE_LABELS = {
   super_admin: '超级管理员',
@@ -111,6 +111,10 @@ async function saveNickname() {
 }
 .info-card {
   width: 100%;
+  margin-top: 14px;
+}
+.profile-tabs {
+  margin-top: 4px;
 }
 .profile-form {
   max-width: 480px;
