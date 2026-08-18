@@ -11,7 +11,7 @@
     <el-card class="glass table-card" shadow="never">
       <el-table :data="users" v-loading="loading" stripe style="width: 100%">
         <el-table-column prop="username" label="用户名" min-width="120" />
-        <el-table-column prop="display_name" label="显示名" min-width="120" />
+        <el-table-column prop="display_name" label="昵称" min-width="120" />
         <el-table-column label="角色" min-width="180">
           <template #default="{ row }">
             <el-tag v-for="r in row.roles" :key="r" size="small" class="role-tag" effect="dark" type="info">
@@ -63,7 +63,7 @@
         <el-form-item label="用户名" required>
           <el-input v-model="form.username" :disabled="editing" placeholder="3-32 位字母/数字/下划线" />
         </el-form-item>
-        <el-form-item label="显示名">
+        <el-form-item label="昵称">
           <el-input v-model="form.displayName" placeholder="可选，展示用名称" />
         </el-form-item>
         <el-form-item label="密码" :required="!editing">
