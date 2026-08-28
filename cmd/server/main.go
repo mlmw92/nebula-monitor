@@ -14,12 +14,13 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/server/agentdist"
-	"github.com/nebula/monitor/internal/server/auth"
-	servercrypto "github.com/nebula/monitor/internal/server/crypto"
 	"github.com/nebula/monitor/internal/server/alert"
+	"github.com/nebula/monitor/internal/server/analysis"
 	"github.com/nebula/monitor/internal/server/api"
 	"github.com/nebula/monitor/internal/server/audit"
+	"github.com/nebula/monitor/internal/server/auth"
 	"github.com/nebula/monitor/internal/server/config"
+	servercrypto "github.com/nebula/monitor/internal/server/crypto"
 	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
@@ -147,8 +148,12 @@ func main() {
 	}
 	dialtestSched.Start(ctx)
 
+	// 智能分析模块：仅查询既有时序数据，不影响上报与告警评估链路。
+	analyzer := analysis.New(store, nodeMgr)
+
 	// 报告生成模块
 	reportGen := report.NewGenerator(store, nodeMgr, securityStore, cfg.ReportDir)
+	reportGen.SetAnalyzer(analyzer)
 
 	// 数据大屏模块显隐配置管理：独立文件（Web 端设置写入），不存在则用默认全开初始化并落盘。
 	screenMgr, err := screencfg.New(cfg.ScreenFile, config.DefaultScreenConfig())
@@ -209,6 +214,7 @@ func main() {
 		api.SetAuthStore(authStore)
 	}
 	rest.SetDashboardManager(dashMgr)
+	rest.SetAnalyzer(analyzer)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)

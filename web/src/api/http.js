@@ -107,6 +107,9 @@ const api = {
   // 指标目录（自动发现）
   metricCatalog,
   metricActive,
+  // 智能分析（只读）
+  analysisSummary: (refresh = false) => request('/api/v1/analysis/summary' + (refresh ? '?refresh=true' : '')),
+  analysisHost: (name, refresh = false) => request('/api/v1/analysis/hosts/' + encodeURIComponent(name) + (refresh ? '?refresh=true' : '')),
   // 自定义仪表盘 CRUD
   listDashboards: () => request('/api/v1/dashboards'),
   getDashboard: (id) => request('/api/v1/dashboards/' + id),

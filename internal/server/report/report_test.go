@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/analysis"
 	"github.com/nebula/monitor/internal/server/security"
 )
 
@@ -49,10 +50,10 @@ func TestRenderHTMLSmoke(t *testing.T) {
 	}
 
 	data := reportData{
-		Period:     "2026-08-02 00:00 ~ 2026-08-03 00:00",
+		Period:      "2026-08-02 00:00 ~ 2026-08-03 00:00",
 		GeneratedAt: 1754179200000,
-		Summary: summaryStat{Total: 2, Online: 2, Offline: 0, CPUAvg: 40, CPUMax: 60, MemAvg: 50, MemMax: 70, DiskAvg: 30, DiskMax: 55},
-		Charts:     charts,
+		Summary:     summaryStat{Total: 2, Online: 2, Offline: 0, CPUAvg: 40, CPUMax: 60, MemAvg: 50, MemMax: 70, DiskAvg: 30, DiskMax: 55},
+		Charts:      charts,
 		Nodes: []nodeStat{
 			{Name: "node-a", IP: "10.0.0.1", Group: "g1", Status: "online", Health: "healthy", HealthScore: 96, CPUAvg: 30, CPUMax: 42, MemAvg: 40, MemMax: 55, DiskAvg: 20, DiskMax: 30, LoadAvg: 1.2, LastSeen: 1754179200000},
 			{Name: "node-b", IP: "10.0.0.2", Group: "g1", Status: "online", Health: "warning", HealthScore: 70, CPUAvg: 60, CPUMax: 78, MemAvg: 70, MemMax: 82, DiskAvg: 40, DiskMax: 60, LoadAvg: 5.1, LastSeen: 1754179200000},
@@ -65,6 +66,7 @@ func TestRenderHTMLSmoke(t *testing.T) {
 			{Severity: "critical", Category: "中间件", Resource: "redis/cache-2", Title: "Redis 内存使用率偏高", Detail: "实例 cache-2 内存使用率 92%。", Impact: "命中率下降。", Suggestion: "上调 maxmemory。"},
 			{Severity: "warning", Category: "主机资源", Resource: "node-b", Title: "CPU 使用率偏高", Detail: "node-b 峰值 78%。", Impact: "响应变慢。", Suggestion: "排查高 CPU 进程。"},
 		},
+		Intelligence: &intelligenceSection{RiskCount: 1, AnomalyCount: 1, UrgentCapacityCount: 1, Hosts: []analysis.HostResult{{Node: "node-b", Score: 82, Severity: analysis.SeverityCritical, Evidence: []analysis.Evidence{{Title: "CPU 使用率持续偏离动态基线"}}, Forecasts: []analysis.Forecast{{Status: "urgent", DaysRemaining: 3.2}}}}},
 	}
 
 	html := renderHTML(data)
@@ -76,6 +78,12 @@ func TestRenderHTMLSmoke(t *testing.T) {
 	}
 	if !strings.Contains(html, "中间件监控明细") {
 		t.Fatal("rendered HTML missing middleware section")
+	}
+	if !strings.Contains(html, "智能分析与预测") {
+		t.Fatal("rendered HTML missing intelligence section")
+	}
+	if !strings.Contains(html, "CPU 使用率持续偏离动态基线") {
+		t.Fatal("rendered HTML missing intelligence evidence")
 	}
 	if !strings.Contains(html, "cache-2") {
 		t.Fatal("rendered HTML missing middleware instance")

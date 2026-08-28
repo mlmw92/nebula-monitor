@@ -82,6 +82,7 @@ import {
   ArrowDown,
   ArrowRight,
   DataLine,
+  Histogram,
   Grid,
   Lock,
   List,
@@ -124,6 +125,7 @@ const groups = [
     icon: Bell,
     items: [
       { key: 'alerts', to: '/alerts', label: '告警中心', icon: Bell },
+      { key: 'intelligence', to: '/intelligence', label: '智能分析', icon: Histogram },
       { key: 'notify', to: '/notify', label: '通知配置', icon: Message },
       { key: 'report', to: '/report', label: '巡检报告', icon: Document },
     ],

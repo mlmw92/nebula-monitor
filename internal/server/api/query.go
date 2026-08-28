@@ -16,8 +16,9 @@ import (
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/alert"
-	"github.com/nebula/monitor/internal/server/auth"
+	"github.com/nebula/monitor/internal/server/analysis"
 	"github.com/nebula/monitor/internal/server/audit"
+	"github.com/nebula/monitor/internal/server/auth"
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/dialtest"
@@ -104,10 +105,14 @@ type API struct {
 	audit          *audit.Store           // 管理操作审计存储（可空）
 	defenseStore   *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空，关闭防护能力）
 	authStore      *auth.Store            // 多用户角色权限存储（可空：未启用登录认证时为 nil）
+	analysis       *analysis.Analyzer     // 只读智能分析服务（可空）
 }
 
 // SetDashboardManager 注入仪表盘配置管理器（可选，不注入则相关接口返回空列表）。
 func (a *API) SetDashboardManager(m *dashboard.Manager) { a.dashMgr = m }
+
+// SetAnalyzer 注入只读智能分析服务。
+func (a *API) SetAnalyzer(analyzer *analysis.Analyzer) { a.analysis = analyzer }
 
 // New 创建 API。
 func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string, sec *security.Store, defenseStore *security.DefenseStore, auditStore *audit.Store, authStore *auth.Store) *API {
@@ -131,6 +136,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/query/range", a.handleQueryRange)
 	mux.HandleFunc("GET /api/v1/query/latest", a.handleQueryLatest)
+	mux.HandleFunc("GET /api/v1/analysis/summary", a.handleAnalysisSummary)
+	mux.HandleFunc("GET /api/v1/analysis/hosts/{name}", a.handleAnalysisHost)
 	mux.HandleFunc("GET /api/v1/processes", a.handleProcesses)
 	mux.HandleFunc("GET /api/v1/query/listeners", a.handleListeners)
 	mux.HandleFunc("GET /api/v1/query/firewall", a.handleFirewall)

@@ -7,6 +7,7 @@ const defaultBlocks = [
   { key: 'health', title: '系统健康度', span: 4, visible: true },
   { key: 'kpi', title: '关键指标', span: 4, visible: true },
   { key: 'criticalAlerts', title: '紧急告警', span: 4, visible: true },
+  { key: 'intelligence', title: '智能运维', span: 12, visible: true },
   { key: 'hostOverview', title: '主机概览', span: 12, visible: true },
   { key: 'middleware', title: '中间件概览', span: 12, visible: true },
   { key: 'recentAlerts', title: '最近告警', span: 12, visible: true },

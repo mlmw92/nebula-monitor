@@ -23,6 +23,7 @@ const routes = [
       { path: 'node/:name', name: 'node', component: () => import('../components/NodeView.vue'), props: true },
       { path: 'middleware', name: 'middleware', component: () => import('../components/MiddlewareView.vue') },
       { path: 'alerts', name: 'alerts', component: () => import('../components/AlertsView.vue') },
+      { path: 'intelligence', name: 'intelligence', component: () => import('../components/intelligence/IntelligenceView.vue') },
       { path: 'dialtest', name: 'dialtest', component: () => import('../components/DialTestView.vue') },
       { path: 'report', name: 'report', component: () => import('../components/ReportView.vue') },
       { path: 'system/upgrade', name: 'system-upgrade', component: () => import('../components/UpgradeView.vue') },

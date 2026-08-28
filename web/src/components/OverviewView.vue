@@ -55,6 +55,7 @@ import { calculateSystemHealth } from '../composables/healthScore'
 import HealthBlock from './overview/HealthBlock.vue'
 import KpiBlock from './overview/KpiBlock.vue'
 import CriticalAlerts from './overview/CriticalAlerts.vue'
+import IntelligenceBlock from './overview/IntelligenceBlock.vue'
 import HostOverview from './overview/HostOverview.vue'
 import MiddlewareOverview from './overview/MiddlewareOverview.vue'
 import RecentAlerts from './overview/RecentAlerts.vue'
@@ -65,6 +66,7 @@ const compMap = {
   health: HealthBlock,
   kpi: KpiBlock,
   criticalAlerts: CriticalAlerts,
+  intelligence: IntelligenceBlock,
   hostOverview: HostOverview,
   middleware: MiddlewareOverview,
   recentAlerts: RecentAlerts,

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/analysis"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/storage"
@@ -49,9 +50,9 @@ type ReportMeta struct {
 
 // chartItem 一张概览图表（内联 SVG，以 template.HTML 类型避免被转义）。
 type chartItem struct {
-	Title string `json:"title"`
+	Title string        `json:"title"`
 	SVG   template.HTML `json:"svg"`
-	Kind  string `json:"kind"` // bar / line
+	Kind  string        `json:"kind"` // bar / line
 }
 
 // summaryStat 巡检概览指标。
@@ -102,21 +103,21 @@ type nodeStat struct {
 
 // mwInstance 单个中间件实例巡检明细，覆盖「连接数 / 响应时间 / 内存使用率 / 命中率」。
 type mwInstance struct {
-	Type       string      `json:"type"`
-	Node       string      `json:"node"`
-	Instance   string      `json:"instance"`
-	Role       string      `json:"role"`
-	Topology   string      `json:"topology"`
-	Version    string      `json:"version"`
-	Up         bool        `json:"up"`
-	ConnUsed   float64     `json:"connUsed"`
-	ConnMax    float64     `json:"connMax"`
-	ConnPct    float64     `json:"connPct"`
-	RespTime   float64     `json:"respTime"`   // 平均响应时间/时延（ms）
-	MemPct     float64     `json:"memPct"`     // 内存使用率 %
-	MemUsedMB  float64     `json:"memUsedMB"`  // 内存用量（MB）
-	HitRate    float64     `json:"hitRate"`    // 命中率 %
-	Throughput float64     `json:"throughput"` // 吞吐（ops/s 或 qps）
+	Type       string             `json:"type"`
+	Node       string             `json:"node"`
+	Instance   string             `json:"instance"`
+	Role       string             `json:"role"`
+	Topology   string             `json:"topology"`
+	Version    string             `json:"version"`
+	Up         bool               `json:"up"`
+	ConnUsed   float64            `json:"connUsed"`
+	ConnMax    float64            `json:"connMax"`
+	ConnPct    float64            `json:"connPct"`
+	RespTime   float64            `json:"respTime"`   // 平均响应时间/时延（ms）
+	MemPct     float64            `json:"memPct"`     // 内存使用率 %
+	MemUsedMB  float64            `json:"memUsedMB"`  // 内存用量（MB）
+	HitRate    float64            `json:"hitRate"`    // 命中率 %
+	Throughput float64            `json:"throughput"` // 吞吐（ops/s 或 qps）
 	Extra      string             `json:"extra"`
 	Status     string             `json:"status"`
 	Trend      []linePoint        `json:"trend"`
@@ -136,18 +137,26 @@ type finding struct {
 
 // reportData 是报告模板的数据模型。
 type reportData struct {
-	Period     string        `json:"period"`
+	Period      string       `json:"period"`
 	GeneratedAt int64        `json:"generatedAt"`
-	Summary    summaryStat   `json:"summary"`
-	Charts     []chartItem   `json:"charts"`
-	Nodes      []nodeStat    `json:"nodes"`
-	Middleware []mwInstance  `json:"middleware"`
-	Findings   []finding     `json:"findings"`
+	Summary     summaryStat  `json:"summary"`
+	Charts      []chartItem  `json:"charts"`
+	Nodes       []nodeStat   `json:"nodes"`
+	Middleware  []mwInstance `json:"middleware"`
+	Findings    []finding    `json:"findings"`
 
 	// 增强段：巡检结论/健康评级、环比、安全中心
-	Conclusion Conclusion       `json:"conclusion"`
-	Comparison *Comparison      `json:"comparison,omitempty"`
-	Security   *SecuritySection `json:"security,omitempty"`
+	Conclusion   Conclusion           `json:"conclusion"`
+	Comparison   *Comparison          `json:"comparison,omitempty"`
+	Security     *SecuritySection     `json:"security,omitempty"`
+	Intelligence *intelligenceSection `json:"intelligence,omitempty"`
+}
+
+type intelligenceSection struct {
+	RiskCount           int                   `json:"riskCount"`
+	AnomalyCount        int                   `json:"anomalyCount"`
+	UrgentCapacityCount int                   `json:"urgentCapacityCount"`
+	Hosts               []analysis.HostResult `json:"hosts"`
 }
 
 // netIfaceStat 单网卡流量统计。
@@ -179,7 +188,7 @@ type diskPartStat struct {
 
 // procStat 进程资源占用快照。
 type procStat struct {
-	PID    int32  `json:"pid"`
+	PID    int32   `json:"pid"`
 	Name   string  `json:"name"`
 	CPUPct float64 `json:"cpuPct"`
 	MemPct float64 `json:"memPct"`
@@ -187,9 +196,9 @@ type procStat struct {
 
 // Conclusion 巡检结论与健康评级。
 type Conclusion struct {
-	Rating         string         `json:"rating"`       // 健康/关注/预警
-	RatingClass    string         `json:"ratingClass"`  // healthy/warning/critical
-	Score          float64        `json:"score"`        // 综合健康评分
+	Rating         string         `json:"rating"`      // 健康/关注/预警
+	RatingClass    string         `json:"ratingClass"` // healthy/warning/critical
+	Score          float64        `json:"score"`       // 综合健康评分
 	TotalFindings  int            `json:"totalFindings"`
 	SeverityCounts map[string]int `json:"severityCounts"`
 	TopRisks       []string       `json:"topRisks"`
@@ -198,30 +207,30 @@ type Conclusion struct {
 
 // Comparison 与上一周期的环比对比。
 type Comparison struct {
-	OnlineRate     float64 `json:"onlineRate"`
-	PrevOnlineRate float64 `json:"prevOnlineRate"`
-	CPUAvg         float64 `json:"cpuAvg"`
-	PrevCPUAvg     float64 `json:"prevCPUAvg"`
-	MemAvg         float64 `json:"memAvg"`
-	PrevMemAvg     float64 `json:"prevMemAvg"`
-	DiskMax        float64 `json:"diskMax"`
-	PrevDiskMax    float64 `json:"prevDiskMax"`
-	HealthScore    float64 `json:"healthScore"`
+	OnlineRate      float64 `json:"onlineRate"`
+	PrevOnlineRate  float64 `json:"prevOnlineRate"`
+	CPUAvg          float64 `json:"cpuAvg"`
+	PrevCPUAvg      float64 `json:"prevCPUAvg"`
+	MemAvg          float64 `json:"memAvg"`
+	PrevMemAvg      float64 `json:"prevMemAvg"`
+	DiskMax         float64 `json:"diskMax"`
+	PrevDiskMax     float64 `json:"prevDiskMax"`
+	HealthScore     float64 `json:"healthScore"`
 	PrevHealthScore float64 `json:"prevHealthScore"`
 }
 
 // SecuritySection 安全中心巡检发现。
 type SecuritySection struct {
-	HasData       bool            `json:"hasData"`
-	NodeCount     int             `json:"nodeCount"`
-	AvgScore      float64         `json:"avgScore"`
-	LowScoreNodes int             `json:"lowScoreNodes"`
-	CriticalEvents int            `json:"criticalEvents"`
-	WarningEvents int             `json:"warningEvents"`
-	CVECount      int             `json:"cveCount"`
-	RiskNodes     []string             `json:"riskNodes"`
-	LowScores     map[string]float64   `json:"lowScores"`
-	Events        []model.SecurityEvent `json:"events"`
+	HasData        bool                  `json:"hasData"`
+	NodeCount      int                   `json:"nodeCount"`
+	AvgScore       float64               `json:"avgScore"`
+	LowScoreNodes  int                   `json:"lowScoreNodes"`
+	CriticalEvents int                   `json:"criticalEvents"`
+	WarningEvents  int                   `json:"warningEvents"`
+	CVECount       int                   `json:"cveCount"`
+	RiskNodes      []string              `json:"riskNodes"`
+	LowScores      map[string]float64    `json:"lowScores"`
+	Events         []model.SecurityEvent `json:"events"`
 }
 
 // Generator 巡检报告生成服务。
@@ -230,6 +239,7 @@ type Generator struct {
 	nodeMgr  *node.Manager
 	secStore *security.Store
 	dir      string
+	analyzer *analysis.Analyzer
 
 	mu      sync.Mutex
 	history []ReportMeta
@@ -245,6 +255,9 @@ func NewGenerator(store storage.Storage, mgr *node.Manager, secStore *security.S
 	g.history = g.loadHistory()
 	return g
 }
+
+// SetAnalyzer 注入可选智能分析服务；分析失败不影响原有巡检报告生成。
+func (g *Generator) SetAnalyzer(analyzer *analysis.Analyzer) { g.analyzer = analyzer }
 
 // Generate 生成指定类型的报告，返回报告 ID。
 func (g *Generator) Generate(rt ReportType) (string, error) {
@@ -425,18 +438,27 @@ func (g *Generator) collectData(start, end time.Time, period string) reportData 
 	})
 	conclusion := g.buildConclusion(nodeStats, findings, sec)
 	comparison := g.buildComparison(start, end, nodeStats, summary)
+	var intelligence *intelligenceSection
+	if g.analyzer != nil {
+		result := g.analyzer.Summary(false)
+		intelligence = &intelligenceSection{
+			RiskCount: result.RiskCount, AnomalyCount: result.AnomalyCount,
+			UrgentCapacityCount: result.UrgentCapacityCount, Hosts: result.Hosts,
+		}
+	}
 
 	return reportData{
-		Period:     fmt.Sprintf("%s ~ %s", start.Format("2006-01-02 15:04"), end.Format("2006-01-02 15:04")),
-		GeneratedAt: time.Now().UnixMilli(),
-		Summary:    summary,
-		Charts:     charts,
-		Nodes:      nodeStats,
-		Middleware: mw,
-		Findings:   findings,
-		Conclusion: conclusion,
-		Comparison: comparison,
-		Security:   sec,
+		Period:       fmt.Sprintf("%s ~ %s", start.Format("2006-01-02 15:04"), end.Format("2006-01-02 15:04")),
+		GeneratedAt:  time.Now().UnixMilli(),
+		Summary:      summary,
+		Charts:       charts,
+		Nodes:        nodeStats,
+		Middleware:   mw,
+		Findings:     findings,
+		Conclusion:   conclusion,
+		Comparison:   comparison,
+		Security:     sec,
+		Intelligence: intelligence,
 	}
 }
 
@@ -783,15 +805,15 @@ func (g *Generator) buildComparison(start, end time.Time, nodes []nodeStat, summ
 		curOnline = round1(float64(summary.Online) / float64(summary.Total) * 100)
 	}
 	return &Comparison{
-		OnlineRate:     curOnline,
-		PrevOnlineRate: round1(prevOnline),
-		CPUAvg:         summary.CPUAvg,
-		PrevCPUAvg:     prevCPU,
-		MemAvg:         summary.MemAvg,
-		PrevMemAvg:     prevMem,
-		DiskMax:        summary.DiskMax,
-		PrevDiskMax:    prevDisk,
-		HealthScore:    curHealth,
+		OnlineRate:      curOnline,
+		PrevOnlineRate:  round1(prevOnline),
+		CPUAvg:          summary.CPUAvg,
+		PrevCPUAvg:      prevCPU,
+		MemAvg:          summary.MemAvg,
+		PrevMemAvg:      prevMem,
+		DiskMax:         summary.DiskMax,
+		PrevDiskMax:     prevDisk,
+		HealthScore:     curHealth,
 		PrevHealthScore: round1(prevHealth),
 	}
 }
@@ -906,27 +928,27 @@ func (g *Generator) collectMiddleware(startMs, endMs, step int64) []mwInstance {
 				if lag := lv("redis_replication_lag_seconds"); lag > 0 {
 					mi.Extra = fmt.Sprintf("主从复制延迟 %.1fs", lag)
 				}
-		case "mysql":
-			mi.ConnMax = lv("mysql_max_connections")
-			mi.HitRate = lv("mysql_buffer_pool_hit_rate")
-			mi.RespTime = lv("mysql_query_latency_ms")
-			slaveLag := lv("mysql_seconds_behind_master")
-			slow := lv("mysql_slow_queries")
-			var parts []string
-			if slaveLag > 0 {
-				parts = append(parts, fmt.Sprintf("主从延迟 %.1fs", slaveLag))
-			}
-			if slow > 0 {
-				parts = append(parts, fmt.Sprintf("慢查询 %d", int(slow)))
-			}
-			mi.Extra = strings.Join(parts, "；")
-		case "postgres":
-			mi.ConnMax = lv("postgres_max_connections")
-			mi.HitRate = lv("postgres_cache_hit_ratio")
-			mi.RespTime = lv("postgres_query_latency_ms")
-			if lag := lv("postgres_replication_lag_bytes"); lag > 0 {
-				mi.Extra = fmt.Sprintf("复制延迟 %.0fB", lag)
-			}
+			case "mysql":
+				mi.ConnMax = lv("mysql_max_connections")
+				mi.HitRate = lv("mysql_buffer_pool_hit_rate")
+				mi.RespTime = lv("mysql_query_latency_ms")
+				slaveLag := lv("mysql_seconds_behind_master")
+				slow := lv("mysql_slow_queries")
+				var parts []string
+				if slaveLag > 0 {
+					parts = append(parts, fmt.Sprintf("主从延迟 %.1fs", slaveLag))
+				}
+				if slow > 0 {
+					parts = append(parts, fmt.Sprintf("慢查询 %d", int(slow)))
+				}
+				mi.Extra = strings.Join(parts, "；")
+			case "postgres":
+				mi.ConnMax = lv("postgres_max_connections")
+				mi.HitRate = lv("postgres_cache_hit_ratio")
+				mi.RespTime = lv("postgres_query_latency_ms")
+				if lag := lv("postgres_replication_lag_bytes"); lag > 0 {
+					mi.Extra = fmt.Sprintf("复制延迟 %.0fB", lag)
+				}
 			case "nginx":
 				mi.ConnUsed = lv("nginx_active_connections")
 				if c5 := lv("nginx_5xx"); c5 > 0 {
@@ -1202,12 +1224,12 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 				sev = "critical"
 			}
 			fs = append(fs, finding{
-				Severity: sev,
-				Category: "主机资源",
-				Resource: n.Name,
-				Title:    "CPU 使用率偏高",
-				Detail:   fmt.Sprintf("主机 %s 巡检周期内 CPU 平均 %.1f%%、峰值 %.1f%%，多个采样点处于高位。", n.Name, n.CPUAvg, n.CPUMax),
-				Impact:   "CPU 持续高位会导致进程调度延迟、请求排队与响应变慢，极端情况下触发进程超时或连锁雪崩。",
+				Severity:   sev,
+				Category:   "主机资源",
+				Resource:   n.Name,
+				Title:      "CPU 使用率偏高",
+				Detail:     fmt.Sprintf("主机 %s 巡检周期内 CPU 平均 %.1f%%、峰值 %.1f%%，多个采样点处于高位。", n.Name, n.CPUAvg, n.CPUMax),
+				Impact:     "CPU 持续高位会导致进程调度延迟、请求排队与响应变慢，极端情况下触发进程超时或连锁雪崩。",
 				Suggestion: "登录该机使用 `top`/`pidstat -u 1` 定位高 CPU 进程，排查异常批处理或死循环；必要时垂直扩容 CPU 或水平扩容；建议对 cpu_usage 配置 70%%/85%% 阈值告警提前预警。",
 			})
 		}
@@ -1217,12 +1239,12 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 				sev = "critical"
 			}
 			fs = append(fs, finding{
-				Severity: sev,
-				Category: "主机资源",
-				Resource: n.Name,
-				Title:    "内存使用率偏高",
-				Detail:   fmt.Sprintf("主机 %s 巡检周期内内存平均 %.1f%%、峰值 %.1f%%。", n.Name, n.MemAvg, n.MemMax),
-				Impact:   "内存接近上限会触发系统 OOM Killer 随机终止进程，造成服务中断与数据不一致。",
+				Severity:   sev,
+				Category:   "主机资源",
+				Resource:   n.Name,
+				Title:      "内存使用率偏高",
+				Detail:     fmt.Sprintf("主机 %s 巡检周期内内存平均 %.1f%%、峰值 %.1f%%。", n.Name, n.MemAvg, n.MemMax),
+				Impact:     "内存接近上限会触发系统 OOM Killer 随机终止进程，造成服务中断与数据不一致。",
 				Suggestion: "使用 `free -h`/`smem` 排查内存占用最大的进程，确认是否存在内存泄漏；调优应用堆/JVM 参数或容器内存限制；必要时扩容内存并配置 mem_usage 告警。",
 			})
 		}
@@ -1232,23 +1254,23 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 				sev = "critical"
 			}
 			fs = append(fs, finding{
-				Severity: sev,
-				Category: "主机资源",
-				Resource: n.Name,
-				Title:    "磁盘使用率偏高",
-				Detail:   fmt.Sprintf("主机 %s 巡检周期内磁盘使用率平均 %.1f%%、峰值 %.1f%%，剩余可用空间受限。", n.Name, n.DiskAvg, n.DiskMax),
-				Impact:   "磁盘写满将导致日志/数据无法落盘、数据库写入失败、应用异常甚至宕机。",
+				Severity:   sev,
+				Category:   "主机资源",
+				Resource:   n.Name,
+				Title:      "磁盘使用率偏高",
+				Detail:     fmt.Sprintf("主机 %s 巡检周期内磁盘使用率平均 %.1f%%、峰值 %.1f%%，剩余可用空间受限。", n.Name, n.DiskAvg, n.DiskMax),
+				Impact:     "磁盘写满将导致日志/数据无法落盘、数据库写入失败、应用异常甚至宕机。",
 				Suggestion: "使用 `df -h`/`du -sh` 定位大目录，清理过期日志与临时文件、归档冷数据；对核心挂载配置 disk_usage 阈值告警并规划磁盘扩容。",
 			})
 		}
 		if n.LoadAvg >= 1 {
 			fs = append(fs, finding{
-				Severity: "warning",
-				Category: "主机资源",
-				Resource: n.Name,
-				Title:    "系统负载偏高",
-				Detail:   fmt.Sprintf("主机 %s 最近系统负载 load1 为 %.2f，处于较高水平。", n.Name, n.LoadAvg),
-				Impact:   "高负载通常意味着 CPU 或 IO 资源出现瓶颈，系统吞吐下降、请求排队。",
+				Severity:   "warning",
+				Category:   "主机资源",
+				Resource:   n.Name,
+				Title:      "系统负载偏高",
+				Detail:     fmt.Sprintf("主机 %s 最近系统负载 load1 为 %.2f，处于较高水平。", n.Name, n.LoadAvg),
+				Impact:     "高负载通常意味着 CPU 或 IO 资源出现瓶颈，系统吞吐下降、请求排队。",
 				Suggestion: "结合 CPU/磁盘 IO 指标定位瓶颈来源（计算密集型或 IO 等待），针对性扩容或优化；负载持续高位时核查 top 中 D 状态（IO 等待）进程。",
 			})
 		}
@@ -1258,12 +1280,12 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 		name := fmt.Sprintf("%s/%s", m.Type, m.Instance)
 		if !m.Up {
 			fs = append(fs, finding{
-				Severity: "critical",
-				Category: "中间件",
-				Resource: name,
-				Title:    "中间件实例离线",
-				Detail:   fmt.Sprintf("中间件实例 %s（类型 %s，节点 %s）探活失败，当前处于离线状态。", m.Instance, m.Type, m.Node),
-				Impact:   "依赖该实例的业务功能受影响，可能出现缓存/查询失败或降级。",
+				Severity:   "critical",
+				Category:   "中间件",
+				Resource:   name,
+				Title:      "中间件实例离线",
+				Detail:     fmt.Sprintf("中间件实例 %s（类型 %s，节点 %s）探活失败，当前处于离线状态。", m.Instance, m.Type, m.Node),
+				Impact:     "依赖该实例的业务功能受影响，可能出现缓存/查询失败或降级。",
 				Suggestion: "检查实例进程状态与端口监听、网络连通性与访问凭证；若为复制集群请确认主从同步状态；恢复后关注连接数、命中率是否回到正常水平。",
 			})
 			continue
@@ -1276,12 +1298,12 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 					sev = "critical"
 				}
 				fs = append(fs, finding{
-					Severity: sev,
-					Category: "中间件",
-					Resource: name,
-					Title:    "Redis 缓存命中率偏低",
-					Detail:   fmt.Sprintf("Redis 实例 %s 命中率仅 %.1f%%，未命中请求将回源至后端存储。", m.Instance, m.HitRate),
-					Impact:   "命中率下降会显著增加后端数据库压力，并使依赖缓存的接口响应变慢。",
+					Severity:   sev,
+					Category:   "中间件",
+					Resource:   name,
+					Title:      "Redis 缓存命中率偏低",
+					Detail:     fmt.Sprintf("Redis 实例 %s 命中率仅 %.1f%%，未命中请求将回源至后端存储。", m.Instance, m.HitRate),
+					Impact:     "命中率下降会显著增加后端数据库压力，并使依赖缓存的接口响应变慢。",
 					Suggestion: "检查 maxmemory 是否过小导致频繁驱逐；确认淘汰策略（建议 allkeys-lru）；排查大 key/热 key 与业务 key 设计；监控 redis_evicted_keys 与 rejected_connections。",
 				})
 			}
@@ -1291,12 +1313,12 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 					sev = "critical"
 				}
 				fs = append(fs, finding{
-					Severity: sev,
-					Category: "中间件",
-					Resource: name,
-					Title:    "Redis 内存使用率偏高",
-					Detail:   fmt.Sprintf("Redis 实例 %s 内存使用率 %.1f%%（约 %.0fMB），接近 maxmemory 上限。", m.Instance, m.MemPct, m.MemUsedMB),
-					Impact:   "内存接近上限会触发 key 驱逐甚至拒绝写入，命中率下降并可能出现写入失败。",
+					Severity:   sev,
+					Category:   "中间件",
+					Resource:   name,
+					Title:      "Redis 内存使用率偏高",
+					Detail:     fmt.Sprintf("Redis 实例 %s 内存使用率 %.1f%%（约 %.0fMB），接近 maxmemory 上限。", m.Instance, m.MemPct, m.MemUsedMB),
+					Impact:     "内存接近上限会触发 key 驱逐甚至拒绝写入，命中率下降并可能出现写入失败。",
 					Suggestion: "适当上调 maxmemory（确保宿主机内存余量充足）；清理无效/过期数据；设置合理淘汰策略；持续监控 used_memory 与 evicted_keys。",
 				})
 			}
@@ -1306,12 +1328,12 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 					sev = "critical"
 				}
 				fs = append(fs, finding{
-					Severity: sev,
-					Category: "中间件",
-					Resource: name,
-					Title:    "Redis 命令响应时间偏高",
-					Detail:   fmt.Sprintf("Redis 实例 %s 命令平均响应时间 %.2fms，高于常态水平。", m.Instance, m.RespTime),
-					Impact:   "命令时延升高会使调用方超时、链路整体变慢，影响上游业务 RT。",
+					Severity:   sev,
+					Category:   "中间件",
+					Resource:   name,
+					Title:      "Redis 命令响应时间偏高",
+					Detail:     fmt.Sprintf("Redis 实例 %s 命令平均响应时间 %.2fms，高于常态水平。", m.Instance, m.RespTime),
+					Impact:     "命令时延升高会使调用方超时、链路整体变慢，影响上游业务 RT。",
 					Suggestion: "排查慢命令（如 keys *、大 key、复杂 Lua）；检查网络与持久化阻塞（AOF/RDB fork）；对热 key 做本地/客户端缓存分散压力。",
 				})
 			}
@@ -1322,12 +1344,12 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 					sev = "critical"
 				}
 				fs = append(fs, finding{
-					Severity: sev,
-					Category: "中间件",
-					Resource: name,
-					Title:    "MySQL 连接数使用率偏高",
-					Detail:   fmt.Sprintf("MySQL 实例 %s 连接数使用率 %.1f%%（%.0f/%.0f），接近 max_connections 上限。", m.Instance, m.ConnPct, m.ConnUsed, m.ConnMax),
-					Impact:   "连接耗尽会导致新连接被拒绝（Too many connections），应用报错或无法建立数据库连接。",
+					Severity:   sev,
+					Category:   "中间件",
+					Resource:   name,
+					Title:      "MySQL 连接数使用率偏高",
+					Detail:     fmt.Sprintf("MySQL 实例 %s 连接数使用率 %.1f%%（%.0f/%.0f），接近 max_connections 上限。", m.Instance, m.ConnPct, m.ConnUsed, m.ConnMax),
+					Impact:     "连接耗尽会导致新连接被拒绝（Too many connections），应用报错或无法建立数据库连接。",
 					Suggestion: "排查并优化连接池配置与空闲连接回收；定位长期占用连接的事务/慢查询；必要时调大 max_connections（受系统 ulimit 与内存约束）；配置连接数阈值告警。",
 				})
 			}
@@ -1337,14 +1359,14 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 					sev = "critical"
 				}
 				fs = append(fs, finding{
-					Severity: sev,
-					Category: "中间件",
-					Resource: name,
-					Title:    "MySQL InnoDB 缓冲池命中率偏低",
-					Detail:   fmt.Sprintf("MySQL 实例 %s InnoDB 缓冲池命中率 %.1f%%，低于推荐值。", m.Instance, m.HitRate),
-					Impact:   "缓冲池命中率下降会增加磁盘 IO，查询延迟上升，数据库整体吞吐受限。",
-				Suggestion: "适当增大 innodb_buffer_pool_size（建议不超过物理内存的 75%）；排查全表扫描与大结果集查询；结合慢查询日志优化索引。",
-			})
+					Severity:   sev,
+					Category:   "中间件",
+					Resource:   name,
+					Title:      "MySQL InnoDB 缓冲池命中率偏低",
+					Detail:     fmt.Sprintf("MySQL 实例 %s InnoDB 缓冲池命中率 %.1f%%，低于推荐值。", m.Instance, m.HitRate),
+					Impact:     "缓冲池命中率下降会增加磁盘 IO，查询延迟上升，数据库整体吞吐受限。",
+					Suggestion: "适当增大 innodb_buffer_pool_size（建议不超过物理内存的 75%）；排查全表扫描与大结果集查询；结合慢查询日志优化索引。",
+				})
 			}
 			if m.RespTime >= dbLatWarn {
 				sev := "warning"
@@ -1352,12 +1374,12 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 					sev = "critical"
 				}
 				fs = append(fs, finding{
-					Severity: sev,
-					Category: "中间件",
-					Resource: name,
-					Title:    "MySQL 平均语句响应时间偏高",
-					Detail:   fmt.Sprintf("MySQL 实例 %s 平均语句响应时间 %.2fms，高于常态水平。", m.Instance, m.RespTime),
-					Impact:   "SQL 时延升高会拖慢调用方 RT，高并发下引发请求堆积与超时，影响上游业务。",
+					Severity:   sev,
+					Category:   "中间件",
+					Resource:   name,
+					Title:      "MySQL 平均语句响应时间偏高",
+					Detail:     fmt.Sprintf("MySQL 实例 %s 平均语句响应时间 %.2fms，高于常态水平。", m.Instance, m.RespTime),
+					Impact:     "SQL 时延升高会拖慢调用方 RT，高并发下引发请求堆积与超时，影响上游业务。",
 					Suggestion: "结合 performance_schema.events_statements_summary_by_digest 定位高耗时 SQL 类型；优化索引与执行计划；排查锁等待、全表扫描与临时表落盘；必要时扩容或读写分离。",
 				})
 			}
@@ -1368,12 +1390,12 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 					sev = "critical"
 				}
 				fs = append(fs, finding{
-					Severity: sev,
-					Category: "中间件",
-					Resource: name,
-					Title:    "PostgreSQL 连接数使用率偏高",
-					Detail:   fmt.Sprintf("PostgreSQL 实例 %s 连接数使用率 %.1f%%（%.0f/%.0f）。", m.Instance, m.ConnPct, m.ConnUsed, m.ConnMax),
-					Impact:   "连接接近上限会造成新连接被拒绝，应用出现连接获取失败。",
+					Severity:   sev,
+					Category:   "中间件",
+					Resource:   name,
+					Title:      "PostgreSQL 连接数使用率偏高",
+					Detail:     fmt.Sprintf("PostgreSQL 实例 %s 连接数使用率 %.1f%%（%.0f/%.0f）。", m.Instance, m.ConnPct, m.ConnUsed, m.ConnMax),
+					Impact:     "连接接近上限会造成新连接被拒绝，应用出现连接获取失败。",
 					Suggestion: "优化连接池（如 pgbouncer）与空闲连接回收；排查长事务；必要时调大 max_connections；配置连接数阈值告警。",
 				})
 			}
@@ -1383,14 +1405,14 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 					sev = "critical"
 				}
 				fs = append(fs, finding{
-					Severity: sev,
-					Category: "中间件",
-					Resource: name,
-					Title:    "PostgreSQL 缓存命中率偏低",
-					Detail:   fmt.Sprintf("PostgreSQL 实例 %s 缓存命中率 %.1f%%。", m.Instance, m.HitRate),
-					Impact:   "缓存命中率下降增加磁盘读取，查询性能下降。",
-				Suggestion: "适当增大 shared_buffers；排查大表顺序扫描；结合 pg_stat_statements 优化高频 SQL 与索引。",
-			})
+					Severity:   sev,
+					Category:   "中间件",
+					Resource:   name,
+					Title:      "PostgreSQL 缓存命中率偏低",
+					Detail:     fmt.Sprintf("PostgreSQL 实例 %s 缓存命中率 %.1f%%。", m.Instance, m.HitRate),
+					Impact:     "缓存命中率下降增加磁盘读取，查询性能下降。",
+					Suggestion: "适当增大 shared_buffers；排查大表顺序扫描；结合 pg_stat_statements 优化高频 SQL 与索引。",
+				})
 			}
 			if m.RespTime >= dbLatWarn {
 				sev := "warning"
@@ -1398,99 +1420,99 @@ func buildFindings(nodes []nodeStat, mw []mwInstance) []finding {
 					sev = "critical"
 				}
 				fs = append(fs, finding{
-					Severity: sev,
-					Category: "中间件",
-					Resource: name,
-					Title:    "PostgreSQL 平均语句响应时间偏高",
-					Detail:   fmt.Sprintf("PostgreSQL 实例 %s 平均语句响应时间 %.2fms，高于常态水平。", m.Instance, m.RespTime),
-					Impact:   "SQL 时延升高会拖慢调用方 RT，高并发下引发请求堆积与超时，影响上游业务。",
+					Severity:   sev,
+					Category:   "中间件",
+					Resource:   name,
+					Title:      "PostgreSQL 平均语句响应时间偏高",
+					Detail:     fmt.Sprintf("PostgreSQL 实例 %s 平均语句响应时间 %.2fms，高于常态水平。", m.Instance, m.RespTime),
+					Impact:     "SQL 时延升高会拖慢调用方 RT，高并发下引发请求堆积与超时，影响上游业务。",
 					Suggestion: "结合 pg_stat_statements 定位高耗时 SQL 与执行计划；优化索引、避免全表扫描与顺序扫描；排查锁等待与长事务；必要时扩容或读写分离。",
 				})
 			}
-	case "kafka":
-		if offline := m.Metrics["kafka_offline_partitions"]; offline > 0 {
-			fs = append(fs, finding{Severity: "critical", Category: "中间件",
-				Resource: name, Title: fmt.Sprintf("%s 存在离线分区", m.Instance),
-				Detail: fmt.Sprintf("离线分区数 %d，可能导致数据不可用。", int(offline))})
-		}
-		if ur := m.Metrics["kafka_under_replicated_partitions"]; ur > 0 {
-			fs = append(fs, finding{Severity: "warning", Category: "中间件",
-				Resource: name, Title: fmt.Sprintf("%s 存在欠副本分区", m.Instance),
-				Detail: fmt.Sprintf("欠副本分区数 %d，副本同步异常。", int(ur))})
-		}
-		if lag := m.Metrics["kafka_consumer_lag"]; lag > 100000 {
-			fs = append(fs, finding{Severity: "warning", Category: "中间件",
-				Resource: name, Title: fmt.Sprintf("%s 消费滞后偏高", m.Instance),
-				Detail: fmt.Sprintf("消费滞后 %.0f 条，消费能力或下游处理存在瓶颈。", lag)})
-		}
-		if ctrl := m.Metrics["kafka_active_controller_count"]; ctrl != 1 {
-			fs = append(fs, finding{Severity: "critical", Category: "中间件",
-				Resource: name, Title: fmt.Sprintf("%s 控制器状态异常", m.Instance),
-				Detail: fmt.Sprintf("活跃控制器数 %d（应为 1），集群选主异常。", int(ctrl))})
-		}
-	case "rocketmq":
-		if acc := m.Metrics["rocketmq_message_accumulation"]; acc > 0 {
-			fs = append(fs, finding{Severity: "warning", Category: "中间件",
-				Resource: name, Title: fmt.Sprintf("%s 消息堆积", m.Instance),
-				Detail: fmt.Sprintf("消息堆积 %d 条，消费速率不足。", int(acc))})
-		}
-		if lag := m.Metrics["rocketmq_consumer_lag"]; lag > 100000 {
-			fs = append(fs, finding{Severity: "warning", Category: "中间件",
-				Resource: name, Title: fmt.Sprintf("%s 消费滞后偏高", m.Instance),
-				Detail: fmt.Sprintf("消费滞后 %.0f 条。", lag)})
-		}
-	case "mongodb":
-		if h := m.Metrics["mongodb_repl_health"]; h > 0 && h < 1 {
-			fs = append(fs, finding{Severity: "critical", Category: "中间件",
-				Resource: name, Title: fmt.Sprintf("%s 复制健康异常", m.Instance),
-				Detail: fmt.Sprintf("复制健康度 %.2f（正常为 1），副本集异常。", h)})
-		}
-		if lag := m.Metrics["mongodb_repl_lag"]; lag > 30 {
-			fs = append(fs, finding{Severity: "warning", Category: "中间件",
-				Resource: name, Title: fmt.Sprintf("%s 复制延迟偏高", m.Instance),
-				Detail: fmt.Sprintf("复制延迟 %.1fs。", lag)})
-		}
-		if cur := m.Metrics["mongodb_connections_current"]; cur > 0 {
-			avail := m.Metrics["mongodb_connections_available"]
-			if cur+avail > 0 && cur/(cur+avail) > 0.9 {
+		case "kafka":
+			if offline := m.Metrics["kafka_offline_partitions"]; offline > 0 {
+				fs = append(fs, finding{Severity: "critical", Category: "中间件",
+					Resource: name, Title: fmt.Sprintf("%s 存在离线分区", m.Instance),
+					Detail: fmt.Sprintf("离线分区数 %d，可能导致数据不可用。", int(offline))})
+			}
+			if ur := m.Metrics["kafka_under_replicated_partitions"]; ur > 0 {
 				fs = append(fs, finding{Severity: "warning", Category: "中间件",
-					Resource: name, Title: fmt.Sprintf("%s 连接使用率偏高", m.Instance),
-					Detail: fmt.Sprintf("当前连接 %d，可用 %d，使用率 %.0f%%。", int(cur), int(avail), cur/(cur+avail)*100)})
+					Resource: name, Title: fmt.Sprintf("%s 存在欠副本分区", m.Instance),
+					Detail: fmt.Sprintf("欠副本分区数 %d，副本同步异常。", int(ur))})
+			}
+			if lag := m.Metrics["kafka_consumer_lag"]; lag > 100000 {
+				fs = append(fs, finding{Severity: "warning", Category: "中间件",
+					Resource: name, Title: fmt.Sprintf("%s 消费滞后偏高", m.Instance),
+					Detail: fmt.Sprintf("消费滞后 %.0f 条，消费能力或下游处理存在瓶颈。", lag)})
+			}
+			if ctrl := m.Metrics["kafka_active_controller_count"]; ctrl != 1 {
+				fs = append(fs, finding{Severity: "critical", Category: "中间件",
+					Resource: name, Title: fmt.Sprintf("%s 控制器状态异常", m.Instance),
+					Detail: fmt.Sprintf("活跃控制器数 %d（应为 1），集群选主异常。", int(ctrl))})
+			}
+		case "rocketmq":
+			if acc := m.Metrics["rocketmq_message_accumulation"]; acc > 0 {
+				fs = append(fs, finding{Severity: "warning", Category: "中间件",
+					Resource: name, Title: fmt.Sprintf("%s 消息堆积", m.Instance),
+					Detail: fmt.Sprintf("消息堆积 %d 条，消费速率不足。", int(acc))})
+			}
+			if lag := m.Metrics["rocketmq_consumer_lag"]; lag > 100000 {
+				fs = append(fs, finding{Severity: "warning", Category: "中间件",
+					Resource: name, Title: fmt.Sprintf("%s 消费滞后偏高", m.Instance),
+					Detail: fmt.Sprintf("消费滞后 %.0f 条。", lag)})
+			}
+		case "mongodb":
+			if h := m.Metrics["mongodb_repl_health"]; h > 0 && h < 1 {
+				fs = append(fs, finding{Severity: "critical", Category: "中间件",
+					Resource: name, Title: fmt.Sprintf("%s 复制健康异常", m.Instance),
+					Detail: fmt.Sprintf("复制健康度 %.2f（正常为 1），副本集异常。", h)})
+			}
+			if lag := m.Metrics["mongodb_repl_lag"]; lag > 30 {
+				fs = append(fs, finding{Severity: "warning", Category: "中间件",
+					Resource: name, Title: fmt.Sprintf("%s 复制延迟偏高", m.Instance),
+					Detail: fmt.Sprintf("复制延迟 %.1fs。", lag)})
+			}
+			if cur := m.Metrics["mongodb_connections_current"]; cur > 0 {
+				avail := m.Metrics["mongodb_connections_available"]
+				if cur+avail > 0 && cur/(cur+avail) > 0.9 {
+					fs = append(fs, finding{Severity: "warning", Category: "中间件",
+						Resource: name, Title: fmt.Sprintf("%s 连接使用率偏高", m.Instance),
+						Detail: fmt.Sprintf("当前连接 %d，可用 %d，使用率 %.0f%%。", int(cur), int(avail), cur/(cur+avail)*100)})
+				}
+			}
+		case "kubernetes":
+			nt := m.Metrics["k8s_nodes_total"]
+			nr := m.Metrics["k8s_nodes_ready"]
+			if nt > 0 && nr < nt {
+				fs = append(fs, finding{Severity: "warning", Category: "中间件",
+					Resource: name, Title: fmt.Sprintf("%s 集群存在未就绪节点", m.Instance),
+					Detail: fmt.Sprintf("节点总数 %d，就绪 %d。", int(nt), int(nr))})
+			}
+			if v := m.Metrics["k8s_pods_failed"]; v > 0 {
+				fs = append(fs, finding{Severity: "warning", Category: "中间件",
+					Resource: name, Title: fmt.Sprintf("%s 存在失败 Pod", m.Instance),
+					Detail: fmt.Sprintf("失败 Pod 数 %d。", int(v))})
+			}
+			if v := m.Metrics["k8s_deployments_unhealthy"]; v > 0 {
+				fs = append(fs, finding{Severity: "warning", Category: "中间件",
+					Resource: name, Title: fmt.Sprintf("%s 存在异常 Deployment", m.Instance),
+					Detail: fmt.Sprintf("异常 Deployment 数 %d。", int(v))})
+			}
+		case "docker":
+			if v := m.Metrics["docker_containers_stopped"]; v > 0 {
+				fs = append(fs, finding{Severity: "info", Category: "中间件",
+					Resource: name, Title: fmt.Sprintf("%s 存在已停止容器", m.Instance),
+					Detail: fmt.Sprintf("已停止容器 %d 个。", int(v))})
 			}
 		}
-	case "kubernetes":
-		nt := m.Metrics["k8s_nodes_total"]
-		nr := m.Metrics["k8s_nodes_ready"]
-		if nt > 0 && nr < nt {
-			fs = append(fs, finding{Severity: "warning", Category: "中间件",
-				Resource: name, Title: fmt.Sprintf("%s 集群存在未就绪节点", m.Instance),
-				Detail: fmt.Sprintf("节点总数 %d，就绪 %d。", int(nt), int(nr))})
-		}
-		if v := m.Metrics["k8s_pods_failed"]; v > 0 {
-			fs = append(fs, finding{Severity: "warning", Category: "中间件",
-				Resource: name, Title: fmt.Sprintf("%s 存在失败 Pod", m.Instance),
-				Detail: fmt.Sprintf("失败 Pod 数 %d。", int(v))})
-		}
-		if v := m.Metrics["k8s_deployments_unhealthy"]; v > 0 {
-			fs = append(fs, finding{Severity: "warning", Category: "中间件",
-				Resource: name, Title: fmt.Sprintf("%s 存在异常 Deployment", m.Instance),
-				Detail: fmt.Sprintf("异常 Deployment 数 %d。", int(v))})
-		}
-	case "docker":
-		if v := m.Metrics["docker_containers_stopped"]; v > 0 {
-			fs = append(fs, finding{Severity: "info", Category: "中间件",
-				Resource: name, Title: fmt.Sprintf("%s 存在已停止容器", m.Instance),
-				Detail: fmt.Sprintf("已停止容器 %d 个。", int(v))})
-		}
-	}
-	if strings.Contains(m.Extra, "主从延迟") || strings.Contains(m.Extra, "复制延迟") {
+		if strings.Contains(m.Extra, "主从延迟") || strings.Contains(m.Extra, "复制延迟") {
 			fs = append(fs, finding{
-				Severity: "warning",
-				Category: "中间件",
-				Resource: name,
-				Title:    "复制延迟",
-				Detail:   fmt.Sprintf("中间件实例 %s 存在复制延迟：%s。", m.Instance, m.Extra),
-				Impact:   "读从库可能读到陈旧数据，存在数据一致性风险；延迟持续扩大可能引发复制中断。",
+				Severity:   "warning",
+				Category:   "中间件",
+				Resource:   name,
+				Title:      "复制延迟",
+				Detail:     fmt.Sprintf("中间件实例 %s 存在复制延迟：%s。", m.Instance, m.Extra),
+				Impact:     "读从库可能读到陈旧数据，存在数据一致性风险；延迟持续扩大可能引发复制中断。",
 				Suggestion: "排查主库写入压力与从库硬件/IO 瓶颈，确认复制线程状态（SHOW REPLICA STATUS / pg_stat_replication）与网络带宽；对强一致读改走主库。",
 			})
 		}
@@ -1719,19 +1741,19 @@ func renderHTML(data reportData) string {
 
 const (
 	// cpuWarn/cpuCrit CPU 使用率告警阈值（警告/紧急，%）。
-	cpuWarn, cpuCrit         = 70.0, 85.0
+	cpuWarn, cpuCrit = 70.0, 85.0
 	// memWarn/memCrit 内存使用率告警阈值（警告/紧急，%）。
-	memWarn, memCrit         = 80.0, 90.0
+	memWarn, memCrit = 80.0, 90.0
 	// diskWarn/diskCrit 磁盘使用率告警阈值（警告/紧急，%）。
-	diskWarn, diskCrit       = 80.0, 90.0
+	diskWarn, diskCrit = 80.0, 90.0
 	// connWarn/connCrit TCP 连接数使用率告警阈值（警告/紧急，%）。
-	connWarn, connCrit       = 80.0, 90.0 // 连接数使用率 %
+	connWarn, connCrit = 80.0, 90.0 // 连接数使用率 %
 	// hitWarn/hitCrit 缓存命中率低于该值即告警（%，警告/紧急）。
-	hitWarn, hitCrit         = 90.0, 80.0 // 命中率低于该值告警（%）
+	hitWarn, hitCrit = 90.0, 80.0 // 命中率低于该值告警（%）
 	// redisMemWarn/redisMemCrit Redis 内存使用率告警阈值（警告/紧急，%）。
 	redisMemWarn, redisMemCrit = 80.0, 90.0
 	// redisLatWarn/redisLatCrit Redis 命令时延告警阈值（警告/紧急，ms）。
 	redisLatWarn, redisLatCrit = 5.0, 20.0 // ms
 	// dbLatWarn/dbLatCrit 关系型数据库平均语句时延告警阈值（警告/紧急，ms）。
-	dbLatWarn, dbLatCrit     = 50.0, 200.0 // ms，关系型数据库平均语句时延
+	dbLatWarn, dbLatCrit = 50.0, 200.0 // ms，关系型数据库平均语句时延
 )
