@@ -686,7 +686,8 @@ onUnmounted(() => {
   display: inline-flex;
   gap: 28px;
   padding-left: 100%;
-  animation: marquee 32s linear infinite;
+  /* 告警内容需要留出足够阅读时间；悬停时可暂停查看。 */
+  animation: marquee 60s linear infinite;
 }
 
 .ab-track:hover {
