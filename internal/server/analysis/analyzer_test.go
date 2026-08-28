@@ -71,3 +71,29 @@ func TestScoreRisk(t *testing.T) {
 		t.Fatalf("风险聚合错误：score=%d severity=%s", score, level)
 	}
 }
+
+func TestNormalizeWindow(t *testing.T) {
+	if got := NormalizeWindow(24); got != 24*time.Hour {
+		t.Fatalf("24h window = %s", got)
+	}
+	if got := NormalizeWindow(720); got != 30*24*time.Hour {
+		t.Fatalf("30d window = %s", got)
+	}
+	if got := NormalizeWindow(99); got != 7*24*time.Hour {
+		t.Fatalf("invalid window fallback = %s", got)
+	}
+}
+
+func TestCoverageExplainsMissingMetrics(t *testing.T) {
+	coverage := coverageOf([]Baseline{{Metric: "cpu_usage", SampleCount: 12, Status: "insufficient_data"}})
+	if coverage.Ready || len(coverage.MissingMetrics) != 3 || coverage.Message == "" {
+		t.Fatalf("覆盖状态应明确样本不足：%+v", coverage)
+	}
+}
+
+func TestRiskTypesDeduplicate(t *testing.T) {
+	types := riskTypes([]Evidence{{Type: "alert"}, {Type: "alert"}, {Type: "security"}})
+	if len(types) != 2 || types[0] != "alert" || types[1] != "security" {
+		t.Fatalf("风险类型去重失败：%v", types)
+	}
+}

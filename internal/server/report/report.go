@@ -153,10 +153,13 @@ type reportData struct {
 }
 
 type intelligenceSection struct {
-	RiskCount           int                   `json:"riskCount"`
-	AnomalyCount        int                   `json:"anomalyCount"`
-	UrgentCapacityCount int                   `json:"urgentCapacityCount"`
-	Hosts               []analysis.HostResult `json:"hosts"`
+	WindowHours           int                   `json:"windowHours"`
+	ReadyNodeCount        int                   `json:"readyNodeCount"`
+	InsufficientNodeCount int                   `json:"insufficientNodeCount"`
+	RiskCount             int                   `json:"riskCount"`
+	AnomalyCount          int                   `json:"anomalyCount"`
+	UrgentCapacityCount   int                   `json:"urgentCapacityCount"`
+	Hosts                 []analysis.HostResult `json:"hosts"`
 }
 
 // netIfaceStat 单网卡流量统计。
@@ -440,10 +443,10 @@ func (g *Generator) collectData(start, end time.Time, period string) reportData 
 	comparison := g.buildComparison(start, end, nodeStats, summary)
 	var intelligence *intelligenceSection
 	if g.analyzer != nil {
-		result := g.analyzer.Summary(false)
+		result := g.analyzer.Summary(7*24*time.Hour, false)
 		intelligence = &intelligenceSection{
-			RiskCount: result.RiskCount, AnomalyCount: result.AnomalyCount,
-			UrgentCapacityCount: result.UrgentCapacityCount, Hosts: result.Hosts,
+			WindowHours: result.WindowHours, ReadyNodeCount: result.ReadyNodeCount, InsufficientNodeCount: result.InsufficientNodeCount,
+			RiskCount: result.RiskCount, AnomalyCount: result.AnomalyCount, UrgentCapacityCount: result.UrgentCapacityCount, Hosts: result.Hosts,
 		}
 	}
 

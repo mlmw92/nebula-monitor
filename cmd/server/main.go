@@ -150,6 +150,8 @@ func main() {
 
 	// 智能分析模块：仅查询既有时序数据，不影响上报与告警评估链路。
 	analyzer := analysis.New(store, nodeMgr)
+	analyzer.SetAlertStore(alertStore)
+	analyzer.SetSecurityStore(securityStore)
 
 	// 报告生成模块
 	reportGen := report.NewGenerator(store, nodeMgr, securityStore, cfg.ReportDir)

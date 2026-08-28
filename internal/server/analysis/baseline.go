@@ -11,7 +11,7 @@ const minBaselineSamples = 24
 
 // CalculateBaseline 以中位数和 MAD 构造稳健正常区间，并要求末尾连续三个点越界才判定异常。
 func CalculateBaseline(metric string, labels map[string]string, points []model.Point) Baseline {
-	out := Baseline{Metric: metric, Labels: labels, SampleCount: len(points), Points: points, Status: "ok"}
+	out := Baseline{Metric: metric, Labels: labels, SampleCount: len(points), RequiredSamples: minBaselineSamples, Points: points, Status: "ok"}
 	if len(points) < minBaselineSamples {
 		out.Status = "insufficient_data"
 		return out

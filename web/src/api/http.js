@@ -108,8 +108,8 @@ const api = {
   metricCatalog,
   metricActive,
   // 智能分析（只读）
-  analysisSummary: (refresh = false) => request('/api/v1/analysis/summary' + (refresh ? '?refresh=true' : '')),
-  analysisHost: (name, refresh = false) => request('/api/v1/analysis/hosts/' + encodeURIComponent(name) + (refresh ? '?refresh=true' : '')),
+  analysisSummary: (windowHours = 168, refresh = false) => request('/api/v1/analysis/summary?windowHours=' + windowHours + (refresh ? '&refresh=true' : '')),
+  analysisHost: (name, windowHours = 168, refresh = false) => request('/api/v1/analysis/hosts/' + encodeURIComponent(name) + '?windowHours=' + windowHours + (refresh ? '&refresh=true' : '')),
   // 自定义仪表盘 CRUD
   listDashboards: () => request('/api/v1/dashboards'),
   getDashboard: (id) => request('/api/v1/dashboards/' + id),

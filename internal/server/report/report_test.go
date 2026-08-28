@@ -66,7 +66,7 @@ func TestRenderHTMLSmoke(t *testing.T) {
 			{Severity: "critical", Category: "中间件", Resource: "redis/cache-2", Title: "Redis 内存使用率偏高", Detail: "实例 cache-2 内存使用率 92%。", Impact: "命中率下降。", Suggestion: "上调 maxmemory。"},
 			{Severity: "warning", Category: "主机资源", Resource: "node-b", Title: "CPU 使用率偏高", Detail: "node-b 峰值 78%。", Impact: "响应变慢。", Suggestion: "排查高 CPU 进程。"},
 		},
-		Intelligence: &intelligenceSection{RiskCount: 1, AnomalyCount: 1, UrgentCapacityCount: 1, Hosts: []analysis.HostResult{{Node: "node-b", Score: 82, Severity: analysis.SeverityCritical, Evidence: []analysis.Evidence{{Title: "CPU 使用率持续偏离动态基线"}}, Forecasts: []analysis.Forecast{{Status: "urgent", DaysRemaining: 3.2}}}}},
+		Intelligence: &intelligenceSection{WindowHours: 168, ReadyNodeCount: 1, InsufficientNodeCount: 1, RiskCount: 1, AnomalyCount: 1, UrgentCapacityCount: 1, Hosts: []analysis.HostResult{{Node: "node-b", Score: 82, Severity: analysis.SeverityCritical, RiskTypes: []string{"anomaly", "alert"}, Coverage: analysis.Coverage{Ready: true}, Evidence: []analysis.Evidence{{Title: "CPU 使用率持续偏离动态基线"}}, Forecasts: []analysis.Forecast{{Status: "urgent", DaysRemaining: 3.2}}}}},
 	}
 
 	html := renderHTML(data)
@@ -84,6 +84,12 @@ func TestRenderHTMLSmoke(t *testing.T) {
 	}
 	if !strings.Contains(html, "CPU 使用率持续偏离动态基线") {
 		t.Fatal("rendered HTML missing intelligence evidence")
+	}
+	if !strings.Contains(html, "数据已就绪 / 样本不足") {
+		t.Fatal("rendered HTML missing intelligence coverage")
+	}
+	if !strings.Contains(html, "anomaly") {
+		t.Fatal("rendered HTML missing intelligence risk type")
 	}
 	if !strings.Contains(html, "cache-2") {
 		t.Fatal("rendered HTML missing middleware instance")
