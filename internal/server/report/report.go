@@ -609,7 +609,10 @@ func (g *Generator) collectSecurity(startMs, endMs int64) *SecuritySection {
 	}
 	baselines := g.secStore.Baselines()
 	events := g.secStore.Events(0, "", "")
-	sec := &SecuritySection{HasData: len(baselines) > 0 || len(events) > 0}
+	sec := &SecuritySection{
+		HasData:   len(baselines) > 0 || len(events) > 0,
+		LowScores: make(map[string]float64),
+	}
 	var sumScore float64
 	for _, b := range baselines {
 		sumScore += b.Score

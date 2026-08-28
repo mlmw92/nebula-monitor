@@ -227,7 +227,7 @@
         <div class="adv-row" v-if="grouping.enabled">
           <div class="adv-item">
             <span class="adv-label">分组标签</span>
-            <el-select v-model="grouping.groupBy" multiple collapse-tags placeholder="分组标签">
+            <el-select v-model="grouping.groupBy" class="group-by-select" multiple collapse-tags tooltip-effect="dark" placeholder="选择分组标签">
               <el-option label="规则名" value="name" />
               <el-option label="规则ID" value="rule" />
               <el-option label="节点" value="node" />
@@ -1129,6 +1129,21 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.adv-item:has(.group-by-select) {
+  min-width: 300px;
+}
+.group-by-select {
+  width: 220px;
+}
+.group-by-select :deep(.el-select__selection) {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.group-by-select :deep(.el-select__selected-item) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .adv-label {
   font-size: 13px;

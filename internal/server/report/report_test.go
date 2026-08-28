@@ -3,7 +3,31 @@ package report
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/security"
 )
+
+func TestCollectSecurityInitializesLowScores(t *testing.T) {
+	store := security.New(t.TempDir() + "/security_store.json")
+	store.Ingest("node-low-score", nil, &model.SecurityBaseline{
+		Node:      "node-low-score",
+		Score:     65,
+		CheckedAt: time.Now().UnixMilli(),
+	})
+
+	sec := (&Generator{secStore: store}).collectSecurity(0, time.Now().Add(time.Hour).UnixMilli())
+	if sec == nil {
+		t.Fatal("collectSecurity returned nil")
+	}
+	if got := sec.LowScores["node-low-score"]; got != 65 {
+		t.Fatalf("low score = %v, want 65", got)
+	}
+	if sec.LowScoreNodes != 1 {
+		t.Fatalf("low score node count = %d, want 1", sec.LowScoreNodes)
+	}
+}
 
 func TestRenderHTMLSmoke(t *testing.T) {
 	charts := buildCharts(
