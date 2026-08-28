@@ -1070,16 +1070,16 @@ defineExpose({ reload: load })
   gap: 10px;
 }
 .refresh-text {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   font-family: var(--mono);
 }
 .refresh-label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .countdown {
-  font-size: 12px;
+  font-size: 13px;
   font-family: var(--mono);
   color: var(--accent);
   min-width: 28px;
@@ -1111,7 +1111,7 @@ defineExpose({ reload: load })
 }
 .hn-ip {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 13px;
   font-family: var(--mono);
 }
 .hn-edit {
@@ -1124,7 +1124,7 @@ defineExpose({ reload: load })
 }
 .ver-cell {
   display: inline-block;
-  font-size: 11px;
+  font-size: 13px;
   font-family: var(--mono);
   padding: 1px 7px;
   border-radius: 4px;
@@ -1166,7 +1166,7 @@ defineExpose({ reload: load })
   background: var(--danger);
 }
 .status-text {
-  font-size: 12px;
+  font-size: 13px;
   vertical-align: middle;
 }
 .status-text.on { color: var(--chart-green); }
@@ -1174,7 +1174,7 @@ defineExpose({ reload: load })
 
 /* 分组标签 */
 .group-tag {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .group-tag.clickable {
@@ -1191,7 +1191,7 @@ defineExpose({ reload: load })
   color: var(--text);
 }
 .group-arrow {
-  font-size: 10px;
+  font-size: 13px;
   opacity: 0.6;
 }
 
@@ -1224,11 +1224,11 @@ defineExpose({ reload: load })
   font-size: 13px;
   color: var(--text);
 }
-.rate.sm { font-size: 11px; }
+.rate.sm { font-size: 13px; }
 .rate.mono { font-family: var(--mono); }
 .rate-sm {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   white-space: nowrap;
 }
@@ -1236,7 +1236,7 @@ defineExpose({ reload: load })
 .rate-sm.amber { color: var(--warn); }
 .rate-sm.red { color: var(--danger); }
 .rate small {
-  font-size: 10px;
+  font-size: 13px;
   margin-left: 1px;
   color: var(--text-dim);
 }
@@ -1246,7 +1246,7 @@ defineExpose({ reload: load })
 }
 .dim {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 /* 行状态高亮 */
@@ -1260,7 +1260,7 @@ defineExpose({ reload: load })
 .net-traffic {
   line-height: 1.5;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
 }
 .net-traffic .net-up {
   color: var(--text-muted);
@@ -1281,7 +1281,7 @@ defineExpose({ reload: load })
 }
 .cmd-box :deep(.el-textarea__inner) {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--accent);
   background: rgba(0, 0, 0, 0.35) !important;
 }
@@ -1293,7 +1293,7 @@ defineExpose({ reload: load })
   gap: 10px;
 }
 .col-set-title {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-bottom: 2px;
 }
@@ -1348,7 +1348,7 @@ defineExpose({ reload: load })
   border-radius: 2px;
 }
 .section-desc {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.7;
   color: var(--text-muted);
   margin: 0;
@@ -1359,12 +1359,12 @@ defineExpose({ reload: load })
   gap: 4px;
 }
 .form-item label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .field-help {
   margin: 0;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.55;
   color: var(--text-muted);
 }
@@ -1374,8 +1374,8 @@ defineExpose({ reload: load })
 .host-tabs :deep(.el-tabs__content) { display: none; }
 .proxy-status-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .panel-title { font-size: 13px; color: var(--text); font-weight: 600; }
-.panel-subtitle { margin-left: 8px; font-size: 11px; color: var(--text-muted); }
-.proxy-summary { font-size: 12px; color: var(--text-muted); }
+.panel-subtitle { margin-left: 8px; font-size: 13px; color: var(--text-muted); }
+.proxy-summary { font-size: 13px; color: var(--text-muted); }
 .field-help code {
   font-family: var(--mono);
   color: var(--accent);
@@ -1389,7 +1389,7 @@ defineExpose({ reload: load })
   gap: 12px;
 }
 .block-desc {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.7;
   color: var(--text-dim);
   background: rgba(255, 255, 255, 0.03);
@@ -1410,7 +1410,7 @@ defineExpose({ reload: load })
   display: flex;
   flex-direction: column;
   gap: 5px;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.7;
   color: var(--text-dim);
 }
@@ -1420,7 +1420,7 @@ defineExpose({ reload: load })
   padding: 1px 5px;
   border-radius: 3px;
   color: var(--accent);
-  font-size: 11px;
+  font-size: 13px;
 }
 .steps-list b {
   color: var(--text);
@@ -1441,14 +1441,14 @@ defineExpose({ reload: load })
 }
 .cmd-label {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .cmd-text {
   margin: 0;
   padding: 10px 12px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.65;
   color: var(--accent);
   white-space: pre-wrap;

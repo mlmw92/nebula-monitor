@@ -121,7 +121,7 @@ async function submit() {
   margin-right: 10px;
 }
 .card-head .sub {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .pwd-form {

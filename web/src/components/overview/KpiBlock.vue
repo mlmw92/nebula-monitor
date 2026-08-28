@@ -81,12 +81,12 @@ function toneCls(tone) {
   line-height: 1.1;
 }
 .kpi-text {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 2px;
 }
 .kpi-foot {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-muted);
   margin-top: 1px;
   white-space: nowrap;

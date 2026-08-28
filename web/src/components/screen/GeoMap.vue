@@ -110,7 +110,7 @@ watch(() => props.scope, render)
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 13px;
   padding: 3px 12px;
   border-radius: 12px;
   cursor: pointer;
@@ -144,7 +144,7 @@ watch(() => props.scope, render)
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   white-space: nowrap;
 }

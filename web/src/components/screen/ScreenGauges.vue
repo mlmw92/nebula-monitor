@@ -119,7 +119,7 @@ function dash(v) {
   line-height: 1.1;
 }
 .sg-label {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 4px;
 }

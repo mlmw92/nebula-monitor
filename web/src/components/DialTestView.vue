@@ -213,12 +213,12 @@ onMounted(load)
 .status-text.off { color: var(--danger); }
 /* 表头不换行，避免“延迟(ms)”等列头被挤压换行 */
 .dialtest-view :deep(th .cell) { white-space: nowrap; }
-.dial-err { color: var(--danger); font-size: 12px; word-break: break-all; }
+.dial-err { color: var(--danger); font-size: 13px; word-break: break-all; }
 .muted { color: var(--text-dim); }
 .metric-good { color: var(--accent); }
 .metric-warn { color: var(--warn); }
 .metric-bad { color: var(--danger); }
 .ch-tag { margin-right: 4px; }
-.hint-inline { font-size: 12px; color: var(--text-dim); margin-left: 8px; }
+.hint-inline { font-size: 13px; color: var(--text-dim); margin-left: 8px; }
 .el-form-item :deep(.el-input-number) { width: 120px; }
 </style>

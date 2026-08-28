@@ -120,7 +120,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 13px;
 }
 .db-kpi {
   display: grid;
@@ -143,14 +143,14 @@ onUnmounted(() => {
 .dbk-v.cyan { color: var(--info); }
 .dbk-v.amber { color: var(--warn); }
 .dbk-l {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 3px;
 }
 .db-usage-head {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-bottom: 5px;
 }
@@ -179,7 +179,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .db-bd .d {

@@ -209,7 +209,7 @@ onMounted(load)
 .empty-icon { color: var(--text-muted); margin-bottom: 16px; }
 .empty-title { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
 .empty-desc { color: var(--text-dim); margin: 0 0 8px; font-size: 13px; }
-.empty-hint { color: var(--text-muted); font-size: 12px; }
+.empty-hint { color: var(--text-muted); font-size: 13px; }
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
@@ -230,7 +230,7 @@ onMounted(load)
 .mono { font-family: var(--mono); }
 .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
 .metric-cell { padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; text-align: center; }
-.mc-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.mc-label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
 .mc-value { font-size: 18px; font-weight: 600; }
 .chart-box { width: 100%; height: 300px; }
 
@@ -240,13 +240,13 @@ onMounted(load)
 .topo-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
 .topo-group-title { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
 .topo-group-title svg { width: 18px; height: 18px; color: var(--accent); flex-shrink: 0; }
-.topo-group-header .dim { color: var(--text-muted); font-size: 12px; }
+.topo-group-header .dim { color: var(--text-muted); font-size: 13px; }
 .topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .rel-node { padding: 12px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--border); background: var(--bg-elev); transition: transform 0.15s, box-shadow 0.15s; }
 .rel-node:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
 .rel-node.is-down { opacity: 0.6; }
 .rel-node-name { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+.rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); margin-top: 6px; }
 .rel-standalone { border-left: 4px solid var(--chart-blue); }
 .rel-master { border-left: 4px solid var(--chart-orange); }
 

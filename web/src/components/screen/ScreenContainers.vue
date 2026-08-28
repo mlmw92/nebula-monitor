@@ -127,7 +127,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 13px;
 }
 .sc-body {
   display: flex;
@@ -164,7 +164,7 @@ onUnmounted(() => {
   line-height: 1;
 }
 .sc-total-l {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 2px;
 }
@@ -179,7 +179,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .sc-leg .d {

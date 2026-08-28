@@ -89,7 +89,7 @@ watch(() => props.series, render, { deep: true })
   margin-bottom: 4px;
 }
 .trend-title {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   letter-spacing: 0.03em;
 }
@@ -116,7 +116,7 @@ watch(() => props.series, render, { deep: true })
   margin-bottom: 0;
 }
 .screen-trend.compact .trend-title {
-  font-size: 11px;
+  font-size: 13px;
 }
 .screen-trend.compact .trend-cur {
   font-size: 13px;

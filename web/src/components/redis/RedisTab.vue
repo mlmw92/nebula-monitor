@@ -1224,13 +1224,13 @@ function handleResize() {
 }
 .section-title.no-bar::before { display: none; }
 .section-desc {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   line-height: 1.5;
   margin-bottom: 12px;
 }
 .chart-note {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   line-height: 1.5;
   margin-bottom: 8px;
@@ -1247,7 +1247,7 @@ function handleResize() {
 }
 .bar-item {}
 .bar-sub-title {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-bottom: 8px;
 }
@@ -1281,7 +1281,7 @@ function handleResize() {
   display: inline-block;
   padding: 2px 10px;
   border-radius: 12px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
 }
 .role-tag.master { background: rgba(220, 56, 45, 0.15); color: #ff6b6b; }
@@ -1292,7 +1292,7 @@ function handleResize() {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 13px;
   background: rgba(56, 189, 248, 0.12);
   color: var(--info);
 }
@@ -1342,18 +1342,18 @@ function handleResize() {
 .bar-fill.amber { background: var(--warn); }
 .bar-fill.red { background: var(--danger); }
 .mem-text {
-  font-size: 12px;
+  font-size: 13px;
   min-width: 60px;
 }
 .mem-pct {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   min-width: 36px;
   text-align: right;
 }
 .issue-reasons {
   color: #fbbf24;
-  font-size: 12px;
+  font-size: 13px;
 }
 .dim-text {
   color: var(--text-dim);
@@ -1379,7 +1379,7 @@ function handleResize() {
 .alert-summary-desc {
   margin-top: 8px;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
 }
 .alert-summary-list {
@@ -1397,7 +1397,7 @@ function handleResize() {
   background: rgba(15, 23, 42, 0.58);
   border: 1px solid rgba(245, 158, 11, 0.22);
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
 }
 .issue-chip:hover {
@@ -1449,7 +1449,7 @@ function handleResize() {
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 10px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .meta-item {}
@@ -1471,7 +1471,7 @@ function handleResize() {
   margin-bottom: 6px;
 }
 .tc-label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .tc-value {
@@ -1524,7 +1524,7 @@ function handleResize() {
 }
 .empty-cmd code {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--accent);
   white-space: nowrap;
 }
@@ -1544,14 +1544,14 @@ function handleResize() {
   background: rgba(34, 211, 238, 0.1);
 }
 .empty-hint {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   margin-top: 8px;
   line-height: 1.6;
 }
 .empty-hint code {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   background: rgba(255, 255, 255, 0.05);
   padding: 1px 6px;
@@ -1572,9 +1572,9 @@ function handleResize() {
 .topo-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 12px; flex-wrap: wrap; }
 .topo-group-title { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
 .topo-group-title svg { width: 18px; height: 18px; color: #93c5fd; }
-.topo-meta { font-size: 12px; display: inline-flex; align-items: center; gap: 10px; }
+.topo-meta { font-size: 13px; display: inline-flex; align-items: center; gap: 10px; }
 .topo-meta .dim { color: rgba(255,255,255,0.45); }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 13px; font-weight: 500; }
 .badge-ok { background: rgba(34,197,94,0.15); color: #4ade80; }
 .badge-warn { background: rgba(234,179,8,0.15); color: #fbbf24; }
 .badge-down { background: rgba(239,68,68,0.18); color: #f87171; }
@@ -1598,7 +1598,7 @@ function handleResize() {
 .rel-arrow { color: rgba(234,179,8,0.8); font-weight: 600; font-size: 13px; padding: 0 4px; white-space: nowrap; }
 .topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .rel-node-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; word-break: break-all; }
-.rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: rgba(255,255,255,0.75); flex-wrap: wrap; }
+.rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: rgba(255,255,255,0.75); flex-wrap: wrap; }
 .rel-node-meta .dim { color: rgba(255,255,255,0.4); }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .dot.up { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.5); }
@@ -1608,7 +1608,7 @@ function handleResize() {
 .snapshot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin: 16px 0 4px; }
 .snap-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px 14px; }
 .snap-card-wide { grid-column: span 2; }
-.snap-label { font-size: 12px; color: rgba(255,255,255,0.55); margin-bottom: 6px; }
+.snap-label { font-size: 13px; color: rgba(255,255,255,0.55); margin-bottom: 6px; }
 .snap-value { font-size: 18px; font-weight: 600; font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .snap-value.ok { color: #4ade80; }
 .snap-value.warn { color: #f87171; }
@@ -1620,14 +1620,14 @@ function handleResize() {
 .rel-edges { align-items: flex-start; }
 .rel-master-block { display: flex; flex-direction: column; gap: 8px; min-width: 180px; }
 .rel-slaves { display: flex; flex-direction: column; gap: 6px; padding-left: 14px; border-left: 2px dashed rgba(99,179,237,0.35); }
-.rel-slave { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 10px; background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.2); border-radius: 8px; cursor: pointer; transition: all .2s ease; flex-wrap: wrap; }
+.rel-slave { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 10px; background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.2); border-radius: 8px; cursor: pointer; transition: all .2s ease; flex-wrap: wrap; }
 .rel-slave:hover { background: rgba(99,102,241,0.14); border-color: rgba(99,102,241,0.45); }
 .rel-slave.is-down { opacity: .55; }
-.rel-slave-tag { background: rgba(99,102,241,0.22); color: #a5b4fc; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.rel-slave-tag { background: rgba(99,102,241,0.22); color: #a5b4fc; padding: 1px 6px; border-radius: 4px; font-size: 13px; font-weight: 600; }
 
 /* ==== Slot 分片条 ==== */
 .slot-section { margin-bottom: 14px; }
-.slot-section-label { font-size: 12px; color: rgba(255,255,255,0.55); margin-bottom: 8px; letter-spacing: 0.02em; }
+.slot-section-label { font-size: 13px; color: rgba(255,255,255,0.55); margin-bottom: 8px; letter-spacing: 0.02em; }
 .slot-bar {
   display: flex; height: 16px; border-radius: 6px; overflow: hidden;
   background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
@@ -1639,7 +1639,7 @@ function handleResize() {
 .slot-seg-empty { background: repeating-linear-gradient(45deg, rgba(148,163,184,0.15) 0 4px, transparent 4px 8px); cursor: default; }
 .slot-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; }
 .slot-legend-item {
-  display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  display: inline-flex; align-items: center; gap: 6px; font-size: 13px;
   padding: 3px 8px; border-radius: 6px; cursor: pointer;
   background: rgba(255,255,255,0.03); border: 1px solid transparent;
   transition: all .15s ease;
@@ -1656,12 +1656,12 @@ function handleResize() {
 .role-badge {
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; border-radius: 5px;
-  font-size: 11px; font-weight: 700; flex-shrink: 0;
+  font-size: 13px; font-weight: 700; flex-shrink: 0;
 }
 .role-badge-m { background: rgba(220,56,45,0.22); color: #ff8a80; border: 1px solid rgba(220,56,45,0.4); }
-.role-badge-s { background: rgba(34,197,94,0.18); color: #4ade80; border: 1px solid rgba(34,197,94,0.35); width: 16px; height: 16px; font-size: 10px; border-radius: 4px; }
+.role-badge-s { background: rgba(34,197,94,0.18); color: #4ade80; border: 1px solid rgba(34,197,94,0.35); width: 16px; height: 16px; font-size: 13px; border-radius: 4px; }
 .slot-chip {
-  font-size: 11px; font-family: var(--mono);
+  font-size: 13px; font-family: var(--mono);
   padding: 1px 8px; border-radius: 4px; border: 1px dashed;
 }
 /* 分支：左轨为复制实线（向下），右侧虚线为 failover（向上）
@@ -1679,7 +1679,7 @@ function handleResize() {
   display: flex; gap: 20px; margin-top: 12px; padding-top: 10px;
   border-top: 1px dashed rgba(255,255,255,0.08);
 }
-.topo-legend-item { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255,255,255,0.5); }
+.topo-legend-item { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,0.5); }
 .legend-line { display: inline-block; width: 24px; height: 0; }
 .legend-solid { border-top: 2px solid rgba(99,179,237,0.65); }
 .legend-dash { border-top: 2px dashed rgba(245,158,11,0.65); }
@@ -1700,7 +1700,7 @@ function handleResize() {
   height: fit-content;
 }
 .name-source-hint {
-  font-size: 10px; color: rgba(255,255,255,0.4);
+  font-size: 13px; color: rgba(255,255,255,0.4);
   border: 1px dashed rgba(255,255,255,0.18); padding: 1px 7px;
   border-radius: 4px; cursor: help; margin-left: 4px;
   white-space: nowrap;
@@ -1710,13 +1710,13 @@ function handleResize() {
 /* ==== 主从复制 + 故障转移强化 ==== */
 .ms-section { margin-top: 12px; }
 .ms-section-label {
-  display: flex; gap: 14px; margin-bottom: 10px; font-size: 11px; flex-wrap: wrap;
+  display: flex; gap: 14px; margin-bottom: 10px; font-size: 13px; flex-wrap: wrap;
   letter-spacing: 0.02em;
 }
 .ms-label-repl { color: rgba(147,197,253,0.9); }
 .ms-label-fo { color: rgba(251,191,36,0.9); }
-.ms-rail-repl { font-size: 10px; color: rgba(147,197,253,0.9); writing-mode: vertical-lr; letter-spacing: 1px; font-weight: 600; }
-.ms-rail-fo { font-size: 10px; color: rgba(251,191,36,0.9); writing-mode: vertical-lr; letter-spacing: 1px; font-weight: 600; }
+.ms-rail-repl { font-size: 13px; color: rgba(147,197,253,0.9); writing-mode: vertical-lr; letter-spacing: 1px; font-weight: 600; }
+.ms-rail-fo { font-size: 13px; color: rgba(251,191,36,0.9); writing-mode: vertical-lr; letter-spacing: 1px; font-weight: 600; }
 
 /* 从节点完整卡片：在线状态/ops/lag/内存 */
 .ms-slave-card {
@@ -1730,8 +1730,8 @@ function handleResize() {
 }
 .ms-slave-card:hover { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.5); }
 .ms-slave-card.is-down { opacity: .55; background: rgba(239,68,68,0.05); border-color: rgba(239,68,68,0.3); border-left-color: rgba(239,68,68,0.55); }
-.ms-slave-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; }
-.ms-slave-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: rgba(255,255,255,0.75); flex-wrap: wrap; }
+.ms-slave-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
+.ms-slave-meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: rgba(255,255,255,0.75); flex-wrap: wrap; }
 .ms-slave-meta .dim { color: rgba(255,255,255,0.4); }
 
 /* ==== 未关联主节点的从节点（replicaOf 为空）==== */
@@ -1741,7 +1741,7 @@ function handleResize() {
   border-radius: 8px;
 }
 .unlinked-label {
-  font-size: 11px; color: rgba(255,255,255,0.55); margin-bottom: 8px;
+  font-size: 13px; color: rgba(255,255,255,0.55); margin-bottom: 8px;
   display: flex; align-items: center; gap: 6px;
 }
 .unlinked-list { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -1836,11 +1836,11 @@ function handleResize() {
   border-right: 2px dashed rgba(251,191,36,0.7);
 }
 .ms-rail-repl {
-  font-size: 10px; color: rgba(147,197,253,0.9);
+  font-size: 13px; color: rgba(147,197,253,0.9);
   writing-mode: vertical-lr; letter-spacing: 1px; font-weight: 600;
 }
 .ms-rail-fo {
-  font-size: 10px; color: rgba(251,191,36,0.9);
+  font-size: 13px; color: rgba(251,191,36,0.9);
   writing-mode: vertical-lr; letter-spacing: 1px; font-weight: 600;
   text-align: right;
 }

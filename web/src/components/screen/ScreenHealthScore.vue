@@ -120,7 +120,7 @@ const bars = computed(() => [
   line-height: 1;
 }
 .sh-lv {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 3px;
 }
@@ -135,7 +135,7 @@ const bars = computed(() => [
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .sh-bar-l {
   width: 56px;

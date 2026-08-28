@@ -863,7 +863,7 @@ func (a *API) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	instance := r.URL.Query().Get("instance")
 	var events []model.AlertEvent
 	if state == "active" || state == string(model.AlertStateFiring) {
-		events = a.alerts.Active()
+		events = a.unacknowledgedAlerts(a.alerts.Active())
 	} else {
 		limit := 100
 		if l := r.URL.Query().Get("limit"); l != "" {
@@ -883,6 +883,22 @@ func (a *API) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		events = filtered
 	}
 	writeJSON(w, 200, map[string]interface{}{"alerts": events})
+}
+
+// unacknowledgedAlerts 返回尚未人工确认的告警，用于待处理告警的展示与统计。
+// 确认不改变监控条件的真实 firing 状态，以免影响引擎重启后的状态恢复。
+func (a *API) unacknowledgedAlerts(events []model.AlertEvent) []model.AlertEvent {
+	if a.acks == nil || len(events) == 0 {
+		return events
+	}
+	out := make([]model.AlertEvent, 0, len(events))
+	for _, event := range events {
+		// 确认接口当前使用 RuleName 作为键，保持与既有确认记录兼容。
+		if !a.acks.IsMarked(event.RuleName, event.Node, event.Instance, event.StartsAt) {
+			out = append(out, event)
+		}
+	}
+	return out
 }
 
 // ---- 告警规则 CRUD ----

@@ -215,10 +215,10 @@ onBeforeUnmount(() => {
 .left { width: 320px; border-right: 1px solid rgba(34,211,238,0.12); padding: 12px; overflow: auto; }
 .left-head-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .left-head { font-size: 15px; font-weight: 700; color: #e5edf7; }
-.discover-count { font-size: 11px; color: #34d399; }
+.discover-count { font-size: 13px; color: #34d399; }
 .discover-count.muted { color: #64748b; }
 .metric-tree-node { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; }
-.metric-state { flex: none; font-size: 10px; }
+.metric-state { flex: none; font-size: 13px; }
 .metric-state.online { color: #34d399; }
 .metric-state.offline { color: #64748b; }
 .kw { margin-bottom: 8px; }
@@ -226,7 +226,7 @@ onBeforeUnmount(() => {
 .empty { color: #64748b; margin-top: 40px; text-align: center; }
 .right-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
 .m-title { font-size: 16px; font-weight: 700; color: #e5edf7; }
-.m-name { font-size: 12px; color: #64748b; font-weight: 400; }
-.m-meta { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+.m-name { font-size: 13px; color: #64748b; font-weight: 400; }
+.m-meta { font-size: 13px; color: #94a3b8; margin-top: 4px; }
 .chart { height: calc(100% - 70px); min-height: 320px; background: rgba(15,23,42,0.4); border-radius: 10px; }
 </style>

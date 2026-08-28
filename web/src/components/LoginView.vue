@@ -165,7 +165,7 @@ async function doLogin() {
   color: var(--text);
 }
 .brand-text p {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 2px;
 }
@@ -183,7 +183,7 @@ async function doLogin() {
 }
 .hint {
   text-align: center;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   margin-top: 20px;
 }
@@ -193,7 +193,7 @@ async function doLogin() {
   left: 0;
   right: 0;
   text-align: center;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   z-index: 1;
 }

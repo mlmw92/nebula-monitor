@@ -210,7 +210,7 @@ function linkPath(n) {
 .tn-dot.warn { background: var(--warn); }
 .tn-dot.danger { background: var(--danger); }
 .tn-meta {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 3px;
   font-family: var(--mono);
@@ -226,19 +226,19 @@ function linkPath(n) {
   min-width: 130px;
 }
 .tt-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text);
   margin-bottom: 4px;
 }
 .tt-line {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   font-family: var(--mono);
 }
 
 @media (max-width: 1100px) {
   .topo-node { min-width: 96px; padding: 6px 9px; }
-  .tn-title { font-size: 12px; }
+  .tn-title { font-size: 13px; }
 }
 </style>

@@ -125,14 +125,14 @@ function goNode(name) {
   color: var(--text);
 }
 .group-count {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   background: var(--bg-elev);
   border-radius: 10px;
   padding: 1px 8px;
 }
 .group-meta {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   margin-left: auto;
 }
@@ -150,7 +150,7 @@ function goNode(name) {
   border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1;
   user-select: none;
   transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
@@ -237,7 +237,7 @@ function goNode(name) {
   flex: 1;
 }
 .host-popover .hp-status {
-  font-size: 11px;
+  font-size: 13px;
   padding: 1px 7px;
   border-radius: 10px;
   font-weight: 600;
@@ -251,7 +251,7 @@ function goNode(name) {
   background: color-mix(in srgb, var(--danger) 16%, transparent);
 }
 .host-popover .hp-ip {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   font-family: var(--mono);
 }
@@ -267,7 +267,7 @@ function goNode(name) {
   grid-template-columns: 32px 1fr 38px;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 13px;
 }
 .host-popover .hp-m-label {
   color: var(--text-dim);
@@ -289,7 +289,7 @@ function goNode(name) {
   font-variant-numeric: tabular-nums;
 }
 .host-popover .hp-foot {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--accent);
   text-align: right;
   margin-top: 2px;

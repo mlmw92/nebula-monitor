@@ -1,9 +1,10 @@
 <template>
   <div class="recent-list">
-    <div v-for="a in alerts" :key="a.id" class="recent-item" @click="goAlerts">
+    <div v-for="(a, index) in alerts" :key="a.id || `${a.ruleId || a.ruleName}-${a.startsAt || index}`" class="recent-item" @click="goAlerts">
       <span class="dot" :class="'sev-' + (a.severity || '').toLowerCase()"></span>
       <div class="recent-body">
-        <div class="recent-title">{{ a.ruleName }}</div>
+        <div class="recent-title">{{ a.ruleName || '未命名告警' }}</div>
+        <div v-if="a.message" class="recent-message" :title="a.message">{{ a.message }}</div>
         <div class="recent-sub">{{ a.node }} · {{ timeAgo(a.startsAt) }}</div>
       </div>
       <span class="recent-state" :class="'st-' + (a.state || '').toLowerCase()">{{ stateText(a.state) }}</span>
@@ -32,7 +33,7 @@ function timeAgo(t) {
   return Math.floor(s / 86400) + ' 天前'
 }
 function stateText(s) {
-  if (s === 'active') return '活跃'
+  if (s === 'active' || s === 'firing') return '告警中'
   if (s === 'acked') return '已确认'
   if (s === 'resolved') return '已恢复'
   return s || '-'
@@ -90,19 +91,28 @@ function goAlerts() {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.recent-message {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .recent-sub {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .recent-state {
-  font-size: 11px;
+  font-size: 13px;
   padding: 2px 8px;
   border-radius: 10px;
   background: var(--bg-card);
   color: var(--text-dim);
   flex-shrink: 0;
 }
-.recent-state.st-active {
+.recent-state.st-active,
+.recent-state.st-firing {
   color: var(--danger);
   background: var(--danger-dim);
 }

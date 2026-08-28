@@ -112,14 +112,14 @@ function goTab(tab) {
   flex: 1;
 }
 .mw-total {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   background: var(--bg-card);
   border-radius: 10px;
   padding: 1px 8px;
 }
 .mw-badge {
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-muted);
   background: var(--bg-card);
@@ -162,7 +162,7 @@ function goTab(tab) {
   line-height: 1;
 }
 .mw-donut-label {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .mw-meta {
@@ -187,18 +187,18 @@ function goTab(tab) {
   color: var(--danger);
 }
 .mw-stat-label {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .mw-top-title {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-bottom: 4px;
 }
 .mw-top-row {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 13px;
   padding: 1px 0;
 }
 .mw-top-label {
@@ -224,12 +224,12 @@ function goTab(tab) {
   text-align: center;
 }
 .mw-empty-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-dim);
 }
 .mw-empty-sub {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-muted);
   line-height: 1.5;
 }

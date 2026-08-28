@@ -501,7 +501,7 @@ onUnmounted(() => {
   align-items: baseline;
   gap: 2px;
   margin-left: 10px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   transition: color 0.3s;
 }
@@ -516,7 +516,7 @@ onUnmounted(() => {
 }
 
 .cd-unit {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 
@@ -548,7 +548,7 @@ onUnmounted(() => {
 
 .cfg-tip {
   margin-top: 10px;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.6;
   color: var(--text-muted);
 }
@@ -587,7 +587,7 @@ onUnmounted(() => {
 }
 
 .kpi-bar-label {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   letter-spacing: 0.05em;
   flex-shrink: 0;
@@ -602,7 +602,7 @@ onUnmounted(() => {
 }
 
 .kpi-bar-unit {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-dim);
   font-family: var(--mono);
 }
@@ -652,7 +652,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   letter-spacing: 0.06em;
 }
@@ -697,7 +697,7 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
   cursor: pointer;
   white-space: nowrap;
@@ -730,7 +730,7 @@ onUnmounted(() => {
 
 .ab-none {
   color: var(--chart-green);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 @keyframes marquee {
@@ -767,7 +767,7 @@ onUnmounted(() => {
   .title-deco { margin-top: 8px; }
   .td-line { width: 110px; }
   .hud-tabs { margin-top: 8px; }
-  .cd-unit { font-size: 12px; }
+  .cd-unit { font-size: 13px; }
   .kpi-bar-label { font-size: 14px; }
   .kpi-bar-value { font-size: 26px; }
   .kpi-bar-unit { font-size: 13px; }

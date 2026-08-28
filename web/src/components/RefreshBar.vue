@@ -99,15 +99,15 @@ onUnmounted(stop)
   gap: 8px;
 }
 .rb-label {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-dim);
 }
 .rb-time {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .rb-countdown {
-  font-size: 12px;
+  font-size: 13px;
   font-family: var(--mono);
   color: var(--accent);
   min-width: 64px;

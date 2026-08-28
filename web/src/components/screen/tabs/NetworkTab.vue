@@ -524,7 +524,7 @@ onUnmounted(() => {
 }
 
 .ntk-label {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -539,7 +539,7 @@ onUnmounted(() => {
 }
 
 .ntk-sub {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   font-family: var(--mono);
 }
@@ -573,7 +573,7 @@ onUnmounted(() => {
 
 .nt-instance-label {
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.04em;
 }
 
@@ -584,7 +584,7 @@ onUnmounted(() => {
   border-radius: 5px;
   background: rgba(5, 15, 29, 0.82);
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
   outline: none;
 }
 
@@ -595,7 +595,7 @@ onUnmounted(() => {
 
 .nt-instance-hint {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .nt-chart-stack {
@@ -618,7 +618,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-bottom: 4px;
   letter-spacing: 0.03em;
@@ -634,7 +634,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 5px;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 13px;
   line-height: 16px;
   cursor: pointer;
   user-select: none;
@@ -711,7 +711,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   padding: 3px 2px;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .rank-row + .rank-row {
@@ -725,7 +725,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   border-radius: 4px;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-dim);
   background: rgba(255, 255, 255, 0.05);
 }
@@ -746,7 +746,7 @@ onUnmounted(() => {
   display: inline-block;
   margin-left: 6px;
   padding: 0 5px;
-  font-size: 10px;
+  font-size: 13px;
   font-style: normal;
   line-height: 15px;
   border-radius: 3px;
@@ -772,7 +772,7 @@ onUnmounted(() => {
 
 .rk-val {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text);
   text-align: right;
   min-width: 44px;
@@ -782,7 +782,7 @@ onUnmounted(() => {
   padding: 16px 0;
   text-align: center;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 /* 右侧：地图 + 来源地 Top 水平并排；地图占主区，来源列自适应收窄 */
@@ -842,7 +842,7 @@ onUnmounted(() => {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 13px;
   padding: 3px 12px;
   border-radius: 12px;
   cursor: pointer;
@@ -880,7 +880,7 @@ onUnmounted(() => {
   gap: 6px;
 }
 .ntm-empty-sub {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   opacity: 0.8;
 }
@@ -912,7 +912,7 @@ onUnmounted(() => {
   .ntc-head { font-size: 15px; }
   .ntc-stat { font-size: 16px; }
   .rank-row { font-size: 14px; padding: 5px 2px; }
-  .rk-idx { width: 20px; height: 20px; font-size: 12px; }
+  .rk-idx { width: 20px; height: 20px; font-size: 13px; }
   .rk-val { font-size: 14px; }
   .ntm-title { font-size: 16px; }
   .ntm-scope button { font-size: 14px; padding: 4px 16px; }

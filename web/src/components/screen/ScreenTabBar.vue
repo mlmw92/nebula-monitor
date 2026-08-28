@@ -180,7 +180,7 @@ onMounted(() => {
   border-radius: 8px;
   background: var(--danger);
   color: #fff;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 700;
   font-family: var(--mono);
   line-height: 1;
@@ -207,7 +207,7 @@ onMounted(() => {
     right: 4px;
     min-width: 20px;
     height: 20px;
-    font-size: 12px;
+    font-size: 13px;
   }
 }
 

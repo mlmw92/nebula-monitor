@@ -135,17 +135,17 @@ function formatUptime(s) {
 .idd-name { font-size: 15px; font-weight: 600; color: #f8fafc; }
 .mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; }
 .idd-tags { display: flex; gap: 6px; margin-bottom: 10px; }
-.idd-tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, .12); }
+.idd-tag { font-size: 13px; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, .12); }
 .idd-tag.master { background: rgba(220, 56, 45, .18); color: #ff8a80; border-color: rgba(220, 56, 45, .35); }
 .idd-tag.slave { background: rgba(34, 197, 94, .15); color: #4ade80; border-color: rgba(34, 197, 94, .3); }
 .idd-tag.topo { background: rgba(56, 189, 248, .12); color: #7dd3fc; border-color: rgba(56, 189, 248, .3); }
 .idd-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 10px 0; border-top: 1px solid rgba(255, 255, 255, .06); border-bottom: 1px solid rgba(255, 255, 255, .06); margin-bottom: 10px; }
-.idd-meta-item { font-size: 12px; color: #94a3b8; }
+.idd-meta-item { font-size: 13px; color: #94a3b8; }
 .idd-meta-item b { color: #e5e7eb; font-weight: 600; margin-left: 6px; }
 .idd-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .idd-metric { background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .07); border-radius: 6px; padding: 8px 10px; }
-.idd-m-label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 3px; }
+.idd-m-label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 3px; }
 .idd-m-value { font-size: 14px; font-weight: 600; color: #e5e7eb; }
 .idd-m-value.warn { color: #f59e0b; }
-.idd-empty { color: #64748b; font-size: 12px; padding: 10px 0; }
+.idd-empty { color: #64748b; font-size: 13px; padding: 10px 0; }
 </style>

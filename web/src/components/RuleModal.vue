@@ -484,13 +484,13 @@ async function submit() {
   line-height: 1;
 }
 .type-hint {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: -4px;
   padding-left: 4px;
 }
 .field-hint {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   line-height: 1.5;
   margin-top: 4px;
@@ -499,8 +499,8 @@ async function submit() {
 /* 指标下拉 */
 .metric-option { display: flex; align-items: center; gap: 8px; }
 .metric-label { font-weight: 500; }
-.metric-name { color: var(--text-dim); font-size: 12px; }
-.metric-unit { margin-left: auto; padding: 0 6px; font-size: 12px; color: var(--el-color-primary); background: var(--el-color-primary-light-9); border-radius: 4px; }
+.metric-name { color: var(--text-dim); font-size: 13px; }
+.metric-unit { margin-left: auto; padding: 0 6px; font-size: 13px; color: var(--el-color-primary); background: var(--el-color-primary-light-9); border-radius: 4px; }
 
 /* 静默时段行 */
 .quiet-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -527,12 +527,12 @@ async function submit() {
 .advanced-collapse :deep(.el-collapse-item__content) { padding: 14px 16px; }
 .collapse-title { font-weight: 600; font-size: 13px; }
 .collapse-body { font-size: 13px; color: var(--el-text-color-regular); }
-.inline-hint { font-size: 12px; color: var(--text-dim); margin-left: 8px; }
+.inline-hint { font-size: 13px; color: var(--text-dim); margin-left: 8px; }
 
 /* 升级策略内联字段 */
 .escalation-field { display: flex; align-items: center; gap: 6px; }
-.escalation-field > label { font-size: 12px; color: var(--el-text-color-secondary); white-space: nowrap; }
-.escalation-label { font-size: 12px; color: var(--el-text-color-secondary); display: block; margin-bottom: 6px; }
+.escalation-field > label { font-size: 13px; color: var(--el-text-color-secondary); white-space: nowrap; }
+.escalation-label { font-size: 13px; color: var(--el-text-color-secondary); display: block; margin-bottom: 6px; }
 
 /* 滚动条美化 */
 .rule-form::-webkit-scrollbar { width: 5px; }

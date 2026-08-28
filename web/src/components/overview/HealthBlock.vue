@@ -186,7 +186,7 @@ function rank(score) {
   color: var(--text-muted);
 }
 .hb-sub {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .hb-sub .off {
@@ -219,7 +219,7 @@ function rank(score) {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 13px;
   padding: 5px 8px;
   background: var(--bg-elev);
   border-radius: 6px;

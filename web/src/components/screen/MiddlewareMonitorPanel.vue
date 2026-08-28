@@ -540,7 +540,7 @@ onUnmounted(() => {
   color: var(--text);
 }
 .mh-score-label {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 2px;
 }
@@ -560,7 +560,7 @@ onUnmounted(() => {
   line-height: 1.1;
 }
 .mh-stat span {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 2px;
 }
@@ -626,7 +626,7 @@ onUnmounted(() => {
   font-weight: 700;
 }
 .mt-alert {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .mt-alert.warn {
@@ -656,7 +656,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 13px;
   font-family: var(--mono);
   color: var(--text);
 }
@@ -664,7 +664,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .mt-up {
   color: var(--text);
@@ -673,12 +673,12 @@ onUnmounted(() => {
 .mt-up em {
   font-style: normal;
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: 13px;
   margin-left: 4px;
 }
 .mt-total {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 13px;
 }
 .mt-summary {
   display: flex;
@@ -692,7 +692,7 @@ onUnmounted(() => {
   display: flex;
   align-items: baseline;
   gap: 4px;
-  font-size: 11px;
+  font-size: 13px;
 }
 .ms-label {
   color: var(--text-muted);
@@ -704,7 +704,7 @@ onUnmounted(() => {
 }
 .ms-val em {
   font-style: normal;
-  font-size: 9px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-left: 1px;
 }
@@ -720,7 +720,7 @@ onUnmounted(() => {
   background: transparent;
   border: 1px dashed var(--border);
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 13px;
   padding: 4px 14px;
   border-radius: 14px;
   cursor: pointer;
@@ -778,7 +778,7 @@ onUnmounted(() => {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 13px;
   padding: 3px 10px;
   border-radius: 12px;
   cursor: pointer;
@@ -833,12 +833,12 @@ onUnmounted(() => {
   gap: 8px;
 }
 .srt-group-name {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--accent);
 }
 .srt-group-meta {
-  font-size: 11px;
+  font-size: 13px;
 }
 .srt-tree {
   display: flex;
@@ -901,7 +901,7 @@ onUnmounted(() => {
   justify-content: center;
   width: 16px;
   height: 16px;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 700;
   border-radius: 3px;
   flex-shrink: 0;
@@ -919,7 +919,7 @@ onUnmounted(() => {
 
 /* 节点名（截断长名） */
 .srt-name {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text);
   overflow: hidden;
@@ -944,7 +944,7 @@ onUnmounted(() => {
   background: var(--danger);
 }
 .srt-status {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-dim);
   flex-shrink: 0;
 }
@@ -979,7 +979,7 @@ onUnmounted(() => {
   gap: 10px;
   padding: 5px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 13px;
 }
 .ms-rank {
   width: 18px;
@@ -990,7 +990,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 13px;
   font-family: var(--mono);
   flex-shrink: 0;
 }
@@ -1007,12 +1007,12 @@ onUnmounted(() => {
 }
 .ms-val em {
   font-style: normal;
-  font-size: 9px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-left: 1px;
 }
 .ms-hint {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   padding: 6px 0;
 }
@@ -1056,7 +1056,7 @@ onUnmounted(() => {
   background: var(--danger);
 }
 .mi-role {
-  font-size: 10px;
+  font-size: 13px;
   padding: 1px 6px;
   border-radius: 9px;
   flex-shrink: 0;
@@ -1080,7 +1080,7 @@ onUnmounted(() => {
   color: var(--chart-purple);
 }
 .mi-name {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--accent);
   flex: 1 1 120px;
   min-width: 80px;
@@ -1092,7 +1092,7 @@ onUnmounted(() => {
   color: var(--chart-cyan);
 }
 .mi-metric {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   white-space: nowrap;
 }
@@ -1100,13 +1100,13 @@ onUnmounted(() => {
   font-family: var(--mono);
   color: var(--text);
   margin: 0 2px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .mi-metric.warn b {
   color: var(--danger);
 }
 .mi-tag {
-  font-size: 10px;
+  font-size: 13px;
   padding: 1px 7px;
   border-radius: 9px;
   background: var(--accent-dim);
@@ -1118,7 +1118,7 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .mi-node {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   max-width: 150px;
   overflow: hidden;
@@ -1136,7 +1136,7 @@ onUnmounted(() => {
   padding: 20px 0;
   text-align: center;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 @keyframes pulse {

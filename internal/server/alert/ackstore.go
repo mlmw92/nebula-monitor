@@ -68,6 +68,17 @@ func (s *AckStore) Mark(rule, host, instance string, startsAt int64, user string
 	s.persistLocked()
 }
 
+// IsMarked 返回指定告警事件是否已确认。
+func (s *AckStore) IsMarked(rule, host, instance string, startsAt int64) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.acks[ackKey(rule, host, instance, startsAt)]
+	return ok
+}
+
 // Map 返回全部确认状态快照，key 为 rule|host|instance|startsAt。
 func (s *AckStore) Map() map[string]AckInfo {
 	s.mu.RLock()

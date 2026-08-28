@@ -68,7 +68,7 @@ func (a *API) handleGroupingPut(w http.ResponseWriter, r *http.Request) {
 
 // handleAlertStats 返回告警统计看板数据：活跃数、抑制数、24h 状态分布、级别分布、Top 规则。
 func (a *API) handleAlertStats(w http.ResponseWriter, r *http.Request) {
-	active := a.alerts.Active()
+	active := a.unacknowledgedAlerts(a.alerts.Active())
 	recent := a.alerts.Recent(200)
 	cutoff := time.Now().Add(-24 * time.Hour).UnixMilli()
 	recent24 := make([]model.AlertEvent, 0, len(recent))

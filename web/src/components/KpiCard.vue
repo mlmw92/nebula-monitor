@@ -62,14 +62,14 @@ defineProps({
   min-width: 0;
 }
 .kpi-num {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   font-family: var(--mono);
   letter-spacing: -0.02em;
   line-height: 1.15;
 }
 .kpi-text {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 1px;
   white-space: nowrap;

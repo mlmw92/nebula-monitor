@@ -623,7 +623,7 @@ onUnmounted(() => {
   gap: 4px;
 }
 .ver-label {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .ver-val {
@@ -638,7 +638,7 @@ onUnmounted(() => {
   margin-top: 12px;
 }
 .upload-progress-text {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   margin-top: 6px;
   text-align: center;
@@ -669,7 +669,7 @@ onUnmounted(() => {
   font-family: var(--mono);
 }
 .r-val.small {
-  font-size: 11px;
+  font-size: 13px;
 }
 .action-row {
   display: flex;

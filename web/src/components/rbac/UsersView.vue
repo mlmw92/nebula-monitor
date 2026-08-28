@@ -340,7 +340,7 @@ onMounted(loadAll)
 }
 .page-sub {
   margin: 6px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .role-tag {
@@ -360,7 +360,7 @@ onMounted(loadAll)
 }
 .scope-warn {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: #e6a23c;
 }
 .table-card {

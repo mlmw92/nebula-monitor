@@ -162,21 +162,21 @@ onMounted(loadEvents)
 .panel { padding: 16px; }
 .panel-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .panel-title { color: var(--text); font-size: 16px; font-weight: 600; }
-.panel-subtitle { color: var(--text-muted); font-size: 12px; margin-top: 5px; }
+.panel-subtitle { color: var(--text-muted); font-size: 13px; margin-top: 5px; }
 .toolbar { display: flex; gap: 8px; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .filters .el-input { width: 180px; }
-.method { display: inline-block; min-width: 48px; margin-right: 8px; color: var(--accent, #4a9df0); font-size: 11px; font-weight: 700; }
+.method { display: inline-block; min-width: 48px; margin-right: 8px; color: var(--accent, #4a9df0); font-size: 13px; font-weight: 700; }
 .method-post, .method-put, .method-patch, .method-delete { color: #ffb454; }
-.path { color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
-.change-summary { display: flex; flex-direction: column; gap: 3px; color: var(--text-muted); font-size: 11px; }
+.path { color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; }
+.change-summary { display: flex; flex-direction: column; gap: 3px; color: var(--text-muted); font-size: 13px; }
 .change-summary span:first-child { color: #e6a23c; }
 .change-summary span:nth-child(2) { color: #67c23a; }
 .change-summary span:nth-child(3) { color: #f56c6c; }
-.muted { color: var(--text-muted); font-size: 11px; }
+.muted { color: var(--text-muted); font-size: 13px; }
 .source-cell { display: flex; flex-direction: column; gap: 2px; line-height: 1.3; }
-.source-ip { font-family: var(--font-mono, monospace); font-size: 12px; }
-.source-loc { font-size: 11px; color: var(--text-muted); }
+.source-ip { font-family: var(--font-mono, monospace); font-size: 13px; }
+.source-loc { font-size: 13px; color: var(--text-muted); }
 .source-loc--unknown { font-style: italic; opacity: 0.7; }
 @media (max-width: 720px) { .panel-title-row { align-items: flex-start; flex-direction: column; } .toolbar { width: 100%; } }
 </style>

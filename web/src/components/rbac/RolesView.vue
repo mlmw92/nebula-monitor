@@ -305,24 +305,24 @@ onMounted(loadAll)
 }
 .page-sub {
   margin: 6px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .builtin-tag {
   margin-left: 6px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .muted {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 .scope-box {
   width: 100%;
 }
 .scope-warn {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: #e6a23c;
 }
 .perm-matrix {
@@ -354,7 +354,7 @@ onMounted(loadAll)
 }
 .domain-count {
   margin-left: 6px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 400;
   color: var(--text-dim, #999);
 }
@@ -397,7 +397,7 @@ onMounted(loadAll)
 }
 .check-icon {
   color: #fff;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1;
 }
 .perm-body {
@@ -408,18 +408,18 @@ onMounted(loadAll)
 }
 .perm-key {
   font-family: var(--font-mono, 'Courier New', monospace);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text, #e0e0e0);
   word-break: break-all;
 }
 .perm-desc {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim, #999);
   line-height: 1.3;
 }
 .perm-empty {
   padding: 12px 8px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted, #666);
 }
 .table-card {

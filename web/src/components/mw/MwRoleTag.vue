@@ -44,7 +44,7 @@ const entry = computed(() => {
   display: inline-block;
   padding: 2px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.5;
   white-space: nowrap;

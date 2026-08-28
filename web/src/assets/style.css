@@ -12,9 +12,9 @@ body[data-theme="b"] {
   --border-strong: rgba(120, 170, 255, 0.20);
   --text: #e8eefb;
   --text-main: #e8eefb;
-  --text-dim: #7e8fb0;
-  --label: #93a4c8;
-  --text-muted: #4a5870;
+  --text-dim: #9baed0;
+  --label: #b0c0dd;
+  --text-muted: #7184a8;
   --accent: #4a9df0;
   --accent-dim: rgba(74, 157, 240, 0.12);
   --accent-glow: rgba(74, 157, 240, 0.16);
@@ -52,9 +52,9 @@ body[data-theme="a"] {
   --border-strong: rgba(255, 255, 255, 0.14);
   --text: #e6edf3;
   --text-main: #e6edf3;
-  --text-dim: #7d8590;
-  --label: #9aa4b2;
-  --text-muted: #4a5360;
+  --text-dim: #a4adba;
+  --label: #b6c0cd;
+  --text-muted: #778594;
   --accent: #00d9a3;
   --accent-dim: rgba(0, 217, 163, 0.12);
   --accent-glow: rgba(0, 217, 163, 0.16);
@@ -80,9 +80,9 @@ body[data-theme="c"] {
   --border-strong: rgba(170, 130, 255, 0.20);
   --text: #ece9fb;
   --text-main: #ece9fb;
-  --text-dim: #8d83b5;
-  --label: #a49bc9;
-  --text-muted: #514a72;
+  --text-dim: #aaa3ce;
+  --label: #c0b9dc;
+  --text-muted: #8079a0;
   --accent: #8b5cf6;
   --accent-dim: rgba(139, 92, 246, 0.12);
   --accent-glow: rgba(139, 92, 246, 0.16);
@@ -397,7 +397,7 @@ textarea:focus {
   vertical-align: middle;
 }
 .nc-group {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 
@@ -508,10 +508,10 @@ textarea:focus {
 /* ============ Element Plus 暗色主题覆盖（跟随主题变量，换肤联动） ============ */
 html.dark {
   /* 放大 Element Plus 组件整体字号（表/表单/按钮/对话框等） */
-  --el-font-size-base: 15px;
-  --el-font-size-small: 13px;
-  --el-font-size-medium: 15px;
-  --el-font-size-large: 16px;
+  --el-font-size-base: 16px;
+  --el-font-size-small: 14px;
+  --el-font-size-medium: 16px;
+  --el-font-size-large: 18px;
   --el-color-primary: var(--accent);
   --el-color-primary-light-3: color-mix(in srgb, var(--accent) 72%, #fff);
   --el-color-primary-light-5: color-mix(in srgb, var(--accent) 55%, #fff);

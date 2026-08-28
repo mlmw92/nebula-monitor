@@ -175,7 +175,7 @@ watch(
   box-shadow: 0 0 8px var(--accent-glow);
 }
 .st-count {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   font-family: var(--mono);
 }
@@ -184,7 +184,7 @@ watch(
 }
 .st-col-head {
   padding: 6px 8px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
   text-transform: uppercase;
@@ -214,7 +214,7 @@ watch(
 }
 .st-cell {
   padding: 0 8px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -241,7 +241,7 @@ watch(
   display: inline-block;
   padding: 1px 8px;
   border-radius: 8px;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
 }
 .st-badge.on {
@@ -275,7 +275,7 @@ watch(
   align-items: center;
   gap: 6px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 13px;
 }
 .st-bar-track {
   flex: 1;
@@ -296,6 +296,6 @@ watch(
   padding: 30px 0;
   text-align: center;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 </style>

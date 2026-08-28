@@ -83,7 +83,7 @@ function goAlerts() {
   text-overflow: ellipsis;
 }
 .crit-sub {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .crit-empty {

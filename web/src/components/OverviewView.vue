@@ -284,7 +284,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 .ov-edit-hint {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--accent);
   background: var(--accent-dim, rgba(64, 158, 255, 0.12));
   border: 1px solid var(--border);
@@ -326,7 +326,7 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 .ov-tool {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1;
   padding: 4px 8px;
   border-radius: 6px;

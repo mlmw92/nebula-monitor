@@ -173,7 +173,7 @@ function pct(v) {
   line-height: 1;
 }
 .sr-total-l {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 2px;
 }
@@ -188,7 +188,7 @@ function pct(v) {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .sr-leg .d {
@@ -212,7 +212,7 @@ function pct(v) {
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .sr-foot b {
@@ -224,7 +224,7 @@ function pct(v) {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   max-height: 72px;
   overflow: auto;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .sr-reasons-title {

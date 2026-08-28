@@ -173,7 +173,7 @@ async function save() {
   margin-right: 10px;
 }
 .card-head .sub {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .head-actions {
@@ -185,7 +185,7 @@ async function save() {
   padding-bottom: 6px;
 }
 .field-hint {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   line-height: 1.5;
   margin-top: 6px;
@@ -213,7 +213,7 @@ async function save() {
   object-fit: contain;
 }
 .logo-empty {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   padding: 8px;
   text-align: center;

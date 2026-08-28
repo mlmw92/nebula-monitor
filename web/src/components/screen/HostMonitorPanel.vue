@@ -270,7 +270,7 @@ watch(
   grid-template-columns: 1.6fr 0.6fr 0.6fr 0.8fr 0.55fr 0.9fr;
   gap: 6px;
   align-items: center;
-  font-size: 12px;
+  font-size: 13px;
 }
 .hl-head {
   color: var(--text-muted);
@@ -312,7 +312,7 @@ watch(
   text-overflow: ellipsis;
 }
 .host-text-ip {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-dim);
   font-family: var(--mono);
   overflow: hidden;
@@ -338,7 +338,7 @@ watch(
 }
 .hl-val.dim {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 13px;
 }
 .hl-row.offline {
   background: rgba(239, 68, 68, 0.12);
@@ -350,7 +350,7 @@ watch(
   color: var(--text-muted);
 }
 .offline-badge {
-  font-size: 10px;
+  font-size: 13px;
   color: #fff;
   background: var(--danger, #ef4444);
   border-radius: 4px;
@@ -366,7 +366,7 @@ watch(
   line-height: 1.15;
 }
 .hl-sub {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-dim);
   font-family: var(--mono);
   white-space: nowrap;
@@ -375,7 +375,7 @@ watch(
   padding: 18px 0;
   text-align: center;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 /* 右侧趋势 */
@@ -399,7 +399,7 @@ watch(
   margin-bottom: 4px;
 }
 .trend-title {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   letter-spacing: 0.03em;
 }
@@ -426,7 +426,7 @@ watch(
   .hl-name { font-size: 15px; gap: 8px; }
   .hl-val { font-size: 15px; }
   .hl-val.dim { font-size: 14px; }
-  .host-text-ip { font-size: 12px; }
+  .host-text-ip { font-size: 13px; }
   .dot { width: 9px; height: 9px; }
   .hl-empty { padding: 26px 0; font-size: 15px; }
   .right-col { gap: 18px; }

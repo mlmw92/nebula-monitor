@@ -249,7 +249,7 @@ onMounted(() => {
   text-overflow: ellipsis;
 }
 .brand-text p {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .nav {
@@ -367,7 +367,7 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: 13px;
 }
 .ver-label {
   color: var(--text-muted);
@@ -375,7 +375,7 @@ onMounted(() => {
 .ver-val {
   color: var(--text-dim);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 13px;
 }
 .ver-val.loading {
   opacity: 0.5;

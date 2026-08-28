@@ -57,7 +57,7 @@ const links = computed(() => {
   gap: 20px;
   max-width: 1440px;
   margin: 0 auto;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .site-footer__brand,

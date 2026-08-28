@@ -444,7 +444,7 @@ onMounted(load)
 .empty-icon { color: var(--text-muted); margin-bottom: 16px; }
 .empty-title { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
 .empty-desc { color: var(--text-dim); margin: 0 0 8px; font-size: 13px; }
-.empty-hint { color: var(--text-muted); font-size: 12px; }
+.empty-hint { color: var(--text-muted); font-size: 13px; }
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .chart-section { padding: 16px; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
@@ -464,7 +464,7 @@ onMounted(load)
 .mono { font-family: var(--mono); }
 .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
 .metric-cell { padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; text-align: center; }
-.mc-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.mc-label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
 .mc-value { font-size: 18px; font-weight: 600; }
 .chart-box { width: 100%; height: 300px; }
 
@@ -473,9 +473,9 @@ onMounted(load)
 .topo-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
 .topo-group-title { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
 .topo-group-title .el-icon { color: var(--accent); }
-.topo-meta { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; }
+.topo-meta { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; }
 .dim { color: var(--text-muted); }
-.badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.badge { padding: 2px 8px; border-radius: 10px; font-size: 13px; font-weight: 600; }
 .badge-ok { color: #4ade80; background: rgba(34, 197, 94, 0.15); }
 .badge-warn { color: #fbbf24; background: rgba(234, 179, 8, 0.15); }
 .badge-down { color: #f87171; background: rgba(239, 68, 68, 0.18); }
@@ -486,7 +486,7 @@ onMounted(load)
 .rel-node:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
 .rel-node.is-down { opacity: 0.6; }
 .rel-node-name { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+.rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); margin-top: 6px; }
 .rel-standalone { border-left: 4px solid var(--chart-blue); }
 
 /* 主从树 */
@@ -495,7 +495,7 @@ onMounted(load)
 .rel-master { border-left: 4px solid var(--chart-orange); min-width: 220px; }
 .ms-master { flex: 0 0 auto; }
 .ms-branch { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 10px; }
-.ms-branch-rail { display: flex; gap: 14px; font-size: 11px; color: var(--text-muted); padding-left: 4px; }
+.ms-branch-rail { display: flex; gap: 14px; font-size: 13px; color: var(--text-muted); padding-left: 4px; }
 .legend-line { display: inline-block; width: 26px; height: 0; vertical-align: middle; margin-right: 4px; }
 .legend-solid { border-top: 2px solid var(--chart-orange); }
 .legend-dash { border-top: 2px dashed var(--chart-green); }
@@ -503,13 +503,13 @@ onMounted(load)
 .ms-slave-card { border-left: 4px solid var(--chart-green); }
 .ms-slave-head { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; }
 .ms-slave-head .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ms-slave-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin-top: 6px; flex-wrap: wrap; }
-.role-badge { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; font-size: 11px; font-weight: 700; color: #fff; flex: 0 0 auto; }
+.ms-slave-meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); margin-top: 6px; flex-wrap: wrap; }
+.role-badge { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; font-size: 13px; font-weight: 700; color: #fff; flex: 0 0 auto; }
 .role-badge-m { background: var(--chart-orange); }
 .role-badge-s { background: var(--chart-green); }
 
-.topo-legend { display: flex; gap: 18px; margin-top: 10px; font-size: 12px; color: var(--text-muted); flex-wrap: wrap; }
+.topo-legend { display: flex; gap: 18px; margin-top: 10px; font-size: 13px; color: var(--text-muted); flex-wrap: wrap; }
 .unlinked-block { margin-top: 14px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 8px; background: rgba(245,158,11,0.04); }
-.unlinked-label { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+.unlinked-label { font-size: 13px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
 .unlinked-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 </style>

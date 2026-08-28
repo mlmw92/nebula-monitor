@@ -221,7 +221,7 @@ onUnmounted(() => {
   box-shadow: 0 0 8px rgba(244, 63, 94, 0.5);
 }
 .sr-sub {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .sr-empty {
@@ -230,7 +230,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 /* KPI 摘要 */
@@ -259,7 +259,7 @@ onUnmounted(() => {
 .srk-v.amber { color: var(--warn); }
 .srk-v.dim { color: var(--text-dim); }
 .srk-l {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 2px;
 }
@@ -272,7 +272,7 @@ onUnmounted(() => {
   margin-bottom: 10px;
 }
 .topo-chip {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   padding: 3px 8px;
   background: rgba(255, 255, 255, 0.03);
@@ -294,7 +294,7 @@ onUnmounted(() => {
   overflow: hidden;
 }
 .rank-title {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -308,7 +308,7 @@ onUnmounted(() => {
 .rank-name {
   width: 88px;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -342,7 +342,7 @@ onUnmounted(() => {
 .rank-val {
   width: 44px;
   text-align: right;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 </style>

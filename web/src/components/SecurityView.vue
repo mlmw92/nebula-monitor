@@ -513,12 +513,12 @@ onMounted(async () => {
   min-width: 0;
 }
 .score-kpi .kpi-title {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text);
   margin-top: 2px;
 }
 .score-kpi .kpi-sub {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .score-kpi.good .kpi-score { color: #00D9A3; }
@@ -568,7 +568,7 @@ onMounted(async () => {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 6px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
 }
 .sev-tag.sev-critical { background: rgba(255, 93, 108, 0.18); color: #FF5D6C; }
@@ -576,14 +576,14 @@ onMounted(async () => {
 .sev-tag.sev-info { background: rgba(74, 157, 240, 0.18); color: #4A9DF0; }
 
 .cat-tag {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .row-critical :deep(.el-table__row) { box-shadow: inset 3px 0 0 #FF5D6C; }
 .row-warning :deep(tr) { border-left: 3px solid #FFB454; }
 
-.dim { color: var(--text-dim); font-size: 12px; }
-.muted { color: var(--text-muted); font-size: 12px; }
+.dim { color: var(--text-dim); font-size: 13px; }
+.muted { color: var(--text-muted); font-size: 13px; }
 
 /* 来源 IP 属地标签 */
 .src-block { display: flex; flex-direction: column; gap: 2px; }
@@ -595,8 +595,8 @@ onMounted(async () => {
   border-radius: 4px;
   background: rgba(74, 157, 240, 0.15);
   color: #6DB3F2;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 13px;
+  line-height: 18px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -633,7 +633,7 @@ onMounted(async () => {
   color: var(--text);
 }
 .node-ip {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 400;
   color: var(--text-dim);
 }
@@ -656,7 +656,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 13px;
   padding: 4px 6px;
   border-radius: 6px;
   transition: background 0.15s;
@@ -672,7 +672,7 @@ onMounted(async () => {
 .bl-item.fail .bl-dot { background: #FF5D6C; box-shadow: 0 0 8px rgba(255,93,108,0.6); }
 .bl-name { color: var(--text-dim); flex: 1; }
 .bl-item.fail .bl-name { color: #FFB454; }
-.bl-state { font-size: 11px; color: var(--text-muted); }
+.bl-state { font-size: 13px; color: var(--text-muted); }
 .bl-item.fail .bl-state { color: #FF5D6C; }
 
 /* FIM 时间线 */
@@ -705,12 +705,12 @@ onMounted(async () => {
 .tl-dot.tl-deleted { background: #FF5D6C; box-shadow: 0 0 8px rgba(255,93,108,0.7); }
 .tl-body { min-width: 0; }
 .tl-msg {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   line-height: 1.4;
 }
 .tl-time {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   margin-top: 2px;
 }
@@ -729,7 +729,7 @@ onMounted(async () => {
   margin-bottom: 12px;
 }
 .defense-tip {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .defense-kpi {
@@ -756,11 +756,11 @@ onMounted(async () => {
 .dk-val.warn { color: #FFB454; }
 .dk-val.bad { color: #FF5D6C; }
 .dk-label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .def-badge {
-  font-size: 12px;
+  font-size: 13px;
   padding: 2px 10px;
   border-radius: 20px;
   font-weight: 600;
@@ -770,23 +770,23 @@ onMounted(async () => {
 .def-badge.bad { background: rgba(255,93,108,0.16); color: #FF5D6C; }
 .def-badge.neutral { background: rgba(255,255,255,0.08); color: var(--text-dim); }
 .node-cell { font-weight: 600; color: var(--text); margin-right: 8px; }
-.need-upgrade { font-size: 11px; color: #FFB454; border: 1px solid rgba(255,180,84,0.4); border-radius: 10px; padding: 1px 8px; }
+.need-upgrade { font-size: 13px; color: #FFB454; border: 1px solid rgba(255,180,84,0.4); border-radius: 10px; padding: 1px 8px; }
 .jail-tag {
-  font-size: 11px;
+  font-size: 13px;
   color: #00D9A3;
   background: rgba(0,217,163,0.12);
   border-radius: 8px;
   padding: 2px 8px;
 }
-.defense-action, .ban-ips { margin-top: 4px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ban-count { color: #FFB454; font-size: 12px; font-weight: 600; }
+.defense-action, .ban-ips { margin-top: 4px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ban-count { color: #FFB454; font-size: 13px; font-weight: 600; }
 .dim { color: var(--text-dim); }
 .muted { color: var(--text-muted); }
 .def-confirm {
   margin: 8px 0 0;
   padding-left: 18px;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.7;
 }
 .def-confirm code {

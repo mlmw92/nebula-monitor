@@ -109,7 +109,7 @@ const rows = computed(() => [
   margin-top: 12px;
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .al-foot b {

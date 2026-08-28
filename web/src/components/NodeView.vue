@@ -1172,8 +1172,8 @@ onUnmounted(() => {
 .port-item.up .port-dot { background: var(--accent); box-shadow: 0 0 4px var(--accent-glow); }
 .port-item.down .port-dot { background: var(--danger); }
 .port-num { font-family: var(--mono); font-weight: 600; }
-.port-state { color: var(--text-dim); font-size: 12px; }
-.port-latency { color: var(--text-muted); font-size: 11px; }
+.port-state { color: var(--text-dim); font-size: 13px; }
+.port-latency { color: var(--text-muted); font-size: 13px; }
 
 .section-title {
   margin: 18px 0 10px;
@@ -1211,14 +1211,14 @@ onUnmounted(() => {
 /* 面包屑 */
 .breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; color: var(--text-dim); padding: 0 2px; }
 .breadcrumb .bc-host-select { width: 220px; }
-.breadcrumb .bc-ip { margin-left: 2px; color: var(--text-muted); font-size: 12px; }
+.breadcrumb .bc-ip { margin-left: 2px; color: var(--text-muted); font-size: 13px; }
 .breadcrumb .bc-home { color: var(--el-color-primary); }
-.breadcrumb .bc-sep { font-size: 12px; opacity: 0.6; }
+.breadcrumb .bc-sep { font-size: 13px; opacity: 0.6; }
 .breadcrumb .bc-item { color: var(--text-dim); }
 .breadcrumb .bc-link { cursor: pointer; transition: color 0.15s; }
 .breadcrumb .bc-link:hover { color: var(--el-color-primary); }
 
-.status-pill { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.status-pill { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
 .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
 .status-pill.online { color: var(--chart-green); background: rgba(34, 197, 94, 0.12); }
 .status-pill.offline { color: var(--danger); background: var(--danger-dim); }
@@ -1241,7 +1241,7 @@ onUnmounted(() => {
 }
 .gauge { width: 100%; height: 130px; }
 .gauge-label { text-align: center; margin-top: 4px; font-size: 13px; color: var(--text-dim); }
-.gauge-sub { text-align: center; margin-top: 2px; font-size: 12px; color: var(--text-main); opacity: 0.85; font-variant-numeric: tabular-nums; }
+.gauge-sub { text-align: center; margin-top: 2px; font-size: 13px; color: var(--text-main); opacity: 0.85; font-variant-numeric: tabular-nums; }
 
 /* 实时趋势 */
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
@@ -1249,7 +1249,7 @@ onUnmounted(() => {
 .mc-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .mc-label { font-size: 14px; font-weight: 400; color: var(--label); letter-spacing: 0.2px; }
 .mc-value { font-size: 26px; font-weight: 700; font-family: var(--mono); line-height: 1.1; }
-.mc-value small { font-size: 12px; font-weight: 400; margin-left: 2px; }
+.mc-value small { font-size: 13px; font-weight: 400; margin-left: 2px; }
 .mc-value.green { color: var(--accent); }
 .mc-value.amber { color: var(--warn); }
 .mc-value.red { color: var(--danger); }
@@ -1259,10 +1259,10 @@ onUnmounted(() => {
 .mc-stat b { font-family: var(--mono); font-weight: 700; font-size: 15px; }
 .mc-stat .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .mc-chart { height: 100px; }
-.mc-desc { margin-top: 8px; font-size: 11px; line-height: 1.4; color: var(--text-dim); opacity: 0.8; }
+.mc-desc { margin-top: 8px; font-size: 13px; line-height: 1.4; color: var(--text-dim); opacity: 0.8; }
 
 /* 说明文字 */
-.panel-hint { margin: 8px 0 12px; font-size: 12px; line-height: 1.5; color: var(--text-dim); opacity: 0.85; }
+.panel-hint { margin: 8px 0 12px; font-size: 13px; line-height: 1.5; color: var(--text-dim); opacity: 0.85; }
 
 /* IO */
 
@@ -1279,7 +1279,7 @@ onUnmounted(() => {
 .bar-fill.green { background: var(--accent); }
 .bar-fill.amber { background: var(--warn); }
 .bar-fill.cyan { background: var(--info); }
-.proc-bar span { width: 40px; text-align: right; font-size: 11px; color: var(--text-dim); }
+.proc-bar span { width: 40px; text-align: right; font-size: 13px; color: var(--text-dim); }
 
 /* 基础监控 */
 .monitor-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
@@ -1287,7 +1287,7 @@ onUnmounted(() => {
 .monitor-panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 8px; }
 .monitor-panel-tools { margin-bottom: 6px; }
 .monitor-panel-title { font-size: 13px; color: var(--text-main); font-weight: 600; }
-.monitor-panel-desc { margin-bottom: 6px; font-size: 11px; line-height: 1.4; color: var(--text-dim); opacity: 0.8; }
+.monitor-panel-desc { margin-bottom: 6px; font-size: 13px; line-height: 1.4; color: var(--text-dim); opacity: 0.8; }
 .monitor-chart { height: 240px; }
 
 @media (max-width: 1100px) {
@@ -1301,10 +1301,10 @@ onUnmounted(() => {
 /* 进程监控 Tab */
 .process-tools { display: flex; align-items: center; gap: 8px; }
 .proc-full-search { width: 280px; }
-.process-footer { margin-top: 10px; font-size: 12px; color: var(--text-dim); }
+.process-footer { margin-top: 10px; font-size: 13px; color: var(--text-dim); }
 .process-count { font-family: var(--mono); }
 .io-cell { color: var(--text-muted); }
-.fw-options { color: var(--text-dim); font-size: 12px; }
+.fw-options { color: var(--text-dim); font-size: 13px; }
 
 /* 防火墙状态卡片 */
 .fw-status-card {
@@ -1322,5 +1322,5 @@ onUnmounted(() => {
 .fw-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .fw-dot.on { background: #2ec27e; box-shadow: 0 0 6px rgba(46,194,126,.7); }
 .fw-dot.off { background: #8a93a6; }
-.fw-status-msg { margin-top: 8px; font-size: 12px; color: var(--text-dim, #8a93a6); }
+.fw-status-msg { margin-top: 8px; font-size: 13px; color: var(--text-dim, #8a93a6); }
 </style>

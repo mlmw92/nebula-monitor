@@ -102,17 +102,17 @@ function formatBytes(value) {
 .hdd-name-wrap { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .hdd-name { color: #f8fafc; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hdd-hostname { color: #64748b; font: 11px ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; }
-.hdd-status { margin-left: auto; padding: 3px 8px; border-radius: 4px; font-size: 11px; }
+.hdd-status { margin-left: auto; padding: 3px 8px; border-radius: 4px; font-size: 13px; }
 .hdd-status.up { color: #4ade80; background: rgba(34, 197, 94, .12); }
 .hdd-status.down { color: #fca5a5; background: rgba(239, 68, 68, .14); }
 .hdd-meta { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 10px 0; border-top: 1px solid rgba(255, 255, 255, .06); border-bottom: 1px solid rgba(255, 255, 255, .06); }
-.hdd-meta-item { color: #94a3b8; font-size: 12px; }
+.hdd-meta-item { color: #94a3b8; font-size: 13px; }
 .hdd-meta-item b { color: #e5e7eb; font-weight: 600; margin-left: 6px; }
-.hdd-section-title { margin: 14px 0 8px; color: #94a3b8; font-size: 12px; letter-spacing: .04em; }
+.hdd-section-title { margin: 14px 0 8px; color: #94a3b8; font-size: 13px; letter-spacing: .04em; }
 .hdd-section-extra { margin-top: 16px; }
 .hdd-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .hdd-metric { min-width: 0; padding: 9px 10px; background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .07); border-radius: 6px; }
-.hdd-m-label { display: block; margin-bottom: 4px; color: #94a3b8; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hdd-m-label { display: block; margin-bottom: 4px; color: #94a3b8; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hdd-m-value { color: #e5e7eb; font: 600 14px ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; white-space: nowrap; }
 .hdd-m-value.warn { color: #f59e0b; }
 @media (max-width: 560px) { .hdd-metrics { grid-template-columns: repeat(2, 1fr); } }

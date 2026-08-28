@@ -140,7 +140,7 @@ watch(() => props.panel, () => load(), { deep: true })
 }
 .panel-error {
   color: #f87171;
-  font-size: 12px;
+  font-size: 13px;
   margin-top: 4px;
 }
 </style>

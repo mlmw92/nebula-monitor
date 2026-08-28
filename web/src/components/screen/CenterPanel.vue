@@ -290,7 +290,7 @@ watch(
   filter: blur(20px);
 }
 .kpi-label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -314,7 +314,7 @@ watch(
   font-weight: 600;
 }
 .kpi-sub {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-top: 4px;
   font-family: var(--mono);
@@ -358,7 +358,7 @@ watch(
 }
 .cb-cur {
   margin-left: auto;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   font-family: var(--mono);
 }
@@ -379,7 +379,7 @@ watch(
   text-align: center;
 }
 .mini-label {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   margin-bottom: 4px;
   letter-spacing: 0.04em;

@@ -116,7 +116,7 @@
           <el-option label="集群损坏" value="cluster_fault" />
           <el-option label="安全事件" value="security_event" />
         </el-select>
-        <span class="muted" style="font-size: 12px">共 {{ filteredRules.length }} 条</span>
+        <span class="muted" style="font-size: 13px">共 {{ filteredRules.length }} 条</span>
       </div>
       <el-table :data="pagedRules" stripe style="width: 100%" empty-text="暂无规则">
         <el-table-column prop="name" label="名称" min-width="140" />
@@ -128,10 +128,10 @@
         <el-table-column label="触发条件" min-width="200">
           <template #default="{ row }">
             <span class="mono">{{ conditionText(row) }}</span>
-            <div v-if="row.quietPeriods && row.quietPeriods.length" class="muted" style="font-size: 12px">
+            <div v-if="row.quietPeriods && row.quietPeriods.length" class="muted" style="font-size: 13px">
               静默时段 {{ row.quietPeriods.length }} 个
             </div>
-            <div v-if="row.escalation && row.escalation.enabled" class="muted" style="font-size: 12px">
+            <div v-if="row.escalation && row.escalation.enabled" class="muted" style="font-size: 13px">
               升级 {{ row.escalation.afterMinutes }}m{{ row.escalation.toSeverity ? '→' + sevLabel(row.escalation.toSeverity) : '' }}
             </div>
           </template>
@@ -204,7 +204,7 @@
           <el-radio label="merge">合并导入（按 ID 更新已有规则、新增没有的规则）</el-radio>
           <el-radio label="replace">覆盖导入（先清空当前所有规则再导入）</el-radio>
         </el-radio-group>
-        <p class="muted" style="font-size: 12px; margin-top: 10px">
+        <p class="muted" style="font-size: 13px; margin-top: 10px">
           覆盖导入会删除当前全部规则，请谨慎操作。
         </p>
       </div>
@@ -290,6 +290,7 @@
             <el-radio-button value="">全部</el-radio-button>
           </el-radio-group>
           <el-button size="small" :disabled="!selected.length" @click="batchAck">批量确认 ({{ selected.length }})</el-button>
+          <span class="muted event-toolbar-hint">确认后将从活跃列表移除，仍可在“全部”中查看</span>
           <el-button size="small" :loading="testing" @click="testAlert">测试事件</el-button>
         </div>
       </div>
@@ -1021,6 +1022,10 @@ onUnmounted(() => {
   gap: 8px;
   align-items: center;
 }
+.event-toolbar-hint {
+  font-size: 13px;
+  white-space: nowrap;
+}
 .muted {
   color: var(--text-dim);
 }
@@ -1042,12 +1047,12 @@ onUnmounted(() => {
   min-width: 200px;
 }
 .maintenance-label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .maintenance-hint {
   margin-top: 10px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--warn);
   background: rgba(230, 162, 60, 0.08);
   padding: 6px 12px;
@@ -1055,7 +1060,7 @@ onUnmounted(() => {
 }
 .scope-count {
   margin-left: 6px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .ev-field {
