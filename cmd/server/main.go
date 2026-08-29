@@ -23,6 +23,7 @@ import (
 	servercrypto "github.com/nebula/monitor/internal/server/crypto"
 	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/dialtest"
+	"github.com/nebula/monitor/internal/server/instancereg"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
@@ -152,6 +153,8 @@ func main() {
 	analyzer := analysis.New(store, nodeMgr)
 	analyzer.SetAlertStore(alertStore)
 	analyzer.SetSecurityStore(securityStore)
+	analyzer.SetInstanceRegistry(instancereg.Default)
+	analyzer.SetDialtestStore(dialtestStore)
 
 	// 报告生成模块
 	reportGen := report.NewGenerator(store, nodeMgr, securityStore, cfg.ReportDir)

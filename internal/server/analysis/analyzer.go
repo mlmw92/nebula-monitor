@@ -9,6 +9,8 @@ import (
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/alert"
+	"github.com/nebula/monitor/internal/server/dialtest"
+	"github.com/nebula/monitor/internal/server/instancereg"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/storage"
@@ -83,17 +85,18 @@ type Forecast struct {
 
 // HostResult 聚合单台主机的分析结论。
 type HostResult struct {
-	Node      string     `json:"node"`
-	Group     string     `json:"group,omitempty"`
-	Online    bool       `json:"online"`
-	Score     int        `json:"score"`
-	Severity  Severity   `json:"severity"`
-	RiskTypes []string   `json:"riskTypes"`
-	Evidence  []Evidence `json:"evidence"`
-	Baselines []Baseline `json:"baselines"`
-	Forecasts []Forecast `json:"forecasts"`
-	Coverage  Coverage   `json:"coverage"`
-	Status    string     `json:"status"`
+	Node         string        `json:"node"`
+	Group        string        `json:"group,omitempty"`
+	Online       bool          `json:"online"`
+	Score        int           `json:"score"`
+	Severity     Severity      `json:"severity"`
+	RiskTypes    []string      `json:"riskTypes"`
+	Evidence     []Evidence    `json:"evidence"`
+	Baselines    []Baseline    `json:"baselines"`
+	Forecasts    []Forecast    `json:"forecasts"`
+	Coverage     Coverage      `json:"coverage"`
+	Status       string        `json:"status"`
+	Correlations []Correlation `json:"correlations,omitempty"`
 }
 
 // Summary 是智能分析摘要和按风险排序的主机列表。
@@ -118,19 +121,23 @@ type cacheEntry struct {
 
 // Analyzer 只读查询现有时序库，不写入指标也不修改告警规则。
 type Analyzer struct {
-	store    storage.Storage
-	nodes    *node.Manager
-	alerts   *alert.VMAlertStore
-	security *security.Store
-	mu       sync.Mutex
-	cached   map[time.Duration]cacheEntry
+	store     storage.Storage
+	nodes     *node.Manager
+	alerts    *alert.VMAlertStore
+	security  *security.Store
+	instances *instancereg.Registry
+	dialtests *dialtest.Store
+	mu        sync.Mutex
+	cached    map[time.Duration]cacheEntry
 }
 
 func New(store storage.Storage, nodes *node.Manager) *Analyzer {
 	return &Analyzer{store: store, nodes: nodes, cached: map[time.Duration]cacheEntry{}}
 }
-func (a *Analyzer) SetAlertStore(store *alert.VMAlertStore) { a.alerts = store }
-func (a *Analyzer) SetSecurityStore(store *security.Store)  { a.security = store }
+func (a *Analyzer) SetAlertStore(store *alert.VMAlertStore)            { a.alerts = store }
+func (a *Analyzer) SetSecurityStore(store *security.Store)             { a.security = store }
+func (a *Analyzer) SetInstanceRegistry(registry *instancereg.Registry) { a.instances = registry }
+func (a *Analyzer) SetDialtestStore(store *dialtest.Store)             { a.dialtests = store }
 
 // NormalizeWindow 限制受支持窗口，非法值回退 7 天。
 func NormalizeWindow(hours int) time.Duration {
@@ -186,16 +193,21 @@ func (a *Analyzer) analyzeLocked(window time.Duration) Summary {
 		}
 	}
 	baselines := map[string]model.SecurityBaseline{}
+	securityEvents := []model.SecurityEvent(nil)
 	if a.security != nil {
 		for _, item := range a.security.Baselines() {
 			baselines[item.Node] = item
 		}
+		securityEvents = a.security.Events(200, "", "")
 	}
+	middleware := a.middlewareRefs()
+	probes := a.probeRefs()
 	out := Summary{GeneratedAt: time.Now().UnixMilli(), Status: "ok", WindowHours: int(window.Hours()), NodeCount: len(nodes), Hosts: make([]HostResult, 0, len(nodes))}
 	end := time.Now()
 	start := end.Add(-window)
 	for _, n := range nodes {
 		h := a.analyzeHost(n, start, end, windowStep(window), active[n.Hostname], baselines[n.Hostname])
+		h.Correlations = correlateHost(h, middleware, probes, securityEvents)
 		out.Hosts = append(out.Hosts, h)
 		if h.Coverage.Ready {
 			out.ReadyNodeCount++
@@ -249,6 +261,61 @@ func (a *Analyzer) analyzeHost(n model.Node, start, end time.Time, step time.Dur
 	}
 	return h
 }
+func (a *Analyzer) middlewareRefs() []MiddlewareRef {
+	if a.instances == nil {
+		return nil
+	}
+	refs := make([]MiddlewareRef, 0)
+	for _, item := range a.instances.RedisInstances() {
+		refs = append(refs, MiddlewareRef{Kind: "Redis", Name: instanceName(item.Name, item.Instance), Node: item.Node, Group: item.Group, Up: item.Up, Topology: item.Topology})
+	}
+	for _, item := range a.instances.MySQLInstances() {
+		refs = append(refs, MiddlewareRef{Kind: "MySQL", Name: instanceName(item.Name, item.Instance), Node: item.Node, Group: item.Group, Up: item.Up, Topology: item.Topology})
+	}
+	for _, item := range a.instances.PostgresInstances() {
+		refs = append(refs, MiddlewareRef{Kind: "PostgreSQL", Name: instanceName(item.Name, item.Instance), Node: item.Node, Group: item.Group, Up: item.Up, Topology: item.Topology})
+	}
+	for _, item := range a.instances.MongoDBInstances() {
+		refs = append(refs, MiddlewareRef{Kind: "MongoDB", Name: instanceName(item.Name, item.Instance), Node: item.Node, Group: item.Group, Up: item.Up, Topology: item.Topology})
+	}
+	for _, item := range a.instances.NginxInstances() {
+		refs = append(refs, MiddlewareRef{Kind: "Nginx", Name: instanceName(item.Name, item.Instance), Node: item.Node, Group: item.Group, Up: item.Up})
+	}
+	for _, item := range a.instances.KafkaInstances() {
+		refs = append(refs, MiddlewareRef{Kind: "Kafka", Name: instanceName(item.Name, item.Instance), Node: item.Node, Group: item.Group, Up: item.Up})
+	}
+	for _, item := range a.instances.RocketMQInstances() {
+		refs = append(refs, MiddlewareRef{Kind: "RocketMQ", Name: instanceName(item.Name, item.Instance), Node: item.Node, Group: item.Group, Up: item.Up})
+	}
+	for _, item := range a.instances.K8sInstances() {
+		refs = append(refs, MiddlewareRef{Kind: "Kubernetes", Name: instanceName(item.Name, item.Instance), Node: item.Node, Group: item.Group, Up: item.Up})
+	}
+	for _, item := range a.instances.FastDFSInstances() {
+		refs = append(refs, MiddlewareRef{Kind: "FastDFS", Name: instanceName(item.Name, item.Instance), Node: item.Node, Group: item.Group, Up: item.Up})
+	}
+	return refs
+}
+
+func (a *Analyzer) probeRefs() []ProbeRef {
+	if a.dialtests == nil {
+		return nil
+	}
+	results := a.dialtests.LastResults()
+	refs := make([]ProbeRef, 0, len(results))
+	for _, task := range a.dialtests.List() {
+		if result, ok := results[task.ID]; ok {
+			refs = append(refs, ProbeRef{Name: task.Name, Target: task.Target, Up: result.Up, Error: result.Error})
+		}
+	}
+	return refs
+}
+func instanceName(name, fallback string) string {
+	if name != "" {
+		return name
+	}
+	return fallback
+}
+
 func (a *Analyzer) collectBaseline(h *HostResult, nodeName, metric string, start, end time.Time, step time.Duration) {
 	series, err := a.store.QueryRange(nodeName, metric, nil, start.UnixMilli(), end.UnixMilli(), step.Milliseconds())
 	if err != nil {

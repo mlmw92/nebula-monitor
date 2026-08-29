@@ -105,7 +105,7 @@
   {{with .Intelligence}}
   <div class="section">
     <h2>智能分析与预测</h2>
-    <p class="desc">基于近 {{.WindowHours}} 小时降采样历史数据，使用中位数与 MAD 构建动态基线，并对持续偏离和容量增长趋势进行只读分析；结果不会触发自动处置。</p>
+    <p class="desc">基于近 {{.WindowHours}} 小时降采样历史数据，使用中位数与 MAD 构建动态基线，并将同主机的告警、安全事件、中间件和拨测状态作为根因关联线索；结论仅供人工排查，不会触发自动处置。</p>
     <div class="cards">
       <div class="stat"><div class="k">需关注资源</div><div class="v">{{.RiskCount}}</div></div>
       <div class="stat"><div class="k">持续异常</div><div class="v">{{.AnomalyCount}}</div></div>
@@ -114,12 +114,13 @@
     </div>
     {{if .Hosts}}
     <table>
-      <thead><tr><th>主机</th><th>数据状态</th><th>综合评分</th><th>风险等级</th><th>风险类型</th><th>关键证据</th><th>容量预测</th></tr></thead>
+      <thead><tr><th>主机</th><th>数据状态</th><th>综合评分</th><th>风险等级</th><th>风险类型</th><th>关键证据</th><th>关联结论</th><th>容量预测</th></tr></thead>
       <tbody>
         {{range .Hosts}}
         <tr>
           <td>{{.Node}}</td><td>{{if .Coverage.Ready}}<span class="badge badge-healthy">已就绪</span>{{else}}<span class="badge badge-warning">样本不足</span>{{end}}</td><td><b>{{.Score}}</b></td><td><span class="badge badge-sev-{{.Severity}}">{{sevText .Severity}}</span></td>
           <td>{{if .RiskTypes}}{{range .RiskTypes}}<span class="tag">{{.}}</span>{{end}}{{else}}<span class="muted">暂无风险信号</span>{{end}}</td><td>{{if .Evidence}}{{(index .Evidence 0).Title}}{{else if .Coverage.Ready}}<span class="muted">历史数据处于稳定范围</span>{{else}}<span class="muted">{{.Coverage.Message}}</span>{{end}}</td>
+          <td>{{if .Correlations}}{{with index .Correlations 0}}<b>{{.Title}}</b><br><span class="muted">{{.Confidence}} · {{.Summary}}</span>{{end}}{{else}}<span class="muted">未形成明确关联链路</span>{{end}}</td>
           <td>{{if .Forecasts}}{{range .Forecasts}}{{if eq .Status "urgent"}}预计 {{f1 .DaysRemaining}} 天后耗尽{{else if eq .Status "warning"}}预计 {{f1 .DaysRemaining}} 天后耗尽{{end}}{{end}}{{else}}<span class="muted">暂无紧迫预测</span>{{end}}</td>
         </tr>
         {{end}}

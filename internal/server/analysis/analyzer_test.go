@@ -97,3 +97,20 @@ func TestRiskTypesDeduplicate(t *testing.T) {
 		t.Fatalf("风险类型去重失败：%v", types)
 	}
 }
+
+func TestCorrelationHostUnavailableImpactsRegisteredMiddleware(t *testing.T) {
+	host := HostResult{Node: "node-a", Online: false, Evidence: []Evidence{{Type: "availability"}}}
+	items := correlateHost(host, []MiddlewareRef{{Kind: "Redis", Name: "cache-a", Node: "node-a", Up: true}}, nil, nil)
+	if len(items) != 1 || items[0].Kind != "host_unavailable" || len(items[0].Impact) != 1 {
+		t.Fatalf("离线主机关联影响范围错误：%+v", items)
+	}
+}
+
+func TestCorrelationKeepsSecurityAsLeadNotRootCause(t *testing.T) {
+	host := HostResult{Node: "node-a", Online: true, Evidence: []Evidence{{Type: "anomaly", Severity: SeverityWarning}}}
+	events := []model.SecurityEvent{{Node: "node-a", Severity: model.SeverityWarning, Category: "登录异常", Message: "失败次数偏高"}}
+	items := correlateHost(host, nil, nil, events)
+	if len(items) != 1 || items[0].Kind != "security_runtime" || items[0].Confidence != "medium" {
+		t.Fatalf("安全关联应保持为中置信线索：%+v", items)
+	}
+}

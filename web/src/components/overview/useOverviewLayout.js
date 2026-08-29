@@ -1,13 +1,14 @@
 import { ref } from 'vue'
 
 const STORAGE_KEY = 'nebula-overview-layout'
+const INTELLIGENCE_PRIORITY_KEY = 'nebula-overview-intelligence-prioritized-v1'
 
 // 首页区块默认配置（顺序即默认排列，span 为 12 栅格占比）
 const defaultBlocks = [
+  { key: 'intelligence', title: '智能运维', span: 12, visible: true },
   { key: 'health', title: '系统健康度', span: 4, visible: true },
   { key: 'kpi', title: '关键指标', span: 4, visible: true },
   { key: 'criticalAlerts', title: '紧急告警', span: 4, visible: true },
-  { key: 'intelligence', title: '智能运维', span: 12, visible: true },
   { key: 'hostOverview', title: '主机概览', span: 12, visible: true },
   { key: 'middleware', title: '中间件概览', span: 12, visible: true },
   { key: 'recentAlerts', title: '最近告警', span: 12, visible: true },
@@ -29,6 +30,15 @@ function load() {
     defaultBlocks.forEach((d) => {
       if (!order.includes(d.key)) order.push(d.key)
     })
+    // 首次升级到智能运维优先布局时迁移已有本地顺序；之后继续尊重用户自定义。
+    if (!localStorage.getItem(INTELLIGENCE_PRIORITY_KEY)) {
+      const intelligenceIndex = order.indexOf('intelligence')
+      if (intelligenceIndex > 0) {
+        order.splice(intelligenceIndex, 1)
+        order.unshift('intelligence')
+      }
+      localStorage.setItem(INTELLIGENCE_PRIORITY_KEY, '1')
+    }
     return order
       .map((k) => ({ ...defaultBlocks.find((d) => d.key === k), ...(byKey[k] || {}) }))
       .filter((b) => defaultBlocks.some((d) => d.key === b.key))
