@@ -88,6 +88,22 @@
         <!-- 实时趋势 + IO -->
         <div class="section-title">实时趋势</div>
         <div class="panel-hint">说明：以下为通过 WebSocket 实时上报的采样（每秒 1 条，横轴为采样时刻，仅保留最近 60 个点）。</div>
+        <el-alert
+          v-if="!rtReady && currentStatus === 'online'"
+          type="info"
+          :closable="false"
+          show-icon
+          class="rt-waiting"
+          title="正在等待实时数据…（WebSocket 连接中，通常 1-2 秒内开始上报）"
+        />
+        <el-alert
+          v-if="currentStatus === 'offline'"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="rt-waiting"
+          title="主机离线，实时数据不可用。主机恢复上报后此处会自动更新。"
+        />
         <div class="metric-grid">
           <div class="metric-card">
             <div class="mc-head"><span class="mc-label">CPU 使用率</span><span class="mc-value" :class="rateClass(rt.cpu)">{{ rt.cpu }}<small>%</small></span></div>
@@ -226,6 +242,17 @@
             </el-button>
           </div>
         </div>
+        <el-alert
+          v-if="loadErrors.process"
+          type="error"
+          :closable="false"
+          show-icon
+          class="load-error-bar"
+        >
+          <template #title>进程数据加载失败：{{ loadErrors.process }}
+            <el-button link type="primary" @click="loadProcessFull(selected)">重试</el-button>
+          </template>
+        </el-alert>
         <el-table :data="filteredProcessFull" stripe size="small" v-loading="loadingProcessFull" max-height="calc(100vh - 320px)"
           :default-sort="{ prop: 'cpu', order: 'descending' }" table-layout="fixed">
           <el-table-column prop="name" label="进程名" min-width="140" show-overflow-tooltip sortable />
@@ -272,6 +299,17 @@
             </el-button>
           </div>
         </div>
+        <el-alert
+          v-if="loadErrors.listeners"
+          type="error"
+          :closable="false"
+          show-icon
+          class="load-error-bar"
+        >
+          <template #title>监听端口加载失败：{{ loadErrors.listeners }}
+            <el-button link type="primary" @click="loadListeners(selected)">重试</el-button>
+          </template>
+        </el-alert>
         <el-table :data="filteredListeners" stripe size="small" v-loading="loadingListeners" max-height="calc(100vh - 320px)"
           :default-sort="{ prop: 'port', order: 'ascending' }" table-layout="fixed">
           <el-table-column label="监听地址" min-width="140" show-overflow-tooltip>
@@ -332,6 +370,7 @@
             </div>
             <div class="fw-status-msg" v-if="firewallStatus.message">{{ firewallStatus.message }}</div>
           </template>
+          <el-empty v-else-if="loadErrors.firewallStatus && !loadingFirewallStatus" description="防火墙状态加载失败" :image-size="40" />
           <el-empty v-else-if="!loadingFirewallStatus" description="无防火墙状态数据（旧版本 Agent 或未上报）" :image-size="40" />
         </div>
         <div class="tab-header">
@@ -343,6 +382,17 @@
             </el-button>
           </div>
         </div>
+        <el-alert
+          v-if="loadErrors.firewall"
+          type="error"
+          :closable="false"
+          show-icon
+          class="load-error-bar"
+        >
+          <template #title>防火墙规则加载失败：{{ loadErrors.firewall }}
+            <el-button link type="primary" @click="loadFirewallRules(selected)">重试</el-button>
+          </template>
+        </el-alert>
         <el-table :data="filteredFirewall" stripe size="small" v-loading="loadingFirewall" max-height="calc(100vh - 320px)"
           table-layout="fixed">
           <el-table-column prop="backend" label="后端" width="95" show-overflow-tooltip>
@@ -402,6 +452,10 @@ const loadingNode = ref(false)
 const autoRefresh = ref(true)
 const procSearch = ref('')
 const portStatuses = ref([])
+// 实时数据是否已收到首帧（用于等待提示，避免首屏全 0 误导）
+const rtReady = ref(false)
+// 快照接口加载失败信息（进程/端口/防火墙），用于区分「加载失败」与「确实无数据」
+const loadErrors = reactive({ process: '', listeners: '', firewall: '', firewallStatus: '' })
 
 const rt = reactive({
   cpu: 0, mem: 0, disk: 0, net: '0 B/s', netSent: '0 B/s',
@@ -627,6 +681,8 @@ function memClass(v) { return num(v) >= 50 ? 'amber' : 'green' }
 // ---------- WebSocket 实时指标 ----------
 function connectWS(name) {
   if (socket) { try { socket.close() } catch (e) {} socket = null }
+  // 切换主机后重置等待态，直到收到新主机首帧数据
+  rtReady.value = false
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const url = `${proto}://${location.host}/ws?topic=metrics&node=${encodeURIComponent(name)}`
   socket = new WebSocket(url)
@@ -634,6 +690,7 @@ function connectWS(name) {
     try {
       const msg = JSON.parse(ev.data)
       if (msg.type !== 'metrics' || !msg.data) return
+      rtReady.value = true
       msg.data.forEach((d) => {
         const key = nameToKey[d.name]
         if (!key) return
@@ -679,9 +736,11 @@ async function loadProcessFull(hostname) {
   try {
     const data = await http.get('/api/v1/processes?hostname=' + encodeURIComponent(hostname))
     processFullList.value = Array.isArray(data.processes) ? data.processes : []
+    loadErrors.process = ''
   } catch (err) {
     console.error('加载进程列表失败:', err)
     processFullList.value = []
+    loadErrors.process = err.message || '加载失败'
   } finally {
     loadingProcessFull.value = false
   }
@@ -727,9 +786,11 @@ async function loadListeners(hostname) {
   try {
     const data = await http.get('/api/v1/query/listeners?hostname=' + encodeURIComponent(hostname))
     listenerList.value = Array.isArray(data.listeners) ? data.listeners : []
+    loadErrors.listeners = ''
   } catch (err) {
     console.error('加载监听端口失败:', err)
     listenerList.value = []
+    loadErrors.listeners = err.message || '加载失败'
   } finally {
     loadingListeners.value = false
   }
@@ -763,9 +824,11 @@ async function loadFirewallRules(hostname) {
   try {
     const data = await http.get('/api/v1/query/firewall?hostname=' + encodeURIComponent(hostname))
     firewallRuleList.value = Array.isArray(data.rules) ? data.rules : []
+    loadErrors.firewall = ''
   } catch (err) {
     console.error('加载防火墙规则失败:', err)
     firewallRuleList.value = []
+    loadErrors.firewall = err.message || '加载失败'
   } finally {
     loadingFirewall.value = false
   }
@@ -777,9 +840,11 @@ async function loadFirewallStatus(hostname) {
   try {
     const data = await http.get('/api/v1/query/firewall/status?hostname=' + encodeURIComponent(hostname))
     firewallStatus.value = data.status || null
+    loadErrors.firewallStatus = ''
   } catch (err) {
     console.error('加载防火墙状态失败:', err)
     firewallStatus.value = null
+    loadErrors.firewallStatus = err.message || '加载失败'
   } finally {
     loadingFirewallStatus.value = false
   }
@@ -1263,6 +1328,11 @@ onUnmounted(() => {
 
 /* 说明文字 */
 .panel-hint { margin: 8px 0 12px; font-size: 13px; line-height: 1.5; color: var(--text-dim); opacity: 0.85; }
+
+/* 实时等待 / 加载失败提示 */
+.rt-waiting { margin-bottom: 12px; }
+.load-error-bar { margin-bottom: 12px; }
+.load-error-bar :deep(.el-button--primary) { font-size: 13px; }
 
 /* IO */
 

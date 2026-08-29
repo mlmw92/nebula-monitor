@@ -15,7 +15,7 @@
         size="small"
         style="flex: 1"
       />
-      <el-button type="primary" size="small" :icon="Plus" @click="createGroup">添加</el-button>
+      <el-button type="primary" size="small" :icon="Plus" :loading="creating" @click="createGroup">添加</el-button>
     </div>
 
     <!-- 分组列表 -->
@@ -55,6 +55,7 @@ const emit = defineEmits(['close', 'changed'])
 const visible = ref(true)
 const newName = ref('')
 const newDesc = ref('')
+const creating = ref(false)
 
 function nodeCount(name) {
   return props.nodes.filter((n) => (n.group || 'default') === name).length
@@ -65,6 +66,8 @@ async function createGroup() {
     ElMessage.warning('请输入分组名称')
     return
   }
+  if (creating.value) return
+  creating.value = true
   try {
     await http.post('/api/v1/groups', { name: newName.value.trim(), description: newDesc.value.trim() })
     ElMessage.success('分组已创建')
@@ -73,6 +76,8 @@ async function createGroup() {
     emit('changed')
   } catch (e) {
     ElMessage.error('创建失败：' + (e.message || '未知错误'))
+  } finally {
+    creating.value = false
   }
 }
 
@@ -87,7 +92,10 @@ async function del(row) {
     ElMessage.success('已删除')
     emit('changed')
   } catch (e) {
-    /* 取消 */
+    // 仅用户主动取消时静默；接口失败时给出错误提示
+    if (!(e === 'cancel' || e === 'close' || (e && e.msg === 'cancel'))) {
+      ElMessage.error('删除失败：' + ((e && e.message) || '未知错误'))
+    }
   }
 }
 </script>

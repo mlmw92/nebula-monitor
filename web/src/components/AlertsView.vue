@@ -3,7 +3,8 @@
     <!-- 告警统计看板 -->
     <div class="glass panel" style="margin-bottom: 16px">
       <div class="panel-title" style="margin-bottom: 12px">告警概览</div>
-      <div class="alert-stats">
+      <div v-if="statsError" class="alert-refresh-error">{{ statsError }}</div>
+      <div class="alert-stats" v-loading="statsLoading">
         <div class="glass panel kpi">
           <div class="kpi-label">活跃告警</div>
           <div class="kpi-value red">{{ stats.firing }}</div>
@@ -94,6 +95,14 @@
         </el-dropdown>
         </div>
       </div>
+      <el-alert
+        v-if="ruleLoadError"
+        type="error"
+        :closable="false"
+        show-icon
+        class="rule-load-error"
+        :title="'告警规则加载失败：' + ruleLoadError"
+      />
       <div class="rule-filter-bar" style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap">
         <el-input
           v-model="ruleSearch"
@@ -473,6 +482,10 @@ const channelOptions = ref(CHANNEL_META.map((c) => ({ ...c, enabled: true })))
 let timer = null
 let loadGeneration = 0
 const refreshError = ref('')
+const statsLoading = ref(false)
+const statsError = ref('')
+const ruleLoadError = ref('')
+let maintenanceTimer = null
 
 // P4：统计看板 / 抑制规则 / 分组配置
 const stats = ref({ firing: 0, suppressed: 0, total: 0, bySeverity: { critical: 0, warning: 0, info: 0 } })
@@ -547,17 +560,22 @@ async function loadMaintenance() {
   } catch (e) { /* ignore */ }
 }
 
-async function saveMaintenance() {
-  try {
-    await http.put('/api/v1/maintenance', {
-      enabled: maintenance.value.enabled,
-      start: maintenance.value.start,
-      end: maintenance.value.end,
-      reason: maintenance.value.reason,
-    })
-  } catch (e) {
-    ElMessage.error('保存维护窗口失败')
-  }
+function saveMaintenance() {
+  // 日期/原因修改会连续触发，防抖合并为一次保存
+  clearTimeout(maintenanceTimer)
+  maintenanceTimer = setTimeout(async () => {
+    try {
+      await http.put('/api/v1/maintenance', {
+        enabled: maintenance.value.enabled,
+        start: maintenance.value.start,
+        end: maintenance.value.end,
+        reason: maintenance.value.reason,
+      })
+      ElMessage.success('维护窗口已保存（热生效）')
+    } catch (e) {
+      ElMessage.error('保存维护窗口失败')
+    }
+  }, 400)
 }
 
 async function loadAlerts() {
@@ -583,7 +601,10 @@ async function loadAlerts() {
 async function load() {
   try {
     rules.value = (await http.get('/api/v1/rules')).rules || []
-  } catch (e) { /* ignore */ }
+    ruleLoadError.value = ''
+  } catch (e) {
+    ruleLoadError.value = e.message || '网络异常'
+  }
   await loadAlerts()
   try {
     groups.value = (await http.get('/api/v1/groups')).groups || []
@@ -595,8 +616,14 @@ async function load() {
     acks.value = (await http.get('/api/v1/alerts/acks')).acks || {}
   } catch (e) { /* ignore */ }
   try {
+    statsLoading.value = true
     stats.value = await http.get('/api/v1/alerts/stats')
-  } catch (e) { /* ignore */ }
+    statsError.value = ''
+  } catch (e) {
+    statsError.value = '告警概览加载失败：' + (e.message || '网络异常')
+  } finally {
+    statsLoading.value = false
+  }
   try {
     inhibits.value = (await http.get('/api/v1/inhibit')).rules || []
   } catch (e) { /* ignore */ }
@@ -699,6 +726,16 @@ async function onFileChange(e) {
 
 async function confirmImport() {
   if (!pendingImport.value) return
+  // 覆盖导入会删除现有全部规则，二次强确认
+  if (importMode.value === 'replace') {
+    try {
+      await ElMessageBox.confirm(
+        `即将清空当前全部 ${rules.value.length} 条规则并导入「${pendingImport.value.name}」中的 ${pendingImport.value.list.length} 条规则，此操作不可撤销。是否继续？`,
+        '覆盖导入确认',
+        { type: 'error', confirmButtonText: '确认覆盖导入', cancelButtonText: '取消' }
+      )
+    } catch { return }
+  }
   try {
     const res = await http.post('/api/v1/rules/import', {
       rules: pendingImport.value.list,
@@ -1001,6 +1038,7 @@ function onThemeChanged() {
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  if (maintenanceTimer) clearTimeout(maintenanceTimer)
   window.removeEventListener('nebula:theme-changed', onThemeChanged)
   if (chartInstance) chartInstance.dispose()
 })
@@ -1011,6 +1049,9 @@ onUnmounted(() => {
   color: var(--danger);
   font-size: 13px;
   margin-bottom: 10px;
+}
+.rule-load-error {
+  margin-bottom: 12px;
 }
 .panel-title-row {
   display: flex;

@@ -45,6 +45,7 @@ const lastUpdate = ref('')
 const countdown = ref(props.interval)
 let timer = null
 let countdownTimer = null
+let hidden = false
 
 watch(() => props.interval, (v) => { interval.value = v })
 
@@ -69,12 +70,9 @@ function stopCountdown() {
 }
 function start() {
   stop()
-  if (auto.value) {
-    timer = setInterval(() => trigger(), interval.value * 1000)
-    startCountdown()
-  } else {
-    stopCountdown()
-  }
+  if (!auto.value || hidden) return
+  timer = setInterval(() => trigger(), interval.value * 1000)
+  startCountdown()
 }
 function stop() {
   if (timer) { clearInterval(timer); timer = null }
@@ -82,8 +80,25 @@ function stop() {
 }
 function restart() { start() }
 
-onMounted(start)
-onUnmounted(stop)
+// 页面隐藏时暂停自动刷新与倒计时，回到前台恢复，避免后台空转浪费资源
+function onVisibility() {
+  hidden = document.visibilityState !== 'visible'
+  if (hidden) {
+    stop()
+  } else {
+    countdown.value = interval.value
+    start()
+  }
+}
+
+onMounted(() => {
+  start()
+  document.addEventListener('visibilitychange', onVisibility)
+})
+onUnmounted(() => {
+  stop()
+  document.removeEventListener('visibilitychange', onVisibility)
+})
 </script>
 
 <style scoped>

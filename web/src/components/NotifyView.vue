@@ -163,6 +163,28 @@ async function load() {
 }
 
 async function save() {
+  // 保存前校验：启用的渠道必须有可用地址
+  const n = notify.value
+  if (n.email.enabled && !n.email.smtpHost) {
+    ElMessage.warning('已启用邮件渠道，请先填写 SMTP 主机')
+    return
+  }
+  if (n.webhook.enabled && !n.webhook.urls.length) {
+    ElMessage.warning('已启用 Webhook 渠道，请先填写至少一个 Webhook 地址')
+    return
+  }
+  if (n.dingtalk.enabled && !n.dingtalk.urls.length) {
+    ElMessage.warning('已启用钉钉机器人，请先填写至少一个机器人 Webhook')
+    return
+  }
+  if (n.feishu.enabled && !n.feishu.urls.length) {
+    ElMessage.warning('已启用飞书机器人，请先填写至少一个机器人 Webhook')
+    return
+  }
+  if (n.wecom.enabled && !n.wecom.urls.length) {
+    ElMessage.warning('已启用企业微信机器人，请先填写至少一个机器人 Webhook')
+    return
+  }
   saving.value = true
   try {
     await http.put('/api/v1/notify', notify.value)

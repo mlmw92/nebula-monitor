@@ -27,9 +27,18 @@
       />
     </div>
 
-    <div class="chart-section glass" v-if="history.length > 0">
+    <div class="chart-section glass">
       <div class="section-title">历史报告</div>
-      <el-table :data="history" style="width: 100%">
+      <el-alert
+        v-if="historyError"
+        type="error"
+        :closable="false"
+        show-icon
+        class="history-error"
+        title="历史报告加载失败"
+        :description="historyError"
+      />
+      <el-table v-if="history.length > 0" :data="history" style="width: 100%">
         <el-table-column label="类型" width="80">
           <template #default="{ row }">
             <el-tag v-if="row.type" size="small">{{ typeLabel(row.type) }}</el-tag>
@@ -49,6 +58,11 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-empty
+        v-else-if="!historyError"
+        description="暂无历史报告，点击上方「生成报告」创建第一份巡检报告"
+        :image-size="60"
+      />
     </div>
 
     <div class="chart-section glass report-frame" v-if="previewUrl">
@@ -66,11 +80,13 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import http from '../api/http'
 
 const reportType = ref('daily')
 const generating = ref(false)
 const history = ref([])
+const historyError = ref('')
 const previewUrl = ref('')
 const currentId = ref('')
 
@@ -78,7 +94,11 @@ async function loadHistory() {
   try {
     const data = await http.get('/api/v1/report/history')
     history.value = data.reports || []
-  } catch (e) { console.error(e) }
+    historyError.value = ''
+  } catch (e) {
+    console.error(e)
+    historyError.value = e.message || '网络异常，请稍后重试'
+  }
 }
 
 async function generate() {
@@ -88,8 +108,12 @@ async function generate() {
     if (data && data.id) {
       preview(data.id)
       await loadHistory()
+      ElMessage.success('报告已生成')
     }
-  } catch (e) { console.error(e) } finally { generating.value = false }
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('生成报告失败：' + (e.message || '请稍后重试'))
+  } finally { generating.value = false }
 }
 
 function preview(id) {
@@ -129,6 +153,7 @@ onMounted(loadHistory)
 .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
 .generate-row { display: flex; gap: 12px; align-items: center; }
 .tip { margin-top: 14px; }
+.history-error { margin-bottom: 12px; }
 .frame-head { display: flex; align-items: center; justify-content: space-between; }
 .frame-actions { display: flex; gap: 8px; }
 .report-iframe {

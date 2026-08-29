@@ -28,6 +28,18 @@
       </div>
     </div>
 
+    <el-alert
+      v-if="loadError"
+      type="error"
+      :closable="false"
+      show-icon
+      class="audit-error"
+    >
+      <template #title>审计记录加载失败：{{ loadError }}
+        <el-button link type="primary" @click="loadEvents">重试</el-button>
+      </template>
+    </el-alert>
+
     <div class="glass panel" v-loading="loading">
       <el-table :data="events" empty-text="暂无审计记录" style="width: 100%">
         <el-table-column label="时间" width="180">
@@ -82,10 +94,12 @@
 
 <script setup>
 import { reactive, ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import http from '../api/http'
 
 const loading = ref(false)
 const exporting = ref(false)
+const loadError = ref('')
 const events = ref([])
 const filters = reactive({ category: '', user: '', path: '', limit: 100 })
 
@@ -130,8 +144,10 @@ async function loadEvents() {
   try {
     const data = await http.get(`/api/v1/audit/events?${queryString()}`)
     events.value = data.events || []
+    loadError.value = ''
   } catch (error) {
     events.value = []
+    loadError.value = error.message || '网络异常，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -149,6 +165,9 @@ async function exportCSV() {
     link.download = 'audit-events.csv'
     link.click()
     URL.revokeObjectURL(url)
+    ElMessage.success('已导出审计记录 CSV')
+  } catch (error) {
+    ElMessage.error('导出失败：' + (error.message || '请稍后重试'))
   } finally {
     exporting.value = false
   }
@@ -159,6 +178,7 @@ onMounted(loadEvents)
 
 <style scoped>
 .audit-view { display: flex; flex-direction: column; gap: 16px; }
+.audit-error :deep(.el-button--primary) { font-size: 13px; }
 .panel { padding: 16px; }
 .panel-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .panel-title { color: var(--text); font-size: 16px; font-weight: 600; }

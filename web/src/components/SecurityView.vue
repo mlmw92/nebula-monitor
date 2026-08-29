@@ -2,6 +2,19 @@
   <div class="security-view">
     <RefreshBar :loading="refreshing" @refresh="refreshAll" />
 
+    <!-- 加载失败提示：与「能力未启用」区分开，避免把失败当空数据 -->
+    <el-alert
+      v-if="loadError"
+      type="error"
+      :closable="false"
+      show-icon
+      class="sec-load-error"
+    >
+      <template #title>安全模块数据加载失败：{{ loadError }}
+        <el-button link type="primary" @click="refreshAll">重试</el-button>
+      </template>
+    </el-alert>
+
     <!-- 顶部 KPI 概览 -->
     <div class="glass panel kpi-row" v-loading="loading">
       <div class="kpi-card score-kpi" :class="scoreClass">
@@ -244,6 +257,7 @@ import KpiCard from './KpiCard.vue'
 
 const loading = ref(false)
 const refreshing = ref(false)
+const loadError = ref('')
 const summary = ref({ score: 0, eventCount: 0, riskNodes: 0, fimChanges: 0, baselineHosts: 0 })
 const events = ref([])
 const baselines = ref([])
@@ -306,8 +320,10 @@ async function loadDefense() {
   try {
     const d = await getDefenseStatuses()
     defenseStatuses.value = d.statuses || []
+    loadError.value = ''
   } catch (e) {
     defenseStatuses.value = []
+    if (e && e.message) loadError.value = e.message
   }
 }
 
@@ -432,8 +448,9 @@ async function loadSummary() {
       fimChanges: d.fimChanges || 0,
       baselineHosts: d.baselineHosts || 0,
     }
+    loadError.value = ''
   } catch (e) {
-    /* 忽略：安全能力可能未启用 */
+    if (e && e.message) loadError.value = e.message
   }
 }
 async function loadEvents() {
@@ -441,16 +458,20 @@ async function loadEvents() {
     const d = await getSecurityEvents({ limit: 2000, category: filterCategory.value, node: filterNode.value })
     events.value = d.events || []
     evCurrentPage.value = 1
+    loadError.value = ''
   } catch (e) {
     events.value = []
+    if (e && e.message) loadError.value = e.message
   }
 }
 async function loadBaselines() {
   try {
     const d = await getSecurityBaselines()
     baselines.value = d.baselines || []
+    loadError.value = ''
   } catch (e) {
     baselines.value = []
+    if (e && e.message) loadError.value = e.message
   }
 }
 async function refreshAll() {
@@ -472,6 +493,10 @@ onMounted(async () => {
   flex-direction: column;
   gap: 16px;
 }
+.sec-load-error {
+  margin-bottom: 0;
+}
+.sec-load-error :deep(.el-button--primary) { font-size: 13px; }
 .kpi-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

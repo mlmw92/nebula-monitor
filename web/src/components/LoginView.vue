@@ -14,16 +14,18 @@
       </div>
 
       <el-form class="login-form" @submit.prevent="doLogin">
-        <el-form-item>
+        <el-form-item :error="errors.username">
           <el-input
             v-model="username"
             size="large"
             placeholder="用户名"
             :prefix-icon="User"
             autofocus
+            @input="errors.username = ''"
+            @keyup.enter="doLogin"
           />
         </el-form-item>
-        <el-form-item>
+        <el-form-item :error="errors.password">
           <el-input
             v-model="password"
             size="large"
@@ -31,6 +33,7 @@
             placeholder="密码"
             :prefix-icon="Lock"
             show-password
+            @input="errors.password = ''"
             @keyup.enter="doLogin"
           />
         </el-form-item>
@@ -77,13 +80,24 @@ const auth = useAuth()
 // 拉取最新品牌配置（含系统名称、Logo、页脚），确保登录页即时反映设置
 loadBrand()
 
-const username = ref('admin')
+const username = ref('')
 const password = ref('')
 const error = ref('')
+const errors = ref({ username: '', password: '' })
 const loading = ref(false)
 
 async function doLogin() {
   error.value = ''
+  // 必填校验：空值不提交，就地提示并聚焦首个错误项
+  errors.value = {
+    username: username.value.trim() ? '' : '请输入用户名',
+    password: password.value ? '' : '请输入密码',
+  }
+  if (errors.value.username || errors.value.password) {
+    const first = document.querySelector('.login-form .el-input__inner')
+    first && first.focus()
+    return
+  }
   loading.value = true
   try {
     const d = await http.post('/api/v1/login', {

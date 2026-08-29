@@ -105,6 +105,7 @@ const tabLoader = (loader) => defineAsyncComponent({
   loader,
   delay: 120,
   loadingComponent: { render: () => h('div', { class: 'tab-loading' }, '加载中…') },
+  errorComponent: { render: () => h('div', { class: 'tab-error' }, '页面加载失败，请刷新页面重试') },
 })
 const RedisTab = tabLoader(() => import('./redis/RedisTab.vue'))
 const MySQLTab = tabLoader(() => import('./mysql/MySQLTab.vue'))
@@ -184,6 +185,12 @@ watch(
   padding: 40px 0;
   text-align: center;
   color: var(--text-dim);
+  font-size: 14px;
+}
+.tab-error {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--danger);
   font-size: 14px;
 }
 .tab-dot {
