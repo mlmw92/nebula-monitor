@@ -1,7 +1,6 @@
 import { ref } from 'vue'
 
 const STORAGE_KEY = 'nebula-overview-layout'
-const INTELLIGENCE_PRIORITY_KEY = 'nebula-overview-intelligence-prioritized-v1'
 
 // 首页区块默认配置（顺序即默认排列，span 为 12 栅格占比）
 const defaultBlocks = [
@@ -13,6 +12,9 @@ const defaultBlocks = [
   { key: 'middleware', title: '中间件概览', span: 12, visible: true },
   { key: 'recentAlerts', title: '最近告警', span: 12, visible: true },
 ]
+
+// 固定置顶区块：始终在首页最上方，不可下移、不可隐藏
+const PINNED_KEYS = ['intelligence']
 
 function clone(v) {
   return JSON.parse(JSON.stringify(v))
@@ -30,18 +32,18 @@ function load() {
     defaultBlocks.forEach((d) => {
       if (!order.includes(d.key)) order.push(d.key)
     })
-    // 首次升级到智能运维优先布局时迁移已有本地顺序；之后继续尊重用户自定义。
-    if (!localStorage.getItem(INTELLIGENCE_PRIORITY_KEY)) {
-      const intelligenceIndex = order.indexOf('intelligence')
-      if (intelligenceIndex > 0) {
-        order.splice(intelligenceIndex, 1)
-        order.unshift('intelligence')
+    // 固定置顶区块强制排在首页最上方（覆盖历史本地布局）
+    PINNED_KEYS.forEach((k) => {
+      const i = order.indexOf(k)
+      if (i > 0) {
+        order.splice(i, 1)
+        order.unshift(k)
       }
-      localStorage.setItem(INTELLIGENCE_PRIORITY_KEY, '1')
-    }
+    })
     return order
       .map((k) => ({ ...defaultBlocks.find((d) => d.key === k), ...(byKey[k] || {}) }))
       .filter((b) => defaultBlocks.some((d) => d.key === b.key))
+      .map((b) => (PINNED_KEYS.includes(b.key) ? { ...b, visible: true } : b))
   } catch {
     return clone(defaultBlocks)
   }
@@ -64,7 +66,9 @@ export function useOverviewLayout() {
 
   function moveUp(key) {
     const i = blocks.value.findIndex((b) => b.key === key)
-    if (i > 0) {
+    // 固定置顶区块位于最前，其它区块不允许越过它们（minIndex = 置顶区块数）
+    const minIndex = PINNED_KEYS.length
+    if (i > minIndex) {
       const arr = blocks.value
       const tmp = arr[i - 1]
       arr[i - 1] = arr[i]
@@ -75,6 +79,7 @@ export function useOverviewLayout() {
   }
 
   function moveDown(key) {
+    if (PINNED_KEYS.includes(key)) return
     const i = blocks.value.findIndex((b) => b.key === key)
     if (i >= 0 && i < blocks.value.length - 1) {
       const arr = blocks.value
@@ -87,6 +92,7 @@ export function useOverviewLayout() {
   }
 
   function toggleVisible(key) {
+    if (PINNED_KEYS.includes(key)) return
     const b = blocks.value.find((x) => x.key === key)
     if (b) {
       b.visible = !b.visible
@@ -103,5 +109,15 @@ export function useOverviewLayout() {
     editing.value = v
   }
 
-  return { blocks, editing, moveUp, moveDown, toggleVisible, reset, setEditing, persist }
+  return {
+    blocks,
+    editing,
+    pinnedKeys: PINNED_KEYS,
+    moveUp,
+    moveDown,
+    toggleVisible,
+    reset,
+    setEditing,
+    persist,
+  }
 }

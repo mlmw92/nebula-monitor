@@ -15,7 +15,7 @@
     </div>
 
     <div v-if="editing" class="ov-edit-hint">
-      编辑模式：使用各区块右上角的 ↑ / ↓ 调整顺序，点击「隐藏」可关闭该区块；配置自动保存到本地。
+      编辑模式：使用各区块右上角的 ↑ / ↓ 调整顺序，点击「隐藏」可关闭该区块；「智能运维」固定置顶，不可移动或隐藏。配置自动保存到本地。
     </div>
 
     <div class="ov-grid">
@@ -29,9 +29,14 @@
           <div class="ov-card-head">
             <h3 class="ov-card-title">{{ b.title }}</h3>
             <div v-if="editing" class="ov-edit-tools">
-              <button class="ov-tool" title="上移" @click="moveUp(b.key)">↑</button>
-              <button class="ov-tool" title="下移" @click="moveDown(b.key)">↓</button>
-              <button class="ov-tool" title="隐藏" @click="toggleVisible(b.key)">隐藏</button>
+              <template v-if="pinnedKeys.includes(b.key)">
+                <span class="ov-pinned" title="该区块固定置顶">固定置顶</span>
+              </template>
+              <template v-else>
+                <button class="ov-tool" title="上移" @click="moveUp(b.key)">↑</button>
+                <button class="ov-tool" title="下移" @click="moveDown(b.key)">↓</button>
+                <button class="ov-tool" title="隐藏" @click="toggleVisible(b.key)">隐藏</button>
+              </template>
             </div>
           </div>
           <div class="ov-card-body">
@@ -60,7 +65,7 @@ import HostOverview from './overview/HostOverview.vue'
 import MiddlewareOverview from './overview/MiddlewareOverview.vue'
 import RecentAlerts from './overview/RecentAlerts.vue'
 
-const { blocks, editing, moveUp, moveDown, toggleVisible, reset, setEditing } = useOverviewLayout()
+const { blocks, editing, pinnedKeys, moveUp, moveDown, toggleVisible, reset, setEditing } = useOverviewLayout()
 
 const compMap = {
   health: HealthBlock,
@@ -341,6 +346,16 @@ onBeforeUnmount(() => {
 .ov-tool:hover {
   color: var(--text);
   border-color: var(--accent);
+}
+.ov-pinned {
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--accent);
+  cursor: default;
 }
 .ov-card-body {
   flex: 1;
