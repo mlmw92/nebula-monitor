@@ -76,6 +76,74 @@
       </template>
     </div>
 
+    <!-- 告警事件：概览与维护状态之后优先展示，便于快速处置 -->
+    <div class="glass panel" style="margin-bottom: 16px">
+      <div v-if="refreshError" class="alert-refresh-error">{{ refreshError }}</div>
+      <div class="panel-title-row">
+        <span class="panel-title" style="margin-bottom: 0">告警事件</span>
+        <div class="event-toolbar">
+          <el-radio-group v-model="eventFilter" size="small">
+            <el-radio-button value="firing">活跃</el-radio-button>
+            <el-radio-button value="resolved">已恢复</el-radio-button>
+            <el-radio-button value="">全部</el-radio-button>
+          </el-radio-group>
+          <el-button size="small" :disabled="!selected.length" @click="batchAck">批量确认 ({{ selected.length }})</el-button>
+          <span class="muted event-toolbar-hint">确认后将从活跃列表移除，仍可在“全部”中查看</span>
+          <el-button size="small" :loading="testing" @click="testAlert">测试事件</el-button>
+        </div>
+      </div>
+      <el-table
+        :data="pagedAlerts"
+        stripe
+        style="width: 100%"
+        empty-text="暂无告警事件"
+        @selection-change="onSelect"
+        @row-dblclick="openDetail"
+      >
+        <el-table-column type="selection" width="45" :selectable="selectableAlert" />
+        <el-table-column prop="ruleName" label="规则" min-width="140" />
+        <el-table-column prop="node" label="节点" min-width="130" />
+        <el-table-column label="级别" width="80">
+          <template #default="{ row }">
+            <el-tag :type="sevType(row.severity)" size="small" effect="dark">{{ sevLabel(row.severity) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.state === 'firing' && acks[ackKey(row)]" type="info" size="small" effect="plain">已确认</el-tag>
+            <el-tag v-else :type="row.state === 'firing' ? 'danger' : 'success'" size="small" effect="dark">
+              {{ row.state === 'firing' ? '告警中' : '已恢复' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="抑制" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="row.suppressed" type="info" size="small" effect="plain">已抑制</el-tag>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="message" label="详情" min-width="200" show-overflow-tooltip />
+        <el-table-column label="时间" width="160">
+          <template #default="{ row }">{{ fmt(row.startsAt || row.endsAt) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="80">
+          <template #default="{ row }">
+            <el-button link size="small" @click="openDetail(row)">详情</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div style="margin-top: 12px; display: flex; justify-content: flex-end">
+        <el-pagination
+          v-model:current-page="evCurrentPage"
+          v-model:page-size="evPageSize"
+          :total="filteredAlerts.length"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+        />
+      </div>
+    </div>
+
     <!-- 告警规则 -->
     <div class="glass panel" style="margin-bottom: 16px">
       <div class="panel-title-row">
@@ -284,74 +352,6 @@
             </template>
           </el-table-column>
         </el-table>
-      </div>
-    </div>
-
-    <!-- 告警事件 -->
-    <div class="glass panel">
-      <div v-if="refreshError" class="alert-refresh-error">{{ refreshError }}</div>
-      <div class="panel-title-row">
-        <span class="panel-title" style="margin-bottom: 0">告警事件</span>
-        <div class="event-toolbar">
-          <el-radio-group v-model="eventFilter" size="small">
-            <el-radio-button value="firing">活跃</el-radio-button>
-            <el-radio-button value="resolved">已恢复</el-radio-button>
-            <el-radio-button value="">全部</el-radio-button>
-          </el-radio-group>
-          <el-button size="small" :disabled="!selected.length" @click="batchAck">批量确认 ({{ selected.length }})</el-button>
-          <span class="muted event-toolbar-hint">确认后将从活跃列表移除，仍可在“全部”中查看</span>
-          <el-button size="small" :loading="testing" @click="testAlert">测试事件</el-button>
-        </div>
-      </div>
-      <el-table
-        :data="pagedAlerts"
-        stripe
-        style="width: 100%"
-        empty-text="暂无告警事件"
-        @selection-change="onSelect"
-        @row-dblclick="openDetail"
-      >
-        <el-table-column type="selection" width="45" :selectable="selectableAlert" />
-        <el-table-column prop="ruleName" label="规则" min-width="140" />
-        <el-table-column prop="node" label="节点" min-width="130" />
-        <el-table-column label="级别" width="80">
-          <template #default="{ row }">
-            <el-tag :type="sevType(row.severity)" size="small" effect="dark">{{ sevLabel(row.severity) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="120">
-          <template #default="{ row }">
-            <el-tag v-if="row.state === 'firing' && acks[ackKey(row)]" type="info" size="small" effect="plain">已确认</el-tag>
-            <el-tag v-else :type="row.state === 'firing' ? 'danger' : 'success'" size="small" effect="dark">
-              {{ row.state === 'firing' ? '告警中' : '已恢复' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="抑制" width="90">
-          <template #default="{ row }">
-            <el-tag v-if="row.suppressed" type="info" size="small" effect="plain">已抑制</el-tag>
-            <span v-else class="muted">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="message" label="详情" min-width="200" show-overflow-tooltip />
-        <el-table-column label="时间" width="160">
-          <template #default="{ row }">{{ fmt(row.startsAt || row.endsAt) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="80">
-          <template #default="{ row }">
-            <el-button link size="small" @click="openDetail(row)">详情</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div style="margin-top: 12px; display: flex; justify-content: flex-end">
-        <el-pagination
-          v-model:current-page="evCurrentPage"
-          v-model:page-size="evPageSize"
-          :total="filteredAlerts.length"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next, jumper"
-          background
-        />
       </div>
     </div>
 
