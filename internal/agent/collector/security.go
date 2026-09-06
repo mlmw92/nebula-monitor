@@ -33,21 +33,22 @@ const (
 
 // SSH 失败登录日志正则（兼容 syslog 风格 auth.log / secure）。
 // 示例：
-//   Failed password for root from 1.2.3.4 port 5678 ssh2
-//   Failed password for invalid user admin from 1.2.3.4 port 5678 ssh2
-//   Connection closed by authenticating user root 1.2.3.4 port 5678 [preauth]
-//   Invalid user admin from 1.2.3.4 port 5678
+//
+//	Failed password for root from 1.2.3.4 port 5678 ssh2
+//	Failed password for invalid user admin from 1.2.3.4 port 5678 ssh2
+//	Connection closed by authenticating user root 1.2.3.4 port 5678 [preauth]
+//	Invalid user admin from 1.2.3.4 port 5678
 var (
 	// reSSHFailed 匹配 SSH 登录失败（含无效用户），捕获用户名与来源 IP。
-	reSSHFailed      = regexp.MustCompile(`Failed password for (?:invalid user )?(\S+) from (\S+) port (\d+)`)
+	reSSHFailed = regexp.MustCompile(`Failed password for (?:invalid user )?(\S+) from (\S+) port (\d+)`)
 	// reSSHInvalidUser 匹配 "Invalid user" 探测，捕获被猜解的用户名与来源 IP。
 	reSSHInvalidUser = regexp.MustCompile(`Invalid user (\S+) from (\S+)`)
 	// reSSHClosedBy 匹配认证阶段被关闭的连接，捕获用户名与来源 IP。
-	reSSHClosedBy    = regexp.MustCompile(`Connection closed by authenticating user (\S+) (\S+) port (\d+)`)
+	reSSHClosedBy = regexp.MustCompile(`Connection closed by authenticating user (\S+) (\S+) port (\d+)`)
 	// reSSHAccepted 匹配 SSH 登录成功，捕获用户名与来源 IP。
-	reSSHAccepted    = regexp.MustCompile(`Accepted password for (\S+) from (\S+) port (\d+)`)
+	reSSHAccepted = regexp.MustCompile(`Accepted password for (\S+) from (\S+) port (\d+)`)
 	// reSSHRootLogin 匹配 root 登录被拒绝/接受（不区分大小写）。
-	reSSHRootLogin   = regexp.MustCompile(`(?i)root login (?:refused|accepted)`)
+	reSSHRootLogin = regexp.MustCompile(`(?i)root login (?:refused|accepted)`)
 	// sudo 审计：记录提权用户、执行的命令与来源 IP（如 sudo -u）。
 	// 示例：sudo:   ops : TTY=... ; PWD=... ; USER=root ; COMMAND=/bin/ls /etc
 	reSudo = regexp.MustCompile(`sudo:\s+(\S+)\s+:\s+.*USER=(\S+)\s+;\s+COMMAND=(.*)$`)
@@ -57,19 +58,21 @@ var (
 // 设计原则：敏感文件（/etc/shadow）仅计算 SHA256 哈希，绝不上传文件内容或口令；
 // SSH 日志增量解析（记录文件偏移），避免重复解析全量日志。
 type SecurityCollector struct {
-	node   string
-	nodeIP string
-	cfg    config.SecurityConfig
-	mu     sync.Mutex
-	fim    *fimState            // FIM 基线状态（含本地偏移/哈希）
-	sshOff map[string]int64    // 各 SSH 日志文件的读取偏移
+	node                 string
+	nodeIP               string
+	cfg                  config.SecurityConfig
+	mu                   sync.Mutex
+	fim                  *fimState          // FIM 基线状态（含本地偏移/哈希）
+	sshOff               map[string]int64   // 各 SSH 日志文件的读取偏移
+	sshFailures          map[string][]int64 // SSH 失败记录，按来源 IP 保留检测窗口内时间戳
+	sshBruteforceAlertAt map[string]int64   // 同一来源 IP 在检测窗口内仅聚合告警一次
 }
 
 // fimState 文件完整性监测的本地状态，含基线哈希与文件路径。
 type fimState struct {
-	BaselinePath string             `json:"baselinePath"`
-	Hashes       map[string]string  `json:"hashes"`    // path -> sha256
-	LastChecked  int64              `json:"lastChecked"`
+	BaselinePath string            `json:"baselinePath"`
+	Hashes       map[string]string `json:"hashes"` // path -> sha256
+	LastChecked  int64             `json:"lastChecked"`
 }
 
 // NewSecurityCollector 创建安全采集器并加载本地 FIM 基线（若存在）。
@@ -81,10 +84,12 @@ func NewSecurityCollector(node, nodeIP string, cfg config.SecurityConfig) *Secur
 		cfg.BruteForceWindowSec = 300
 	}
 	c := &SecurityCollector{
-		node:    node,
-		nodeIP:  nodeIP,
-		cfg:     cfg,
-		sshOff:  map[string]int64{},
+		node:                 node,
+		nodeIP:               nodeIP,
+		cfg:                  cfg,
+		sshOff:               map[string]int64{},
+		sshFailures:          map[string][]int64{},
+		sshBruteforceAlertAt: map[string]int64{},
 	}
 	c.loadFIMBaseline()
 	return c
@@ -152,20 +157,18 @@ func (c *SecurityCollector) Collect() ([]model.SecurityEvent, *model.SecurityBas
 	return events, baseline
 }
 
-// collectSSH 增量解析 SSH 日志，统计失败来源 IP，检测暴力破解。
+// collectSSH 增量解析 SSH 日志。单次失败仅在 Agent 内存中计数；达到阈值时按来源 IP 聚合为一条暴力破解事件。
 func (c *SecurityCollector) collectSSH() []model.SecurityEvent {
 	paths := c.sshLogPaths()
 	var events []model.SecurityEvent
 	now := time.Now()
-
-	// 窗口内失败尝试按来源 IP 聚合：ip -> []失败时间戳
-	failByIP := map[string][]int64{}
+	window := time.Duration(c.cfg.BruteForceWindowSec) * time.Second
+	cutoff := now.Add(-window).UnixMilli()
 
 	for _, path := range paths {
 		offset, _ := c.sshOff[path]
 		f, err := os.Open(path)
 		if err != nil {
-			// 该日志文件可能不存在（非对应发行版），仅调试级别，不刷屏
 			slog.Debug("SSH 日志打开失败，跳过", "path", path, "err", err)
 			continue
 		}
@@ -175,7 +178,7 @@ func (c *SecurityCollector) collectSSH() []model.SecurityEvent {
 			continue
 		}
 		if st.Size() < offset {
-			offset = 0 // 日志被轮转，从头解析
+			offset = 0
 		}
 		if _, err := f.Seek(offset, 0); err != nil {
 			_ = f.Close()
@@ -192,28 +195,18 @@ func (c *SecurityCollector) collectSSH() []model.SecurityEvent {
 				}
 				line = strings.TrimRight(line, "\r\n")
 				ts := parseSyslogTime(line, now)
-				if m := reSSHFailed.FindStringSubmatch(line); m != nil {
-					ip := m[2]
-					failByIP[ip] = append(failByIP[ip], ts)
-					// 失败登录审计事件（信息级别，便于追溯攻击来源）
-					events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSSHAudit, model.SeverityInfo,
-						fmt.Sprintf("SSH 登录失败：用户 %s 来自 %s", m[1], ip),
-						map[string]string{"user": m[1], "result": "failed"}, ip, "", ts))
-				} else if m := reSSHInvalidUser.FindStringSubmatch(line); m != nil {
-					failByIP[m[2]] = append(failByIP[m[2]], ts)
-					events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSSHAudit, model.SeverityInfo,
-						fmt.Sprintf("SSH 登录失败：无效用户 %s 来自 %s", m[1], m[2]),
-						map[string]string{"user": m[1], "result": "invalid"}, m[2], "", ts))
-				} else if m := reSSHClosedBy.FindStringSubmatch(line); m != nil {
-					failByIP[m[2]] = append(failByIP[m[2]], ts)
-					events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSSHAudit, model.SeverityInfo,
-						fmt.Sprintf("SSH 认证中断：用户 %s 来自 %s", m[1], m[2]),
-						map[string]string{"user": m[1], "result": "closed"}, m[2], "", ts))
-				} else if m := reSSHAccepted.FindStringSubmatch(line); m != nil {
-					// 成功登录也记录审计（不告警），便于排查暴力破解后的入侵
+				switch {
+				case reSSHFailed.MatchString(line):
+					c.recordSSHFailure(reSSHFailed.FindStringSubmatch(line)[2], ts, cutoff)
+				case reSSHInvalidUser.MatchString(line):
+					c.recordSSHFailure(reSSHInvalidUser.FindStringSubmatch(line)[2], ts, cutoff)
+				case reSSHClosedBy.MatchString(line):
+					c.recordSSHFailure(reSSHClosedBy.FindStringSubmatch(line)[2], ts, cutoff)
+				case reSSHAccepted.MatchString(line):
+					m := reSSHAccepted.FindStringSubmatch(line)
 					events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSSHAudit, model.SeverityInfo,
 						fmt.Sprintf("SSH 登录成功：用户 %s 来自 %s", m[1], m[2]),
-						map[string]string{"user": m[1], "result": "success"}, m[2], m[1], ts))
+						map[string]string{"result": "success"}, m[2], m[1], ts))
 				}
 			}
 			if err != nil {
@@ -227,25 +220,58 @@ func (c *SecurityCollector) collectSSH() []model.SecurityEvent {
 		_ = f.Close()
 	}
 
-	// 暴力破解检测：窗口内失败次数超阈值
-	for ip, tsList := range failByIP {
-		// 仅统计窗口内的失败次数
-		window := time.Duration(c.cfg.BruteForceWindowSec) * time.Second
-		cutoff := now.Add(-window).UnixMilli()
-		cnt := 0
-		for _, t := range tsList {
-			if t >= cutoff {
-				cnt++
-			}
+	for ip, count := range c.sshFailureCounts(cutoff) {
+		if count < c.cfg.BruteForceThreshold || !c.markSSHBruteforceAlert(ip, now.UnixMilli(), window) {
+			continue
 		}
-		if cnt >= c.cfg.BruteForceThreshold {
-			events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSSHBruteforce, model.SeverityCritical,
-				fmt.Sprintf("检测到 SSH 暴力破解：来源 %s 在 %d 秒内失败 %d 次", ip, c.cfg.BruteForceWindowSec, cnt),
-				map[string]string{"failCount": strconv.Itoa(cnt), "windowSec": strconv.Itoa(c.cfg.BruteForceWindowSec)},
-				ip, "", now.UnixMilli()))
-		}
+		events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSSHBruteforce, model.SeverityCritical,
+			fmt.Sprintf("检测到 SSH 暴力破解：来源 %s 在 %d 秒内失败 %d 次", ip, c.cfg.BruteForceWindowSec, count),
+			map[string]string{"failCount": strconv.Itoa(count), "windowSec": strconv.Itoa(c.cfg.BruteForceWindowSec)},
+			ip, "", now.UnixMilli()))
 	}
 	return events
+}
+
+func (c *SecurityCollector) recordSSHFailure(ip string, timestamp, cutoff int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	failures := append(c.sshFailures[ip], timestamp)
+	c.sshFailures[ip] = trimSSHFailures(failures, cutoff)
+}
+
+func (c *SecurityCollector) sshFailureCounts(cutoff int64) map[string]int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	counts := make(map[string]int, len(c.sshFailures))
+	for ip, failures := range c.sshFailures {
+		failures = trimSSHFailures(failures, cutoff)
+		if len(failures) == 0 {
+			delete(c.sshFailures, ip)
+			delete(c.sshBruteforceAlertAt, ip)
+			continue
+		}
+		c.sshFailures[ip] = failures
+		counts[ip] = len(failures)
+	}
+	return counts
+}
+
+func (c *SecurityCollector) markSSHBruteforceAlert(ip string, now int64, window time.Duration) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if last := c.sshBruteforceAlertAt[ip]; last > 0 && now-last < window.Milliseconds() {
+		return false
+	}
+	c.sshBruteforceAlertAt[ip] = now
+	return true
+}
+
+func trimSSHFailures(failures []int64, cutoff int64) []int64 {
+	start := 0
+	for start < len(failures) && failures[start] < cutoff {
+		start++
+	}
+	return failures[start:]
 }
 
 // collectFIM 计算关键文件 SHA256，与基线比对，产出新增/修改/删除事件，并更新基线。
@@ -688,8 +714,8 @@ func extractSyslogPrefix(line string) string {
 
 // procInfo 进程基本信息。
 type procInfo struct {
-	pid    int
-	name   string
+	pid     int
+	name    string
 	cmdline string
 }
 

@@ -86,6 +86,7 @@ type Forecast struct {
 // HostResult 聚合单台主机的分析结论。
 type HostResult struct {
 	Node         string        `json:"node"`
+	IP           string        `json:"ip,omitempty"`
 	Group        string        `json:"group,omitempty"`
 	Online       bool          `json:"online"`
 	Score        int           `json:"score"`
@@ -237,7 +238,7 @@ func (a *Analyzer) analyzeLocked(window time.Duration) Summary {
 	return out
 }
 func (a *Analyzer) analyzeHost(n model.Node, start, end time.Time, step time.Duration, active []model.AlertEvent, securityBaseline model.SecurityBaseline) HostResult {
-	h := HostResult{Node: n.Hostname, Group: n.Group, Online: n.Status == "online", Severity: SeverityInfo, Status: "ok", Coverage: Coverage{RequiredSamples: minBaselineSamples}}
+	h := HostResult{Node: n.Hostname, IP: n.IP, Group: n.Group, Online: n.Status == "online", Severity: SeverityInfo, Status: "ok", Coverage: Coverage{RequiredSamples: minBaselineSamples}}
 	if !h.Online {
 		h.Evidence = append(h.Evidence, availabilityEvidence())
 	}

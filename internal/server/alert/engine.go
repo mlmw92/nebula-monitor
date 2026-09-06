@@ -28,15 +28,15 @@ type Broadcaster interface {
 // 规则类型别名（来自 model 包），便于引擎内分支判断。
 const (
 	// RuleTypeThreshold 阈值规则类型别名，等价于 model.RuleTypeThreshold。
-	RuleTypeThreshold     = model.RuleTypeThreshold
+	RuleTypeThreshold = model.RuleTypeThreshold
 	// RuleTypeNodeOffline 主机离线规则类型别名。
-	RuleTypeNodeOffline   = model.RuleTypeNodeOffline
+	RuleTypeNodeOffline = model.RuleTypeNodeOffline
 	// RuleTypeServiceDown 中间件/服务离线规则类型别名。
-	RuleTypeServiceDown   = model.RuleTypeServiceDown
+	RuleTypeServiceDown = model.RuleTypeServiceDown
 	// RuleTypeRoleChange 数据库主从切换规则类型别名。
-	RuleTypeRoleChange    = model.RuleTypeRoleChange
+	RuleTypeRoleChange = model.RuleTypeRoleChange
 	// RuleTypeClusterFault 集群状态损坏规则类型别名。
-	RuleTypeClusterFault  = model.RuleTypeClusterFault
+	RuleTypeClusterFault = model.RuleTypeClusterFault
 	// RuleTypeSecurityEvent 安全事件规则类型别名。
 	RuleTypeSecurityEvent = model.RuleTypeSecurityEvent
 )
@@ -212,6 +212,11 @@ func (e *Engine) evalSecurityEvents(r model.AlertRule, nodes []model.Node, now i
 				i++
 				continue
 			}
+			if !shouldAlertSecurityEvent(ev) {
+				// 已过滤的 SSH 审计噪声不应长期滞留在待告警队列。
+				events = append(events[:i], events[i+1:]...)
+				continue
+			}
 			key := r.ID + "|" + ev.Node + "|" + ev.ID
 			if _, seen := e.securityRuleEvents[key]; seen {
 				// 已按该规则处理过，从事件队列移除，避免无限累积。
@@ -228,6 +233,20 @@ func (e *Engine) evalSecurityEvents(r model.AlertRule, nodes []model.Node, now i
 			events = append(events[:i], events[i+1:]...)
 		}
 		e.securityEvents[node] = events
+	}
+}
+
+// shouldAlertSecurityEvent 过滤高频 SSH 审计噪声：登录失败、无效用户和认证中断只作安全日志保留；
+// SSH 登录成功及其他安全事件仍可由规则告警，暴力破解则由聚合类别单独触发。
+func shouldAlertSecurityEvent(ev model.SecurityEvent) bool {
+	if ev.Category != model.SecurityCatSSHAudit {
+		return true
+	}
+	switch ev.Detail["result"] {
+	case "failed", "invalid", "closed":
+		return false
+	default:
+		return true
 	}
 }
 

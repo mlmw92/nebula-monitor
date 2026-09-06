@@ -24,6 +24,26 @@ func TestValidateSecurityEventRule(t *testing.T) {
 	}
 }
 
+func TestShouldAlertSecurityEvent(t *testing.T) {
+	cases := []struct {
+		name  string
+		event model.SecurityEvent
+		want  bool
+	}{
+		{name: "SSH 登录失败", event: model.SecurityEvent{Category: model.SecurityCatSSHAudit, Detail: map[string]string{"result": "failed"}}, want: false},
+		{name: "SSH 无效用户", event: model.SecurityEvent{Category: model.SecurityCatSSHAudit, Detail: map[string]string{"result": "invalid"}}, want: false},
+		{name: "SSH 登录成功", event: model.SecurityEvent{Category: model.SecurityCatSSHAudit, Detail: map[string]string{"result": "success"}}, want: true},
+		{name: "SSH 暴力破解", event: model.SecurityEvent{Category: model.SecurityCatSSHBruteforce}, want: true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldAlertSecurityEvent(tt.event); got != tt.want {
+				t.Fatalf("shouldAlertSecurityEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCleanupInactiveSecurityRulesPreservesEventsForEnabledRules(t *testing.T) {
 	disabledAll := model.AlertRule{ID: "disabled-all", Type: model.RuleTypeSecurityEvent, Enabled: false}
 	enabledSSH := model.AlertRule{
