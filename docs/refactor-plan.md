@@ -104,7 +104,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 |---|---|---|
 | **批次一** | **E1**、**D2**、**F2** + **B1 设计件** | 用最低风险拿到采集稳定性与通知体验收益，并为鉴权改造定契约 |
 | **批次二** | B1（实施）、D1、F1、D4、E3、A3、F3（**E2 推迟**） | 补齐授权正确性与告警降噪两块硬缺口 |
-| **批次三** | **C1（分三阶段，首位）→ C2**、**E2（紧随 C1）**、C3、A1 实施、A2/E4 评估 | 攻生态扩展与架构纵深 |
+| **批次三** | **C1 阶段一（设计件已出，待评审）→ 阶段二 → 阶段三**、**E2（C1 阶段二之后）**、C2、C3、A1 实施、A2/E4 评估 | 攻生态扩展与架构纵深 |
 | 待办（不排期） | D3、C4、F4、A4 | 视需求启动 |
 
 ### A1（Server 高可用）前置调研要点
@@ -375,7 +375,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | D4 | 告警认领与协作 | 1. `AckStore` 扩展为 pending / ack / closed 状态机 | ✅ | — | `alert/ackstore.go`：`Mark`/`Assign`/`Close`/`Reopen`/`Comment`/`Get`；`IsMarked` 更名 `IsHandled`（语义变为「认领或关闭」，重新打开的告警会回到待处理）；旧记录无 `status` 字段 → `EffectiveStatus()` 一律视为已认领（升级不改变既有语义） |
 | D4 | | 2. 评论与指派（复用 `audit` 记录） | ✅ | — | 评论/指派/关闭原因存入处置记录（前端时间线的数据源），同时经既有 `AuditMiddleware` 自动写入管理操作审计；评论上限 50 条/告警、单条 2000 字符，按字符截断避免切断汉字 |
 | D4 | | 3. 前端处置流 | ✅ | — | 「告警中心」：状态列改为处置状态机标签（待处理/已认领/已关闭/已恢复，读 `acks` 的 `status`，旧记录按已认领兜底）；详情抽屉新增处置区（处理人/关闭原因）、处置时间线、评论输入框与「认领 / 指派 / 关闭告警 / 重新打开 / 评论」 |
-| E2 | 更多中间件 | 1. MariaDB / RabbitMQ / Elasticsearch / ClickHouse / Nacos / Etcd / ZooKeeper | ⏸ 推迟 | 1.25.0 | **按决策推迟到 C1 之后**：现架构下每加一个中间件要改 6 处联动（采集、上报模型、实例注册、API、前端 Tab、指标目录），7 个中间件约 42 处机械改动，而 C1 采集项模板化后这些改动大部分会作废——之后新增中间件退化为「写一个模板」 |
+| E2 | 更多中间件 | 1. MariaDB / RabbitMQ / Elasticsearch / ClickHouse / Nacos / Etcd / ZooKeeper | ⏸ 推迟 | — | **推迟到 C1 阶段二之后**。修正原判断（「C1 之后即可只写模板」偏乐观）：C1 阶段一仅解决「能否采到」，模板指标进入 Tab / 首页概览 / 报告 / 服务离线告警需阶段二的「模板 → 中间件类型」注册。按设计件结论，7 类中真正靠模板的是 5~6 个 exporter/HTTP 型（RabbitMQ / ES / ClickHouse / Etcd / ZK，Nacos 待确认），**MariaDB 可直接复用既有 MySQL exporter 通路**，不必新写模板。改动面由约 30 文件 / 55 处降为「写模板 + 阶段二注册」 |
 | E3 | 容量预测扩展 | 1. 内存 / CPU / 网络容量预测 | ✅ | — | `forecastMetric` 泛化：百分比类（磁盘/内存/CPU）估算打满时间，速率类（网络收发）无上限只估算增长（不报耗尽）；文案/单位复用指标目录；`collectMetric` 一次取数供基线与预测共用（净增 2 次查询） |
 | E3 | | 2. 中间件容量预测 | ⬜ | — | 需为各类中间件定义容量上限语义（如 Redis `maxmemory`、MySQL 连接数上限），单独立项 |
 | A3 | 数据保留策略 | 1. 本地数据清理 + TSDB retention 呈现 | ✅ | — | 新增 `internal/server/retention`：告警处置记录（**只清已处置且超期**，待处理一律保留）与巡检报告（文件 + 历史同步删）按天清理，支持开关 / 周期 / 立即清理，策略文件 Web 可改；TSDB 保留期经 `/flags` **只读呈现**（运行期由时序库启动参数决定，不假装纳管）；审计与安全事件改为导出上限常量并展示现状 |
@@ -385,7 +385,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 
 | ID | 任务 | 子项 | 状态 | 版本 | 备注 |
 |---|---|---|---|---|---|
-| C1 | 采集项 YML 模板化 | 1. 阶段一：`http` + `prometheus-exporter` 模板最小闭环 | ⬜ | — | 产出仍走 `model.Metric` + remote_write，Server 零改动 |
+| C1 | 采集项 YML 模板化 | 1. 阶段一：`http` + `prometheus-exporter` 模板最小闭环 | 📝 设计件已产出（待评审） | — | `docs/c1-collector-templates.md`：DSL（3 类 kind + 上限 + 保留前缀）、复用 E1 并发内核与 `fetchMetrics`/`parsePrometheusTextWithPrefix`、每模板一任务、失败仅产 `up=0`；产出仍走 `model.Metric` + remote_write，**Server 零改动** |
 | C1 | | 2. 阶段二：模板 CRUD + 下发（复用上报响应通道）+ 前端编辑与校验 | ⬜ | — | — |
 | C1 | | 3. 阶段三：`jdbc` / `exec` / `file` + 内置模板集 | ⬜ | — | — |
 | C2 | 集中日志分析 | 1. 日志采集 + 检索 + 日志告警联动 | ⬜ | — | 依赖 C1 |
@@ -422,6 +422,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 
 | 日期 | 变更 |
 |---|---|
+| 2026-09-26 | **C1 阶段一设计件产出**（`docs/c1-collector-templates.md`，待评审）：先用探索代理把「新增一种中间件」的**完整联动面**盘清——实际为 **约 30 文件 / 55 处变更、10 套同构重复形态**（此前估计的「6 处」偏窄，漏了第 7 类：告警默认规则与 `serviceMetric`、报告 `mwDefs` 与 5 处 switch、指标字典、大屏 5 组件、安装脚本与 parity 脚本）。设计件据此定为：阶段一在 **Agent 侧**加 3 类 kind（`prometheus-exporter` / `http-json` / `http-text`），复用 E1 的 `runTasks` 隔离与 `fetchMetrics`、`parsePrometheusTextWithPrefix`，每模板一个任务（20 个封顶）、失败仅产 `template_target_up=0`、保留前缀与基数上限启动期 fail-fast、凭据沿用 `enc:` 解密且不落日志；**Server 零改动**。同时修正两处判断：① E2 真正"只写模板"需等**阶段二**（模板→中间件类型注册），阶段一指标只进「指标浏览」；② 7 类中 MariaDB 复用既有 MySQL exporter 通路即可。另记录探索中发现的三处**现存缺陷**——指标目录名与实现不符（**7 处，已逐一核对**）、`serviceMetric` 的 8 个 case 漏 mongodb/fastdfs（落 default 回退 `redis_instance_up`）、首页概览缺 2 类——建议各自单独修（详见设计件附录 B） |
 | 2026-09-26 | **打包 1.25.0**：本机经 Git Bash 运行 `build/release.sh`（**未上传源码**），交叉编译 linux/amd64·arm64·arm 并组装 `nebula-monitor-v1.25.0-full.tar.gz`（138M）与 `-upgrade.tar.gz`（66M）。脚本自带 manifest 自校验 + 解包后独立 `sha256sum -c` 全通过（upgrade 94/94、full 101/101）；包内二进制与前端产物内嵌版本均为 `1.25.0`。打包前发现并修正一个**部署级缺陷**：`.gitattributes` 为空且该克隆 `core.autocrlf=true`，使 `build/release.sh` 被检出为 CRLF（同目录其它脚本为 LF），在 Git Bash / Linux 下执行会报 `$'\r': command not found`；`deploy/*.sh` 同理——**安装脚本本身可能完全跑不起来**。已在 `.gitattributes` 为 `*.sh` 与 `VERSION` 固定 `eol=lf` |
 | 2026-09-26 | **批次二收口 + 版本递增 `1.24.0` → `1.25.0`**：批次二完成 B1 实施（子批次 A~E）、F1 测试体系、D1 告警风暴收敛、F3 自监控与健康检查、D4 告警协作处置、E3 容量预测扩展（主机侧）、A3 数据保留策略；**E2 按决策推迟到 C1 之后**（现架构下每加一个中间件需改 6 处联动，C1 模板化后退化为写模板）。`VERSION` 与前端 `WEB_VERSION` 同步为 `1.25.0`。编译与打包尚未执行 |
 | 2026-09-26 | 初稿：候选改造点、优先级矩阵、批次一计划 |
