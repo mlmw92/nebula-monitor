@@ -521,7 +521,7 @@ func (e *Engine) evalThreshold(r model.AlertRule, nodes []model.Node, now int64)
 		if !matchesScope(r.Scope, r.Nodes, n.Hostname) {
 			continue
 		}
-		for _, sample := range e.latestMetricSamples(n.Hostname, r.Metric) {
+		for _, sample := range e.latestMetricSamples(n.Hostname, r.Metric, nil) {
 			key := r.ID + "|" + n.Hostname + "|" + sample.instance
 			st := e.getState(key)
 			cond := Compare(r.Operator, sample.value, r.Threshold)
@@ -599,43 +599,26 @@ func (e *Engine) evalNodeOffline(r model.AlertRule, nodes []model.Node, now int6
 
 // serviceMetric 将 Service 类型映射为其「存活指标」名。
 //
-// 命名并不统一，必须逐类对齐真实产出的名字：多数中间件是 `<mw>_instance_up`，
-// MongoDB / FastDFS 是 `<mw>_up`，K8s 是 `k8s_cluster_up`，Docker 是 `docker_container_up`。
+// 映射来自中间件类型注册表（内置 10 类 + 模板派生类型）。命名并不统一，必须逐类对齐真实
+// 产出的名字：多数中间件是 `<mw>_instance_up`，MongoDB / FastDFS 是 `<mw>_up`，
+// K8s 是 `k8s_cluster_up`，Docker 是 `docker_container_up`，模板派生类型统一为
+// `template_target_up`（靠 template 标签区分归属）。
 // 若某类缺失，会落到 default 而用 redis 的存活指标去判断——即「监控错了对象」，
 // 表现为该服务的离线告警永不触发（或随 redis 状态误触发）。
-// 该映射与指标目录的一致性由 TestServiceMetricNamesAreRegistered 守住。
+// 内置部分与指标目录的一致性由 TestServiceMetricNamesAreRegistered 守住。
 func serviceMetric(svc string) string {
-	switch svc {
-	case "mysql":
-		return "mysql_instance_up"
-	case "postgres":
-		return "postgres_instance_up"
-	case "redis":
-		return "redis_instance_up"
-	case "nginx":
-		return "nginx_instance_up"
-	case "kafka":
-		return "kafka_instance_up"
-	case "rocketmq":
-		return "rocketmq_instance_up"
-	case "docker":
-		return "docker_container_up"
-	case "k8s":
-		return "k8s_cluster_up"
-	case "mongodb":
-		return "mongodb_up"
-	case "fastdfs":
-		return "fastdfs_up"
-	default:
-		// 未知服务：退化为 redis_instance_up（前端限制了可选值，这里兜底）
-		return "redis_instance_up"
+	if t, ok := mwTypes.Get(svc); ok && t.UpMetric != "" {
+		return t.UpMetric
 	}
+	// 未知服务：退化为 redis_instance_up（前端限制了可选值，这里兜底）
+	return "redis_instance_up"
 }
 
 // evalServiceDown 中间件/服务离线检测：基于 *_instance_up 指标（值为 0 即离线）。
 // 默认阈值 <= 0.5 触发（即 up=0），阈值/运算符可由规则自定义。状态型。
 func (e *Engine) evalServiceDown(r model.AlertRule, nodes []model.Node, now int64) {
 	metric := serviceMetric(r.Service)
+	upLabels := upLabelsFor(r.Service)
 	op := r.Operator
 	if op == "" {
 		op = "<="
@@ -651,7 +634,7 @@ func (e *Engine) evalServiceDown(r model.AlertRule, nodes []model.Node, now int6
 		if !matchesScope(r.Scope, r.Nodes, n.Hostname) {
 			continue
 		}
-		for _, sample := range e.latestMetricSamples(n.Hostname, metric) {
+		for _, sample := range e.latestMetricSamples(n.Hostname, metric, upLabels) {
 			key := r.ID + "|" + n.Hostname + "|" + sample.instance
 			st := e.getState(key)
 			cond := Compare(op, sample.value, thr)
@@ -1740,14 +1723,18 @@ type metricSample struct {
 // latestMetricSamples 返回节点某指标的全部最新时序样本。
 // 普通主机指标通常只有一个无 instance 标签的样本；Redis 等多实例指标按 instance 分别评估。
 // 对于 disk_used_percent，保持全部真实磁盘汇总的既有语义。
-func (e *Engine) latestMetricSamples(node, metric string) []metricSample {
+// latestMetricSamples 取某节点上某指标的最新样本。
+//
+// labels 为附加过滤条件：模板派生类型的存活指标是所有模板共用的 template_target_up，
+// 必须按 template 标签过滤，否则「A 模板离线」会被 B 模板的实例误触发。
+func (e *Engine) latestMetricSamples(node, metric string, labels map[string]string) []metricSample {
 	if metric == "disk_used_percent" {
 		if value, ok := aggregatedDiskUsage(e.store, node); ok {
 			return []metricSample{{value: value}}
 		}
 		return nil
 	}
-	series, err := e.store.QueryInstant(node, metric, nil)
+	series, err := e.store.QueryInstant(node, metric, labels)
 	if err != nil {
 		return nil
 	}

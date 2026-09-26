@@ -24,6 +24,7 @@ import (
 	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/instancereg"
+	"github.com/nebula/monitor/internal/server/mwreg"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
@@ -175,6 +176,9 @@ func main() {
 	// 采集项模板（C1 阶段二）：Web 端统一 CRUD，并作为下发给 Agent 的数据源
 	templateStore := templates.NewStore(cfg.TemplatesFile)
 	recv.SetTemplateStore(templateStore)
+	// 中间件类型注册表：内置 10 类 + 由模板派生的类型，是「有哪些中间件类型」的唯一来源
+	//（api 的类型清单、报告分节、告警的服务类型校验都读它）。
+	mwRegistry := mwreg.New(templateStore)
 
 	// 拨测模块
 	dialtestStore := dialtest.NewStore(cfg.DialtestFile)
@@ -195,6 +199,8 @@ func main() {
 	// 报告生成模块
 	reportGen := report.NewGenerator(store, nodeMgr, securityStore, cfg.ReportDir)
 	reportGen.SetAnalyzer(analyzer)
+	// 报告的分节同样来自注册表：模板派生类型会作为独立一节出现在报告里
+	reportGen.SetMiddlewareRegistry(mwRegistry)
 
 	// 数据大屏模块显隐配置管理：独立文件（Web 端设置写入），不存在则用默认全开初始化并落盘。
 	screenMgr, err := screencfg.New(cfg.ScreenFile, config.DefaultScreenConfig())
@@ -267,6 +273,9 @@ func main() {
 	rest.SetSelfMon(mon)
 	rest.SetRetention(retentionMgr)
 	rest.SetTemplateStore(templateStore)
+	rest.SetMiddlewareRegistry(mwRegistry)
+	// 告警侧同样读注册表：模板派生类型才能被「服务离线」规则监控
+	alert.SetMiddlewareRegistry(mwRegistry)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)

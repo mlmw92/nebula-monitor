@@ -24,6 +24,7 @@ import (
 	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/instancereg"
+	"github.com/nebula/monitor/internal/server/mwreg"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
@@ -113,6 +114,7 @@ type API struct {
 	selfmon        *selfmon.Monitor       // 自监控收集器（可空；不注入时探针仍可用，只是没有进程指标）
 	retention      *retention.Manager     // 数据保留策略（可空；不注入时接口返回默认策略）
 	templates      TemplatesProvider      // 采集项模板（可空；未注入时模板接口返回空集合）
+	mwRegistry     *mwreg.Registry        // 中间件类型注册表（可空；未注入时退化为内置类型）
 	startedAt      time.Time              // 进程启动时间，供 /healthz、/readyz 报告运行时长
 }
 
@@ -133,6 +135,18 @@ func (a *API) SetPipelineStore(p *alert.PipelineStore) { a.pipeline = p }
 
 // SetTemplateStore 注入采集项模板存储（C1 阶段二；未注入时模板接口返回空集合）。
 func (a *API) SetTemplateStore(p TemplatesProvider) { a.templates = p }
+
+// SetMiddlewareRegistry 注入中间件类型注册表（内置类型 + 模板派生类型）。
+// 未注入时退化为只有内置类型，行为与改造前一致。
+func (a *API) SetMiddlewareRegistry(r *mwreg.Registry) { a.mwRegistry = r }
+
+// middlewareRegistry 返回中间件类型注册表（未注入时用内置类型单例兜底）。
+func (a *API) middlewareRegistry() *mwreg.Registry {
+	if a.mwRegistry != nil {
+		return a.mwRegistry
+	}
+	return mwreg.BuiltinOnly()
+}
 
 // New 创建 API。
 func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string, sec *security.Store, defenseStore *security.DefenseStore, auditStore *audit.Store, authStore *auth.Store) *API {
@@ -180,6 +194,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/middleware/overview", a.permit(a.handleMiddlewareOverview, "middleware:read"))
 	// 采集项模板（C1 阶段二）：读 middleware:read，写 middleware:write。
 	// templates 是字面量路径段，与既有 /middleware/{type}/instances 一类参数段不冲突（字面量优先）。
+	// 模板派生类型的通用实例接口：内置类型各自的字面量路由优先命中，不会走到这里
+	mux.HandleFunc("GET /api/v1/middleware/{type}/instances", a.permit(a.handleMiddlewareTypeInstances, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/templates", a.permit(a.handleTemplatesList, "middleware:read"))
 	mux.HandleFunc("POST /api/v1/middleware/templates", a.permit(a.handleTemplateCreate, "middleware:write"))
 	mux.HandleFunc("POST /api/v1/middleware/templates/validate", a.permit(a.handleTemplateValidate, "middleware:write"))

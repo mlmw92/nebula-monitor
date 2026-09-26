@@ -459,7 +459,7 @@ Collector.CollectAll(ctx)
 | 0 | DSL 移到共享包 `internal/template`（Server 与 Agent 用同一份校验器，否则两处必然漂移） | ✅ |
 | A | Server 侧存储（CRUD + 校验 + 原子落盘 + revision）+ CRUD/校验 API + 权限门（`middleware:read` / `middleware:write`） | ✅ |
 | B | 下发与热生效（响应携带 + 分组过滤 + 能力/版本协商 + Agent 原子替换） | ✅ |
-| C | 注册化：模板 → 中间件类型（后端 `middlewareTypes`/`mwSummarySpecs`/`mwDefs`/`serviceMetric`/`KnownServices` 5 处 + 前端 4 处收敛到一份运行时注册表） | ⬜ |
+| C | 注册化：模板 → 中间件类型（后端 5 处 + 前端 4 处收敛到一份运行时注册表） | ✅ 后端完成 |
 | D | 前端模板管理页（照 `DialTestView.vue` 形态）+ 中间件 Tab 动态化 + 「已配置但无数据」提示 | ⬜ |
 
 ### 13.1 子批次 B 的关键取舍
@@ -477,6 +477,31 @@ Collector.CollectAll(ctx)
    Server 会持续重发，配置修好后自动恢复——宁可暂时用旧配置，也不能因模板把采集打断。
 6. **首次接管时的替换是显式的**：Agent 日志明确提示「本机 agent.yaml 中的模板被 Server 下发替换」，
    避免运维困惑于「本地写的模板怎么不见了」。
+
+### 13.3 子批次 C：类型注册表（`internal/server/mwreg`）
+
+把「有哪些中间件类型、每类的存活指标是什么、卡片与报告展示哪些指标」从原先**四处硬编码**
+收敛为一份数据源：
+
+| 原位置 | 现状 |
+|---|---|
+| `api/middlewareTypes`、`api/mwSummarySpecs` | 读注册表（总览卡片与类型清单） |
+| `report/mwDefs` + `docker` 特例 + `throughputMetric()` | 读注册表（分节、明细、吞吐列、存活判定） |
+| `alert/serviceMetric()` | 读注册表（存活指标映射） |
+| `alert/KnownServices`、`validService()` | 内置清单保留为文档，校验改读注册表（模板类型也能被规则监控） |
+
+收敛过程中发现并处理的问题：
+
+1. **两处真实漂移**：报告侧把 Kubernetes 的类型键写成 `kubernetes`（其余处用 `k8s`）；报告侧**完全没有 FastDFS** 条目。
+2. **一处看似漂移、实为刻意**：报告侧 Docker 用容器**总数**指标是否存在判定存活，而非容器 up 值——
+   因为「0 个运行容器」不该被判成离线。这不是缺陷，而是同一类中间件在「报告」与「告警」眼里
+   本就是不同对象，因此注册表保留了 `ReportUpMetric` / `ReportPresenceUp` 两个显式字段而非强行统一。
+   （我最初把它当成缺陷，读过代码后改回原语义并在测试里固定下来。）
+3. **模板类型的存活告警必须带标签过滤**：所有模板共用 `template_target_up`，
+   因此 `upLabelsFor` 给出 `{"template": <id>}` 并透传进 `QueryInstant`，
+   否则「A 模板离线」会被 B 模板的实例误触发。
+4. 新增模板类型的**通用实例接口** `GET /api/v1/middleware/{type}/instances`：
+   内置类型各自的字面量路由优先命中，模板类型走通用形态（实例 + 摘要指标），供前端一个通用 Tab 渲染。
 
 ### 13.2 子批次 B 的验证
 

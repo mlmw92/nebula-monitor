@@ -175,6 +175,10 @@ type MetricRule struct {
 	Pattern string `yaml:"pattern" json:"pattern"`
 	// Type 仅作声明记录（counter / gauge），阶段一不做计算，故不影响取值。
 	Type string `yaml:"type" json:"type"`
+	// Label / Unit 只影响展示（中间件卡片摘要、报告表头），不参与采集。
+	// 留空时展示层回退为指标名 / 无单位。
+	Label string `yaml:"label" json:"label"`
+	Unit  string `yaml:"unit" json:"unit"`
 }
 
 // EffectiveInstance 返回写入 instance 标签的值：显式 instance 优先，否则取 addr 的 host:port。
@@ -416,6 +420,9 @@ func (r *Rules) validate(kind Kind, id string) []error {
 			errs = append(errs, fmt.Errorf("rules.metrics[%d]：name %q 重复", i, m.Name))
 		}
 		seen[m.Name] = true
+		if len(m.Label) > MaxLabelValueLen {
+			errs = append(errs, fmt.Errorf("rules.metrics[%d]：label 长度 %d 超过上限 %d", i, len(m.Label), MaxLabelValueLen))
+		}
 
 		// 最终名字 = id + "_" + name，故按加了前缀的结果校验长度与保留族
 		final := EnsurePrefix(id, m.Name)

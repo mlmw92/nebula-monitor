@@ -406,19 +406,21 @@ func validOperator(op string) bool {
 	}
 }
 
-// KnownServices 是「服务离线」规则允许监控的服务类型全量清单。
-// validService 与测试共用一份：新增类型时只需在此加一项，映射与目录的一致性测试会自动覆盖。
+// KnownServices 是**内置**服务类型清单。
+//
+// 模板派生类型（由采集项模板生成的中间件类型）不在此列——它们由注册表在运行期提供，
+// 见 SetMiddlewareRegistry 与 validService。保留本变量是为了让「内置清单」有明确出处，
+// 并供测试遍历（内置部分必须与指标目录一致）。
 var KnownServices = []string{
 	"mysql", "postgres", "redis", "nginx", "kafka", "rocketmq", "docker", "k8s", "mongodb", "fastdfs",
 }
 
+// validService 校验「服务离线 / 主从切换 / 集群故障」规则的服务类型是否已知。
+//
+// 走注册表而非上面的内置清单：模板派生类型也应能被这些规则监控
+// （否则「新增中间件只写模板」到告警这一步就断了）。
 func validService(s string) bool {
-	for _, svc := range KnownServices {
-		if svc == s {
-			return true
-		}
-	}
-	return false
+	return mwTypes.Has(s)
 }
 
 func validSecurityCategory(category string) bool {

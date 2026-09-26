@@ -16,6 +16,7 @@ import (
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/analysis"
+	"github.com/nebula/monitor/internal/server/mwreg"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/storage"
@@ -243,9 +244,22 @@ type Generator struct {
 	secStore *security.Store
 	dir      string
 	analyzer *analysis.Analyzer
+	// mwRegistry 为中间件类型注册表（内置类型 + 模板派生类型）；未注入时退化为内置类型。
+	mwRegistry *mwreg.Registry
 
 	mu      sync.Mutex
 	history []ReportMeta
+}
+
+// SetMiddlewareRegistry 注入中间件类型注册表。未注入时报告只含内置类型（行为与改造前一致）。
+func (g *Generator) SetMiddlewareRegistry(r *mwreg.Registry) { g.mwRegistry = r }
+
+// mwTypes 返回报告要遍历的中间件类型（未注入注册表时用内置类型单例）。
+func (g *Generator) mwTypes() []mwreg.Type {
+	if g.mwRegistry != nil {
+		return g.mwRegistry.Types()
+	}
+	return mwreg.BuiltinOnly().Types()
 }
 
 // NewGenerator 构造报告生成器。dir 为报告 HTML 存储目录。
@@ -897,79 +911,23 @@ func (g *Generator) buildComparison(start, end time.Time, nodes []nodeStat, summ
 
 // ---- 中间件采集 ----
 
-// mwDefs 报告所需的中间件指标定义（类型、实例存活指标、负载指标、关键指标、展示名与图标）。
-var mwDefs = []mwDef{
-	{"redis", "redis_instance_up", "redis_connected_clients", []string{
-		"redis_connected_clients", "redis_maxclients", "redis_used_memory_percent",
-		"redis_used_memory", "redis_hit_rate", "redis_cmd_latency_ms", "redis_ops_per_sec",
-		"redis_replication_lag", "redis_evicted_keys", "redis_rejected_connections",
-	}, "Redis", "🗄️"},
-	{"mysql", "mysql_instance_up", "mysql_threads_connected", []string{
-		"mysql_threads_connected", "mysql_max_connections", "mysql_innodb_buffer_pool_hit_rate",
-		"mysql_queries_per_sec", "mysql_seconds_behind_master", "mysql_slow_queries",
-		"mysql_query_latency_ms",
-	}, "MySQL", "🛢️"},
-	{"postgres", "postgres_instance_up", "postgres_numbackends", []string{
-		"postgres_numbackends", "postgres_max_connections", "postgres_cache_hit_ratio",
-		"postgres_replication_lag_bytes", "postgres_query_latency_ms",
-	}, "PostgreSQL", "🐘"},
-	{"nginx", "nginx_instance_up", "nginx_active_connections", []string{
-		// 5xx 只能按 status 标签从访问日志指标取，此处改用同样来自访问日志的请求速率
-		"nginx_active_connections", "nginx_access_requests_rate",
-	}, "Nginx", "🌐"},
-	{"kafka", "kafka_instance_up", "", []string{
-		"kafka_broker_count", "kafka_offline_partitions", "kafka_under_replicated_partitions",
-		"kafka_consumer_lag", "kafka_active_controller_count", "kafka_topic_count",
-	}, "Kafka", "📨"},
-	{"rocketmq", "rocketmq_instance_up", "", []string{
-		"rocketmq_broker_count", "rocketmq_message_accumulation", "rocketmq_consumer_lag",
-		"rocketmq_topic_count",
-	}, "RocketMQ", "🚀"},
-	{"mongodb", "mongodb_up", "", []string{
-		"mongodb_connections_current", "mongodb_connections_available",
-		"mongodb_repl_lag", "mongodb_repl_health", "mongodb_mem_resident_bytes",
-	}, "MongoDB", "🍃"},
-	{"kubernetes", "k8s_cluster_up", "", []string{
-		"k8s_nodes_total", "k8s_nodes_ready", "k8s_pods_running",
-		"k8s_pods_pending", "k8s_pods_failed", "k8s_deployments_unhealthy",
-	}, "Kubernetes", "☸️"},
-	{"docker", "docker_containers_total", "", []string{
-		"docker_containers_total", "docker_containers_running", "docker_containers_stopped",
-		"docker_images_total",
-	}, "Docker", "🐳"},
-}
-
-type mwDef struct {
-	typ        string
-	up         string
-	connMetric string
-	metrics    []string
-	title      string
-	icon       string
-}
-
-func (d mwDef) throughputMetric() string {
-	switch d.typ {
-	case "redis":
-		return "redis_ops_per_sec"
-	case "mysql":
-		return "mysql_queries_per_sec"
-	}
-	return ""
-}
+// 报告所需的中间件类型定义已收敛到 mwreg 注册表（内置类型 + 模板派生类型）：
+// 原先这里的 mwDefs 与 api 的 middlewareTypes/mwSummarySpecs、alert 的 serviceMetric 各自维护，
+// 已经漂移出三处不一致（见 mwreg/builtin.go 的说明）。报告通过 SetMiddlewareRegistry 注入读取。
 
 func (g *Generator) collectMiddleware(startMs, endMs, step int64) []mwInstance {
 	var out []mwInstance
-	for _, d := range mwDefs {
-		upSeries, err := g.store.QueryAllLatest(d.up, nil)
+	for _, d := range g.mwTypes() {
+		// 模板派生类型的存活指标是所有模板共用的 template_target_up，必须带上类型自身的标签过滤
+		upSeries, err := g.store.QueryAllLatest(d.UpMetricForReport(), d.UpLabels)
 		if err != nil || len(upSeries) == 0 {
 			continue
 		}
 		latest := map[string]map[string]float64{}
-		for _, m := range d.metrics {
+		for _, m := range d.KeyMetrics {
 			latest[m] = latestByInstance(g.store, m)
 		}
-		tp := d.throughputMetric()
+		tp := d.ReportThroughputMetric
 		for _, s := range upSeries {
 			node := s.Labels["node"]
 			inst := s.Labels["instance"]
@@ -977,13 +935,13 @@ func (g *Generator) collectMiddleware(startMs, endMs, step int64) []mwInstance {
 			if len(s.Points) > 0 {
 				up = s.Points[len(s.Points)-1].Value > 0
 			}
-			if d.typ == "docker" {
-				// docker 守护进程以容器总数指标存在与否判定存活，避免 0 容器误判离线
+			if d.ReportPresenceUp {
+				// 以「指标是否有数据」判定存活（Docker 守护进程即如此：避免 0 容器被误判离线）
 				up = true
 			}
 			key := node + "|" + inst
 			mi := mwInstance{
-				Type:     d.typ,
+				Type:     d.Key,
 				Node:     node,
 				Instance: inst,
 				Role:     s.Labels["role"],
@@ -992,11 +950,11 @@ func (g *Generator) collectMiddleware(startMs, endMs, step int64) []mwInstance {
 				Up:       up,
 			}
 			lv := func(m string) float64 { return latest[m][key] }
-			mi.ConnUsed = lv(d.connMetric)
+			mi.ConnUsed = lv(d.ConnMetric)
 			if tp != "" {
 				mi.Throughput = lv(tp)
 			}
-			switch d.typ {
+			switch d.Key {
 			case "redis":
 				mi.ConnMax = lv("redis_maxclients")
 				mi.MemPct = lv("redis_used_memory_percent")
@@ -1101,7 +1059,7 @@ func (g *Generator) collectMiddleware(startMs, endMs, step int64) []mwInstance {
 				mi.Extra = strings.Join(dp, "；")
 			}
 			mi.Metrics = map[string]float64{}
-			for _, m := range d.metrics {
+			for _, m := range d.KeyMetrics {
 				if v, ok := latest[m][key]; ok {
 					mi.Metrics[m] = v
 				}
@@ -1111,7 +1069,7 @@ func (g *Generator) collectMiddleware(startMs, endMs, step int64) []mwInstance {
 			}
 			mi.Status = evalMwStatus(mi)
 			if up && node != "" {
-				mi.Trend = rangePoints(g.store, node, d.connMetric, inst, startMs, endMs, step)
+				mi.Trend = rangePoints(g.store, node, d.ConnMetric, inst, startMs, endMs, step)
 			}
 			out = append(out, mi)
 		}

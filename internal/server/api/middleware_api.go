@@ -10,6 +10,7 @@ import (
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/instancereg"
+	"github.com/nebula/monitor/internal/server/mwreg"
 	"github.com/nebula/monitor/internal/server/report"
 )
 
@@ -644,74 +645,9 @@ type mwSummaryItem struct {
 }
 
 // mwSummarySpec 描述某类中间件在卡片上要展示的核心指标及其聚合方式。
-type mwSummarySpec struct {
-	metric    string
-	label     string
-	agg       string // max / avg / sum
-	unit      string
-	warnAbove float64
-}
-
-// mwSummarySpecs 各中间件类型在总览卡片上的核心指标摘要定义。
-var mwSummarySpecs = map[string][]mwSummarySpec{
-	"redis": {
-		{"redis_ops_per_sec", "QPS峰值", "max", "", 0},
-		{"redis_used_memory_percent", "内存使用率", "avg", "%", 85},
-		{"redis_hit_rate", "命中率", "avg", "%", 0},
-	},
-	"mysql": {
-		{"mysql_queries_per_sec", "QPS", "sum", "", 0},
-		{"mysql_threads_connected", "连接数", "max", "", 0},
-		{"mysql_innodb_buffer_pool_hit_rate", "缓冲命中率", "avg", "%", 0},
-	},
-	"postgres": {
-		{"postgres_numbackends", "连接数", "max", "", 0},
-		{"postgres_cache_hit_ratio", "缓存命中率", "avg", "%", 0},
-		{"postgres_replication_lag_bytes", "复制延迟", "max", "B", 0},
-	},
-	"nginx": {
-		{"nginx_active_connections", "活动连接", "max", "", 0},
-		{"nginx_requests", "请求量", "sum", "", 0},
-		// 5xx 率需按 nginx_access_requests_by_status 的 status 标签取值，
-		// 而该口径不支持按标签过滤，故改报请求速率（同样来自访问日志分析）。
-		{"nginx_access_requests_rate", "请求速率", "avg", "次/s", 0},
-	},
-	"kafka": {
-		{"kafka_consumer_lag", "消费积压", "sum", "", 0},
-		{"kafka_under_replicated_partitions", "欠副本分区", "sum", "", 0},
-		{"kafka_offline_partitions", "离线分区", "sum", "", 0},
-	},
-	"docker": {
-		{"docker_container_up", "运行容器", "sum", "", 0},
-		{"docker_container_cpu_percent", "CPU使用率", "avg", "%", 0},
-		{"docker_container_mem_percent", "内存使用率", "avg", "%", 0},
-	},
-	"rocketmq": {
-		{"rocketmq_producer_tps", "生产TPS", "sum", "", 0},
-		{"rocketmq_message_accumulation", "消息堆积", "sum", "", 0},
-		{"rocketmq_consumer_lag", "消费积压", "sum", "", 0},
-	},
-	"k8s": {
-		{"k8s_pods_running", "运行Pod", "sum", "", 0},
-		{"k8s_pods_pending", "待调度Pod", "sum", "", 0},
-		{"k8s_nodes_ready", "就绪节点", "sum", "", 0},
-	},
-	"mongodb": {
-		{"mongodb_uptime_seconds", "运行时长", "avg", "s", 0},
-		{"mongodb_connections_current", "当前连接数", "avg", "", 0},
-		{"mongodb_mem_resident_bytes", "常驻内存", "avg", "MB", 0},
-		{"mongodb_opcounters_command", "命令数", "sum", "", 0},
-		{"mongodb_db_dataSize_bytes", "数据大小", "avg", "MB", 0},
-	},
-	"fastdfs": {
-		{"fastdfs_storage_count", "Storage节点", "sum", "", 0},
-		{"fastdfs_storage_online_count", "在线Storage", "sum", "", 0},
-		// 空间类指标实际单位为字节（此前卡片标成 MB，数值却是字节）
-		{"fastdfs_total_space", "总空间", "sum", "B", 0},
-		{"fastdfs_free_space", "空闲空间", "sum", "B", 0},
-		{"fastdfs_used_space", "已用空间", "sum", "B", 0},
-	},
-}
+//
+// 具体内容已收敛到 mwreg 的类型注册表（内置类型在 mwreg/builtin.go，
+// 模板派生类型由模板的 rules.metrics 现算），此处只保留渲染用的结构体。
 
 // mwAggregateLatest 对指定指标的「最新值」按 agg 方式跨所有序列聚合（sum/avg/max）。
 func mwAggregateLatest(a *API, metric, agg string) (float64, bool) {
@@ -753,24 +689,14 @@ type middlewareOverviewResp struct {
 	Types      []middlewareOverviewType `json:"types"`
 }
 
-// middlewareTypes 10 类中间件的 up 指标与展示名。
-var middlewareTypes = []struct{ typ, label, upMetric string }{
-	{"redis", "Redis", "redis_instance_up"},
-	{"mysql", "MySQL", "mysql_instance_up"},
-	{"postgres", "PostgreSQL", "postgres_instance_up"},
-	{"nginx", "Nginx", "nginx_instance_up"},
-	{"kafka", "Kafka", "kafka_instance_up"},
-	{"docker", "Docker", "docker_container_up"},
-	{"rocketmq", "RocketMQ", "rocketmq_instance_up"},
-	{"k8s", "Kubernetes", "k8s_cluster_up"},
-	{"mongodb", "MongoDB", "mongodb_up"},
-	{"fastdfs", "FastDFS", "fastdfs_up"},
-}
-
 // handleMiddlewareOverview 返回中间件健康度总览（各类型实例数/在线率/告警数），
-// 供数据大屏中间件监控板块一次拉取，避免前端 8 个请求轮询。
+// 供数据大屏中间件监控板块一次拉取，避免前端逐个请求轮询。
+//
+// 类型清单来自 mwreg 注册表：内置 10 类 + 由采集项模板派生的类型，
+// 因此「新增中间件只写模板」在这里自动生效（前端据此渲染卡片与 Tab）。
 func (a *API) handleMiddlewareOverview(w http.ResponseWriter, r *http.Request) {
 	p := Principal(r)
+	types := a.middlewareRegistry().Types()
 
 	// 活跃告警按指标前缀归类（仅统计当前用户可见节点，避免泄露范围外的告警量）
 	alertCount := map[string]int{}
@@ -779,20 +705,22 @@ func (a *API) handleMiddlewareOverview(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		metric := strings.ToLower(ev.Metric)
-		for _, t := range middlewareTypes {
-			if strings.HasPrefix(metric, t.typ+"_") {
-				alertCount[t.typ]++
+		for _, t := range types {
+			// 模板指标名同样以模板 id 为前缀（且 id 之间、id 与内置前缀之间互不为前缀，已由校验器保证）
+			if strings.HasPrefix(metric, t.Key+"_") {
+				alertCount[t.Key]++
 				break
 			}
 		}
 	}
 
-	resp := middlewareOverviewResp{Types: make([]middlewareOverviewType, 0, len(middlewareTypes))}
-	for _, t := range middlewareTypes {
-		item := middlewareOverviewType{Type: t.typ, Label: t.label, AlertCount: alertCount[t.typ]}
-		series, err := a.store.QueryAllLatest(t.upMetric, nil)
+	resp := middlewareOverviewResp{Types: make([]middlewareOverviewType, 0, len(types))}
+	for _, t := range types {
+		item := middlewareOverviewType{Type: t.Key, Label: t.Label, AlertCount: alertCount[t.Key]}
+		// UpLabels 用于区分模板类型：所有模板共用 template_target_up，靠 template 标签归属
+		series, err := a.store.QueryAllLatest(t.UpMetric, t.UpLabels)
 		if err != nil {
-			slog.Warn("查询中间件 up 指标失败", "metric", t.upMetric, "err", err)
+			slog.Warn("查询中间件 up 指标失败", "metric", t.UpMetric, "err", err)
 			resp.Types = append(resp.Types, item)
 			continue
 		}
@@ -815,17 +743,15 @@ func (a *API) handleMiddlewareOverview(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// 核心指标摘要（卡片展示）
-		if specs, ok := mwSummarySpecs[t.typ]; ok {
-			for _, sp := range specs {
-				if v, ok := mwAggregateLatest(a, sp.metric, sp.agg); ok {
-					item.Summary = append(item.Summary, mwSummaryItem{
-						Key:   sp.metric,
-						Label: sp.label,
-						Value: v,
-						Unit:  sp.unit,
-						Warn:  sp.warnAbove > 0 && v >= sp.warnAbove,
-					})
-				}
+		for _, sp := range t.Summary {
+			if v, ok := mwAggregateLatest(a, sp.Metric, sp.Agg); ok {
+				item.Summary = append(item.Summary, mwSummaryItem{
+					Key:   sp.Metric,
+					Label: sp.Label,
+					Value: v,
+					Unit:  sp.Unit,
+					Warn:  sp.WarnAbove > 0 && v >= sp.WarnAbove,
+				})
 			}
 		}
 		resp.Total += item.Total
@@ -835,6 +761,93 @@ func (a *API) handleMiddlewareOverview(w http.ResponseWriter, r *http.Request) {
 		resp.Types = append(resp.Types, item)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// templateInstanceMetric 是模板实例上的一项摘要指标（供前端通用 Tab 直接渲染）。
+type templateInstanceMetric struct {
+	Key   string  `json:"key"`
+	Label string  `json:"label"`
+	Value float64 `json:"value"`
+	Unit  string  `json:"unit"`
+}
+
+// templateInstanceInfo 是模板派生类型的一个实例。
+type templateInstanceInfo struct {
+	Instance string                   `json:"instance"`
+	Node     string                   `json:"node"`
+	Group    string                   `json:"group"`
+	Up       bool                     `json:"up"`
+	Metrics  []templateInstanceMetric `json:"metrics"`
+}
+
+// handleMiddlewareTypeInstances 是**模板派生类型**的通用实例接口。
+//
+// 内置类型各有专用 handler（字段形态差异大，如 Redis 的分片图、K8s 的 Pod 列表），
+// 这里的形态刻意保持通用：模板类型的实例 = 存活指标的 node|instance 组合，
+// 指标值 = 该类型的摘要指标在该实例上的最新值。
+// 内置类型不会走到这里——它们的字面量路由（/middleware/redis/instances 等）优先命中。
+func (a *API) handleMiddlewareTypeInstances(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("type")
+	t, ok := a.middlewareRegistry().Get(key)
+	if !ok || t.Kind != mwreg.KindTemplate {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "未知的中间件类型 " + key})
+		return
+	}
+	p := Principal(r)
+
+	ups, err := a.store.QueryAllLatest(t.UpMetric, t.UpLabels)
+	if err != nil {
+		slog.Warn("查询模板实例失败", "type", key, "err", err)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"type": key, "label": t.Label, "instances": []interface{}{}})
+		return
+	}
+
+	// 摘要指标最新值按 node|instance 建索引：一次查询覆盖全部实例，避免逐实例再查
+	summary := map[string]map[string]float64{}
+	for _, sp := range t.Summary {
+		series, err := a.store.QueryAllLatest(sp.Metric, nil)
+		if err != nil {
+			continue
+		}
+		for _, s := range series {
+			if len(s.Points) == 0 {
+				continue
+			}
+			k := s.Labels["node"] + "|" + s.Labels["instance"]
+			if summary[k] == nil {
+				summary[k] = map[string]float64{}
+			}
+			summary[k][sp.Metric] = s.Points[len(s.Points)-1].Value
+		}
+	}
+
+	out := make([]templateInstanceInfo, 0, len(ups))
+	seen := map[string]bool{}
+	for _, s := range ups {
+		if !a.nodeInScope(p, s.Labels["node"]) {
+			continue
+		}
+		k := s.Labels["node"] + "|" + s.Labels["instance"]
+		if k == "|" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		item := templateInstanceInfo{
+			Instance: s.Labels["instance"],
+			Node:     s.Labels["node"],
+			Group:    s.Labels["group"],
+			Up:       len(s.Points) > 0 && s.Points[len(s.Points)-1].Value > 0,
+		}
+		for _, sp := range t.Summary {
+			if v, ok := summary[k][sp.Metric]; ok {
+				item.Metrics = append(item.Metrics, templateInstanceMetric{
+					Key: sp.Metric, Label: sp.Label, Value: v, Unit: sp.Unit,
+				})
+			}
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"type": key, "label": t.Label, "instances": out})
 }
 
 // nodeIP 返回指定节点上报的主机 IP（primaryIP，首个非回环 IPv4）；节点未在线或查不到时返回空串。
