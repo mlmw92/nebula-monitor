@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"time"
@@ -23,8 +24,13 @@ func NewFastDFSCollector(node string, instances []model.FastDFSInstanceConfig) *
 	return &FastDFSCollector{node: node, instances: instances}
 }
 
-// Collect 遍历所有实例采集指标与实例元信息。
+// Collect 遍历所有实例采集指标与实例元信息（等价于 CollectCtx(context.Background())）。
 func (c *FastDFSCollector) Collect() ([]model.Metric, []model.FastDFSInstance) {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 遍历所有实例采集指标与实例元信息；ctx 取消或超时后停止采集剩余实例。
+func (c *FastDFSCollector) CollectCtx(ctx context.Context) ([]model.Metric, []model.FastDFSInstance) {
 	if len(c.instances) == 0 {
 		return nil, nil
 	}
@@ -32,13 +38,17 @@ func (c *FastDFSCollector) Collect() ([]model.Metric, []model.FastDFSInstance) {
 	var metrics []model.Metric
 	var instances []model.FastDFSInstance
 	for _, cfg := range c.instances {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("FastDFS 采集被中断，跳过剩余实例", "err", err)
+			break
+		}
 		if cfg.ExporterURL != "" {
-			m, fi := c.collectExporter(cfg, now)
+			m, fi := c.collectExporter(ctx, cfg, now)
 			metrics = append(metrics, m...)
 			instances = append(instances, fi)
 			continue
 		}
-		m, fi := c.collectLiveness(cfg, now)
+		m, fi := c.collectLiveness(ctx, cfg, now)
 		metrics = append(metrics, m...)
 		instances = append(instances, fi)
 	}
@@ -62,9 +72,9 @@ func cfgRolePort(role string) string {
 	return "22122"
 }
 
-func (c *FastDFSCollector) collectExporter(cfg model.FastDFSInstanceConfig, now int64) ([]model.Metric, model.FastDFSInstance) {
+func (c *FastDFSCollector) collectExporter(ctx context.Context, cfg model.FastDFSInstanceConfig, now int64) ([]model.Metric, model.FastDFSInstance) {
 	inst := fastDFSInstanceMeta(c, cfg)
-	body, err := fetchPrometheusText(cfg.ExporterURL)
+	body, err := fetchMetricsText(ctx, nil, cfg.ExporterURL)
 	if err != nil {
 		slog.Warn("FastDFS exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
 		inst.Up = false
@@ -105,7 +115,7 @@ func (c *FastDFSCollector) collectExporter(cfg model.FastDFSInstanceConfig, now 
 	return metrics, inst
 }
 
-func (c *FastDFSCollector) collectLiveness(cfg model.FastDFSInstanceConfig, now int64) ([]model.Metric, model.FastDFSInstance) {
+func (c *FastDFSCollector) collectLiveness(ctx context.Context, cfg model.FastDFSInstanceConfig, now int64) ([]model.Metric, model.FastDFSInstance) {
 	inst := fastDFSInstanceMeta(c, cfg)
 	base := map[string]string{
 		"node":     c.node,
@@ -115,7 +125,7 @@ func (c *FastDFSCollector) collectLiveness(cfg model.FastDFSInstanceConfig, now 
 		"group":    cfg.Group,
 	}
 	up := 0.0
-	conn, err := net.DialTimeout("tcp", cfg.Addr, 3*time.Second)
+	conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", cfg.Addr)
 	if err == nil {
 		_ = conn.Close()
 		up = 1

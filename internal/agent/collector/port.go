@@ -1,6 +1,8 @@
 package collector
 
 import (
+	"context"
+	"log/slog"
 	"net"
 	"strconv"
 	"time"
@@ -19,14 +21,25 @@ func NewPortCollector(node string, ports []string) *PortCollector {
 	return &PortCollector{node: node, ports: ports}
 }
 
-// Collect 对每个配置端口执行 TCP connect 检测，产出 port_up 与 port_latency 指标。
+// Collect 对每个配置端口执行 TCP connect 检测（等价于 CollectCtx(context.Background())）。
 func (c *PortCollector) Collect() []model.Metric {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 对每个配置端口执行 TCP connect 检测，产出 port_up 与 port_latency 指标。
+// ctx 取消或超时后停止检测剩余端口。
+func (c *PortCollector) CollectCtx(ctx context.Context) []model.Metric {
 	if len(c.ports) == 0 {
 		return nil
 	}
 	now := model.NowMillis()
 	var out []model.Metric
+	dialer := &net.Dialer{Timeout: 3 * time.Second}
 	for _, port := range c.ports {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("端口存活检测被中断，跳过剩余端口", "err", err)
+			break
+		}
 		labels := map[string]string{
 			"node": c.node,
 			"port": port,
@@ -36,7 +49,7 @@ func (c *PortCollector) Collect() []model.Metric {
 		// 尝试连接 127.0.0.1:port（端口检测针对本机）
 		addr := net.JoinHostPort("127.0.0.1", port)
 		start := time.Now()
-		conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+		conn, err := dialer.DialContext(ctx, "tcp", addr)
 		latency = float64(time.Since(start).Microseconds()) / 1000.0
 		if err == nil {
 			conn.Close()

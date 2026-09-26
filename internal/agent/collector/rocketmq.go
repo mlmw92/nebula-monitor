@@ -1,9 +1,9 @@
 package collector
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -23,8 +23,13 @@ func NewRocketMQCollector(node string, instances []model.RocketMQInstanceConfig)
 	return &RocketMQCollector{node: node, instances: instances}
 }
 
-// Collect 采集所有 RocketMQ 实例指标。
+// Collect 采集所有 RocketMQ 实例指标（等价于 CollectCtx(context.Background())）。
 func (c *RocketMQCollector) Collect() ([]model.Metric, []model.RocketMQInstance) {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 采集所有 RocketMQ 实例指标；ctx 取消或超时后停止采集剩余实例。
+func (c *RocketMQCollector) CollectCtx(ctx context.Context) ([]model.Metric, []model.RocketMQInstance) {
 	if len(c.instances) == 0 {
 		return nil, nil
 	}
@@ -33,13 +38,17 @@ func (c *RocketMQCollector) Collect() ([]model.Metric, []model.RocketMQInstance)
 	var instances []model.RocketMQInstance
 
 	for _, cfg := range c.instances {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("RocketMQ 采集被中断，跳过剩余实例", "err", err)
+			break
+		}
 		if cfg.ExporterURL != "" {
-			m, ri := c.collectExporter(cfg, now)
+			m, ri := c.collectExporter(ctx, cfg, now)
 			metrics = append(metrics, m...)
 			instances = append(instances, ri)
 			continue
 		}
-		m, ri := c.collectHTTP(cfg, now)
+		m, ri := c.collectHTTP(ctx, cfg, now)
 		metrics = append(metrics, m...)
 		instances = append(instances, ri)
 	}
@@ -47,7 +56,7 @@ func (c *RocketMQCollector) Collect() ([]model.Metric, []model.RocketMQInstance)
 }
 
 // collectHTTP 通过 RocketMQ HTTP API 采集。
-func (c *RocketMQCollector) collectHTTP(cfg model.RocketMQInstanceConfig, now int64) ([]model.Metric, model.RocketMQInstance) {
+func (c *RocketMQCollector) collectHTTP(ctx context.Context, cfg model.RocketMQInstanceConfig, now int64) ([]model.Metric, model.RocketMQInstance) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	baseURL := "http://" + cfg.Addr
 
@@ -66,7 +75,7 @@ func (c *RocketMQCollector) collectHTTP(cfg model.RocketMQInstanceConfig, now in
 	up := 1.0
 
 	// 1. 集群信息
-	clusterInfo, err := c.getRocketMQJSON(client, baseURL+"/rocketmq/httpapi/cluster/list.query")
+	clusterInfo, err := c.getRocketMQJSON(ctx, client, baseURL+"/rocketmq/httpapi/cluster/list.query")
 	if err != nil {
 		hint := "请确认 NameServer 已开启 HTTP API（RocketMQ 5.x 需启动参数 -Drocketmq.httpapi.enabled=true 或环境变量 ROCKETMQ_HTTPAPI_ENABLED=true；RocketMQ 4.x 无此 HTTP API，请改用 exporterURL 走 rocketmq-exporter 模式）"
 		if strings.Contains(err.Error(), "EOF") {
@@ -95,7 +104,7 @@ func (c *RocketMQCollector) collectHTTP(cfg model.RocketMQInstanceConfig, now in
 	out = append(out, mk("rocketmq_broker_count", brokerCount))
 
 	// 2. Topic 列表
-	topicList, _ := c.getRocketMQJSON(client, baseURL+"/rocketmq/httpapi/topic/list.query")
+	topicList, _ := c.getRocketMQJSON(ctx, client, baseURL+"/rocketmq/httpapi/topic/list.query")
 	topicCount := 0.0
 	if data, ok := topicList["data"].(map[string]interface{}); ok {
 		if topics, ok := data["topicList"].([]interface{}); ok {
@@ -105,7 +114,7 @@ func (c *RocketMQCollector) collectHTTP(cfg model.RocketMQInstanceConfig, now in
 	out = append(out, mk("rocketmq_topic_count", topicCount))
 
 	// 3. Consumer Group 列表
-	groupList, _ := c.getRocketMQJSON(client, baseURL+"/rocketmq/httpapi/consumerGroup/list.query")
+	groupList, _ := c.getRocketMQJSON(ctx, client, baseURL+"/rocketmq/httpapi/consumerGroup/list.query")
 	groupCount := 0.0
 	if data, ok := groupList["data"].(map[string]interface{}); ok {
 		if groups, ok := data["groupList"].([]interface{}); ok {
@@ -115,7 +124,7 @@ func (c *RocketMQCollector) collectHTTP(cfg model.RocketMQInstanceConfig, now in
 	out = append(out, mk("rocketmq_consumer_group_count", groupCount))
 
 	// 4. Broker TPS/QPS（从集群 stats 接口获取）
-	stats, _ := c.getRocketMQJSON(client, baseURL+"/rocketmq/httpapi/cluster/stats.query")
+	stats, _ := c.getRocketMQJSON(ctx, client, baseURL+"/rocketmq/httpapi/cluster/stats.query")
 	if data, ok := stats["data"].(map[string]interface{}); ok {
 		out = append(out, mk("rocketmq_broker_tps", parseFloat(fmt.Sprintf("%v", data["brokerTps"]))))
 		out = append(out, mk("rocketmq_producer_tps", parseFloat(fmt.Sprintf("%v", data["producerTps"]))))
@@ -132,7 +141,7 @@ func (c *RocketMQCollector) collectHTTP(cfg model.RocketMQInstanceConfig, now in
 				if groupName == "" {
 					continue
 				}
-				groupStats, _ := c.getRocketMQJSON(client, baseURL+"/rocketmq/httpapi/consumer/stats.query?group="+groupName)
+				groupStats, _ := c.getRocketMQJSON(ctx, client, baseURL+"/rocketmq/httpapi/consumer/stats.query?group="+groupName)
 				if sd, ok := groupStats["data"].(map[string]interface{}); ok {
 					diff := parseFloat(fmt.Sprintf("%v", sd["consumeDiff"]))
 					totalAccumulation += diff
@@ -165,20 +174,11 @@ func (c *RocketMQCollector) collectHTTP(cfg model.RocketMQInstanceConfig, now in
 	return out, ri
 }
 
-func (c *RocketMQCollector) collectExporter(cfg model.RocketMQInstanceConfig, now int64) ([]model.Metric, model.RocketMQInstance) {
+func (c *RocketMQCollector) collectExporter(ctx context.Context, cfg model.RocketMQInstanceConfig, now int64) ([]model.Metric, model.RocketMQInstance) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(cfg.ExporterURL)
+	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
 		slog.Warn("RocketMQ exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
-		return nil, model.RocketMQInstance{
-			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
-			Group: cfg.Name, Role: "nameserver", Up: false,
-		}
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		slog.Warn("RocketMQ exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, model.RocketMQInstance{
 			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 			Group: cfg.Name, Role: "nameserver", Up: false,
@@ -200,13 +200,8 @@ func (c *RocketMQCollector) collectExporter(cfg model.RocketMQInstanceConfig, no
 }
 
 // getRocketMQJSON 发送 GET 请求并解析 JSON。
-func (c *RocketMQCollector) getRocketMQJSON(client *http.Client, url string) (map[string]interface{}, error) {
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+func (c *RocketMQCollector) getRocketMQJSON(ctx context.Context, client *http.Client, url string) (map[string]interface{}, error) {
+	body, err := fetchMetrics(ctx, client, url)
 	if err != nil {
 		return nil, err
 	}

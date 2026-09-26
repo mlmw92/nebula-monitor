@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -24,8 +25,13 @@ func NewNginxCollector(node string, instances []model.NginxInstanceConfig) *Ngin
 	return &NginxCollector{node: node, instances: instances}
 }
 
-// Collect 采集所有 Nginx 实例指标。
+// Collect 采集所有 Nginx 实例指标（等价于 CollectCtx(context.Background())）。
 func (c *NginxCollector) Collect() ([]model.Metric, []model.NginxInstance) {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 采集所有 Nginx 实例指标；ctx 取消或超时后停止采集剩余实例。
+func (c *NginxCollector) CollectCtx(ctx context.Context) ([]model.Metric, []model.NginxInstance) {
 	if len(c.instances) == 0 {
 		return nil, nil
 	}
@@ -34,13 +40,17 @@ func (c *NginxCollector) Collect() ([]model.Metric, []model.NginxInstance) {
 	var instances []model.NginxInstance
 
 	for _, cfg := range c.instances {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("Nginx 采集被中断，跳过剩余实例", "err", err)
+			break
+		}
 		if cfg.ExporterURL != "" {
-			m, ni := c.collectExporter(cfg, now)
+			m, ni := c.collectExporter(ctx, cfg, now)
 			metrics = append(metrics, m...)
 			instances = append(instances, ni)
 			continue
 		}
-		m, ni := c.collectStubStatus(cfg, now)
+		m, ni := c.collectStubStatus(ctx, cfg, now)
 		metrics = append(metrics, m...)
 		instances = append(instances, ni)
 	}
@@ -48,7 +58,7 @@ func (c *NginxCollector) Collect() ([]model.Metric, []model.NginxInstance) {
 }
 
 // collectStubStatus 通过 HTTP GET stub_status 端点采集。
-func (c *NginxCollector) collectStubStatus(cfg model.NginxInstanceConfig, now int64) ([]model.Metric, model.NginxInstance) {
+func (c *NginxCollector) collectStubStatus(ctx context.Context, cfg model.NginxInstanceConfig, now int64) ([]model.Metric, model.NginxInstance) {
 	scheme := "http"
 	if strings.HasPrefix(cfg.Addr, "https://") {
 		scheme = "https"
@@ -67,7 +77,12 @@ func (c *NginxCollector) collectStubStatus(cfg model.NginxInstanceConfig, now in
 		},
 	}
 	defer client.CloseIdleConnections()
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		slog.Warn("Nginx stub_status 请求构造失败", "url", url, "err", err)
+		return nil, c.downInstance(cfg)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		slog.Warn("Nginx stub_status 拉取失败", "url", url, "err", err)
 		return nil, c.downInstance(cfg)
@@ -140,20 +155,15 @@ func (c *NginxCollector) downInstance(cfg model.NginxInstanceConfig) model.Nginx
 	}
 }
 
-func (c *NginxCollector) collectExporter(cfg model.NginxInstanceConfig, now int64) ([]model.Metric, model.NginxInstance) {
+func (c *NginxCollector) collectExporter(ctx context.Context, cfg model.NginxInstanceConfig, now int64) ([]model.Metric, model.NginxInstance) {
 	client := &http.Client{
 		Timeout:   5 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.InsecureTLS}},
 	}
-	resp, err := client.Get(cfg.ExporterURL)
+	defer client.CloseIdleConnections()
+	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
 		slog.Warn("Nginx exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
-		return nil, c.downInstance(cfg)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		slog.Warn("Nginx exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, c.downInstance(cfg)
 	}
 	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), "nginx_", now)
