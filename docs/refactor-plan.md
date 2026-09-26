@@ -321,18 +321,19 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | ID | 任务 | 子项 | 状态 | 版本 | 备注 |
 |---|---|---|---|---|---|
 | E1 | 采集并发化 + ctx 一次到位 | 0. 并发调度内核 `runTasks` + 单元测试（7 用例） | ✅ | — | `collector/task.go`、`task_test.go`；本地已验证（含 3 次重复） |
-| E1 | | 1. 采集器签名统一加 `ctx`（`CollectCtx` + 兼容包装） | 🟨 | — | 已完成 11/23：rocketmq、nginx、fastdfs、port、mysql、postgres、redis、k8s、docker、mongo、kafka |
-| E1 | | 2. `Result` 结构 + `CollectAll(ctx)`（per-task timeout） | ⬜ | — | collector.go；内核已就绪 |
-| E1 | | 3. 统一 `fetchMetrics(ctx,…)` 替换分散 `client.Get` | ✅ | — | 全部完成：redis、mysql、postgres、nginx×2、rocketmq×2、k8s、docker×3、mongo、fastdfs、kafka；`fetchPrometheusText` 已删除 |
+| E1 | | 1. 采集器签名统一加 `ctx`（`CollectCtx` + 兼容包装） | ✅ | — | 12 个中间件采集器 + 主机类 cpu/disk/network/nginx-access/host-info（`*Ctx` + 入口门控）。内存/负载/进程/监听为不可取消的本机只读采集，门控在 `CollectCtx` 调用点完成，**不添加空转 ctx 参数**（设计决策） |
+| E1 | | 2. `Result` 结构 + `CollectAll(ctx)`（per-task timeout） | ✅ | — | `collect_all.go`：16 个任务并发调度 |
+| E1 | | 3. 统一 `fetchMetrics(ctx,…)` 替换分散 `client.Get` | ✅ | — | redis、mysql、postgres、nginx×2、rocketmq×2、k8s、docker×3、mongo、fastdfs、kafka；`fetchPrometheusText` 已删除 |
 | E1 | | 4. DB（mysql/postgres）改 `*Context` 版本 | ✅ | — | 共 15 处（mysql 6 + postgres 9） |
-| E1 | | 5. Redis dial ctx + `SetDeadline` 取消在途读 | ✅ | — | `DialContext` + `context.AfterFunc`→`SetDeadline`，已有专项测试 |
-| E1 | | 6. exec 改 `CommandContext`（firewall/security） | ⬜ | — | 20+ 处 |
-| E1 | | 7. 实例循环内 `ctx.Err()` 检查 | ✅ | — | 11 个采集器均已接入（含 redis 专项测试） |
+| E1 | | 5. Redis dial ctx + `SetDeadline` 取消在途读 | ✅ | — | `DialContext` + `context.AfterFunc`→`SetDeadline`，有专项测试 |
+| E1 | | 6. exec 改 `CommandContext`（firewall/security） | ✅ | — | 22 处（firewall 18 + security 4） |
+| E1 | | 7. 实例循环内 `ctx.Err()` 检查 | ✅ | — | 12 个采集器均已接入（含 redis 专项测试） |
 | E1 | | 8. sarama 网络超时对齐 + 注释标注边界 | ✅ | — | Kafka：`Net.DialTimeout`/`Net.ReadTimeout` 5s + 代码注释标注 |
-| E1 | | 9. `collectTimeout` 配置项 | ✅ | — | `config.go`：默认 8s，0=不限，负值归零 |
-| E1 | | 10. `main.go` 接线到 `CollectAll` | ⬜ | — | 替换 `collectAndReport` |
-| E1 | | 11. TDD 测试（采集器级 9 个用例） | 🟨 | — | 内核 7 用例 + redis 3 用例已完成；待 HTTP/exporter 级用例 |
-| E1 | | 12. `-race`（Linux/CI）+ 指标名/结构回归比对 | ⬜ | 1.23.8 | 本机无 cgo，`-race` 需在 Linux 执行 |
+| E1 | | 9. `collectTimeout` 配置项 | ✅ | — | `config.go` 默认 8s，0=不限；已接入 `collector.New` |
+| E1 | | 10. `main.go` 接线到 `CollectAll` | ✅ | — | `collectAndReport` 改为消费 `Result`，上报体字段逐项对照迁移 |
+| E1 | | 11. TDD 测试 | ✅ | — | 15 个用例：内核 7 + redis 3 + CollectAll 5，全部通过 |
+| E1 | | 12. `-race`（Linux/CI） | ⬜ | 1.23.8 | 本机无 cgo，需在 Linux 执行 `CGO_ENABLED=1 go test -race ./internal/agent/...` |
+| E1 | | 13. 实机回归比对（指标名/label 与旧版一致） | ⬜ | 1.23.8 | 需 Linux 节点部署新旧 Agent 各采集一轮逐字段比对 |
 | D2 | 告警事件管道 + 前端编辑 | 1. `pipeline.go` + `PipelineStore` 热加载 | ⬜ | — | 仿 inhibit/grouping |
 | D2 | | 2. engine 接入 pipeline 阶段 | ⬜ | — | notify 前，浅拷贝 |
 | D2 | | 3. 通知模板可加载 + 兜底 | ⬜ | — | 不丢告警 |
@@ -366,6 +367,9 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | 2026-09-26 | E1 实施：新增 `fetch.go` 统一 ctx 感知 HTTP 拉取；完成 rocketmq、nginx、fastdfs、port 四个采集器的 `CollectCtx`（HTTP + 裸 TCP）。提交 `54e6a71` |
 | 2026-09-26 | E1 实施：完成 mysql、postgres 的 `CollectCtx`，Ping/Query/QueryRow 全部改 `*Context`（15 处）。提交 `e19169e` |
 | 2026-09-26 | E1 实施：完成 redis、k8s、docker、mongo、kafka 的 `CollectCtx`；Redis 接入 `context.AfterFunc`+`SetDeadline` 取消在途 RESP 读；HTTP 拉取统一完成；新增 redis 3 个专项测试；修正 mysql 缩进。提交 `52299ec` |
+| 2026-09-26 | E1 实施：完成 firewall/security 的 exec 改造（22 处 `exec.CommandContext`）与 collector 的 `*Ctx` 变体；顺带用 gofmt 规范化 firewall.go 的错乱缩进。提交 `8334273` |
+| 2026-09-26 | E1 实施：完成主机采集器入口门控（collector/cpu/disk/network）；不可取消的本机只读采集不添加空转 ctx（设计决策）。提交 `21cc0cb` |
+| 2026-09-26 | E1 主体完成：`Result` + `CollectAll`（16 任务并发）接线到 `main.go`；删除 11 个会绕过 ctx 的中间件包装；防火墙规则+状态合并单任务。新增 5 个 CollectAll 测试（共 15 个用例全绿）。**E1 待收尾：Linux 上跑 `-race` 与实机指标回归比对** |
 
 ---
 
