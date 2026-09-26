@@ -200,6 +200,15 @@ var (
 	metricNamePattern = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
 	// columnNamePattern 是 jdbc 取值列的合法名（标识符，不含引号/分号等）。
 	columnNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	// dbAddrPattern 限制 jdbc 目标地址为 host:port（含 IPv6 字面量与域名）；
+	// 不允许空格/斜杠等，因为库地址会被直接拼进连接串。
+	dbAddrPattern = regexp.MustCompile(`^[A-Za-z0-9._:\[\]-]+$`)
+	// dbNamePattern 限制库名为标识符：库名同样直接进连接串。
+	dbNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$]{0,63}$`)
+	// paramKeyPattern / paramValuePattern 限制驱动参数（如 postgres 的 sslmode）：
+	// postgres DSN 用空格分隔参数，值里带空格就能注入额外参数。
+	paramKeyPattern   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	paramValuePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{0,64}$`)
 )
 
 // Config 是单个模板的配置。
@@ -691,12 +700,27 @@ func (t Target) validateLocal(kind Kind, where string) []error {
 
 	switch kind {
 	case KindJDBC:
-		// addr 是 host:port（不是 URL），故不按 http 解析
-		if strings.TrimSpace(t.Addr) == "" {
+		// addr 是 host:port（不是 URL），故不按 http 解析；但必须限制字符集——
+		// 它会直接拼进连接串，而 postgres DSN 用空格分隔参数
+		switch {
+		case strings.TrimSpace(t.Addr) == "":
 			errs = append(errs, fmt.Errorf("%s：jdbc 需要 addr（格式 host:port）", where))
+		case !dbAddrPattern.MatchString(t.Addr):
+			errs = append(errs, fmt.Errorf("%s：addr %q 含不允许的字符（只接受 host:port，可带域名/IPv6）", where, t.Addr))
 		}
-		if strings.TrimSpace(t.Database) == "" {
+		switch {
+		case strings.TrimSpace(t.Database) == "":
 			errs = append(errs, fmt.Errorf("%s：jdbc 需要 database", where))
+		case !dbNamePattern.MatchString(t.Database):
+			errs = append(errs, fmt.Errorf("%s：database %q 非法（需为标识符，如 appdb）", where, t.Database))
+		}
+		for k, v := range t.Params {
+			if !paramKeyPattern.MatchString(k) {
+				errs = append(errs, fmt.Errorf("%s：params 键 %q 非法", where, k))
+			}
+			if !paramValuePattern.MatchString(v) {
+				errs = append(errs, fmt.Errorf("%s：params[%q] 值 %q 非法（只接受字母数字与 ._-，避免污染连接串）", where, k, v))
+			}
 		}
 		if t.Auth == nil || t.Auth.Basic == nil || strings.TrimSpace(t.Auth.Basic.User) == "" {
 			errs = append(errs, fmt.Errorf("%s：jdbc 需要 auth.basic.user（库账号）", where))

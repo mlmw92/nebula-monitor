@@ -143,13 +143,20 @@ func (r *TemplateRunner) dropCollisions(tpl template.Config, metrics []model.Met
 
 // warnCollisionOnce 同一（模板, 指标）只告警一次：否则每轮采集都刷屏，反而把其它问题淹掉。
 func (r *TemplateRunner) warnCollisionOnce(tplID, metric string, dropped int) {
-	key := tplID + "\x00" + metric
+	r.warnOnce("collision\x00"+tplID+"\x00"+metric, "模板产出存在同名同标签的重复序列，已只保留第一条",
+		"template", tplID, "metric", metric, "dropped", dropped,
+		"hint", "通常是 rules.unlabel 丢掉了区分序列的标签；如需汇总请用 rules.aggregate 声明 sum/max/min/avg")
+}
+
+// warnOnce 同一类问题（由 key 标识）只告警一次。
+//
+// 用于「每轮都会发生、但原因不变」的问题（重复序列、护栏拒绝…）：
+// 按采集周期刷屏会把真正的新问题淹掉，而这些问题本身不会自愈，报一次足够定位。
+func (r *TemplateRunner) warnOnce(key, msg string, args ...any) {
 	if _, loaded := r.warned.LoadOrStore(key, struct{}{}); loaded {
 		return
 	}
-	slog.Warn("模板产出存在同名同标签的重复序列，已只保留第一条",
-		"template", tplID, "metric", metric, "dropped", dropped,
-		"hint", "通常是 rules.unlabel 丢掉了区分序列的标签；如需汇总请用 rules.aggregate 声明 sum/max/min/avg")
+	slog.Warn(msg, args...)
 }
 
 // seriesKey 返回「指标名 + 标签集」的稳定标识（标签按键排序，用不可见分隔符避免歧义）。

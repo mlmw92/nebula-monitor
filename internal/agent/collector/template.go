@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -40,6 +41,10 @@ type TemplateRunner struct {
 	warned sync.Map // key: tplID\x00metric
 	// guards 是本机护栏（阶段三）：决定 exec/file/jdbc 三类是否放行、以及允许哪些命令与路径。
 	guards config.TemplateGuardsConfig
+	// runCmd 与 queryScalar 是两处 I/O 缝隙：默认走真实实现，单测注入替身，
+	// 这样 jdbc/exec 的取值与护栏判定不依赖平台上的具体数据库与可执行文件。
+	runCmd      func(ctx context.Context, name string, args []string) (stdout, stderr []byte, err error)
+	queryScalar func(ctx context.Context, tpl template.Config, t template.Target, rule template.MetricRule) (float64, bool, error)
 }
 
 // NewTemplateRunner 创建模板执行器。
@@ -107,14 +112,21 @@ func (r *TemplateRunner) collectTarget(ctx context.Context, tpl template.Config,
 		return nil, up
 	}
 
-	body, err := r.fetch(ctx, t)
-	if err != nil {
-		// 日志只带模板 id / instance / 地址与错误，绝不回显响应体与 auth
-		slog.Warn("模板采集失败", "template", tpl.ID, "instance", instance, "url", sanitizeURL(t.Addr), "err", err)
-		return nil, up
+	// 只有网络取数类需要先拉响应体；本机/数据库取数（exec/file/jdbc）各自在下方取数，
+	// 它们的 target 没有 addr，走 HTTP 拉取必然失败。
+	var body []byte
+	if !template.IsGuardedKind(tpl.Kind) {
+		b, ferr := r.fetch(ctx, t)
+		if ferr != nil {
+			// 日志只带模板 id / instance / 地址与错误，绝不回显响应体与 auth
+			slog.Warn("模板采集失败", "template", tpl.ID, "instance", instance, "url", sanitizeURL(t.Addr), "err", ferr)
+			return nil, up
+		}
+		body = b
 	}
 
 	var metrics []model.Metric
+	var err error
 	switch tpl.Kind {
 	case template.KindPrometheusExporter:
 		metrics, err = r.mapPrometheus(tpl, t, body, now)
@@ -122,11 +134,25 @@ func (r *TemplateRunner) collectTarget(ctx context.Context, tpl template.Config,
 		metrics, err = r.mapJSON(tpl, t, body, now)
 	case template.KindHTTPText:
 		metrics, err = r.mapText(tpl, t, body, now)
+	case template.KindExec:
+		metrics, err = r.collectExec(ctx, tpl, t, now)
+	case template.KindFile:
+		metrics, err = r.collectFile(ctx, tpl, t, now)
+	case template.KindJDBC:
+		metrics, err = r.collectJDBC(ctx, tpl, t, now)
 	default:
 		// 校验器已拦截非法 kind，这里兜底以免配置热更新等旁路路径漏检
 		err = fmt.Errorf("未知模板类型 %q", tpl.Kind)
 	}
 	if err != nil {
+		var denied errGuardDenied
+		if errors.As(err, &denied) {
+			// 护栏拒绝是配置问题、每轮都会发生：按「模板 + 原因」去重告警，并把修法直接写出来
+			r.warnOnce("guard\x00"+tpl.ID+"\x00"+denied.reason, "模板被本机护栏拦下",
+				"template", tpl.ID, "instance", instance, "reason", denied.reason,
+				"hint", "在 agent.yaml 的 templateGuards 中启用该取数方式，并把目标加入 allow 白名单")
+			return nil, up
+		}
 		slog.Warn("模板解析失败", "template", tpl.ID, "instance", instance, "url", sanitizeURL(t.Addr), "err", err)
 		return nil, up
 	}

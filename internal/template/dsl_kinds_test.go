@@ -141,6 +141,13 @@ func TestValidate_JDBCRejects(t *testing.T) {
 		// 复制粘贴残留：jdbc 不认识 command / path
 		{"残留 command", func(c *Config) { c.Targets[0].Command = "/bin/echo" }, "command"},
 		{"残留 path", func(c *Config) { c.Targets[0].Path = "/etc/passwd" }, "path"},
+		// 连接串字段会被拼进 DSN（postgres 用空格分隔参数），故必须限制字符集
+		{"addr 含空格", func(c *Config) { c.Targets[0].Addr = "10.0.0.5:3306 sslmode=require" }, "不允许的字符"},
+		{"addr 含斜杠", func(c *Config) { c.Targets[0].Addr = "10.0.0.5/appdb" }, "不允许的字符"},
+		{"database 含斜杠", func(c *Config) { c.Targets[0].Database = "appdb/x" }, "database"},
+		{"params 值含空格", func(c *Config) {
+			c.Targets[0].Params = map[string]string{"sslmode": "require connect_timeout=1"}
+		}, "params"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
