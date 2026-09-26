@@ -34,10 +34,15 @@ type Task struct {
 	Timeout  int      `json:"timeout" yaml:"timeout"`   // 超时（秒）
 	// FailThreshold 连续失败达到该次数才判定为故障并触发告警，用于抑制单次网络抖动
 	// 产生的“故障→恢复”邮件对。≤ 0 表示使用默认阈值（3 次）。
-	FailThreshold int      `json:"fail_threshold,omitempty" yaml:"fail_threshold,omitempty"`
-	Enabled       bool     `json:"enabled" yaml:"enabled"`
-	Severity      string   `json:"severity" yaml:"severity"` // 告警严重级别: critical/warning/info，默认 warning
-	Notify        []string `json:"notify" yaml:"notify"`     // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示仅平台展示、不推送外部渠道
+	FailThreshold int  `json:"fail_threshold,omitempty" yaml:"fail_threshold,omitempty"`
+	Enabled       bool `json:"enabled" yaml:"enabled"`
+	// Public 是否在「对外状态页」展示（默认 false = 不展示）。
+	//
+	// 这是「对外发布」的开关：状态页是**无需登录**的页面，因此默认不暴露任何任务，
+	// 由运维显式勾选哪些可以对外公开（C3）。
+	Public   bool     `json:"public,omitempty" yaml:"public,omitempty"`
+	Severity string   `json:"severity" yaml:"severity"` // 告警严重级别: critical/warning/info，默认 warning
+	Notify   []string `json:"notify" yaml:"notify"`     // 通知渠道：email/webhook/dingtalk/feishu/wecom，空表示仅平台展示、不推送外部渠道
 
 	// SSL 证书过期预警阈值（天）：仅 HTTPS 任务生效；≤ 0 表示沿用默认（预警 30 / 告警 7）。
 	// 证书剩余天数 ≤ CertWarnDays 触发「警告」，≤ CertCritDays 触发「紧急」。

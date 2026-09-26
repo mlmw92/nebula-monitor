@@ -15,6 +15,14 @@ const routes = [
     component: () => import('../components/screen/ScreenView.vue'),
   },
   {
+    // 对外状态页（C3）：免登录的独立页面（与 /screen 同级），内容仅来自公开接口 /api/v1/status。
+    // 它刻意放在登录壳之外——分享给外部时不应被重定向到登录页。
+    path: '/status',
+    name: 'status',
+    meta: { public: true },
+    component: () => import('../components/StatusView.vue'),
+  },
+  {
     path: '/',
     component: () => import('../layouts/MainLayout.vue'),
     children: [

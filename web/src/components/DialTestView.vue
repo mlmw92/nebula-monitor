@@ -34,6 +34,13 @@
             <el-tag v-for="c in (row.notify || [])" :key="c" size="small" class="ch-tag">{{ chLabel(c) }}</el-tag>
           </template>
         </el-table-column>
+        <!-- 对外发布（C3）：勾选后该任务会出现在免登录的「对外状态页」上 -->
+        <el-table-column label="对外" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.public" size="small" type="success" effect="plain">已发布</el-tag>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-button link @click="editTask(row)">编辑</el-button>
@@ -87,6 +94,12 @@
         <el-form-item label="间隔(s)"><el-input-number v-model="form.interval" :min="10" :max="3600" /></el-form-item>
         <el-form-item label="超时(s)"><el-input-number v-model="form.timeout" :min="1" :max="60" /></el-form-item>
         <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
+        <el-form-item label="对外发布">
+          <el-switch v-model="form.public" />
+          <span class="field-hint inline">
+            开启后出现在免登录的「对外状态页」上（只展示名称 / 可用性 / 延迟，不含目标地址与节点）
+          </span>
+        </el-form-item>
         <el-form-item label="告警级别">
           <el-select v-model="form.severity" placeholder="选择严重级别">
             <el-option label="紧急" value="critical" />
@@ -131,7 +144,7 @@ const tasks = ref([])
 const results = ref([])
 const showDialog = ref(false)
 const editing = ref(false)
-const form = ref({ name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true, severity: 'warning', notify: [], cert_warn: 30, cert_crit: 7 })
+const form = ref({ name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true, public: false, severity: 'warning', notify: [], cert_warn: 30, cert_crit: 7 })
 async function load() {
   loading.value = true
   try {
@@ -159,7 +172,7 @@ async function saveTask() {
     }
     showDialog.value = false
     editing.value = false
-    form.value = { name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true, severity: 'warning', notify: [], cert_warn: 30, cert_crit: 7 }
+    form.value = { name: '', type: 'http', target: '', interval: 60, timeout: 10, enabled: true, public: false, severity: 'warning', notify: [], cert_warn: 30, cert_crit: 7 }
     await load()
   } catch (e) { console.error(e) }
 }

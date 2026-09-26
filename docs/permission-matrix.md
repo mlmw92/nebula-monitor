@@ -84,6 +84,7 @@
 | POST | `/api/v1/login` | 公开 | — |
 | POST | `/api/v1/report` | 公开（`X-Agent-Secret`） | — |
 | POST | `/api/v1/logs` | 公开（`X-Agent-Secret`） | 集中日志上行（C2）。与上报同一套接入凭据；必须同时在登录认证的公开白名单 `isPublicPath` 内，否则启用登录后会被 401 |
+| GET | `/api/v1/status` | **公开（免登录）** | 对外状态页（C3）。免登录是设计目的；暴露范围由「拨测任务是否勾选 `public`」控制，响应**不含** target / 节点 / 错误原文。白名单按方法判定，**仅放行 GET** |
 | GET | `/api/v1/logs` | `logs:read` + 节点分组范围 | 集中日志检索（C2）。**与上行共用路径**，因此白名单必须按方法判定（只有 POST 免登录）——按路径前缀放行会让浏览器请求没有 Principal，`permit` 直接 401 且范围过滤静默失效 |
 | GET | `/api/v1/agent/check` | 公开（`X-Agent-Secret`） | — |
 | GET | `/healthz` | 公开（存活探针，F3 新增） | — |

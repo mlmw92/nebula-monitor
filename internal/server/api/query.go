@@ -202,6 +202,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/middleware/templates/presets", a.permit(a.handleTemplatePresets, "middleware:read"))
 	// 集中日志检索（C2）：内容敏感，独立权限点 logs:read + 节点分组范围
 	mux.HandleFunc("GET /api/v1/logs", a.permit(a.handleLogsQuery, "logs:read"))
+	// 对外状态页（C3）：**刻意不套 permit**——它是给外部人看的免登录页面。
+	// 暴露范围由「拨测任务是否勾选 public」控制（见 dialtest.Task.Public），
+	// 且响应只含名称/状态/延迟/可用率，不含 target 与节点。
+	mux.HandleFunc("GET /api/v1/status", a.handlePublicStatus)
 	mux.HandleFunc("POST /api/v1/middleware/templates", a.permit(a.handleTemplateCreate, "middleware:write"))
 	mux.HandleFunc("POST /api/v1/middleware/templates/validate", a.permit(a.handleTemplateValidate, "middleware:write"))
 	mux.HandleFunc("PUT /api/v1/middleware/templates/{id}", a.permit(a.handleTemplateUpdate, "middleware:write"))

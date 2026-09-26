@@ -87,6 +87,7 @@ import {
   Lock,
   List,
   Aim,
+  View,
 } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { useBrand } from '../composables/useBrand'
@@ -117,6 +118,8 @@ const groups = [
       { key: 'templates', to: '/templates', label: '采集项模板', icon: Connection, perm: 'middleware:read' },
       { key: 'logs', to: '/logs', label: '集中日志', icon: List, perm: 'logs:read' },
       { key: 'dialtest', to: '/dialtest', label: '服务拨测', icon: Aim, perm: 'probe:read' },
+      // 对外状态页入口（页面本身免登录，菜单项属管理侧快捷入口）
+      { key: 'status', to: '/status', label: '对外状态页', icon: View, perm: 'probe:read' },
       { key: 'metrics-explore', to: '/metrics/explore', label: '指标浏览', icon: DataLine, perm: 'nodes:read' },
       { key: 'dashboards', to: '/system/dashboards', label: '自定义仪表盘', icon: Grid, perm: 'dashboard:read' },
     ],

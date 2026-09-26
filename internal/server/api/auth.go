@@ -159,6 +159,11 @@ func isPublicPath(r *http.Request) bool {
 	if r.Method == http.MethodPost && (path == "/api/v1/report" || path == "/api/v1/logs") {
 		return true
 	}
+	// 对外状态页（C3）：免登录是它的设计目的。**只放行 GET**，
+	// 与 /api/v1/logs 同理——同一路径的其它方法不应被顺带放行。
+	if r.Method == http.MethodGet && path == "/api/v1/status" {
+		return true
+	}
 	// Agent 安装脚本的接入鉴权预检（同样走 X-Agent-Secret，不受登录 token 影响）
 	if strings.HasPrefix(path, "/api/v1/agent/check") {
 		return true
