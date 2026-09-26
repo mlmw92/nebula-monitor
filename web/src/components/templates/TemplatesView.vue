@@ -67,6 +67,23 @@
     <!-- 新建 / 编辑 -->
     <el-dialog v-model="showDialog" :title="editing ? `编辑模板 ${form.id}` : '新建采集项模板'" width="680px">
       <el-form :model="form" label-width="96px">
+        <!-- 从预设创建：常见中间件（RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper）
+             的取数与映射规则已逐一核对过真实 exporter 的输出形态，避免「不知道 keep 该怎么写」 -->
+        <el-form-item v-if="!editing" label="从预设">
+          <el-select
+            v-model="presetId"
+            clearable
+            placeholder="选择常见中间件，自动填好取数与映射规则（仍需选择生效分组）"
+            style="width: 100%"
+            @change="applyPreset"
+          >
+            <el-option v-for="p in presets" :key="p.id" :label="p.title" :value="p.id">
+              <span>{{ p.title }}</span>
+              <span class="opt-desc">{{ p.desc }}</span>
+            </el-option>
+          </el-select>
+          <div v-if="presetNote" class="hint-inline">{{ presetNote }}</div>
+        </el-form-item>
         <el-form-item label="ID">
           <el-input v-model="form.id" :disabled="editing" placeholder="小写字母开头，如 rabbitmq；它同时是指标名前缀" />
           <div class="hint-inline">
@@ -166,6 +183,28 @@ const showDialog = ref(false)
 const editing = ref(false)
 const validationErrors = ref([])
 const rulesText = ref('')
+const presets = ref([])
+const presetId = ref('')
+const presetNote = ref('')
+
+// applyPreset 用预设填好表单：不覆盖生效分组（分组取决于用户环境，预设刻意留空）。
+function applyPreset(id) {
+  const p = presets.value.find((x) => x.id === id)
+  if (!p) {
+    presetNote.value = ''
+    return
+  }
+  const c = p.config || {}
+  form.value.id = c.id || ''
+  form.value.title = c.title || ''
+  form.value.kind = c.kind || 'prometheus-exporter'
+  form.value.targets = (c.targets || []).map((t) => ({ instance: t.instance || '', addr: t.addr || '' }))
+  if (form.value.targets.length === 0) form.value.targets.push({ instance: '', addr: '' })
+  form.value.rules = c.rules || {}
+  rulesText.value = JSON.stringify(c.rules || {}, null, 2)
+  presetNote.value = p.note || ''
+  validationErrors.value = []
+}
 
 const emptyForm = () => ({
   id: '',
@@ -206,10 +245,22 @@ async function loadGroups() {
   }
 }
 
+async function loadPresets() {
+  try {
+    const data = await http.get('/api/v1/middleware/templates/presets')
+    presets.value = data.presets || []
+  } catch (e) {
+    // 预设是便利功能：取不到时仍可手工填写，不影响建模板
+    console.error('加载模板预设失败', e)
+  }
+}
+
 function openCreate() {
   editing.value = false
   form.value = emptyForm()
   rulesText.value = ''
+  presetId.value = ''
+  presetNote.value = ''
   validationErrors.value = []
   showDialog.value = true
 }
@@ -305,7 +356,7 @@ async function remove(row) {
 }
 
 onMounted(async () => {
-  await Promise.all([load(), loadGroups()])
+  await Promise.all([load(), loadGroups(), loadPresets()])
 })
 </script>
 
@@ -333,4 +384,5 @@ onMounted(async () => {
 .targets { width: 100%; }
 .target-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .err-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; }
+.opt-desc { float: right; color: var(--text-muted); font-size: 12px; margin-left: 12px; }
 </style>

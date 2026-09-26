@@ -158,9 +158,37 @@ type Rules struct {
 	Labels map[string]string `yaml:"labels" json:"labels"`
 	// Unlabel 需要删除的响应自带标签。
 	Unlabel []string `yaml:"unlabel" json:"unlabel"`
+	// Aggregate 声明「丢弃标签后如何合并同名序列」，match 作用于**最终指标名**（含模板前缀，
+	// 即「指标浏览」里看到的名字）。
+	//
+	// 与 keep/drop/rename 的差异是刻意的：那三条处理「响应长什么样」，匹配响应中的原名；
+	// 聚合处理「我们产出什么」，此时名字已加前缀，用最终名匹配才不会出现「明明写了却没生效」。
+	//
+	// 为什么需要它：RabbitMQ 这类中间件按维度暴露指标（rabbitmq_queue_messages{queue=...}），
+	// 想汇总所有队列时最自然的写法是 unlabel: ["queue"]——但那会产出多条
+	// 「同名 + 同标签 + 不同值」的序列，写进时序库后互相覆盖（last-write-wins），
+	// 数值无意义且不报错。声明聚合后语义明确，也才真的能表达「所有队列的消息总数」。
+	Aggregate []AggregateRule `yaml:"aggregate" json:"aggregate"`
 	// Metrics http-json / http-text 的取值规则。
 	Metrics []MetricRule `yaml:"metrics" json:"metrics"`
 }
+
+// AggregateRule 是单条聚合规则：match 匹配响应中的原名，op 为合并方式。
+type AggregateRule struct {
+	Match string `yaml:"match" json:"match"`
+	Op    string `yaml:"op" json:"op"` // sum / max / min / avg
+}
+
+// 允许的聚合方式。
+const (
+	AggSum = "sum"
+	AggMax = "max"
+	AggMin = "min"
+	AggAvg = "avg"
+)
+
+// AggregateOps 是全部允许的聚合方式（校验与前端提示共用一份）。
+var AggregateOps = []string{AggSum, AggMax, AggMin, AggAvg}
 
 // RenameRule 是单条改名规则：match 匹配原名，to 为改写后的名字（支持 $1 反向引用）。
 type RenameRule struct {
@@ -201,6 +229,16 @@ func EnsurePrefix(id, name string) string {
 		return name
 	}
 	return prefix + name
+}
+
+// isAggregateOp 判断聚合方式是否受支持。
+func isAggregateOp(op string) bool {
+	for _, v := range AggregateOps {
+		if v == op {
+			return true
+		}
+	}
+	return false
 }
 
 // MaxStaticLabels 是模板可追加的静态标签数上限：总标签上限需为引擎注入的保留标签留位置，
@@ -397,6 +435,22 @@ func (r *Rules) validate(kind Kind, id string) []error {
 		}
 	}
 
+	seenAgg := make(map[string]bool, len(r.Aggregate))
+	for i, a := range r.Aggregate {
+		if strings.TrimSpace(a.Match) == "" {
+			errs = append(errs, fmt.Errorf("rules.aggregate[%d]：match 不能为空", i))
+		} else if _, err := regexp.Compile(a.Match); err != nil {
+			errs = append(errs, fmt.Errorf("rules.aggregate[%d]：match 正则非法：%v", i, err))
+		}
+		if !isAggregateOp(a.Op) {
+			errs = append(errs, fmt.Errorf("rules.aggregate[%d]：op %q 非法（可选 %v）", i, a.Op, AggregateOps))
+		}
+		if seenAgg[a.Match] {
+			errs = append(errs, fmt.Errorf("rules.aggregate[%d]：match %q 重复（首条匹配生效，重复声明只会让人误以为后一条也生效）", i, a.Match))
+		}
+		seenAgg[a.Match] = true
+	}
+
 	switch kind {
 	case KindPrometheusExporter:
 		if len(r.Metrics) > 0 {
@@ -405,6 +459,11 @@ func (r *Rules) validate(kind Kind, id string) []error {
 	case KindHTTPJSON, KindHTTPText:
 		if len(r.Metrics) == 0 {
 			errs = append(errs, fmt.Errorf("kind=%s 必须配置 rules.metrics", kind))
+		}
+		// 这两类每个规则只产出一条序列（无维度标签可塌缩），聚合无从谈起：
+		// 静默忽略会让用户以为聚合生效了，故直接拒绝。
+		if len(r.Aggregate) > 0 {
+			errs = append(errs, fmt.Errorf("kind=%s 不支持 rules.aggregate（每规则只产出一条序列，无同名序列可合并）", kind))
 		}
 	}
 	if len(r.Metrics) > MaxMetricsPerTemplate {

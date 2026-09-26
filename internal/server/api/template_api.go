@@ -102,6 +102,26 @@ func (a *API) handleTemplateDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"ok": true})
 }
 
+// handleTemplatePresets 返回内置预设（常见中间件的开箱模板）。
+//
+// 预设只是「待填模板」：groups 为空（由用户按自己环境选择），目标地址是本机默认端口。
+// 它解决的是「不知道 exporter 有哪些指标、keep/drop 该怎么写」这个真实门槛——
+// 这些规则逐一核对过真实 exporter 的输出形态（见 internal/template/presets.go）。
+func (a *API) handleTemplatePresets(w http.ResponseWriter, r *http.Request) {
+	presets := dsl.Presets()
+	out := make([]map[string]interface{}, 0, len(presets))
+	for _, p := range presets {
+		out = append(out, map[string]interface{}{
+			"id":     p.ID,
+			"title":  p.Title,
+			"desc":   p.Desc,
+			"note":   p.Note,
+			"config": p.Config,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"presets": out})
+}
+
 // handleTemplateValidate 只校验不保存，返回与保存时一致的校验结果。
 //
 // 存在的意义：校验规则（含 id 互为前缀、保留指标族、正则、标签越权等）都在 Go 侧，

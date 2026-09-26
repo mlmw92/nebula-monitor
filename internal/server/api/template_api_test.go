@@ -178,6 +178,53 @@ func TestTemplatesAPI_Validate(t *testing.T) {
 	}
 }
 
+// TestTemplatesAPI_Presets 预设接口：返回开箱模板供「从预设创建」，
+// 且预设必须自洽（元信息齐全、不预设生效分组——分组由用户按自己环境选择）。
+func TestTemplatesAPI_Presets(t *testing.T) {
+	a := newTemplateTestAPI(t)
+	rec := do(a, http.MethodGet, "/api/v1/middleware/templates/presets", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("预设接口应 200，got %d（body=%s）", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Presets []struct {
+			ID     string `json:"id"`
+			Title  string `json:"title"`
+			Desc   string `json:"desc"`
+			Note   string `json:"note"`
+			Config struct {
+				ID     string   `json:"id"`
+				Kind   string   `json:"kind"`
+				Groups []string `json:"groups"`
+				Rules  struct {
+					Keep string `json:"keep"`
+				} `json:"rules"`
+			} `json:"config"`
+		} `json:"presets"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("响应解析失败：%v", err)
+	}
+	if len(resp.Presets) < 4 {
+		t.Fatalf("预设数量 %d 偏少（至少覆盖 4 个常见中间件）", len(resp.Presets))
+	}
+	for _, p := range resp.Presets {
+		if p.ID == "" || p.Title == "" || p.Desc == "" || p.Note == "" {
+			t.Errorf("预设 %s 元信息不完整（前端下拉与提示直接展示它们）", p.ID)
+		}
+		if p.Config.ID != p.ID || p.Config.Kind != "prometheus-exporter" {
+			t.Errorf("预设 %s 的配置与元信息不一致：%+v", p.ID, p.Config)
+		}
+		// 预设必须留空生效分组：分组取决于用户环境，预设里写死会让「点一下就建好」变成建错
+		if len(p.Config.Groups) != 0 {
+			t.Errorf("预设 %s 不应预设生效分组：%v", p.ID, p.Config.Groups)
+		}
+		if p.Config.Rules.Keep == "" {
+			t.Errorf("预设 %s 应给出 keep 收窄到该中间件指标族（否则会带入 exporter 自身的 go_*/process_*）", p.ID)
+		}
+	}
+}
+
 // TestTemplatesAPI_NotInjected 未注入存储时：读返回空集合（前端不报错），写明确不可用。
 func TestTemplatesAPI_NotInjected(t *testing.T) {
 	a := scopeTestAPI(t) // 不注入模板存储

@@ -448,7 +448,7 @@ Collector.CollectAll(ctx)
 与「每个中间件的存活指标都已登记」；`internal/server/alert/service_metric_test.go` 校验
 「服务映射 ↔ 指标目录」一致。守卫已做过**注入验证**：把 `mysql_instance_up` 改回 `mysql_up` 后测试立即失败并报出该名字。
 
-## 13. 阶段二实施记录（进行中）
+## 13. 阶段二实施记录（A/B/C/D 均已完成，2026-09-26）
 
 阶段二把模板从「逐台写 agent.yaml」变成「Web 端统一存管 + 下发」，分四个子批次。
 评审决策（2026-09-26）：① 下发范围按**节点分组**（`groups` 必填）；② 只走响应下发，不加 SIGHUP；
@@ -478,22 +478,14 @@ Collector.CollectAll(ctx)
 6. **首次接管时的替换是显式的**：Agent 日志明确提示「本机 agent.yaml 中的模板被 Server 下发替换」，
    避免运维困惑于「本地写的模板怎么不见了」。
 
-### 13.4 子批次 D：前端
+### 13.2 子批次 B 的验证
 
-| 位置 | 改动 |
-|---|---|
-| `components/templates/TemplatesView.vue`（新） | 模板列表 + 新建/编辑弹窗 + 「校验」按钮（调 `/templates/validate`，把服务端精确原因列出来，避免「保存失败再猜」）。列表里直接显示**采集情况**（在线/失败数，或「已配置但无数据」标记） |
-| `components/mw/TemplateTab.vue`（新） | 模板派生类型的**通用** Tab：实例表（实例/节点/分组/采集状态 + 模板声明的摘要指标）。空状态给出排查方向（生效分组是否匹配、目标是否可达、Agent 是否已收到下发） |
-| `components/MiddlewareView.vue` | Tab 由 `/middleware/overview` 的 `kind=template` 类型动态追加；深链 `?tab=` 白名单随之动态化；头部加「采集项模板」入口；暂无数据的模板在 Tab 上打提示点 |
-| `components/OverviewView.vue` + `overview/MiddlewareOverview.vue` | 首页卡片追加模板派生类型（数据取自总览接口）；空状态文案可被覆盖——模板是「已配置但无数据」，与内置类型的「尚未配置」排查方向不同 |
-| `components/screen/*` | 大屏的类型清单本就来自总览接口（注册表一生效即自动出现）；补上模板类型的实例列表与参数趋势指标（用模板声明的摘要指标） |
-| `Sidebar.vue` / `router` / `MainLayout.vue` | 新增「采集项模板」菜单与路由（读 `middleware:read`，写按钮另受 `middleware:write` 门控） |
-
-**写操作的表单取舍**：`rules` 规则较丰富（keep/drop/rename/labels/unlabel/metrics），弹窗里用 **JSON 文本域** + 服务端校验，
-而不是为每种规则做一套表单控件——结构化字段（id/title/kind/groups/targets）照常用表单，规则区保留完整表达力。
-
-**已知小项**：`/api/v1/groups` 需 `groups:read`，仅有 `middleware:read` 的用户打开模板页时分组下拉为空
-（可手动输入，`allow-create` 已开）；如需完全顺畅，可给这类账号一并授予 `groups:read`。
+- 单测：receiver 6 例（分组过滤 / 版本一致跳过 / 缺能力跳过 / 未注入不下发 / 空集合清空 / 分组匹配细节）
+  + collector 2 例（热替换无需重启、非法下发保留原配置）+ 存储 9 例 + API 5 例。
+- 实机端到端（`bash build/verify-template-delivery.sh`）：Agent 的 `agent.yaml` **不配任何模板**，
+  因此被测指标只能来自下发路径；9 项断言全过——模板经 Server → 上报响应 → Agent 应用
+  （日志 `已应用 Server 下发的采集项模板 count=1 revision=1`）→ 采集 → 落库写入路径，
+  且 `rename` / `keep` / 静态标签均正确生效。假时序库见 `build/template-fakes/fakevm`。
 
 ### 13.3 子批次 C：类型注册表（`internal/server/mwreg`）
 
@@ -520,11 +512,70 @@ Collector.CollectAll(ctx)
 4. 新增模板类型的**通用实例接口** `GET /api/v1/middleware/{type}/instances`：
    内置类型各自的字面量路由优先命中，模板类型走通用形态（实例 + 摘要指标），供前端一个通用 Tab 渲染。
 
-### 13.2 子批次 B 的验证
+### 13.4 子批次 D：前端
 
-- 单测：receiver 6 例（分组过滤 / 版本一致跳过 / 缺能力跳过 / 未注入不下发 / 空集合清空 / 分组匹配细节）
-  + collector 2 例（热替换无需重启、非法下发保留原配置）+ 存储 9 例 + API 5 例。
-- 实机端到端（`bash build/verify-template-delivery.sh`）：Agent 的 `agent.yaml` **不配任何模板**，
-  因此被测指标只能来自下发路径；9 项断言全过——模板经 Server → 上报响应 → Agent 应用
-  （日志 `已应用 Server 下发的采集项模板 count=1 revision=1`）→ 采集 → 落库写入路径，
-  且 `rename` / `keep` / 静态标签均正确生效。假时序库见 `build/template-fakes/fakevm`。
+| 位置 | 改动 |
+|---|---|
+| `components/templates/TemplatesView.vue`（新） | 模板列表 + 新建/编辑弹窗 + 「校验」按钮（调 `/templates/validate`，把服务端精确原因列出来，避免「保存失败再猜」）。列表里直接显示**采集情况**（在线/失败数，或「已配置但无数据」标记）；另有「从预设创建」下拉，直接载入 E2 的开箱模板 |
+| `components/mw/TemplateTab.vue`（新） | 模板派生类型的**通用** Tab：实例表（实例/节点/分组/采集状态 + 模板声明的摘要指标）。空状态给出排查方向（生效分组是否匹配、目标是否可达、Agent 是否已收到下发） |
+| `components/MiddlewareView.vue` | Tab 由 `/middleware/overview` 的 `kind=template` 类型动态追加；深链 `?tab=` 白名单随之动态化；头部加「采集项模板」入口；暂无数据的模板在 Tab 上打提示点 |
+| `components/OverviewView.vue` + `overview/MiddlewareOverview.vue` | 首页卡片追加模板派生类型（数据取自总览接口）；空状态文案可被覆盖——模板是「已配置但无数据」，与内置类型的「尚未配置」排查方向不同 |
+| `components/screen/*` | 大屏的类型清单本就来自总览接口（注册表一生效即自动出现）；补上模板类型的实例列表与参数趋势指标（用模板声明的摘要指标） |
+| `Sidebar.vue` / `router` / `MainLayout.vue` | 新增「采集项模板」菜单与路由（读 `middleware:read`，写按钮另受 `middleware:write` 门控） |
+
+**写操作的表单取舍**：`rules` 规则较丰富（keep/drop/rename/labels/unlabel/metrics/aggregate），弹窗里用 **JSON 文本域** + 服务端校验，
+而不是为每种规则做一套表单控件——结构化字段（id/title/kind/groups/targets）照常用表单，规则区保留完整表达力。
+
+**已知小项**：`/api/v1/groups` 需 `groups:read`，仅有 `middleware:read` 的用户打开模板页时分组下拉为空
+（可手动输入，`allow-create` 已开）；如需完全顺畅，可给这类账号一并授予 `groups:read`。
+
+## 14. E2 实测：把「写模板即可」拿到真实中间件上走一遍（2026-09-26）
+
+阶段二收口后立刻做了 E2 第一批——**目的不是「多接几个中间件」，而是验证模板表达力在真实场景是否够用**。
+
+### 14.1 交付：5 个开箱预设
+
+`internal/template/presets.go`（放在共享包：Server 用它提供「从预设创建」，Agent 侧测试直接引用同一份规则）
+覆盖 **RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper**，规则按各 exporter 的真实输出形态逐条核对：
+
+- 一律 `keep` 收窄到该中间件的指标族：exporter 普遍同时暴露 `go_*` / `process_*` / `promhttp_*`，
+  全量透传会把基数浪费在与被监控对象无关的序列上；
+- 一律丢弃 `*_created`：新版 client 库为每个 counter/gauge 都带一条 created 时间戳序列，对监控无意义却成倍放大基数；
+- 直方图默认丢 `_bucket`、保留 `_sum`/`_count`（本项目暂无分位数查询口径）；
+- 每个预设带**前置条件说明**（ES 需启用 prometheus 模块、ZK 需第三方 exporter、RabbitMQ 需 15692 插件端口），
+  因为「建了没数据」最常见的原因就是前置条件不满足。
+
+### 14.2 走真实场景立刻暴露的缺口：`unlabel` 汇总会静默损坏数据
+
+RabbitMQ 按队列暴露 `rabbitmq_queue_messages{queue="a"}`、`{queue="b"}`……
+用户想「汇总所有队列」时最自然的写法是 `unlabel: ["queue"]`，但那会产出多条
+**同名 + 同标签 + 不同值**的序列，写进时序库后是 last-write-wins：数值无意义，且完全不报错。
+
+修复分两层（**只做其中一层都不够**）：
+
+| 层 | 做法 | 为什么这么做 |
+|---|---|---|
+| 表达力 | 新增 `rules.aggregate`（`match` 匹配**最终指标名** + `sum/max/min/avg`） | 让「汇总」这个真实需求可以**正确表达**，而不只是被拦住 |
+| 护栏 | 未声明聚合却出现重复序列时，只保留第一条并告警（同一模板同一指标只告警一次） | 聚合方式取决于指标语义（消息数该 sum、队列深度该 max），系统猜错会给出「看起来正常但含义错误」的数字；少一条数据 + 明确告警，比一个错误的数字安全 |
+
+实现过程中的一个自纠：最初按「还原出响应原名再匹配」写了 `TrimPrefix`，测试立刻证明它站不住——
+`EnsurePrefix` 是幂等的（响应里本就常带 `<id>_` 前缀），还原反而把指标名截断成 `value`，
+聚合规则静默失效。改为直接匹配**最终指标名**（也正是用户在「指标浏览」里看到的名字），并删掉该函数。
+
+### 14.3 仍然存在的表达力边界（诚实的清单）
+
+| # | 边界 | 影响 | 当下对策 |
+|---|---|---|---|
+| 1 | `http-json` 的路径语法不支持遍历「按 id 分组的 map」 | Elasticsearch 未启用 prometheus 模块时只有 `_nodes/stats`（`nodes: {nodeId: {...}}`），模板无法表达 | 预设要求启用 `/ _prometheus/metrics`；否则需专用采集器 |
+| 2 | 无法把「标签值提升为指标名」 | Nacos 这类 `nacos_monitor{name="configCount"}` 形态：数据能采到（保留 `name` 标签，正确），但指标名不直观、卡片展示不友好 | 暂记为边界；真要做需在 DSL 增加 label→name 的映射规则 |
+| 3 | 无分位数/直方图聚合口径 | 只能看 `_sum`/`_count`，不能按 `le` 标签算 P95/P99 | 属查询侧能力，非模板问题 |
+
+### 14.4 验证方式与限度
+
+- 单测 9 例：预设合法性/可共存/元信息完备、**5 个预设各用「按真实 exporter 输出形态构造的样本」核对
+  该留的留下、该挡的挡住**（样本含 HELP/TYPE 注释、`*_created`、直方图 bucket、维度标签、exporter 自身指标）、
+  保留队列维度、未声明聚合只留一条、四种聚合取值正确。
+- **限度**：样本是依据官方文档与常见输出形态构造的，不是从真实集群抓取；
+  「该中间件现场到底有没有暴露某指标」仍需部署时核对。真实产品端点的现场验证属部署动作，本轮未做。
+
+

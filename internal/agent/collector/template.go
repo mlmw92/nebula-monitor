@@ -34,6 +34,9 @@ type TemplateRunner struct {
 	client *http.Client
 	// res 缓存已编译正则：模板规则在 Agent 生命周期内不变，缓存可避免每轮重复编译。
 	res sync.Map // pattern -> *regexp.Regexp
+	// warned 记录已告警过的产出问题（如「同名同标签序列」）：同一问题只告警一次，
+	// 否则每轮采集都刷屏，反而把其它问题淹掉。
+	warned sync.Map // key: tplID\x00metric
 }
 
 // NewTemplateRunner 创建模板执行器。
@@ -57,11 +60,20 @@ func (r *TemplateRunner) CollectTemplate(ctx context.Context, tpl template.Confi
 		data = append(data, d...)
 		ups = append(ups, up)
 	}
+	// 合并「声明了聚合」的同名序列；未声明聚合却出现重复序列时只保留一条并告警。
+	// 详见 template_aggregate.go：多条同名同标签序列写进时序库是 last-write-wins 的静默损坏。
+	if merged, err := r.applyAggregate(tpl, data); err != nil {
+		slog.Warn("模板聚合规则执行失败，本轮未按规则聚合", "template", tpl.ID, "err", err)
+	} else {
+		data = merged
+	}
+	data = r.dropCollisions(tpl, data)
+
 	if len(data) > template.MaxMetricsPerTemplate {
 		// 宁可丢数据也必须让运维看见：静默放大基数会拖垮时序库
 		slog.Warn("模板产出超过上限，已截断",
 			"template", tpl.ID, "produced", len(data), "limit", template.MaxMetricsPerTemplate,
-			"hint", "用 rules.keep 收窄，或为该中间件写专用采集器")
+			"hint", "用 rules.keep 收窄、rules.aggregate 汇总，或为该中间件写专用采集器")
 		data = data[:template.MaxMetricsPerTemplate]
 	}
 	return append(data, ups...)

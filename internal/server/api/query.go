@@ -197,6 +197,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// 模板派生类型的通用实例接口：内置类型各自的字面量路由优先命中，不会走到这里
 	mux.HandleFunc("GET /api/v1/middleware/{type}/instances", a.permit(a.handleMiddlewareTypeInstances, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/templates", a.permit(a.handleTemplatesList, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/templates/presets", a.permit(a.handleTemplatePresets, "middleware:read"))
 	mux.HandleFunc("POST /api/v1/middleware/templates", a.permit(a.handleTemplateCreate, "middleware:write"))
 	mux.HandleFunc("POST /api/v1/middleware/templates/validate", a.permit(a.handleTemplateValidate, "middleware:write"))
 	mux.HandleFunc("PUT /api/v1/middleware/templates/{id}", a.permit(a.handleTemplateUpdate, "middleware:write"))

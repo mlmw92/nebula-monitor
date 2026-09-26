@@ -141,6 +141,7 @@
 | GET | `/api/v1/middleware/nginx/access/geo` | `middleware:read` | 分组 |
 | GET | `/api/v1/middleware/{type}/instances` | `middleware:read` | 分组（模板派生类型的通用实例接口；内置类型由各自的字面量路由优先命中） |
 | GET | `/api/v1/middleware/templates` | `middleware:read` | 见下方说明 |
+| GET | `/api/v1/middleware/templates/presets` | `middleware:read` | 内置预设（只读的模板样例，不含任何环境信息） |
 | POST | `/api/v1/middleware/templates` | `middleware:write` | 见下方说明 |
 | POST | `/api/v1/middleware/templates/validate` | `middleware:write` | 见下方说明 |
 | PUT | `/api/v1/middleware/templates/{id}` | `middleware:write` | 见下方说明 |

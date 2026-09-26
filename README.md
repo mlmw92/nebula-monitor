@@ -835,6 +835,26 @@ templates:
 - 下发内容校验不通过时，Agent **保留现有模板**并记一次告警（绝不因模板把采集打断）；
   该告警按版本号去重，不会刷屏；Server 会持续重发，配置修好后自动恢复。
 
+**内置预设**：Web 端「采集项模板 → 新建」里可直接选 **RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper**
+（接口 `GET /api/v1/middleware/templates/presets`）。取数与映射规则已按各 exporter 的真实输出形态写好
+（含 `keep` 收窄到该中间件指标族、丢掉 `*_created` 与直方图 `_bucket`），只需再选生效分组、改成本环境地址。
+每个预设都带**前置条件说明**（如 Elasticsearch 需启用 prometheus 模块），避免「建了却没数据」时无处排查。
+
+**汇总维度指标（`rules.aggregate`）**：像 RabbitMQ 这样按队列暴露指标的中间件，
+若用 `unlabel` 丢掉 `queue` 想「汇总所有队列」，会产出多条「同名 + 同标签」的序列，
+写进时序库后互相覆盖（last-write-wins），数值无意义且不报错。声明聚合即可正确表达：
+
+```yaml
+rules:
+  unlabel: ["queue", "vhost"]
+  aggregate:
+    - { match: "^rabbitmq_queue_messages$", op: sum }   # sum / max / min / avg
+```
+
+`aggregate.match` 匹配**最终指标名**（含模板前缀，即「指标浏览」里看到的名字）；
+未声明聚合却出现重复序列时，Agent 只保留第一条并告警（同一模板同一指标只告警一次），
+不会把互相覆盖的多条写入时序库。
+
 **约束与安全边界**
 
 | 项 | 说明 |
