@@ -69,18 +69,25 @@ type Baseline struct {
 	Points          []model.Point     `json:"points,omitempty"`
 }
 
-// Forecast 表示分区容量耗尽预测。不可预测时 Reason 必须非空。
+// Forecast 表示容量预测结论：百分比类指标估算「何时打满」，
+// 速率类指标（无绝对上限）只给增长预测。不可预测时 Reason 必须非空；
+// Summary 是一句可直接展示的结论（含数值与单位），前端无需再拼中文。
 type Forecast struct {
-	Metric        string            `json:"metric"`
-	Labels        map[string]string `json:"labels,omitempty"`
-	Latest        float64           `json:"latest"`
-	RatePerDay    float64           `json:"ratePerDay"`
-	RSquared      float64           `json:"rSquared"`
-	ExhaustedAt   int64             `json:"exhaustedAt,omitempty"`
-	DaysRemaining float64           `json:"daysRemaining,omitempty"`
-	Status        string            `json:"status"`
-	Reason        string            `json:"reason,omitempty"`
-	Points        []model.Point     `json:"points,omitempty"`
+	Metric         string            `json:"metric"`
+	MetricTitle    string            `json:"metricTitle,omitempty"`
+	Unit           string            `json:"unit,omitempty"`
+	Labels         map[string]string `json:"labels,omitempty"`
+	Latest         float64           `json:"latest"`
+	RatePerDay     float64           `json:"ratePerDay"`
+	RSquared       float64           `json:"rSquared"`
+	Ceiling        float64           `json:"ceiling,omitempty"`        // 预测上限；0 表示无上限（速率类）
+	ProjectedValue float64           `json:"projectedValue,omitempty"` // 预测跨度后的值（速率类/参考）
+	ExhaustedAt    int64             `json:"exhaustedAt,omitempty"`
+	DaysRemaining  float64           `json:"daysRemaining,omitempty"`
+	Summary        string            `json:"summary,omitempty"`
+	Status         string            `json:"status"`
+	Reason         string            `json:"reason,omitempty"`
+	Points         []model.Point     `json:"points,omitempty"`
 }
 
 // HostResult 聚合单台主机的分析结论。
@@ -242,10 +249,7 @@ func (a *Analyzer) analyzeHost(n model.Node, start, end time.Time, step time.Dur
 	if !h.Online {
 		h.Evidence = append(h.Evidence, availabilityEvidence())
 	}
-	for _, metric := range []string{"cpu_usage", "mem_used_percent"} {
-		a.collectBaseline(&h, n.Hostname, metric, start, end, step)
-	}
-	a.collectDisk(&h, n.Hostname, start, end, step)
+	a.collectHostMetrics(&h, n.Hostname, start, end, step)
 	for _, item := range active {
 		h.Evidence = append(h.Evidence, alertEvidence(item))
 	}
@@ -317,38 +321,38 @@ func instanceName(name, fallback string) string {
 	return fallback
 }
 
-func (a *Analyzer) collectBaseline(h *HostResult, nodeName, metric string, start, end time.Time, step time.Duration) {
+// collectHostMetrics 采集主机侧指标：同一份数据同时用于动态基线与容量预测，
+// 避免同一指标为了「基线」和「预测」重复查询两次。
+func (a *Analyzer) collectHostMetrics(h *HostResult, nodeName string, start, end time.Time, step time.Duration) {
+	for _, metric := range analyzedMetrics {
+		a.collectMetric(h, nodeName, metric, start, end, step, true)
+	}
+	// 速率类指标只做容量预测：它们没有「打满」语义，也不适合用持续偏离基线判异常
+	// （业务流量本身就有周期）。
+	for _, metric := range rateMetrics {
+		a.collectMetric(h, nodeName, metric, start, end, step, false)
+	}
+}
+
+// collectMetric 查询单个指标并产出基线（withBaseline 时）与容量预测结论。
+func (a *Analyzer) collectMetric(h *HostResult, nodeName, metric string, start, end time.Time, step time.Duration, withBaseline bool) {
 	series, err := a.store.QueryRange(nodeName, metric, nil, start.UnixMilli(), end.UnixMilli(), step.Milliseconds())
 	if err != nil {
 		slog.Warn("智能分析查询指标失败", "node", nodeName, "metric", metric, "err", err)
 		return
 	}
-	if len(series) == 0 {
-		return
-	}
 	for _, s := range series {
-		b := CalculateBaseline(metric, s.Labels, s.Points)
-		h.Baselines = append(h.Baselines, b)
-		if b.IsAnomalous {
-			h.Evidence = append(h.Evidence, anomalyEvidence(b))
+		if withBaseline {
+			b := CalculateBaseline(metric, s.Labels, s.Points)
+			h.Baselines = append(h.Baselines, b)
+			if b.IsAnomalous {
+				h.Evidence = append(h.Evidence, anomalyEvidence(b))
+			}
 		}
-	}
-}
-func (a *Analyzer) collectDisk(h *HostResult, nodeName string, start, end time.Time, step time.Duration) {
-	series, err := a.store.QueryRange(nodeName, "disk_used_percent", nil, start.UnixMilli(), end.UnixMilli(), step.Milliseconds())
-	if err != nil {
-		slog.Warn("智能分析查询磁盘趋势失败", "node", nodeName, "err", err)
-		return
-	}
-	for _, s := range series {
-		b := CalculateBaseline("disk_used_percent", s.Labels, s.Points)
-		h.Baselines = append(h.Baselines, b)
-		if b.IsAnomalous {
-			h.Evidence = append(h.Evidence, anomalyEvidence(b))
-		}
-		f := ForecastCapacity(s.Labels, s.Points)
+		f := forecastMetric(metric, s.Labels, s.Points)
 		h.Forecasts = append(h.Forecasts, f)
-		if f.Status == "urgent" || f.Status == "warning" {
+		switch f.Status {
+		case "urgent", "warning", "rising":
 			h.Evidence = append(h.Evidence, forecastEvidence(f))
 		}
 	}

@@ -71,7 +71,7 @@ const (
 type MetricMeta struct {
 	Name     string    `json:"name"`     // Prometheus 指标名，如 cpu_usage
 	Title    string    `json:"title"`    // 中文显示名
-	Category Category   `json:"category"` // 分类
+	Category Category  `json:"category"` // 分类
 	Unit     string    `json:"unit"`     // 单位，如 %/MB/次
 	Chart    ChartType `json:"chart"`    // 推荐图表类型
 	Desc     string    `json:"desc,omitempty"`
@@ -80,11 +80,11 @@ type MetricMeta struct {
 // catalog 全局指标目录，Register 在 init/启动时调用。
 var (
 	// mu 保护 entries 与 order 的并发读写。
-	mu      sync.RWMutex
+	mu sync.RWMutex
 	// entries 指标元数据映射（name -> meta）。
 	entries = map[string]MetricMeta{}
 	// order 指标注册顺序，保证目录展示稳定。
-	order   []string
+	order []string
 )
 
 // Register 注册（或覆盖）一条指标元数据。可安全重复调用。
@@ -109,6 +109,15 @@ func List() []MetricMeta {
 		out = append(out, entries[n])
 	}
 	return out
+}
+
+// Meta 返回单个指标的元数据。用于需要「标题 / 单位」的展示侧（如容量预测文案），
+// 避免各处再写一份中文名与单位。
+func Meta(name string) (MetricMeta, bool) {
+	mu.RLock()
+	defer mu.RUnlock()
+	m, ok := entries[name]
+	return m, ok
 }
 
 // ListByCategory 返回按分类分组的指标（分类内保持注册顺序，分类间按名称排序）。
