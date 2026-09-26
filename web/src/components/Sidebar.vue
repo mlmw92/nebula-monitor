@@ -115,6 +115,7 @@ const groups = [
       { key: 'hosts', to: '/hosts', label: '主机列表', icon: Monitor, perm: 'nodes:read' },
       { key: 'middleware', to: '/middleware', label: '中间件监控', icon: Connection, perm: 'middleware:read' },
       { key: 'templates', to: '/templates', label: '采集项模板', icon: Connection, perm: 'middleware:read' },
+      { key: 'logs', to: '/logs', label: '集中日志', icon: List, perm: 'logs:read' },
       { key: 'dialtest', to: '/dialtest', label: '服务拨测', icon: Aim, perm: 'probe:read' },
       { key: 'metrics-explore', to: '/metrics/explore', label: '指标浏览', icon: DataLine, perm: 'nodes:read' },
       { key: 'dashboards', to: '/system/dashboards', label: '自定义仪表盘', icon: Grid, perm: 'dashboard:read' },

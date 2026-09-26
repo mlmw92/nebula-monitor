@@ -72,6 +72,13 @@ type LogQueryResult struct {
 	// Truncated 表示「命中上限用尽而提前停止」——必须回给前端。
 	// 静默截断会让人以为「日志就这么多」，从而得出错误结论。
 	Truncated bool `json:"truncated"`
+	// Cursor 是继续翻页的游标（truncated 为 false 时为空）。
+	// 不透明字符串：前端只需原样回传，不解析、不构造。
+	Cursor string `json:"cursor,omitempty"`
+	// 以下三项是扫描诊断：解释「为什么没有结果」——是确实没有，还是扫描预算先用完了。
+	ScannedBytes int64 `json:"scannedBytes"`
+	ScannedLines int64 `json:"scannedLines"`
+	Files        int   `json:"files"` // 参与扫描的文件数
 }
 
 // LogHit 是检索命中的一条日志（附带定位信息）。

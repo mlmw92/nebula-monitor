@@ -22,16 +22,16 @@ func batch(source, node string, texts ...string) model.LogBatch {
 	return model.LogBatch{Source: source, Node: node, Lines: lines}
 }
 
-func readAll(t *testing.T, root, source, node string) []record {
+func readAll(t *testing.T, root, source, node string) []model.LogHit {
 	t.Helper()
 	path := filepath.Join(root, source, time.Now().Format("2006-01-02"), node+".log")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读取落盘文件失败：%v", err)
 	}
-	var out []record
+	var out []model.LogHit
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-		var r record
+		var r model.LogHit
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
 			t.Fatalf("落盘行不是合法 JSON：%v（%q）", err, line)
 		}

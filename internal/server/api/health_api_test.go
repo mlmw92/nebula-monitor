@@ -62,22 +62,29 @@ func healthTestAPI(t *testing.T, store *healthTestStore, mon *selfmon.Monitor) *
 func TestPublicPaths_AgentUpstreams(t *testing.T) {
 	for _, p := range []string{
 		"/api/v1/report", // 指标上报
-		"/api/v1/logs",   // 集中日志上行（C2）
+		"/api/v1/logs",   // 集中日志上行（C2，POST）
 		"/api/v1/agent/check",
 	} {
-		if !isPublicPath(p) {
-			t.Fatalf("%s 必须在公开白名单内（Agent 无登录令牌，走 X-Agent-Secret）", p)
+		if !isPublicPath(httptest.NewRequest(http.MethodPost, p, nil)) {
+			t.Fatalf("POST %s 必须在公开白名单内（Agent 无登录令牌，走 X-Agent-Secret）", p)
 		}
 	}
-	// 反例：业务读接口绝不能因为「名字像」而被放行
-	if isPublicPath("/api/v1/middleware/templates") {
+	// 反例一：业务读接口绝不能因为「名字像」而被放行
+	if isPublicPath(httptest.NewRequest(http.MethodGet, "/api/v1/middleware/templates", nil)) {
 		t.Fatal("业务接口不应出现在公开白名单里")
+	}
+	// 反例二：与 Agent 上行**共用路径**的浏览器接口必须鉴权。
+	// 若按路径前缀放行，GET /api/v1/logs 会没有 Principal → permit 直接 401，
+	// 且依赖 Principal 的节点范围过滤静默失效（只在启用登录认证的生产环境暴露）。
+	if isPublicPath(httptest.NewRequest(http.MethodGet, "/api/v1/logs", nil)) {
+		t.Fatal("GET /api/v1/logs 是浏览器检索接口，必须走登录鉴权")
 	}
 }
 
 // TestRoutes_HealthzOKAndPublic /healthz 永远 200，且无需登录（探针无法携带令牌）。
 func TestRoutes_HealthzOKAndPublic(t *testing.T) {
-	if !isPublicPath("/healthz") || !isPublicPath("/readyz") {
+	if !isPublicPath(httptest.NewRequest(http.MethodGet, "/healthz", nil)) ||
+		!isPublicPath(httptest.NewRequest(http.MethodGet, "/readyz", nil)) {
 		t.Fatal("健康探针必须在公开白名单内（k8s/systemd/反代无法携带登录令牌）")
 	}
 	a := healthTestAPI(t, &healthTestStore{}, nil)

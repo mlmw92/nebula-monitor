@@ -24,6 +24,7 @@ import (
 	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/instancereg"
+	"github.com/nebula/monitor/internal/server/logstore"
 	"github.com/nebula/monitor/internal/server/mwreg"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
@@ -115,6 +116,7 @@ type API struct {
 	retention      *retention.Manager     // 数据保留策略（可空；不注入时接口返回默认策略）
 	templates      TemplatesProvider      // 采集项模板（可空；未注入时模板接口返回空集合）
 	mwRegistry     *mwreg.Registry        // 中间件类型注册表（可空；未注入时退化为内置类型）
+	logs           *logstore.Store        // 集中日志存储（C2；可空，未注入时检索接口返回 503）
 	startedAt      time.Time              // 进程启动时间，供 /healthz、/readyz 报告运行时长
 }
 
@@ -198,6 +200,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/middleware/{type}/instances", a.permit(a.handleMiddlewareTypeInstances, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/templates", a.permit(a.handleTemplatesList, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/templates/presets", a.permit(a.handleTemplatePresets, "middleware:read"))
+	// 集中日志检索（C2）：内容敏感，独立权限点 logs:read + 节点分组范围
+	mux.HandleFunc("GET /api/v1/logs", a.permit(a.handleLogsQuery, "logs:read"))
 	mux.HandleFunc("POST /api/v1/middleware/templates", a.permit(a.handleTemplateCreate, "middleware:write"))
 	mux.HandleFunc("POST /api/v1/middleware/templates/validate", a.permit(a.handleTemplateValidate, "middleware:write"))
 	mux.HandleFunc("PUT /api/v1/middleware/templates/{id}", a.permit(a.handleTemplateUpdate, "middleware:write"))

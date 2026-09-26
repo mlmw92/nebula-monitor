@@ -962,7 +962,14 @@ Server（`POST /api/v1/logs`，与上报共用 `X-Agent-Secret` 接入凭据）�
 启用后同时产出 `<id>_log_up`（读不到即 0）、`<id>_log_lines_total`、`<id>_log_match_total{pattern}`、
 `<id>_log_dropped_total{reason}` 四个指标，因此**「错误日志激增」可以直接用既有阈值规则配出告警**。
 Server 侧按 `来源/日期/节点` 分片落盘，并有「每来源每日上限 + 单节点上行限速」两个天花板。
-**检索页面与日志保留策略属后续批次**（当前通过指标观察日志态势）。未配置 `logSources` 时零行为变化。
+
+**检索**：Web 端「观测监控 → 集中日志」按时间范围 + 关键词/正则 + 节点/来源查询。
+分片目录让扫描**有界**（先按时间与来源筛掉绝大多数文件，再逐文件从末尾反向读——于是天然时间倒序，
+游标只需记「文件内绝对字节偏移」，翻页不重不漏；即使文件在两次翻页之间长大也不会跳过老行）。
+命中上限（单页 200，最多 1000）与扫描预算（64 MiB / 20 万行）任一用尽都会返回 `truncated` 并提示
+——**静默截断会让人以为「日志就这么多」**。读取需 `logs:read`（日志内容可能含敏感数据，
+故未并入 `nodes:read`；内置「运维管理员」默认拥有，只读/告警/安全/审计角色需按需授予），并受节点分组范围约束。
+**日志保留策略（retention 扩展）与实机验证脚本**属后续批次。
 
 **约束与安全边界**
 
@@ -1701,6 +1708,7 @@ journalctl -u monitor-proxy-hub -f
 | DELETE | `/api/v1/middleware/templates/{id}` | 删除采集项模板 |
 | GET | `/api/v1/middleware/templates/presets` | 内置模板预设（RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper / Nacos） |
 | POST | `/api/v1/logs` | 集中日志上行（Agent → Server，走 `X-Agent-Secret`，非浏览器接口） |
+| GET | `/api/v1/logs?from&to&q\|regex&nodes&sources&limit&cursor` | 集中日志检索（`logs:read` + 节点分组范围；游标翻页，命中上限时返回 `truncated`） |
 
 ### 智能分析
 

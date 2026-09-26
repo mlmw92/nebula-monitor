@@ -205,6 +205,8 @@ func PermissionCatalog() []permDomain {
 		{Domain: "数据导出", Items: []Permission{{"metrics:export", "导出指标"}}},
 		{Domain: "中间件", Items: []Permission{{"middleware:read", "查看"}, {"middleware:write", "管理"}}},
 		{Domain: "安全中心", Items: []Permission{{"security:read", "查看"}, {"security:write", "操作"}, {"agent:secret:read", "查看 Agent 密钥"}}},
+		// 日志内容可能含密码/个人信息/业务数据，因此单独设权限点：不默认给只读角色，按需授予
+		{Domain: "集中日志", Items: []Permission{{"logs:read", "查看集中日志"}}},
 		{Domain: "Agent", Items: []Permission{{"agent:read", "查看"}, {"agent:upgrade", "升级"}}},
 		{Domain: "系统", Items: []Permission{
 			{"system:upgrade", "系统升级"},
@@ -245,6 +247,9 @@ func BuiltinRoles() []Role {
 			Permissions: []string{
 				"dashboard:read", "dashboard:write", "nodes:read", "nodes:write", "groups:read", "groups:write",
 				"middleware:read", "middleware:write", "probe:read", "probe:write",
+				// 集中日志（C2）：运维是排查问题的人，默认给全局运维角色；
+				// 刻意不给只读/告警/安全/审计角色——日志内容可能含敏感数据，按需单独授予。
+				"logs:read",
 				"report:read", "report:export", "metrics:export", "agent:read", "agent:upgrade",
 				"alerts:read", "roles:read", "system:config",
 			},

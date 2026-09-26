@@ -137,17 +137,26 @@ func hmacSign(secret, data string) string {
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
 
-// 公开路径（无需登录 token）
-func isPublicPath(path string) bool {
+// isPublicPath 判断该请求是否无需登录 token。
+//
+// 参数是**请求**而不是路径，因为「Agent 上行」与「浏览器接口」可能共用同一路径：
+// `/api/v1/logs` 的 POST 是 Agent 上行（走 X-Agent-Secret），GET 是浏览器检索（走登录 + logs:read）。
+//
+// 这一点必须按方法区分：本函数为 true 时中间件**直接放行且不解析 token**，请求里没有 Principal，
+// 于是 permit 会因 p == nil 直接 401（浏览器永远查不了），依赖 Principal 的资源范围过滤也会静默失效。
+// 早期版本按「路径前缀」放行，正是踩了这个坑。
+func isPublicPath(r *http.Request) bool {
+	path := r.URL.Path
 	if path == "/" || strings.HasPrefix(path, "/assets/") {
 		return true
 	}
-	// 登录、Agent 上报与 Agent 日志上行（Agent 走 X-Agent-Secret 校验，不走登录 token）。
-	// 新增任何 Agent→Server 的上行接口都必须加到这里：漏掉的后果是「启用登录认证后该接口 401」，
+	// 登录接口，以及 Agent→Server 的上行接口（**仅 POST**：Agent 没有登录会话，走 X-Agent-Secret）。
+	// 新增任何 Agent 上行接口都要加到这里；漏加的后果是「启用登录认证后该接口 401」，
 	// 而本机直连测试通常没开登录认证，因此只在生产才暴露。
-	if strings.HasPrefix(path, "/api/v1/login") ||
-		strings.HasPrefix(path, "/api/v1/report") ||
-		strings.HasPrefix(path, "/api/v1/logs") {
+	if strings.HasPrefix(path, "/api/v1/login") {
+		return true
+	}
+	if r.Method == http.MethodPost && (path == "/api/v1/report" || path == "/api/v1/logs") {
 		return true
 	}
 	// Agent 安装脚本的接入鉴权预检（同样走 X-Agent-Secret，不受登录 token 影响）
@@ -174,7 +183,7 @@ func AuthMiddleware(next http.Handler, authCfg config.AuthConfig, authStore *aut
 			next.ServeHTTP(w, r)
 			return
 		}
-		if isPublicPath(r.URL.Path) {
+		if isPublicPath(r) {
 			next.ServeHTTP(w, r)
 			return
 		}

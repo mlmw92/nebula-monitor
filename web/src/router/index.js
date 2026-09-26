@@ -34,6 +34,8 @@ const routes = [
       { path: 'metrics/explore', name: 'metrics-explore', component: () => import('../components/metrics/MetricsExploreView.vue'), meta: { perm: 'nodes:read' } },
       { path: 'system/dashboards', name: 'system-dashboards', component: () => import('../components/dashboard/DashboardView.vue'), meta: { perm: 'dashboard:read' } },
       { path: 'security', name: 'security', component: () => import('../components/SecurityView.vue'), meta: { perm: 'security:read' } },
+      // 集中日志（C2）：读取需 logs:read（日志内容可能含敏感数据，故不并入 nodes:read）
+      { path: 'logs', name: 'logs', component: () => import('../components/LogsView.vue'), meta: { perm: 'logs:read' } },
       { path: 'audit', name: 'audit', component: () => import('../components/AuditView.vue'), meta: { perm: 'audit:read' } },
       { path: 'system/users', name: 'system-users', component: () => import('../components/rbac/UsersView.vue'), meta: { perm: 'users:manage' } },
       { path: 'system/roles', name: 'system-roles', component: () => import('../components/rbac/RolesView.vue'), meta: { perm: 'roles:read' } },

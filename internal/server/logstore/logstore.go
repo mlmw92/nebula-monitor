@@ -36,6 +36,9 @@ var nodeFilePattern = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 type Store struct {
 	root      string
 	maxPerDay int64
+	// 检索的扫描预算（见 query.go）——一次查询的代价必须有上限
+	scanBudgetBytes int64
+	scanBudgetLines int64
 
 	mu sync.Mutex
 	// written 记录 (source|date) 已写入字节数。首次触及时从现有文件大小重建，
@@ -51,7 +54,28 @@ func New(root string, maxBytesPerDay int64) *Store {
 	if maxBytesPerDay <= 0 {
 		maxBytesPerDay = DefaultMaxBytesPerDay
 	}
-	return &Store{root: root, maxPerDay: maxBytesPerDay, written: map[string]int64{}}
+	return &Store{
+		root:            root,
+		maxPerDay:       maxBytesPerDay,
+		scanBudgetBytes: DefaultScanBudgetBytes,
+		scanBudgetLines: DefaultScanBudgetLines,
+		written:         map[string]int64{},
+	}
+}
+
+// budgetBytes / budgetLines 返回扫描预算（构造与 SetScanBudget 都会保证非零，这里只是防御）。
+func (s *Store) budgetBytes() int64 {
+	if s.scanBudgetBytes <= 0 {
+		return DefaultScanBudgetBytes
+	}
+	return s.scanBudgetBytes
+}
+
+func (s *Store) budgetLines() int64 {
+	if s.scanBudgetLines <= 0 {
+		return DefaultScanBudgetLines
+	}
+	return s.scanBudgetLines
 }
 
 // Root 返回存储根目录（检索侧按同样布局定位文件）。
@@ -104,7 +128,7 @@ func (s *Store) Append(b model.LogBatch) (accepted, dropped int, reason string, 
 			dropped = len(b.Lines) - accepted
 			return accepted, dropped, "dailyCap", nil
 		}
-		rec := record{
+		rec := model.LogHit{
 			Ts:      clampTS(line.Ts),
 			Node:    b.Node,
 			Source:  b.Source,
@@ -126,14 +150,8 @@ func (s *Store) Append(b model.LogBatch) (accepted, dropped int, reason string, 
 	return accepted, dropped, "", nil
 }
 
-// record 是落盘的一行（自带 ts/node/source，检索时无需依赖文件名与目录即可判断）。
-type record struct {
-	Ts      int64  `json:"ts"`
-	Node    string `json:"node"`
-	Source  string `json:"source"`
-	Pattern string `json:"pattern,omitempty"`
-	Text    string `json:"text"`
-}
+// 落盘的一行直接就是 model.LogHit：存储格式与检索返回的形状一致，
+// 于是「磁盘上的东西」与「接口返回的东西」不会漂移（少一层映射就少一处不一致）。
 
 // sanitizeNodeName 把节点名净化成安全文件名：不留任何路径分隔符或特殊字符。
 func sanitizeNodeName(node string) string {

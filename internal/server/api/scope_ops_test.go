@@ -62,6 +62,7 @@ func TestRoutes_BatchE_PermissionPoints(t *testing.T) {
 		// C1 阶段二：采集项模板的读写权限点不可互相顶替
 		{"模板列表需 middleware:read", http.MethodGet, "/api/v1/middleware/templates", "alerts:read"},
 		{"模板预设需 middleware:read", http.MethodGet, "/api/v1/middleware/templates/presets", "alerts:read"},
+		{"日志检索需 logs:read", http.MethodGet, "/api/v1/logs?q=x", "alerts:read"},
 		{"模板新建需 middleware:write", http.MethodPost, "/api/v1/middleware/templates", "middleware:read"},
 		{"模板校验需 middleware:write", http.MethodPost, "/api/v1/middleware/templates/validate", "middleware:read"},
 		{"模板更新需 middleware:write", http.MethodPut, "/api/v1/middleware/templates/rabbitmq", "middleware:read"},
