@@ -1,0 +1,346 @@
+# 权限矩阵设计（路由 → 权限点 → 资源范围）
+
+> 本文为 B1 改造的设计件（不含代码改动），用于评审后再进入实施。
+> 事实基线：VERSION 1.23.7；路由清点自 `internal/server/api/query.go` 的 `RegisterRoutes`（121 条）加 `ws.go`（1）、`spa.go`（1）、`cmd/server/main.go`（1）、`internal/server/agentdist/agentdist.go`（2），合计 **126 条**。
+
+---
+
+## 1. 目标
+
+1. **授权缺陷修复**：业务接口在服务端按「权限点 + 资源范围」强制校验，前端隐藏仅作体验（OWASP A01）。
+2. **不改协议**：仅增加服务端校验，不改变请求/响应结构与既有路由路径。
+3. **可分批上线**：每批可独立发布、独立回滚，且不存在「升级即锁死」的中间态。
+4. **单一事实来源**：权限点与 `GET /api/v1/permissions/catalog` 同源（`auth.PermissionCatalog()`），不新增第二套定义。
+
+## 2. 现状
+
+| 项 | 现状 |
+|---|---|
+| 认证 | `api.AuthMiddleware`（`internal/server/api/auth.go:161`）包裹整个 mux；`auth.enabled=false` 时全放行 |
+| 凭据来源 | `Authorization: Bearer <token>`，为空时回退到 **HttpOnly Cookie `nebula_token`**（登录时由 `handleLogin` 种下，`auth.go:282`） |
+| 公开白名单 | `isPublicPath`（`auth.go:141`）：`/`、`/assets/*`、`/api/v1/login`、`/api/v1/report`、`/api/v1/agent/check`、`/install/*`、`/bin/*`；另有 `GET /api/v1/ui/settings` 匿名只读（`auth.go:172`） |
+| 授权 | `api.authz(next, perm)`（`auth.go:226`）当前仅用于 **14 条** 权限管理路由（`users:manage` 8 条、`roles:manage` 3 条、`roles:read` 3 条） |
+| 权限点目录 | `auth.PermissionCatalog()`（`internal/server/auth/model.go:195`），**27 个**权限点 / 13 个域 |
+| 高风险权限点 | `auth.HighRiskPermissions`（`internal/server/auth/policy.go:71`），**8 个**：`system:upgrade`、`agent:secret:read`、`agent:upgrade`、`security:write`、`notify:write`、`users:manage`、`roles:manage`、`audit:export` |
+| 资源范围工具 | `auth.FilterGroups`（列表过滤）、`auth.FilterByGroup[T]`（泛型项过滤）、`auth.CheckBatchGroups`（写操作批量校验）、`Principal.CanAccessGroup`（单条校验） |
+| 范围语义 | `Scope.Mode` 为 `global` 或 `restricted`；`restricted` 且分组为空 = **无资源权限**（不放大为全部） |
+
+**结论**：认证已到位，缺口在**授权**——除权限管理接口外，节点升级、Agent 密钥、入侵防御、通知、系统升级、数据导出等 110 条路由仅要求「已登录」。
+
+## 3. 权限点目录
+
+### 3.1 现有（27 个，不可重命名）
+
+| 域 | 权限点 |
+|---|---|
+| 仪表盘 | `dashboard:read` |
+| 主机 / 节点 | `nodes:read`、`nodes:write` |
+| 节点分组 | `groups:read`、`groups:write` |
+| 告警 | `alerts:read`、`alerts:write` |
+| 通知 | `notify:read`、`notify:write` |
+| 静默 / 维护 | `silence:read`、`silence:write` |
+| 拨测 | `probe:read`、`probe:write` |
+| 报告 | `report:read`、`report:export` |
+| 数据导出 | `metrics:export` |
+| 中间件 | `middleware:read`、`middleware:write` |
+| 安全中心 | `security:read`、`security:write`、`agent:secret:read` |
+| Agent | `agent:read`、`agent:upgrade` |
+| 系统 | `system:upgrade`、`audit:read`、`audit:export`、`users:manage`、`roles:manage`、`roles:read` |
+
+### 3.2 建议新增（2 个）
+
+| 权限点 | 说明 | 理由 |
+|---|---|---|
+| `dashboard:write` | 管理自定义仪表盘 | 现目录仅有 `dashboard:read`；若允许多用户编辑看板，`dashboard:read` 会把「查看」与「增删改」绑成同一权限，违反最小权限 |
+| `system:config` | 系统配置（IP 地理库、数据大屏配置、品牌配置） | 现目录中系统级配置无对应权限点；若复用 `system:upgrade`，会把「上传地理库」与「升级 Server 二进制」绑成同一权限，且 `system:upgrade` 已列入高风险 |
+
+> 新增权限点必须同步两处，否则**超级管理员也拿不到该权限**：
+> ① `auth.PermissionCatalog()`；② `auth.BuiltinRoles()` 中对应内置角色（至少超级管理员、运维管理员）。
+> 这是批次 A 的第一个检查项。
+
+## 4. 路由 → 权限点 → 资源范围
+
+约定：
+- **范围** 列 `分组` 表示需按节点分组过滤/校验；`节点` 表示需按单节点归属分组校验；`—` 表示不涉及范围。
+- 「权限点」列 `—` 表示登录即可访问，不增加校验。
+
+### 4.1 公开接口（6 条，不动）
+
+| 方法 | 路径 | 权限点 | 范围 |
+|---|---|---|---|
+| POST | `/api/v1/login` | 公开 | — |
+| POST | `/api/v1/report` | 公开（`X-Agent-Secret`） | — |
+| GET | `/api/v1/agent/check` | 公开（`X-Agent-Secret`） | — |
+| GET | `/install/agent-install.sh` | 公开 | — |
+| GET | `/bin/` | 公开 | — |
+| GET | `/` | 公开（SPA） | — |
+
+### 4.2 主机与节点（11 条）
+
+| 方法 | 路径 | 权限点 | 范围 |
+|---|---|---|---|
+| GET | `/api/v1/nodes` | `nodes:read` | 分组 |
+| GET | `/api/v1/nodes/latest` | `nodes:read` | 分组 |
+| GET | `/api/v1/nodes/{name}` | `nodes:read` | 节点 |
+| DELETE | `/api/v1/nodes/{name}` | `nodes:write` | 节点 |
+| PUT | `/api/v1/nodes/{name}/group` | `nodes:write` | 节点 |
+| PUT | `/api/v1/nodes/{name}/display-name` | `nodes:write` | 节点 |
+| POST | `/api/v1/nodes/{name}/upgrade` | `agent:upgrade`（高风险） | 节点 |
+| POST | `/api/v1/nodes/upgrade` | `agent:upgrade`（高风险） | 分组（`CheckBatchGroups`） |
+| GET | `/api/v1/groups` | `groups:read` | 分组 |
+| POST | `/api/v1/groups` | `groups:write` | — |
+| DELETE | `/api/v1/groups/{name}` | `groups:write` | 分组 |
+
+### 4.3 指标查询与浏览（9 条）
+
+| 方法 | 路径 | 权限点 | 范围 |
+|---|---|---|---|
+| GET | `/api/v1/query/range` | `nodes:read` | 节点 |
+| GET | `/api/v1/query/latest` | `nodes:read` | 节点 |
+| GET | `/api/v1/processes` | `nodes:read` | 节点 |
+| GET | `/api/v1/query/listeners` | `nodes:read` | 节点 |
+| GET | `/api/v1/query/firewall` | `nodes:read` | 节点 |
+| GET | `/api/v1/query/firewall/status` | `nodes:read` | 节点 |
+| GET | `/api/v1/metrics/catalog` | `nodes:read` | — |
+| GET | `/api/v1/metrics/active` | `nodes:read` | 分组 |
+| GET | `/api/v1/metrics/export` | `metrics:export` | 节点 |
+
+### 4.4 中间件监控（13 条）
+
+> 实例的可见性由其**所属节点**的分组决定；`overview` 的计数需在过滤后重新聚合，否则会泄露不可见分组的实例数量。
+
+| 方法 | 路径 | 权限点 | 范围 |
+|---|---|---|---|
+| GET | `/api/v1/middleware/overview` | `middleware:read` | 分组（过滤后聚合） |
+| GET | `/api/v1/middleware/redis/instances` | `middleware:read` | 分组 |
+| GET | `/api/v1/middleware/mysql/instances` | `middleware:read` | 分组 |
+| GET | `/api/v1/middleware/postgres/instances` | `middleware:read` | 分组 |
+| GET | `/api/v1/middleware/nginx/instances` | `middleware:read` | 分组 |
+| GET | `/api/v1/middleware/kafka/instances` | `middleware:read` | 分组 |
+| GET | `/api/v1/middleware/docker/containers` | `middleware:read` | 分组 |
+| GET | `/api/v1/middleware/rocketmq/instances` | `middleware:read` | 分组 |
+| GET | `/api/v1/middleware/k8s/instances` | `middleware:read` | 分组 |
+| GET | `/api/v1/middleware/mongodb/instances` | `middleware:read` | 分组 |
+| GET | `/api/v1/middleware/fastdfs/instances` | `middleware:read` | 分组 |
+| GET | `/api/v1/middleware/nginx/access/summary` | `middleware:read` | 分组 |
+| GET | `/api/v1/middleware/nginx/access/geo` | `middleware:read` | 分组 |
+
+> `middleware:write` 当前**无对应路由**（中间件采集配置在 `agent.yaml` 侧维护），保留为预留权限点。
+
+### 4.5 智能分析（2 条）
+
+| 方法 | 路径 | 权限点 | 范围 |
+|---|---|---|---|
+| GET | `/api/v1/analysis/summary` | `nodes:read` | 分组 |
+| GET | `/api/v1/analysis/hosts/{name}` | `nodes:read` | 节点 |
+
+### 4.6 告警（26 条）
+
+> 规则类资源当前为**全局配置**（不设范围）；若后续规则支持绑定分组，需补充分组维度过滤。
+
+| 方法 | 路径 | 权限点 | 范围 |
+|---|---|---|---|
+| GET | `/api/v1/alerts` | `alerts:read` | 分组 |
+| GET | `/api/v1/alerts/stats` | `alerts:read` | 分组 |
+| GET | `/api/v1/alerts/acks` | `alerts:read` | 分组 |
+| POST | `/api/v1/alerts/ack` | `alerts:write` | 分组 |
+| POST | `/api/v1/alerts/test` | `alerts:write` | — |
+| GET | `/api/v1/rules` | `alerts:read` | — |
+| POST | `/api/v1/rules` | `alerts:write` | — |
+| PUT | `/api/v1/rules/{id}` | `alerts:write` | — |
+| DELETE | `/api/v1/rules/{id}` | `alerts:write` | — |
+| POST | `/api/v1/rules/{id}/toggle` | `alerts:write` | — |
+| POST | `/api/v1/rules/{id}/toggle-silence` | `silence:write` | — |
+| GET | `/api/v1/rules/export` | `alerts:read` | — |
+| POST | `/api/v1/rules/import` | `alerts:write` | — |
+| GET | `/api/v1/rules/templates` | `alerts:read` | — |
+| GET | `/api/v1/inhibit` | `alerts:read` | — |
+| PUT | `/api/v1/inhibit` | `alerts:write` | — |
+| GET | `/api/v1/grouping` | `alerts:read` | — |
+| PUT | `/api/v1/grouping` | `alerts:write` | — |
+| GET | `/api/v1/alert-pipeline` | `alerts:read` | — |
+| PUT | `/api/v1/alert-pipeline` | `alerts:write` | — |
+| POST | `/api/v1/alert-pipeline/preview` | `alerts:read` | — |
+| GET | `/api/v1/maintenance` | `silence:read` | — |
+| PUT | `/api/v1/maintenance` | `silence:write` | — |
+| GET | `/api/v1/notify` | `notify:read` | — |
+| PUT | `/api/v1/notify` | `notify:write`（高风险） | — |
+| POST | `/api/v1/notify/test` | `notify:write` | — |
+
+### 4.7 安全中心与审计（9 条）
+
+| 方法 | 路径 | 权限点 | 范围 |
+|---|---|---|---|
+| GET | `/api/v1/security/summary` | `security:read` | 分组 |
+| GET | `/api/v1/security/events` | `security:read` | 分组 |
+| GET | `/api/v1/security/baselines` | `security:read` | 分组 |
+| GET | `/api/v1/security/defense/status` | `security:read` | 分组 |
+| GET | `/api/v1/security/defense/status/{node}` | `security:read` | 节点 |
+| POST | `/api/v1/security/defense/{node}/{action}` | `security:write`（高风险） | 节点 |
+| GET | `/api/v1/security/defense/tasks` | `security:read` | 分组 |
+| GET | `/api/v1/security/defense/tasks/{node}` | `security:read` | 节点 |
+| GET | `/api/v1/audit/events` | `audit:read`（携带导出参数时 `audit:export`，高风险） | — |
+
+### 4.8 拨测与巡检报告（8 条）
+
+| 方法 | 路径 | 权限点 | 范围 |
+|---|---|---|---|
+| GET | `/api/v1/dialtest/tasks` | `probe:read` | — |
+| POST | `/api/v1/dialtest/tasks` | `probe:write` | — |
+| PUT | `/api/v1/dialtest/tasks/{id}` | `probe:write` | — |
+| DELETE | `/api/v1/dialtest/tasks/{id}` | `probe:write` | — |
+| GET | `/api/v1/dialtest/latest` | `probe:read` | — |
+| POST | `/api/v1/report/generate` | `report:export` | 分组 |
+| GET | `/api/v1/report/download` | `report:export` | 分组 |
+| GET | `/api/v1/report/history` | `report:read` | 分组 |
+
+### 4.9 升级、配置与展示（22 条）
+
+| 方法 | 路径 | 权限点 | 范围 |
+|---|---|---|---|
+| GET | `/api/v1/version` | — | — |
+| GET | `/api/v1/install-info` | `agent:secret:read`（高风险） | — |
+| GET | `/api/v1/proxy/status` | `agent:read` | — |
+| POST | `/api/v1/system/upgrade/upload` | `system:upgrade`（高风险） | — |
+| GET | `/api/v1/system/upgrade/current` | `system:upgrade`（高风险） | — |
+| POST | `/api/v1/system/upgrade/apply` | `system:upgrade`（高风险） | — |
+| GET | `/api/v1/system/upgrade/history` | `system:upgrade`（高风险） | — |
+| GET | `/api/v1/system/upgrade/archive` | `system:upgrade`（高风险） | — |
+| POST | `/api/v1/system/upgrade/rollback-to` | `system:upgrade`（高风险） | — |
+| GET | `/api/v1/system/geoip` | `system:config`（新增） | — |
+| POST | `/api/v1/system/geoip/upload` | `system:config`（新增） | — |
+| POST | `/api/v1/system/geoip/reset` | `system:config`（新增） | — |
+| GET | `/api/v1/system/geoip/test` | `system:config`（新增） | — |
+| GET | `/api/v1/ui/settings` | 公开（匿名只读） | — |
+| PUT | `/api/v1/ui/settings` | `system:config`（新增） | — |
+| GET | `/api/v1/screen/config` | `system:config`（新增） | — |
+| PUT | `/api/v1/screen/config` | `system:config`（新增） | — |
+| GET | `/api/v1/dashboards` | `dashboard:read` | — |
+| POST | `/api/v1/dashboards` | `dashboard:write`（新增） | — |
+| GET | `/api/v1/dashboards/{id}` | `dashboard:read` | — |
+| PUT | `/api/v1/dashboards/{id}` | `dashboard:write`（新增） | — |
+| DELETE | `/api/v1/dashboards/{id}` | `dashboard:write`（新增） | — |
+
+### 4.10 认证与权限（19 条）
+
+| 方法 | 路径 | 权限点 | 范围 |
+|---|---|---|---|
+| POST | `/api/v1/logout` | —（自身） | — |
+| GET | `/api/v1/auth-info` | — | — |
+| POST | `/api/v1/auth/change-password` | —（自身） | — |
+| GET | `/api/v1/auth/me` | —（自身） | — |
+| PUT | `/api/v1/auth/me` | —（自身） | — |
+| GET | `/api/v1/users` | `users:manage`（高风险，**已生效**） | — |
+| POST | `/api/v1/users` | `users:manage` | — |
+| GET | `/api/v1/users/{username}` | `users:manage` | — |
+| PUT | `/api/v1/users/{username}` | `users:manage` | — |
+| DELETE | `/api/v1/users/{username}` | `users:manage` | — |
+| POST | `/api/v1/users/{username}/reset-password` | `users:manage` | — |
+| POST | `/api/v1/users/{username}/disable` | `users:manage` | — |
+| POST | `/api/v1/users/{username}/enable` | `users:manage` | — |
+| GET | `/api/v1/roles` | `roles:read`（**已生效**） | — |
+| POST | `/api/v1/roles` | `roles:manage`（**已生效**） | — |
+| GET | `/api/v1/roles/{name}` | `roles:read` | — |
+| PUT | `/api/v1/roles/{name}` | `roles:manage` | — |
+| DELETE | `/api/v1/roles/{name}` | `roles:manage` | — |
+| GET | `/api/v1/permissions/catalog` | `roles:read` | — |
+
+### 4.11 WebSocket（2 条用法 / 1 条路由）
+
+| 方法 | 路径 | 权限点 | 范围 |
+|---|---|---|---|
+| GET | `/ws?topic=metrics&node=` | `nodes:read` | 节点（**当前缺失**，见 8.2） |
+| GET | `/ws?topic=alerts` | `alerts:read` | 分组（**当前缺失**） |
+
+## 5. 兼容策略（实施前必须逐条确认，否则升级即锁死）
+
+| # | 场景 | 处理 |
+|---|---|---|
+| 1 | `auth.enabled=false` | 全放行，行为与旧版一致（`AuthMiddleware` 已实现，勿改） |
+| 2 | 启用认证但 `users.yaml` 缺失、由 `server.yaml` 的 `auth.username/password` 迁移 | `MigrateSingleAdmin` 生成的账号按**超级管理员**处理，拥有全部权限点 |
+| 3 | `Principal(r) == nil`（未登录） | 403，但公开白名单不受影响 |
+| 4 | 新增权限点后，已有自定义角色 | 不自动授予（保持既有权限集合），需管理员显式勾选 |
+| 5 | 新增权限点后，**内置角色** | 必须在 `auth.BuiltinRoles()` 同步补齐（至少超级管理员、运维管理员），否则新权限无角色可用 |
+| 6 | 旧版 `users.yaml` 中不存在的权限点 key | `AllPermissionKeys` 校验时忽略，不影响登录 |
+| 7 | WebSocket | 保持走 Cookie 兜底（已在 `AuthMiddleware` 实现），不得加入公开白名单 |
+
+## 6. 资源范围策略
+
+| 资源形态 | 工具 | 说明 |
+|---|---|---|
+| 节点列表 / 主机列表 | `auth.FilterByGroup[T]` | `groupOf` 取节点所属分组 |
+| 单节点详情 / 单节点操作 | `Principal.CanAccessGroup(group)` | 不允许时返回 403（不是 404，避免掩盖资源存在性） |
+| 批量节点操作（批量升级） | `auth.CheckBatchGroups` | 返回被拒分组列表，整体拒绝并回报 |
+| 中间件实例 | `auth.FilterByGroup[T]` | 先由实例名解析所属节点，再取分组 |
+| 概览类聚合计数 | 过滤后再聚合 | 否则泄露不可见分组的实例数 |
+| 分组列表本身 | `auth.FilterGroups` | 受限用户只看到自己范围内的分组 |
+| 统一原则 | — | 各 handler **不得自行实现**范围判断，一律调用 `auth` 包工具（`internal/server/auth/policy.go`） |
+
+## 7. 分批实施顺序
+
+| 批次 | 范围 | 路由数 | 前置 |
+|---|---|---|---|
+| **A｜基础设施** | 新增 `dashboard:write`、`system:config` 两个权限点并补齐内置角色；新增 `requirePerm(next, perm)` 统一包装（含 403 响应体与 `RecordPermissionDenied` 审计）；补单元测试骨架 | 0 | 无 |
+| **B｜主机与指标** | `nodes/*`、`groups/*`、`query/*`、`processes`、`metrics/*`、`analysis/*` + **`/ws` topic 授权与范围校验** | 23 | A |
+| **C｜中间件** | `middleware/*` 全部 13 条 + 概览聚合口径修正 | 13 | A |
+| **D｜告警与通知** | `alerts/*`、`rules/*`、`inhibit`、`grouping`、`alert-pipeline`、`maintenance`、`notify` | 26 | A |
+| **E｜安全、系统与其余** | `security/*`、`audit/*`、`system/*`、`ui/*`、`screen/*`、`dashboards/*`、`install-info`、`proxy/status`、`dialtest/*`、`report/*` | 37 | A |
+
+每批交付物：
+1. 路由挂载 `requirePerm`（已有 `authz` 的 16 条保持不动）；
+2. 「无权限 → 403」单测（逐路由表驱动）；
+3. 「越范围 → 过滤 / 403」单测（至少覆盖列表类与单节点类各一条）；
+4. `auth.enabled=false` 回归（全部 200）；
+5. 前端 `meta.perm` 与菜单 `perm` 同步（避免用户看不到菜单却能调接口）。
+
+## 8. 开放问题与风险
+
+### 8.1 `globalAuthStore` 包级单例
+`internal/server/api/auth.go:217` 的 `globalAuthStore` 与 `SetAuthStore` 是包级单例，测试之间会互相污染，且与 **A1（Server 高可用）** 议题直接冲突（多实例下 Principal 解析依赖实例内状态）。建议在批次 A 一并改造为显式注入（`API` 结构体字段），该改动同时降低 A1 的实施成本。
+
+### 8.2 WebSocket 授权缺口（当前已存在）
+`/ws` 已通过 Cookie 兜底完成**认证**，但**没有 topic 级授权与范围校验**：任何已登录用户都能 `GET /ws?topic=metrics&node=<任意节点>` 订阅任意节点实时指标，绕过节点分组资源范围。批次 B 需补：`topic` 合法性校验 + `nodes:read`/`alerts:read` + 节点归属分组校验。
+
+### 8.3 同一路由承载「查看」与「导出」
+- `GET /api/v1/audit/events`：带导出参数时语义为导出（`audit:export`，高风险）。
+- `GET /api/v1/report/download`、`GET /api/v1/metrics/export`：GET 但语义为导出。
+需在批次 A 明确约定：**按参数在 handler 内二次判断权限**，或**拆分为独立路由**。倾向于后者（路由即契约，便于审计与测试），但会改变 API 面，需你确认。
+
+### 8.4 方法 ≠ 权限等级
+`POST /api/v1/alert-pipeline/preview` 为只读试算，权限点为 `alerts:read`；`POST /api/v1/notify/test` 会对外发信，权限点为 `notify:write`（高风险）。映射表以**语义**而非 HTTP 方法为准，实施时不要机械按方法推导。
+
+### 8.5 大屏与品牌配置的可见性
+本设计将 `GET /api/v1/screen/config` 归入 `system:config`（配置类）。若希望普通登录用户也能读取大屏配置，可降为 `dashboard:read`；`GET /api/v1/ui/settings` 已由白名单匿名可读，保持不变。
+
+### 8.6 前端守卫覆盖面
+`web/src/router/index.js` 目前仅 `system/users`、`system/roles` 两条路由带 `meta.perm`。随各批次上线需同步补齐，否则出现「菜单可见、点击 403」的体验问题。
+
+### 8.7 不影响面
+`/api/v1/report`、`/api/v1/agent/check`、`/install/*`、`/bin/*` 面向 Agent，走 `X-Agent-Secret`，不纳入本次授权改造。
+
+## 9. 验收标准
+
+| 项 | 标准 |
+|---|---|
+| 功能 | 表中每条非公开、非「自身」路由：无权限 → 403；有权限 → 200；越范围 → 过滤后返回或 403 |
+| 兼容 | `auth.enabled=false` 时全部路由 200，与改造前逐条一致 |
+| 兼容 | 单管理员迁移场景下全部路由 200 |
+| 测试 | `go test ./internal/server/api/... ./internal/server/auth/...` 全绿；新增测试覆盖率：表内路由 100% 有对应用例 |
+| 审计 | 403 均产生权限拒绝审计记录（复用 `RecordPermissionDenied`） |
+| 前端 | 各批同步补齐 `meta.perm`，无「可见但 403」入口 |
+
+---
+
+## 附：统计
+
+| 项 | 数量 |
+|---|---|
+| 路由总数 | 126 |
+| 公开接口 | 7（`login`、`report`、`agent/check`、`install/*`、`bin/*`、`/`、`GET ui/settings`） |
+| 无需权限点（登录即可 / 自身资源） | 6（`version`、`auth-info`、`logout`、`auth/me` ×2、`change-password`） |
+| 已生效（现状 `authz`） | 14（`users:manage` 8 + `roles:manage` 3 + `roles:read` 3） |
+| **本次需新增校验** | **99** = 126 − 7 − 6 − 14 |
+| 新增权限点 | 2（`dashboard:write`、`system:config`） |
+| 高风险权限点 | 8（现状） |
+
+分批校验：23（B）+ 13（C）+ 26（D）+ 37（E）= 99 ✓

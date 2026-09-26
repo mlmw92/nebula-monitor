@@ -341,14 +341,14 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | D2 | | 5. 前端编辑页 + 预览 + 构建 | ✅ | — | 「系统设置 → 告警管道」标签页；三阶段表格编辑 + 试算预览 + 配置直编；`npm run build` 通过 |
 | D2 | | 6. TDD（含校验失败路径） | ✅ | 1.23.9 | 8 个管道单测（含空管道回归等价） |
 | D2 | | 7. `AlertEvent` 标签视图（`Labels` 字段） | ✅ | — | 由事件字段派生 + 事件自有标签，与分组键命名一致 |
-| F2 | 文档一致性 | 1. README 8 类 → 十类 | ⬜ | — | README:89 |
-| F2 | | 2. vite.config / release.sh 注释修正 | ⬜ | — | embed 表述 |
-| F2 | | 3. 路线图移除已实现的 RBAC 前端页 | ⬜ | — | 并补章节入口 |
-| F2 | | 4. API 表全量补齐 | ⬜ | — | ~90+ 条 |
-| F2 | | 5. Makefile build-web 复用脚本 | ⬜ | — | — |
-| F2 | | 6. 措辞治理（面向终端用户） | ⬜ | 1.23.9 | — |
-| B1 | 权限映射表设计件 | 1. 路由 → 权限点映射表 | ⬜ | — | 落 `docs/permission-matrix.md` |
-| B1 | | 2. 兼容策略与分批顺序 | ⬜ | — | 批次二输入 |
+| F2 | 文档一致性 | 1. README 8 类 → 十类 | ✅ | — | README:89 |
+| F2 | | 2. vite.config / release.sh 注释修正 | ✅ | — | 三处 embed 表述；保留保守重建行为并注明历史遗留 |
+| F2 | | 3. 路线图移除已实现的 RBAC 前端页 | ✅ | — | 从路线图移除；新增「权限管理界面」小节说明入口与权限 |
+| F2 | | 4. API 表全量补齐 | ✅ | — | 44 行 → 127 行（126 条路由，`/ws` 按两种 topic 分列）；双向差集为空 |
+| F2 | | 5. Makefile build-web 复用脚本 | ✅ | — | 改为调用 `build/build-web.sh` |
+| F2 | | 6. 措辞治理（面向终端用户） | ✅ | 1.23.9 | 随改动章节中性化；高风险操作补注服务端校验实际覆盖范围 |
+| B1 | 权限映射设计件 | 1. 路由 → 权限点映射表 | ✅ | — | `docs/permission-matrix.md`：126 条逐条映射（双向差集为空） |
+| B1 | | 2. 兼容策略与分批顺序 | ✅ | — | 7 条兼容策略 + 5 批实施顺序 + 7 项开放问题；批次二输入 |
 
 ### 批次二 / 批次三（占位）
 
@@ -374,7 +374,10 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | 2026-09-26 | **E1 收尾验证完成**（Ubuntu 24.04 / Go 1.27.1 / 2C2G 实机）：① `CGO_ENABLED=1 go test -race -count=1 ./internal/agent/...` 全绿无竞态；② 新旧 Agent 同节点各跑一轮真实采集，结构比对 IDENTICAL（78 指标/66 签名、43 监听、93 安全事件、9 类实例结构全一致）。**E1 完成，可发布 1.23.8** |
 | 2026-09-26 | 新增 `build/verify-agent-parity.sh`：把上述对照验证环境固化为可复用脚本（远端辅助文件由脚本自身生成，含假 exporter / 假 Redis / 上报捕获 / 结构比对），任何 Agent 采集改动均可一键回归。用法 `bash build/verify-agent-parity.sh --baseline <ref> [--race] [--install-go] [--keep]`。实测通过 |
 | 2026-09-26 | **D2 后端完成**：`alert/pipeline.go`（relabel/enrich/template + `PipelineStore` 热加载）、`AlertEvent` 新增标签视图 `Labels`、引擎 `notify`/`flushGroup` 双派发点接入、三个 API（GET/PUT/preview）。8 个管道单测通过 |
-| 2026-09-26 | **D2 前端完成**：`settings/AlertPipelineSubView.vue`（三阶段表格编辑 + when 简写 + 试算预览 + 配置直编）、SettingsView 注册标签页、http.js 三个方法；接口错误响应 JSON 化（前端可展示校验文案）。另补 6 个 API 冒烟测试。`npm run build` 通过。**D2 全部完成；批次一剩 F2、B1** |
+| 2026-09-26 | **D2 前端完成**：`settings/AlertPipelineSubView.vue`（三阶段表格编辑 + when 简写 + 试算预览 + 配置直编）、SettingsView 注册标签页、http.js 三个方法；接口错误响应 JSON 化（前端可展示校验文案）。另补 6 个 API 冒烟测试。`npm run build` 通过 |
+| 2026-09-26 | **直编改 YAML**：引入 `js-yaml`（v4 具名导入），直编面板改为与服务端落盘同格式的 YAML，新增语法检查与类型规整（`str/toArray/asArray/whenOrNull`）。`npm run build` 通过 |
+| 2026-09-26 | **F2 完成**：README 统一「十类」、路线图移除已实现的 RBAC 前端页并新增「权限管理界面」小节、API 章节按代码重写（44 行 → 127 行，修正 `docker/containers` 错路径，双向差集为空）；`vite.config.js` / `release.sh` 三处 embed 表述修正；Makefile `build-web` 改为调用 `build/build-web.sh` |
+| 2026-09-26 | **B1 完成**：产出 `docs/permission-matrix.md`（126 条路由逐条映射、7 条兼容策略、5 批实施顺序、7 项开放问题）；校正现状 authz 覆盖为 **14 条**（原记 16）；发现 `/ws` 存在 topic 级授权与范围校验缺口。**批次一全部完成** |
 
 ---
 
