@@ -22,6 +22,8 @@ const routes = [
       { path: 'hosts', name: 'hosts', component: () => import('../components/HostsView.vue'), meta: { perm: 'nodes:read' } },
       { path: 'node/:name', name: 'node', component: () => import('../components/NodeView.vue'), props: true, meta: { perm: 'nodes:read' } },
       { path: 'middleware', name: 'middleware', component: () => import('../components/MiddlewareView.vue'), meta: { perm: 'middleware:read' } },
+      // 采集项模板管理（读为 middleware:read；写操作由后端 middleware:write 校验，前端按钮同权限门控）
+      { path: 'templates', name: 'templates', component: () => import('../components/templates/TemplatesView.vue'), meta: { perm: 'middleware:read' } },
       { path: 'alerts', name: 'alerts', component: () => import('../components/AlertsView.vue'), meta: { perm: 'alerts:read' } },
       { path: 'intelligence', name: 'intelligence', component: () => import('../components/intelligence/IntelligenceView.vue'), meta: { perm: 'nodes:read' } },
       { path: 'dialtest', name: 'dialtest', component: () => import('../components/DialTestView.vue'), meta: { perm: 'probe:read' } },

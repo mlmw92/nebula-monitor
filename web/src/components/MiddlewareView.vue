@@ -4,8 +4,12 @@
     <div class="page-header">
       <div class="header-left">
         <h2 class="page-title">中间件监控</h2>
-        <p class="page-desc">Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes / MongoDB / FastDFS 实例监控与可视化</p>
+        <p class="page-desc">
+          Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes / MongoDB / FastDFS
+          实例监控与可视化，以及由「采集项模板」派生的自定义类型
+        </p>
       </div>
+      <el-button @click="$router.push('/templates')">采集项模板</el-button>
     </div>
 
     <!-- 中间件类型 Tab -->
@@ -90,13 +94,28 @@
         </template>
         <FastDFSTab v-if="activeTab === 'fastdfs'" />
       </el-tab-pane>
+      <!-- 采集项模板派生的类型：由 Server 侧类型注册表动态提供，无需为每类中间件写前端代码 -->
+      <el-tab-pane v-for="t in templateTypes" :key="t.type" :label="t.label" :name="t.type">
+        <template #label>
+          <span class="tab-label">
+            {{ t.label }}
+            <span
+              v-if="t.total === 0"
+              class="tab-hint-dot"
+              title="已配置该模板，但还没有采集到实例"
+            ></span>
+          </span>
+        </template>
+        <TemplateTab v-if="activeTab === t.type" :type="t.type" :label="t.label" />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, defineAsyncComponent, h } from 'vue'
+import { ref, watch, defineAsyncComponent, h, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
+import http from '../api/http'
 import './mw/mw.css'
 
 // 各中间件 Tab 改为异步组件，拆分为独立 chunk，避免进入中间件页面时
@@ -117,6 +136,8 @@ const RocketMQTab = tabLoader(() => import('./rocketmq/RocketMQTab.vue'))
 const K8sTab = tabLoader(() => import('./k8s/K8sTab.vue'))
 const MongoTab = tabLoader(() => import('./mongo/MongoTab.vue'))
 const FastDFSTab = tabLoader(() => import('./fastdfs/FastDFSTab.vue'))
+// 模板派生类型共用一个通用 Tab（实例表 + 摘要指标），因此新增一类中间件不必再写前端组件
+const TemplateTab = tabLoader(() => import('./mw/TemplateTab.vue'))
 import redisIcon from '../assets/img/redis.svg'
 import mysqlIcon from '../assets/img/mysql.svg'
 import postgresIcon from '../assets/img/postgresql.svg'
@@ -129,16 +150,35 @@ import k8sIcon from '../assets/img/kubernetes.svg'
 import fastdfsIcon from '../assets/img/fastdfs.svg'
 
 const route = useRoute()
-const validTabs = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s', 'mongodb', 'fastdfs']
-const activeTab = ref(validTabs.includes(route.query.tab) ? route.query.tab : 'redis')
+const BUILTIN_TABS = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s', 'mongodb', 'fastdfs']
+
+// 模板派生类型来自 Server 侧类型注册表（总览接口把 kind=template 的类型一并返回）
+const templateTypes = ref([])
+async function loadTemplateTypes() {
+  try {
+    const data = await http.get('/api/v1/middleware/overview')
+    templateTypes.value = (data.types || []).filter((t) => t.kind === 'template')
+  } catch (e) {
+    console.error('加载模板派生类型失败', e)
+  }
+}
+
+const validTabs = computed(() => BUILTIN_TABS.concat(templateTypes.value.map((t) => t.type)))
+const activeTab = ref(BUILTIN_TABS.includes(route.query.tab) ? route.query.tab : 'redis')
 
 // 支持从首页等外部链接通过 ?tab= 深链跳转到指定中间件
 watch(
   () => route.query.tab,
   (t) => {
-    if (validTabs.includes(t)) activeTab.value = t
+    if (validTabs.value.includes(t)) activeTab.value = t
   }
 )
+
+// 模板类型要等类型列表返回后才存在，因此加载完成后再解析一次深链
+onMounted(async () => {
+  await loadTemplateTypes()
+  if (route.query.tab && validTabs.value.includes(route.query.tab)) activeTab.value = route.query.tab
+})
 </script>
 
 <style scoped>
@@ -146,7 +186,18 @@ watch(
   padding: 4px 0 16px;
 }
 .page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   margin-bottom: 16px;
+}
+/* 模板类型暂无数据时的提示点（与 Tab 内的空状态文案配合） */
+.tab-hint-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning, #e6a23c);
+  display: inline-block;
 }
 .page-title {
   font-size: 22px;

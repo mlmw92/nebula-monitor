@@ -41,13 +41,32 @@ export function useScreenData() {
   }
 
   async function loadMiddleware() {
-    const results = await Promise.all(
-      MW_TYPES.map((t) =>
-        t === 'docker'
-          ? http.get('/api/v1/middleware/docker/containers').catch(() => ({ containers: [] }))
-          : http.get(`/api/v1/middleware/${t}/instances`).catch(() => ({ instances: [] }))
-      )
-    )
+    // 先取类型清单：内置 10 类之外还可能有「采集项模板」派生的类型（注册表动态提供），
+    // 它们走通用实例接口，形态与内置类型一致（instances[] 带 up/instance/node）
+    let templateTypes = []
+    try {
+      const ov = await http.get('/api/v1/middleware/overview')
+      templateTypes = (ov.types || []).filter((t) => t.kind === 'template')
+    } catch (e) {
+      // 大屏不因模板类型拉取失败整体失败
+    }
+
+    const [results, tplResults] = await Promise.all([
+      Promise.all(
+        MW_TYPES.map((t) =>
+          t === 'docker'
+            ? http.get('/api/v1/middleware/docker/containers').catch(() => ({ containers: [] }))
+            : http.get(`/api/v1/middleware/${t}/instances`).catch(() => ({ instances: [] }))
+        )
+      ),
+      Promise.all(
+        templateTypes.map((t) =>
+          http
+            .get(`/api/v1/middleware/${encodeURIComponent(t.type)}/instances`)
+            .catch(() => ({ instances: [] }))
+        )
+      ),
+    ])
     const list = []
     results.forEach((res, i) => {
       const type = MW_TYPES[i]
@@ -58,6 +77,17 @@ export function useScreenData() {
           name: it.name || it.container || it.ip || it.instance || '-',
           node: it.node || '-',
           status: it.up || it.online ? '在线' : '离线',
+        })
+      })
+    })
+    tplResults.forEach((res, i) => {
+      const t = templateTypes[i]
+      ;(res?.instances || []).forEach((it) => {
+        list.push({
+          type: t.label || t.type,
+          name: it.instance || '-',
+          node: it.node || '-',
+          status: it.up ? '在线' : '离线',
         })
       })
     })

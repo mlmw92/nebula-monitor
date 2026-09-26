@@ -245,7 +245,7 @@ const showAll = ref(false)
 const overviewTypes = computed(() =>
   (overview.value?.types || []).map((t, i) => ({ ...t, color: RING_COLORS[i % 8] }))
 )
-const activeLabel = computed(() => TYPE_LABELS[activeType.value] || activeType.value)
+const activeLabel = computed(() => labelOf(activeType.value))
 const visibleTypes = computed(() =>
   showAll.value ? overviewTypes.value : overviewTypes.value.filter((t) => t.total > 0)
 )
@@ -278,8 +278,23 @@ const scoreDash = computed(() => {
   return `${(C * healthScore.value) / 100} ${C}`
 })
 
+// 参数趋势图的指标：内置类型用固定清单；模板派生类型用模板声明的摘要指标
+// （来自总览接口的 summary，即模板 rules.metrics 中声明、可带 label/unit 的项）
 function metricsOf(type) {
-  return TYPE_METRICS[type] || []
+  if (TYPE_METRICS[type]) return TYPE_METRICS[type]
+  const t = (overview.value?.types || []).find((x) => x.type === type)
+  return (t?.summary || []).map((s) => ({
+    key: s.key,
+    label: s.unit ? `${s.label} ${s.unit}` : s.label,
+    mode: 'avg',
+  }))
+}
+
+// 模板派生类型的展示名取自总览接口（内置类型用固定简写，如 PG / MQ）
+function labelOf(type) {
+  if (TYPE_LABELS[type]) return TYPE_LABELS[type]
+  const t = (overview.value?.types || []).find((x) => x.type === type)
+  return t?.label || type
 }
 function onlineRate(t) {
   if (!t.total) return 0

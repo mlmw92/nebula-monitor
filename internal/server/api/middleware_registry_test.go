@@ -117,6 +117,7 @@ func TestMiddlewareOverview_IncludesTemplateType(t *testing.T) {
 		Types      []struct {
 			Type       string `json:"type"`
 			Label      string `json:"label"`
+			Kind       string `json:"kind"`
 			Total      int    `json:"total"`
 			Up         int    `json:"up"`
 			Down       int    `json:"down"`
@@ -144,6 +145,10 @@ func TestMiddlewareOverview_IncludesTemplateType(t *testing.T) {
 		found = true
 		if item.Label != "RabbitMQ" {
 			t.Errorf("展示名应取模板 title，got %q", item.Label)
+		}
+		// 前端据此区分「内置类型」与「模板派生类型」（模板类型走通用 Tab 组件）
+		if item.Kind != string(mwreg.KindTemplate) {
+			t.Errorf("kind 应为 %q，got %q", mwreg.KindTemplate, item.Kind)
 		}
 		if item.Total != 2 || item.Up != 1 || item.Down != 1 {
 			t.Errorf("实例统计不符：total=%d up=%d down=%d", item.Total, item.Up, item.Down)

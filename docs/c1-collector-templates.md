@@ -460,7 +460,7 @@ Collector.CollectAll(ctx)
 | A | Server 侧存储（CRUD + 校验 + 原子落盘 + revision）+ CRUD/校验 API + 权限门（`middleware:read` / `middleware:write`） | ✅ |
 | B | 下发与热生效（响应携带 + 分组过滤 + 能力/版本协商 + Agent 原子替换） | ✅ |
 | C | 注册化：模板 → 中间件类型（后端 5 处 + 前端 4 处收敛到一份运行时注册表） | ✅ 后端完成 |
-| D | 前端模板管理页（照 `DialTestView.vue` 形态）+ 中间件 Tab 动态化 + 「已配置但无数据」提示 | ⬜ |
+| D | 前端模板管理页 + 中间件 Tab 动态化 + 「已配置但无数据」提示 | ✅ |
 
 ### 13.1 子批次 B 的关键取舍
 
@@ -477,6 +477,23 @@ Collector.CollectAll(ctx)
    Server 会持续重发，配置修好后自动恢复——宁可暂时用旧配置，也不能因模板把采集打断。
 6. **首次接管时的替换是显式的**：Agent 日志明确提示「本机 agent.yaml 中的模板被 Server 下发替换」，
    避免运维困惑于「本地写的模板怎么不见了」。
+
+### 13.4 子批次 D：前端
+
+| 位置 | 改动 |
+|---|---|
+| `components/templates/TemplatesView.vue`（新） | 模板列表 + 新建/编辑弹窗 + 「校验」按钮（调 `/templates/validate`，把服务端精确原因列出来，避免「保存失败再猜」）。列表里直接显示**采集情况**（在线/失败数，或「已配置但无数据」标记） |
+| `components/mw/TemplateTab.vue`（新） | 模板派生类型的**通用** Tab：实例表（实例/节点/分组/采集状态 + 模板声明的摘要指标）。空状态给出排查方向（生效分组是否匹配、目标是否可达、Agent 是否已收到下发） |
+| `components/MiddlewareView.vue` | Tab 由 `/middleware/overview` 的 `kind=template` 类型动态追加；深链 `?tab=` 白名单随之动态化；头部加「采集项模板」入口；暂无数据的模板在 Tab 上打提示点 |
+| `components/OverviewView.vue` + `overview/MiddlewareOverview.vue` | 首页卡片追加模板派生类型（数据取自总览接口）；空状态文案可被覆盖——模板是「已配置但无数据」，与内置类型的「尚未配置」排查方向不同 |
+| `components/screen/*` | 大屏的类型清单本就来自总览接口（注册表一生效即自动出现）；补上模板类型的实例列表与参数趋势指标（用模板声明的摘要指标） |
+| `Sidebar.vue` / `router` / `MainLayout.vue` | 新增「采集项模板」菜单与路由（读 `middleware:read`，写按钮另受 `middleware:write` 门控） |
+
+**写操作的表单取舍**：`rules` 规则较丰富（keep/drop/rename/labels/unlabel/metrics），弹窗里用 **JSON 文本域** + 服务端校验，
+而不是为每种规则做一套表单控件——结构化字段（id/title/kind/groups/targets）照常用表单，规则区保留完整表达力。
+
+**已知小项**：`/api/v1/groups` 需 `groups:read`，仅有 `middleware:read` 的用户打开模板页时分组下拉为空
+（可手动输入，`allow-create` 已开）；如需完全顺畅，可给这类账号一并授予 `groups:read`。
 
 ### 13.3 子批次 C：类型注册表（`internal/server/mwreg`）
 

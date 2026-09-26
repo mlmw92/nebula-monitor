@@ -53,6 +53,8 @@ import { ref, computed, onMounted, onBeforeUnmount, markRaw } from 'vue'
 import { RefreshRight, Monitor, Bell, Connection, FirstAidKit } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { middlewareTypes } from './overview/middlewareConfig'
+// 模板派生类型的通用图标（内置类型用各自的品牌图标）
+import templateIcon from '../assets/img/template.svg'
 import { formatMetric } from './overview/format'
 import { useOverviewLayout } from './overview/useOverviewLayout'
 import { calculateSystemHealth } from '../composables/healthScore'
@@ -100,6 +102,13 @@ async function loadAll() {
     groups.value = gRes.groups || []
     alertsAll.value = aRes.alerts || []
     latest.value = lRes || { metrics: {} }
+    // 模板派生类型的卡片数据取自总览接口（内置类型走各自的实例端点，结构不统一）
+    try {
+      const ov = await get('/api/v1/middleware/overview')
+      dynamicMw.value = (ov.types || []).filter((t) => t.kind === 'template')
+    } catch (e) {
+      console.error('加载模板派生类型失败', e)
+    }
     const map = {}
     middlewareTypes.forEach((t, i) => {
       const r = mw[i] || {}
@@ -210,8 +219,11 @@ const recentAlerts = computed(() =>
     .slice(0, 12)
 )
 
-const mwSummaries = computed(() =>
-  middlewareTypes.map((t) => {
+// 模板派生类型的卡片：数据来自 /middleware/overview（total/up/down/summary 已由后端算好）
+const dynamicMw = ref([])
+
+const mwSummaries = computed(() => {
+  const builtin = middlewareTypes.map((t) => {
     const inst = mwData.value[t.key] || []
     const total = inst.length
     const online = inst.filter((i) => i.up).length
@@ -227,7 +239,26 @@ const mwSummaries = computed(() =>
       }))
     return { ...t, total, online, offline, topN: top }
   })
-)
+
+  // 模板派生类型：主指标取模板 rules.metrics 声明的首项；空状态要给出与内置类型不同的排查方向
+  const dynamic = dynamicMw.value.map((t) => ({
+    key: t.type,
+    label: t.label,
+    icon: templateIcon,
+    tab: t.type,
+    total: t.total,
+    online: t.up,
+    offline: t.down,
+    topN: (t.summary || []).slice(0, 3).map((s) => ({
+      label: s.label,
+      valueText: `${s.value}${s.unit ? ' ' + s.unit : ''}`,
+      subText: '',
+    })),
+    emptyTitle: '已配置但无数据',
+    emptySub: '检查生效分组与目标可达性，或点开「采集项模板」查看',
+  }))
+  return builtin.concat(dynamic)
+})
 
 const visibleBlocks = computed(() => blocks.value.filter((b) => b.visible))
 

@@ -628,6 +628,7 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 type middlewareOverviewType struct {
 	Type       string          `json:"type"`       // redis/mysql/postgres/nginx/kafka/docker/rocketmq/k8s
 	Label      string          `json:"label"`      // 中文名
+	Kind       string          `json:"kind"`       // builtin（内置）| template（由采集项模板派生）
 	Total      int             `json:"total"`      // 实例总数
 	Up         int             `json:"up"`         // 在线实例数
 	Down       int             `json:"down"`       // 离线实例数
@@ -716,7 +717,7 @@ func (a *API) handleMiddlewareOverview(w http.ResponseWriter, r *http.Request) {
 
 	resp := middlewareOverviewResp{Types: make([]middlewareOverviewType, 0, len(types))}
 	for _, t := range types {
-		item := middlewareOverviewType{Type: t.Key, Label: t.Label, AlertCount: alertCount[t.Key]}
+		item := middlewareOverviewType{Type: t.Key, Label: t.Label, Kind: string(t.Kind), AlertCount: alertCount[t.Key]}
 		// UpLabels 用于区分模板类型：所有模板共用 template_target_up，靠 template 标签归属
 		series, err := a.store.QueryAllLatest(t.UpMetric, t.UpLabels)
 		if err != nil {

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#6ea8fe" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <!-- 采集项模板的通用图标：拼图块（表示「按模板拼装出的中间件类型」） -->
+  <path d="M10 3h4a1 1 0 0 1 1 1v2.2a1.8 1.8 0 1 0 0 3.6V12a1 1 0 0 1-1 1h-2.2a1.8 1.8 0 1 0-3.6 0H6a1 1 0 0 1-1-1V9h2.2a1.8 1.8 0 1 0 0-3.6H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5z" />
+  <path d="M13 13h5a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-1.2a1.8 1.8 0 1 0-3.6 0V18a1 1 0 0 1-1 1H5" opacity="0.55" />
+</svg>

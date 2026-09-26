@@ -8,7 +8,8 @@
       @click="goTab(s.tab)"
     >
       <div class="mw-head">
-        <img class="mw-icon" :src="s.icon" :alt="s.label" />
+        <!-- 模板派生类型若未提供图标则不渲染，避免出现坏图 -->
+        <img v-if="s.icon" class="mw-icon" :src="s.icon" :alt="s.label" />
         <span class="mw-name">{{ s.label }}</span>
         <span v-if="s.total > 0" class="mw-total">{{ s.total }}</span>
         <span v-else class="mw-badge">未配置</span>
@@ -39,8 +40,9 @@
 
       <div v-else class="mw-empty">
         <el-icon :size="20"><InfoFilled /></el-icon>
-        <div class="mw-empty-title">尚未配置监控</div>
-        <div class="mw-empty-sub">点击前往 {{ s.label }} 页面了解接入方式</div>
+        <!-- 空状态文案可被覆盖：模板类型「已配置但无数据」与内置类型「尚未配置」的排查方向不同 -->
+        <div class="mw-empty-title">{{ s.emptyTitle || '尚未配置监控' }}</div>
+        <div class="mw-empty-sub">{{ s.emptySub || `点击前往 ${s.label} 页面了解接入方式` }}</div>
       </div>
     </div>
   </div>

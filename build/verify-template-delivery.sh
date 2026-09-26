@@ -174,6 +174,66 @@ print("端到端全部通过")
 PY
 rc=$?
 
-echo "== 6) Agent 日志中的模板相关记录 =="
+echo "== 6) 前端所消费的两个接口（类型注册表 + 通用实例）=="
+python3 - "$WORK" <<'PY'
+import json
+import sys
+import urllib.request
+
+work = sys.argv[1]
+fails = []
+
+
+def check(cond, msg):
+    print(("  PASS  " if cond else "  FAIL  ") + msg)
+    if not cond:
+        fails.append(msg)
+
+
+def get(path):
+    with urllib.request.urlopen("http://127.0.0.1:18080" + path, timeout=5) as resp:
+        return json.loads(resp.read())
+
+
+try:
+    ov = get("/api/v1/middleware/overview")
+except Exception as exc:  # noqa: BLE001
+    print(f"  FAIL  总览接口不可用：{exc}")
+    sys.exit(1)
+
+types = {t["type"]: t for t in ov.get("types", [])}
+check("rabbitmq" in types, "总览包含模板派生类型 rabbitmq（前端据此渲染 Tab 与卡片）")
+t = types.get("rabbitmq", {})
+check(t.get("kind") == "template", f"类型来源标记为 template（前端据此区分内置/模板），got {t.get('kind')!r}")
+check(t.get("label") == "RabbitMQ", f"展示名取自模板 title，got {t.get('label')!r}")
+
+inst = get("/api/v1/middleware/rabbitmq/instances")
+check(inst.get("type") == "rabbitmq" and inst.get("label") == "RabbitMQ", "通用实例接口回显类型与展示名")
+
+# 说明：实例数/摘要指标/实例状态都来自时序库**查询**，而本验证用的假时序库只接受写入
+# （查询返回空），因此这三项在这里必然为空，不能作为失败判据。
+# 它们由 internal/server/api 的单测精确覆盖：
+#   TestMiddlewareOverview_IncludesTemplateType（total/up/down/summary/告警归集）
+#   TestMiddlewareTypeInstances_TemplateType（实例列表/摘要值/按 template 标签过滤）
+print("  SKIP  实例数 / 卡片摘要 / 实例状态：需真实 TSDB（假时序库只接受写入）")
+print("        这些读路径由 internal/server/api 的单测覆盖（含标签过滤断言）")
+
+# 内置类型仍走各自的专用接口（通用接口不应截胡）
+import urllib.error
+try:
+    get("/api/v1/middleware/nosuchtype/instances")
+    check(False, "未知类型应返回 404")
+except urllib.error.HTTPError as exc:
+    check(exc.code == 404, f"未知类型返回 404，got {exc.code}")
+
+if fails:
+    print(f"共 {len(fails)} 项未通过")
+    sys.exit(1)
+print("接口契约全部通过")
+PY
+rc2=$?
+[ "$rc" -eq 0 ] || rc2=$rc
+
+echo "== 7) Agent 日志中的模板相关记录 =="
 grep -h "模板" "$WORK/agent.log" | head -3 || true
-exit $rc
+exit $rc2

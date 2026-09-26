@@ -125,6 +125,7 @@ const pageTitle = computed(() => {
     hosts: '主机列表',
     node: '主机详情',
     middleware: '中间件监控',
+    templates: '采集项模板',
     alerts: '告警中心',
     security: '安全中心',
     audit: '操作审计',
