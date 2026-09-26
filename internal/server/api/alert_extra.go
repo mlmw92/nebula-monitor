@@ -159,8 +159,10 @@ func sampleAlertEvent() model.AlertEvent {
 
 // handleAlertStats 返回告警统计看板数据：活跃数、抑制数、24h 状态分布、级别分布、Top 规则。
 func (a *API) handleAlertStats(w http.ResponseWriter, r *http.Request) {
-	active := a.unacknowledgedAlerts(a.alerts.Active())
-	recent := a.alerts.Recent(200)
+	p := Principal(r)
+	// 资源范围：统计口径与告警列表保持一致，只统计当前用户可见节点的告警。
+	active := filterByNodeScope(a, p, a.unacknowledgedAlerts(a.alerts.Active()), func(e model.AlertEvent) string { return e.Node })
+	recent := filterByNodeScope(a, p, a.alerts.Recent(200), func(e model.AlertEvent) string { return e.Node })
 	cutoff := time.Now().Add(-24 * time.Hour).UnixMilli()
 	recent24 := make([]model.AlertEvent, 0, len(recent))
 	for _, e := range recent {

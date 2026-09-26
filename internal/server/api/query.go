@@ -165,18 +165,20 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/middleware/nginx/access/summary", a.permit(a.handleNginxAccessSummary, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/nginx/access/geo", a.permit(a.handleNginxAccessGeo, "middleware:read"))
 
-	mux.HandleFunc("GET /api/v1/alerts", a.handleAlerts)
-	mux.HandleFunc("GET /api/v1/alerts/acks", a.handleAlertAcks)
-	mux.HandleFunc("POST /api/v1/alerts/ack", a.handleAlertAck)
-	mux.HandleFunc("GET /api/v1/rules", a.handleRulesList)
-	mux.HandleFunc("GET /api/v1/rules/export", a.handleRulesExport)
-	mux.HandleFunc("POST /api/v1/rules/import", a.handleRulesImport)
-	mux.HandleFunc("GET /api/v1/rules/templates", a.handleRuleTemplates)
-	mux.HandleFunc("POST /api/v1/rules", a.handleRuleCreate)
-	mux.HandleFunc("PUT /api/v1/rules/{id}", a.handleRuleUpdate)
-	mux.HandleFunc("POST /api/v1/rules/{id}/toggle", a.handleRuleToggle)
-	mux.HandleFunc("POST /api/v1/rules/{id}/toggle-silence", a.handleRuleToggleSilence)
-	mux.HandleFunc("DELETE /api/v1/rules/{id}", a.handleRuleDelete)
+	// 告警事件：读 alerts:read、确认 alerts:write（列表与统计按节点资源范围过滤）
+	mux.HandleFunc("GET /api/v1/alerts", a.permitNode(a.handleAlerts, "alerts:read"))
+	mux.HandleFunc("GET /api/v1/alerts/acks", a.permit(a.handleAlertAcks, "alerts:read"))
+	mux.HandleFunc("POST /api/v1/alerts/ack", a.permit(a.handleAlertAck, "alerts:write"))
+	// 告警规则：读 alerts:read、写 alerts:write、临时静默 silence:write
+	mux.HandleFunc("GET /api/v1/rules", a.permit(a.handleRulesList, "alerts:read"))
+	mux.HandleFunc("GET /api/v1/rules/export", a.permit(a.handleRulesExport, "alerts:read"))
+	mux.HandleFunc("POST /api/v1/rules/import", a.permit(a.handleRulesImport, "alerts:write"))
+	mux.HandleFunc("GET /api/v1/rules/templates", a.permit(a.handleRuleTemplates, "alerts:read"))
+	mux.HandleFunc("POST /api/v1/rules", a.permit(a.handleRuleCreate, "alerts:write"))
+	mux.HandleFunc("PUT /api/v1/rules/{id}", a.permit(a.handleRuleUpdate, "alerts:write"))
+	mux.HandleFunc("POST /api/v1/rules/{id}/toggle", a.permit(a.handleRuleToggle, "alerts:write"))
+	mux.HandleFunc("POST /api/v1/rules/{id}/toggle-silence", a.permit(a.handleRuleToggleSilence, "silence:write"))
+	mux.HandleFunc("DELETE /api/v1/rules/{id}", a.permit(a.handleRuleDelete, "alerts:write"))
 
 	// 管理操作审计
 	mux.HandleFunc("GET /api/v1/audit/events", a.handleAuditEvents)
@@ -236,9 +238,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// 权限目录（roles:read）
 	mux.HandleFunc("GET /api/v1/permissions/catalog", a.authz(a.handlePermissionCatalog, "roles:read"))
 
-	mux.HandleFunc("GET /api/v1/notify", a.handleNotifyGet)
-	mux.HandleFunc("PUT /api/v1/notify", a.handleNotifyPut)
-	mux.HandleFunc("POST /api/v1/notify/test", a.handleNotifyTest)
+	// 通知渠道：读 notify:read；写与测试通知 notify:write（高危权限点）
+	mux.HandleFunc("GET /api/v1/notify", a.permit(a.handleNotifyGet, "notify:read"))
+	mux.HandleFunc("PUT /api/v1/notify", a.permit(a.handleNotifyPut, "notify:write"))
+	mux.HandleFunc("POST /api/v1/notify/test", a.permit(a.handleNotifyTest, "notify:write"))
 
 	mux.HandleFunc("GET /api/v1/screen/config", a.handleScreenGet)
 	mux.HandleFunc("PUT /api/v1/screen/config", a.handleScreenPut)
@@ -249,24 +252,25 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("POST /api/v1/alerts/test", a.handleAlertTest)
 
-	mux.HandleFunc("GET /api/v1/maintenance", a.handleMaintenanceGet)
-	mux.HandleFunc("PUT /api/v1/maintenance", a.handleMaintenanceSet)
+	mux.HandleFunc("GET /api/v1/maintenance", a.permit(a.handleMaintenanceGet, "silence:read"))
+	mux.HandleFunc("PUT /api/v1/maintenance", a.permit(a.handleMaintenanceSet, "silence:write"))
 
-	// 告警抑制规则（P4）
-	mux.HandleFunc("GET /api/v1/inhibit", a.handleInhibitGet)
-	mux.HandleFunc("PUT /api/v1/inhibit", a.handleInhibitPut)
+	// 告警抑制规则（P4）：属于告警引擎配置
+	mux.HandleFunc("GET /api/v1/inhibit", a.permit(a.handleInhibitGet, "alerts:read"))
+	mux.HandleFunc("PUT /api/v1/inhibit", a.permit(a.handleInhibitPut, "alerts:write"))
 
 	// 告警事件管道（relabel / enrich / 消息模板）：独立配置，保存即热生效
-	mux.HandleFunc("GET /api/v1/alert-pipeline", a.handlePipelineGet)
-	mux.HandleFunc("PUT /api/v1/alert-pipeline", a.handlePipelinePut)
-	mux.HandleFunc("POST /api/v1/alert-pipeline/preview", a.handlePipelinePreview)
+	// preview 为只读试算（不落盘），故仅需 alerts:read，不按 HTTP 方法机械推导权限。
+	mux.HandleFunc("GET /api/v1/alert-pipeline", a.permit(a.handlePipelineGet, "alerts:read"))
+	mux.HandleFunc("PUT /api/v1/alert-pipeline", a.permit(a.handlePipelinePut, "alerts:write"))
+	mux.HandleFunc("POST /api/v1/alert-pipeline/preview", a.permit(a.handlePipelinePreview, "alerts:read"))
 
 	// 告警分组配置（P4）
-	mux.HandleFunc("GET /api/v1/grouping", a.handleGroupingGet)
-	mux.HandleFunc("PUT /api/v1/grouping", a.handleGroupingPut)
+	mux.HandleFunc("GET /api/v1/grouping", a.permit(a.handleGroupingGet, "alerts:read"))
+	mux.HandleFunc("PUT /api/v1/grouping", a.permit(a.handleGroupingPut, "alerts:write"))
 
 	// 告警统计看板（P4）
-	mux.HandleFunc("GET /api/v1/alerts/stats", a.handleAlertStats)
+	mux.HandleFunc("GET /api/v1/alerts/stats", a.permit(a.handleAlertStats, "alerts:read"))
 
 	mux.HandleFunc("GET /api/v1/dialtest/tasks", a.handleDialtestList)
 	mux.HandleFunc("POST /api/v1/dialtest/tasks", a.handleDialtestCreate)
@@ -993,6 +997,8 @@ func (a *API) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 		events = filtered
 	}
+	// 资源范围：受限用户只能看到范围内节点产生的告警。
+	events = filterByNodeScope(a, Principal(r), events, func(e model.AlertEvent) string { return e.Node })
 	writeJSON(w, 200, map[string]interface{}{"alerts": events})
 }
 
@@ -1083,7 +1089,17 @@ func (a *API) handleRuleTemplates(w http.ResponseWriter, r *http.Request) {
 
 // handleAlertAcks 返回全部已确认告警的 key 映射（rule|host|instance|startsAt）。
 func (a *API) handleAlertAcks(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]interface{}{"acks": a.acks.Map()})
+	acks := a.acks.Map()
+	// 资源范围：受限用户只能看到范围内节点的确认记录（key 第 2 段为节点名）。
+	if p := Principal(r); p != nil && !p.Scope.IsGlobal() {
+		for k := range acks {
+			parts := strings.SplitN(k, "|", 3)
+			if len(parts) < 2 || !a.nodeInScope(p, parts[1]) {
+				delete(acks, k)
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]interface{}{"acks": acks})
 }
 
 // handleAlertAck 确认（认领）一条告警。
@@ -1097,6 +1113,11 @@ func (a *API) handleAlertAck(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Rule == "" || body.Host == "" || body.StartsAt <= 0 {
 		http.Error(w, "rule, host and startsAt required", http.StatusBadRequest)
+		return
+	}
+	// 资源范围：不允许对范围外节点的告警进行确认。
+	if p := Principal(r); !a.nodeInScope(p, body.Host) {
+		a.denyScope(w, r, "alerts:write", a.nodeGroup(body.Host))
 		return
 	}
 	user := AuthenticatedUser(r)

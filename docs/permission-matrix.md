@@ -13,7 +13,7 @@
 | **A｜基础设施** | ✅ 已完成 | 新增 `dashboard:write`、`system:config` 两个权限点并补齐内置角色；新增 `api.API.permit(next, perm)` 业务接口权限包装器（未启用认证放行 / 未登录 401 / 缺权限 403 + 授权拒绝审计）；去除 `globalAuthStore` 包级单例，`AuthMiddleware` 改为显式接收 `*auth.Store`；11 个单元测试 |
 | **B｜主机与指标（含 `/ws`）** | ✅ 已完成 | 23 条路由挂载 `permit` / `permitNode`：`nodes/*`（8）、`groups/*`（3）、`query/*`+`processes`+`listeners`+`firewall`（6）、`metrics/*`（3）、`analysis/*`（2，范围过滤本已存在）、`/ws`（1）。列表类按范围过滤（`handleNodes` / `handleNodesLatest` / `handleGroups`），单节点类由 `permitNode` 统一校验（路径 `{name}` 或查询 `node`），批量升级用 `CheckBatchGroups` 整体校验；**`/ws` 补齐 topic 级授权**（`metrics`→`nodes:read`+节点范围、`alerts`→`alerts:read`、未知 topic 拒绝）。告警管理员补齐 `nodes:read`/`groups:read`（告警页面分组筛选与规则目标选择依赖）；前端 `hosts` / `node/:name` / `metrics/explore` 补 `meta.perm` 与菜单 `perm`。14 个新测试 |
 | **C｜中间件** | ✅ 已完成 | 13 条路由挂载 `middleware:read`；实例列表按「实例 → 所属节点 → 分组」过滤（Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / K8s / MongoDB / FastDFS 及 Nginx 访问汇总的实例列表）；`overview` 的实例计数与告警计数改为**过滤后重算**；K8s 工作节点/Pod 无 Agent 节点标签，按可见集群的 instance 归属过滤；前端中间件菜单与路由补 `perm`。8 个新测试 |
-| D｜告警与通知 | ⬜ 待实施 | — |
+| **D｜告警与通知** | ✅ 已完成 | 26 条路由挂载权限点：告警事件（`alerts:read` / 确认 `alerts:write`）、规则 CRUD（`alerts:read` / `alerts:write`，临时静默为 `silence:write`）、抑制 / 分组 / 事件管道（`alerts:read` / `alerts:write`，`preview` 按语义只需 `alerts:read`）、维护窗口（`silence:read` / `silence:write`）、通知（`notify:read` / `notify:write` 高危）。范围过滤：告警列表、确认记录列表、统计看板均按节点范围过滤/重算，确认接口对范围外节点返回 403；规则、抑制、分组、管道、维护、通知为**全局配置**，不设范围。前端告警中心 / 智能分析 / 通知配置菜单与路由补 `perm`。7 个新测试 |
 | E｜安全、系统与其余 | ⬜ 待实施 | — |
 
 ---

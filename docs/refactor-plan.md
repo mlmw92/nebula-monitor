@@ -382,6 +382,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | 2026-09-26 | **批次二启动：B1 批次 A（基础设施）完成**：新增 `dashboard:write` / `system:config` 权限点并补齐内置角色；新增 `api.API.permit(next, perm)`（未启用认证放行 / 未登录 401 / 缺权限 403 + 授权拒绝审计）；移除 `globalAuthStore` 包级单例，`AuthMiddleware` 改为显式传参。新增 11 个单测，全量测试绿 |
 | 2026-09-26 | **B1 批次 B（主机与指标 + `/ws`）完成**：23 条路由挂载授权（`permit` / `permitNode`），节点列表、全节点指标、分组列表按资源范围过滤，批量升级整体校验，**`/ws` 补齐 topic 级授权与节点范围校验**（修复设计件 8.2 越权缺口）；告警管理员补 `nodes:read`/`groups:read`；前端 3 条路由与 2 个菜单项补 `perm`。新增 14 个测试，全量测试与前端构建均绿 |
 | 2026-09-26 | **B1 批次 C（中间件）完成**：13 条路由挂 middleware:read；10 类实例列表（含 Nginx 访问汇总）按「实例→所属节点→分组」过滤，新增 `nodeGroup`/`nodeInScope`/`nodeOfKey`/`filterByNodeScope` 辅助；`overview` 的实例计数与告警计数改为过滤后重算；K8s 工作节点与 Pod 按可见集群归属过滤；前端中间件菜单与路由补 `perm`。新增 8 个测试（含 fake 存储端到端用例）。聚合类数值未过滤列为已知限制（设计件 8.8） |
+| 2026-09-26 | **B1 批次 D（告警与通知）完成**：26 条路由挂权限点（事件 / 规则 / 抑制 / 分组 / 事件管道 / 维护窗口 / 通知）；告警列表、确认记录、统计看板按节点范围过滤与重算，确认接口对范围外节点 403；事件管道 `preview` 按「只读试算」语义只需 `alerts:read`（不按 HTTP 方法机械推导）；规则临时静默归 `silence:write`；前端 3 个菜单与 3 条路由补 `perm`。新增 7 个测试（含 AlertStore / RulesProvider 替身） |
 
 ---
 
