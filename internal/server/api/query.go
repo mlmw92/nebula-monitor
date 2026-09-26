@@ -29,6 +29,7 @@ import (
 	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/receiver"
 	"github.com/nebula/monitor/internal/server/report"
+	"github.com/nebula/monitor/internal/server/retention"
 	"github.com/nebula/monitor/internal/server/screencfg"
 	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/selfmon"
@@ -110,6 +111,7 @@ type API struct {
 	analysis       *analysis.Analyzer     // 只读智能分析服务（可空）
 	pipeline       *alert.PipelineStore   // 告警事件管道：relabel/enrich/消息模板（可空）
 	selfmon        *selfmon.Monitor       // 自监控收集器（可空；不注入时探针仍可用，只是没有进程指标）
+	retention      *retention.Manager     // 数据保留策略（可空；不注入时接口返回默认策略）
 	startedAt      time.Time              // 进程启动时间，供 /healthz、/readyz 报告运行时长
 }
 
@@ -220,6 +222,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /readyz", a.handleReadyz)
 	// 自监控快照属运维只读概览信息 → dashboard:read（与「查看概览」同级）
 	mux.HandleFunc("GET /api/v1/self/status", a.permit(a.handleSelfStatus, "dashboard:read"))
+
+	// 数据保留策略：系统配置类，读写均需 system:config（与品牌 / 大屏 / 地理库同级）
+	mux.HandleFunc("GET /api/v1/system/retention", a.permit(a.handleRetentionGet, "system:config"))
+	mux.HandleFunc("PUT /api/v1/system/retention", a.permit(a.handleRetentionPut, "system:config"))
+	mux.HandleFunc("POST /api/v1/system/retention/cleanup", a.permit(a.handleRetentionCleanup, "system:config"))
 	mux.HandleFunc("GET /api/v1/agent/check", a.handleAgentCheck)
 
 	// 系统升级：system:upgrade（高危权限点）

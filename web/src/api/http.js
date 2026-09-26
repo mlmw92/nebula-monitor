@@ -178,6 +178,10 @@ const api = {
     const [health, ready] = await Promise.all([read('/healthz'), read('/readyz')])
     return { health, ready }
   },
+  // —— 数据保留策略 ——
+  getRetention: () => request('/api/v1/system/retention'),
+  saveRetention: (cfg) => api.put('/api/v1/system/retention', cfg),
+  cleanupRetention: () => api.post('/api/v1/system/retention/cleanup', {}),
 }
 
 export default api

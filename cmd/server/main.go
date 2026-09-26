@@ -29,6 +29,7 @@ import (
 	"github.com/nebula/monitor/internal/server/notify"
 	"github.com/nebula/monitor/internal/server/receiver"
 	"github.com/nebula/monitor/internal/server/report"
+	"github.com/nebula/monitor/internal/server/retention"
 	"github.com/nebula/monitor/internal/server/screencfg"
 	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/selfmon"
@@ -243,11 +244,23 @@ func main() {
 
 	// API
 	auditStore := audit.New(filepath.Join(filepath.Dir(*cfgPath), "audit_events.json"))
+	// 数据保留策略：清理本地可清理的数据（告警处置记录、巡检报告），
+	// 并只读呈现时序库保留期与内置上限的现状。
+	retentionFile := cfg.RetentionFile
+	if retentionFile == "" {
+		retentionFile = filepath.Join(cfg.DataDir, "retention.yaml")
+	}
+	retentionMgr, err := retention.New(retentionFile, retention.DefaultConfig(), ackStore, reportGen, auditStore, securityStore, cfg.TSDB.Addr)
+	if err != nil {
+		slog.Error("初始化数据保留策略失败", "err", err)
+		os.Exit(1)
+	}
 	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath, securityStore, defenseStore, auditStore, authStore)
 	rest.SetDashboardManager(dashMgr)
 	rest.SetAnalyzer(analyzer)
 	rest.SetPipelineStore(pipelineStore)
 	rest.SetSelfMon(mon)
+	rest.SetRetention(retentionMgr)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)
@@ -268,6 +281,8 @@ func main() {
 	// 自监控指标周期写入时序库（走未包装的原始存储）：self_* 指标因此可查询、可画趋势，
 	// 也能直接复用现有告警规则来监控 Server 自身。
 	go selfmon.NewReporter(rawStore, mon, selfmon.DefaultReportInterval).Run(ctx)
+	// 数据保留：按周期清理超期数据（策略可在「系统设置 → 数据保留」调整，保存即热生效）
+	go retentionMgr.Run(ctx)
 
 	// 认证中间件（启用 auth 时保护 /api/v1/* 业务接口）。
 	// authStore 显式传入（非包级单例），避免多实例部署与测试之间的状态污染。

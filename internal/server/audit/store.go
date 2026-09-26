@@ -15,22 +15,22 @@ import (
 	"github.com/nebula/monitor/internal/server/config"
 )
 
-// maxEvents 内存中保留的最大审计事件条数，超出按时间淘汰。
-const maxEvents = 2000
+// MaxEvents 内存中保留的最大审计事件条数，超出按时间淘汰。
+const MaxEvents = 2000
 
 // Event 记录一次管理接口操作，不保存请求体或敏感参数。
 type Event struct {
-	Time      time.Time `json:"time"`
-	User      string    `json:"user"`
-	Method    string    `json:"method"`
-	Path      string    `json:"path"`
+	Time           time.Time `json:"time"`
+	User           string    `json:"user"`
+	Method         string    `json:"method"`
+	Path           string    `json:"path"`
 	Status         int       `json:"status"`
 	RemoteIP       string    `json:"remoteIP"`
 	SourceLocation string    `json:"sourceLocation,omitempty"` // 来源 IP 属地（国家/省份/城市），由 Server 端经 ip2region 补全
 	Succeeded      bool      `json:"succeeded"`
-	Category  string    `json:"category,omitempty"`
-	Action    string    `json:"action,omitempty"`
-	Detail    string    `json:"detail,omitempty"`
+	Category       string    `json:"category,omitempty"`
+	Action         string    `json:"action,omitempty"`
+	Detail         string    `json:"detail,omitempty"`
 }
 
 // Store 以 JSON 文件持久化审计事件，提供记录与查询能力。
@@ -57,7 +57,7 @@ func New(path string) *Store {
 	return s
 }
 
-// Record 追加一条审计事件并持久化（超过上限自动截断到最近 maxEvents 条）。
+// Record 追加一条审计事件并持久化（超过上限自动截断到最近 MaxEvents 条）。
 func (s *Store) Record(event Event) error {
 	if event.Time.IsZero() {
 		event.Time = time.Now()
@@ -81,11 +81,18 @@ func (s *Store) List(limit int, user, path string) []Event {
 	return s.ListFiltered(limit, user, path, "")
 }
 
+// Count 返回当前保留的审计事件条数。
+func (s *Store) Count() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.events)
+}
+
 // ListFiltered 在 List 基础上额外按事件分类过滤。
 func (s *Store) ListFiltered(limit int, user, path, category string) []Event {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if limit <= 0 || limit > maxEvents {
+	if limit <= 0 || limit > MaxEvents {
 		limit = 100
 	}
 	result := make([]Event, 0, limit)
@@ -177,10 +184,10 @@ func objectHash(object map[string]interface{}) string {
 }
 
 func trim(events []Event) []Event {
-	if len(events) <= maxEvents {
+	if len(events) <= MaxEvents {
 		return events
 	}
-	return events[len(events)-maxEvents:]
+	return events[len(events)-MaxEvents:]
 }
 
 // ClientIP 从请求中提取客户端 IP（去除端口部分）。

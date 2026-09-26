@@ -19,28 +19,29 @@ const (
 
 // Config 是 Server 运行配置。
 type Config struct {
-	Mode            string          `yaml:"mode"`            // standalone
-	Listen          string          `yaml:"listen"`          // HTTP 监听地址，如 :8080
-	TSDB            TSDBConfig      `yaml:"tsdb"`            // 时序库（默认 VictoriaMetrics，可对接主流 PromQL 时序库）
-	NodeMeta        string          `yaml:"nodeMeta"`        // 节点分组 meta JSON 路径
-	DataDir         string          `yaml:"dataDir"`         // 运行时数据目录
-	OfflineTimeout  int             `yaml:"offlineTimeout"`  // 节点离线判定阈值（秒）
-	Alert           AlertConfig     `yaml:"alert"`           // 告警配置
-	Notify          NotifyConfig    `yaml:"notify"`          // 通知渠道配置
-	AgentAuth       AgentAuthConfig `yaml:"agentAuth"`       // Agent 接入授权（参考哪吒探针：密钥注册）
-	AgentBinDir     string          `yaml:"agentBinDir"`     // Agent 二进制分发目录（自带 CDN，含 agent/linux/<arch>/agent）
-	AgentScriptPath string          `yaml:"agentScriptPath"` // Agent 安装脚本路径（由 /install/agent-install.sh 提供）
-	WebDir          string          `yaml:"webDir"`          // 前端静态资源目录（磁盘读取，改前端只需替换文件+重启）
-	Auth            AuthConfig      `yaml:"auth"`            // 登录认证配置
-	Upgrade         UpgradeConfig   `yaml:"upgrade"`         // Web 系统升级模块配置
-	NotifyFile      string          `yaml:"notifyFile"`      // 通知渠道独立配置文件（Web 端配置写入，优先于 server.yaml 的 notify 段）
-	DialtestFile    string          `yaml:"dialtestFile"`    // 拨测任务配置文件
-	ReportDir       string          `yaml:"reportDir"`       // 报告存储目录
-	ScreenFile      string          `yaml:"screenFile"`      // 数据大屏模块显隐配置文件（Web 端设置写入）
-	UIFile          string          `yaml:"uiFile"`          // 系统 UI 品牌配置（系统名称/Logo，Web 端设置写入）
-	GeoIPFile       string          `yaml:"geoipFile"`       // IP 地理库（ip2region v4 xdb）存放路径，Web 端上传后覆盖此文件；缺失时用内置库
-	DashboardsFile  string          `yaml:"dashboardsFile"`  // 自定义仪表盘配置文件（Web 端增删改写入）
-	SecurityStoreFile string         `yaml:"securityStoreFile"` // 安全事件/基线持久化文件
+	Mode              string          `yaml:"mode"`              // standalone
+	Listen            string          `yaml:"listen"`            // HTTP 监听地址，如 :8080
+	TSDB              TSDBConfig      `yaml:"tsdb"`              // 时序库（默认 VictoriaMetrics，可对接主流 PromQL 时序库）
+	NodeMeta          string          `yaml:"nodeMeta"`          // 节点分组 meta JSON 路径
+	DataDir           string          `yaml:"dataDir"`           // 运行时数据目录
+	OfflineTimeout    int             `yaml:"offlineTimeout"`    // 节点离线判定阈值（秒）
+	Alert             AlertConfig     `yaml:"alert"`             // 告警配置
+	Notify            NotifyConfig    `yaml:"notify"`            // 通知渠道配置
+	AgentAuth         AgentAuthConfig `yaml:"agentAuth"`         // Agent 接入授权（参考哪吒探针：密钥注册）
+	AgentBinDir       string          `yaml:"agentBinDir"`       // Agent 二进制分发目录（自带 CDN，含 agent/linux/<arch>/agent）
+	AgentScriptPath   string          `yaml:"agentScriptPath"`   // Agent 安装脚本路径（由 /install/agent-install.sh 提供）
+	WebDir            string          `yaml:"webDir"`            // 前端静态资源目录（磁盘读取，改前端只需替换文件+重启）
+	Auth              AuthConfig      `yaml:"auth"`              // 登录认证配置
+	Upgrade           UpgradeConfig   `yaml:"upgrade"`           // Web 系统升级模块配置
+	NotifyFile        string          `yaml:"notifyFile"`        // 通知渠道独立配置文件（Web 端配置写入，优先于 server.yaml 的 notify 段）
+	DialtestFile      string          `yaml:"dialtestFile"`      // 拨测任务配置文件
+	ReportDir         string          `yaml:"reportDir"`         // 报告存储目录
+	ScreenFile        string          `yaml:"screenFile"`        // 数据大屏模块显隐配置文件（Web 端设置写入）
+	UIFile            string          `yaml:"uiFile"`            // 系统 UI 品牌配置（系统名称/Logo，Web 端设置写入）
+	GeoIPFile         string          `yaml:"geoipFile"`         // IP 地理库（ip2region v4 xdb）存放路径，Web 端上传后覆盖此文件；缺失时用内置库
+	DashboardsFile    string          `yaml:"dashboardsFile"`    // 自定义仪表盘配置文件（Web 端增删改写入）
+	RetentionFile     string          `yaml:"retentionFile"`     // 数据保留策略配置文件（Web 端可改，保存即热生效）
+	SecurityStoreFile string          `yaml:"securityStoreFile"` // 安全事件/基线持久化文件
 }
 
 // ScreenConfig 数据大屏模块显隐配置（全局单份，与 notify 一致）。
@@ -110,10 +111,10 @@ func DefaultScreenConfig() ScreenConfig {
 
 // AuthConfig 登录认证配置（启用后访问需登录，token 有效期 24h）
 type AuthConfig struct {
-	Enabled  bool   `yaml:"enabled"`  // 是否启用登录认证
-	Username string `yaml:"username"` // 登录用户名（单管理员种子；多用户迁移后运行态以 UsersFile 为准）
-	Password string `yaml:"password"` // 登录密码（国密 SM3 加盐哈希，形如 sm3:<salt>:<hash>；旧明文配置会在启动时自动迁移为哈希）
-	Secret   string `yaml:"secret"`   // token 签名密钥（留空时启动自动生成）
+	Enabled   bool   `yaml:"enabled"`   // 是否启用登录认证
+	Username  string `yaml:"username"`  // 登录用户名（单管理员种子；多用户迁移后运行态以 UsersFile 为准）
+	Password  string `yaml:"password"`  // 登录密码（国密 SM3 加盐哈希，形如 sm3:<salt>:<hash>；旧明文配置会在启动时自动迁移为哈希）
+	Secret    string `yaml:"secret"`    // token 签名密钥（留空时启动自动生成）
 	UsersFile string `yaml:"usersFile"` // 多用户数据文件（users.yaml）；默认 <DataDir>/users.yaml
 	// MigrateSingleAdmin 控制首次启动是否将单管理员账号迁移为超级管理员。
 	// 设为 false 可回退到单管理员模式（运行态以本配置为准）。默认 true。
@@ -299,13 +300,13 @@ type AgentAuthConfig struct {
 // 替换 server、把新 agent 同步到自带 CDN（AgentBinDir/agent/linux/<arch>/agent），
 // 并重启 monitor-server。Agent 不主动推送到节点，由管理员在主机列表手动点击升级。
 type UpgradeConfig struct {
-	Enabled    bool   `yaml:"enabled"`    // 是否启用 Web 升级功能
-	Dir        string `yaml:"dir"`        // 升级工作目录（上传包、解压、备份）；默认 <DataDir>/upgrades
+	Enabled     bool   `yaml:"enabled"`     // 是否启用 Web 升级功能
+	Dir         string `yaml:"dir"`         // 升级工作目录（上传包、解压、备份）；默认 <DataDir>/upgrades
 	BinDir      string `yaml:"binDir"`      // server 二进制安装目录；默认 /usr/local/bin
 	BackupKeep  int    `yaml:"backupKeep"`  // 保留最近几次备份；默认 3
 	ArchiveKeep int    `yaml:"archiveKeep"` // 保留最近几个已上传升级包（可回退版本）；默认 5
 	UseSystemd  bool   `yaml:"useSystemd"`  // 是否用 systemd 重启 server；默认 true
-	Service    string `yaml:"service"`    // systemd 服务名；默认 monitor-server.service
+	Service     string `yaml:"service"`     // systemd 服务名；默认 monitor-server.service
 }
 
 // Default 返回默认配置。
@@ -325,27 +326,28 @@ func Default() *Config {
 			Feishu:   FeishuConfig{Enabled: false},
 			WeCom:    WeComConfig{Enabled: false},
 		},
-		AgentAuth:       AgentAuthConfig{Enabled: false, Secret: ""},
-		AgentBinDir:     "./dist",
-		AgentScriptPath: "./deploy/agent-install.sh",
-		WebDir:          "/etc/monitor-server/web",
-		NotifyFile:      "/etc/monitor-server/notify.yaml",
-		DialtestFile:    "/etc/monitor-server/dialtest.yaml",
-		ReportDir:       "/var/lib/monitor-server/reports",
-		ScreenFile:      "/etc/monitor-server/screen.yaml",
-		UIFile:          "/etc/monitor-server/ui.yaml",
-		DashboardsFile:  "/etc/monitor-server/dashboards.yaml",
+		AgentAuth:         AgentAuthConfig{Enabled: false, Secret: ""},
+		AgentBinDir:       "./dist",
+		AgentScriptPath:   "./deploy/agent-install.sh",
+		WebDir:            "/etc/monitor-server/web",
+		NotifyFile:        "/etc/monitor-server/notify.yaml",
+		DialtestFile:      "/etc/monitor-server/dialtest.yaml",
+		ReportDir:         "/var/lib/monitor-server/reports",
+		ScreenFile:        "/etc/monitor-server/screen.yaml",
+		UIFile:            "/etc/monitor-server/ui.yaml",
+		DashboardsFile:    "/etc/monitor-server/dashboards.yaml",
+		RetentionFile:     "/etc/monitor-server/retention.yaml",
 		SecurityStoreFile: "/var/lib/monitor-server/security_store.json",
-		GeoIPFile:       "/var/lib/monitor-server/geoip/ip2region_v4.xdb",
-		Auth:            AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: "", UsersFile: "/var/lib/monitor-server/users.yaml", MigrateSingleAdmin: true},
+		GeoIPFile:         "/var/lib/monitor-server/geoip/ip2region_v4.xdb",
+		Auth:              AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: "", UsersFile: "/var/lib/monitor-server/users.yaml", MigrateSingleAdmin: true},
 		Upgrade: UpgradeConfig{
-			Enabled:    true,
-			Dir:        "/var/lib/monitor-server/upgrades",
+			Enabled:     true,
+			Dir:         "/var/lib/monitor-server/upgrades",
 			BinDir:      "/usr/local/bin",
 			BackupKeep:  3,
 			ArchiveKeep: 5,
 			UseSystemd:  true,
-			Service:    "monitor-server.service",
+			Service:     "monitor-server.service",
 		},
 	}
 }

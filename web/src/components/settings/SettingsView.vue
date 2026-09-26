@@ -10,6 +10,9 @@
       <el-tab-pane label="系统自监控" name="selfmon">
         <SelfMonitorSubView />
       </el-tab-pane>
+      <el-tab-pane label="数据保留" name="retention">
+        <RetentionSubView />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -20,6 +23,7 @@ import { useRoute } from 'vue-router'
 import BrandSettingsSubView from './BrandSettingsSubView.vue'
 import AlertPipelineSubView from './AlertPipelineSubView.vue'
 import SelfMonitorSubView from './SelfMonitorSubView.vue'
+import RetentionSubView from './RetentionSubView.vue'
 
 const route = useRoute()
 const active = ref('brand')

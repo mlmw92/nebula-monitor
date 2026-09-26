@@ -16,8 +16,8 @@ import (
 // 事件列表设容量上限，防止内存膨胀。
 
 const (
-	// maxEvents 内存中保留的最大安全事件条数。
-	maxEvents = 2000
+	// MaxEvents 内存中保留的最大安全事件条数。
+	MaxEvents = 2000
 	// defaultStoreFile 默认持久化文件名。
 	defaultStoreFile = "security_store.json"
 )
@@ -25,7 +25,7 @@ const (
 // Store 安全事件/基线存储。
 type Store struct {
 	mu            sync.RWMutex
-	events        []model.SecurityEvent            // 全量事件（按时间倒序追加，裁剪到 maxEvents）
+	events        []model.SecurityEvent             // 全量事件（按时间倒序追加，裁剪到 MaxEvents）
 	baseline      map[string]model.SecurityBaseline // node -> 最新基线
 	defenseStatus map[string]*model.DefenseStatus   // node -> 最新入侵防护状态
 	path          string                            // 持久化文件路径
@@ -52,7 +52,7 @@ func (s *Store) load() {
 		return
 	}
 	var snap struct {
-		Events        []model.SecurityEvent            `json:"events"`
+		Events        []model.SecurityEvent             `json:"events"`
 		Baseline      map[string]model.SecurityBaseline `json:"baseline"`
 		DefenseStatus map[string]*model.DefenseStatus   `json:"defenseStatus"`
 	}
@@ -76,7 +76,7 @@ func (s *Store) load() {
 func (s *Store) save() {
 	s.mu.RLock()
 	snap := struct {
-		Events        []model.SecurityEvent            `json:"events"`
+		Events        []model.SecurityEvent             `json:"events"`
 		Baseline      map[string]model.SecurityBaseline `json:"baseline"`
 		DefenseStatus map[string]*model.DefenseStatus   `json:"defenseStatus"`
 	}{
@@ -124,8 +124,8 @@ func (s *Store) Ingest(node string, events []model.SecurityEvent, baseline *mode
 		s.events = append(s.events, e)
 	}
 	// 裁剪到最大容量（保留最新）
-	if len(s.events) > maxEvents {
-		s.events = s.events[len(s.events)-maxEvents:]
+	if len(s.events) > MaxEvents {
+		s.events = s.events[len(s.events)-MaxEvents:]
 	}
 	if baseline != nil {
 		if baseline.Node == "" {
@@ -135,6 +135,13 @@ func (s *Store) Ingest(node string, events []model.SecurityEvent, baseline *mode
 	}
 	s.mu.Unlock()
 	s.save()
+}
+
+// Count 返回当前保留的安全事件条数。
+func (s *Store) Count() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.events)
 }
 
 // Events 返回安全事件列表（按时间倒序），支持按分类/节点筛选与数量上限。
@@ -202,12 +209,12 @@ func (s *Store) Summary() SecuritySummary {
 		scoreAvg = totalScore / float64(len(s.baseline))
 	}
 	return SecuritySummary{
-		Score:        scoreAvg,
-		EventCount:   len(s.events),
-		RiskNodes:    len(riskNodes),
-		FIMChanges:   fimChanges,
+		Score:         scoreAvg,
+		EventCount:    len(s.events),
+		RiskNodes:     len(riskNodes),
+		FIMChanges:    fimChanges,
 		BaselineHosts: len(nodes),
-		GeneratedAt:  time.Now().UnixMilli(),
+		GeneratedAt:   time.Now().UnixMilli(),
 	}
 }
 

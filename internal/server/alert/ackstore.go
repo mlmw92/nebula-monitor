@@ -199,6 +199,56 @@ func (s *AckStore) Comment(rule, host, instance string, startsAt int64, user, te
 	return info, nil
 }
 
+// AckStats 是处置记录的统计快照（保留策略与自监控使用）。
+type AckStats struct {
+	Total   int   `json:"total"`
+	Handled int   `json:"handled"`
+	Oldest  int64 `json:"oldest"` // 最早一条记录的最后操作时间（毫秒）；无记录为 0
+}
+
+// Stats 返回处置记录统计。
+func (s *AckStore) Stats() AckStats {
+	if s == nil {
+		return AckStats{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := AckStats{Total: len(s.acks)}
+	for _, v := range s.acks {
+		if v.Handled() {
+			out.Handled++
+		}
+		if v.Time > 0 && (out.Oldest == 0 || v.Time < out.Oldest) {
+			out.Oldest = v.Time
+		}
+	}
+	return out
+}
+
+// PruneHandled 删除「已处置（已认领或已关闭）」且最后操作时间早于 before 的记录，返回删除条数。
+//
+// 待处理（pending）记录一律保留：它们仍然需要人处理，不能因为时间久远被静默清掉，
+// 否则「重新打开后回到待处理」的告警会在清理后再次消失。
+func (s *AckStore) PruneHandled(before int64) int {
+	if s == nil || before <= 0 {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for key, info := range s.acks {
+		if !info.Handled() || info.Time >= before {
+			continue
+		}
+		delete(s.acks, key)
+		removed++
+	}
+	if removed > 0 {
+		s.persistLocked()
+	}
+	return removed
+}
+
 // Get 返回单条告警的处置记录。
 func (s *AckStore) Get(rule, host, instance string, startsAt int64) (AckInfo, bool) {
 	if s == nil {

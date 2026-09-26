@@ -324,6 +324,80 @@ func (g *Generator) History() []ReportMeta {
 	return out
 }
 
+// ReportStats 是报告文件的统计快照。
+type ReportStats struct {
+	Files int   `json:"files"`
+	Bytes int64 `json:"bytes"`
+}
+
+// PruneResult 是一次报告清理的结果。
+type PruneResult struct {
+	Files   int   `json:"files"`
+	History int   `json:"history"`
+	Bytes   int64 `json:"bytes"`
+}
+
+// Stats 返回报告目录中 HTML 文件的数量与总占用。
+func (g *Generator) Stats() ReportStats {
+	entries, err := os.ReadDir(g.dir)
+	if err != nil {
+		return ReportStats{}
+	}
+	var out ReportStats
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".html" {
+			continue
+		}
+		out.Files++
+		if info, err := e.Info(); err == nil {
+			out.Bytes += info.Size()
+		}
+	}
+	return out
+}
+
+// PruneBefore 删除生成时间早于 cutoff 的报告文件，并同步裁剪历史记录。
+//
+// 文件与历史必须一起处理：只删文件会让历史列表出现点开即 404 的条目，
+// 只删历史则文件永远留在磁盘上（这正是本项目报告目录无界增长的成因）。
+func (g *Generator) PruneBefore(cutoff time.Time) PruneResult {
+	var out PruneResult
+	entries, err := os.ReadDir(g.dir)
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".html" {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil || !info.ModTime().Before(cutoff) {
+				continue
+			}
+			if err := os.Remove(filepath.Join(g.dir, e.Name())); err != nil {
+				continue
+			}
+			out.Files++
+			out.Bytes += info.Size()
+		}
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	cutoffMs := cutoff.UnixMilli()
+	kept := make([]ReportMeta, 0, len(g.history))
+	for _, item := range g.history {
+		if item.Generated > 0 && item.Generated < cutoffMs {
+			out.History++
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if out.History > 0 {
+		g.history = kept
+		g.persistHistoryLocked()
+	}
+	return out
+}
+
 func (g *Generator) historyPath() string {
 	return filepath.Join(g.dir, "history.json")
 }

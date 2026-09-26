@@ -22,6 +22,7 @@
 - **网闸代理模式**：Edge / Hub mTLS 隧道穿透网闸，单端口、断线重连、内存缓冲
 - **一键部署与升级**：Server + Agent 离线 / 在线安装，Web 端系统升级与独立 IP 地理库热更新
 - **可观测性增强**：指标自动发现（按分类浏览全部采集指标、标记在线状态）、自定义仪表盘（Web 端自由编排面板并持久化）、历史数据导出（按指标/主机/时间范围导出 CSV）
+- **数据保留**：本地数据自动清理——告警处置记录按天保留（**只清理已认领/已关闭的记录**，待处理的一律保留）、巡检报告按天清理（文件与历史同步删除），周期与开关可在「系统设置 → 数据保留」调整并支持「立即清理」；审计事件与安全事件由内置上限（各 2000 条）自动淘汰最旧记录。指标数据的保留期由时序库启动参数决定，界面只做只读呈现。策略文件为 `server.yaml` 的 `retentionFile`（默认 `/etc/monitor-server/retention.yaml`）
 - **安全监测中心**：SSH 登录审计与暴力破解检测、文件完整性监测（FIM，关键文件 SHA256 基线比对）、安全基线合规评分、异常进程与反弹 shell 检测、sudo 提权审计；事件复用阈值告警体系（邮件/Webhook/钉钉/飞书/企业微信，支持静默与维护窗口），Web 端「安全中心」统一查看与处置
 - **智能分析与预测**：基于历史指标构建动态基线、识别持续异常、预测磁盘 / 内存 / CPU 容量耗尽与网络流量增长、聚合风险优先级；关联同主机告警、安全事件、中间件实例与拨测状态，输出只读根因线索、影响范围和人工排查建议
 
@@ -361,7 +362,7 @@ securityStoreFile: /var/lib/monitor-server/security_store.json
 - **代理增强（P1）**：磁盘缓冲（长时间断网容灾）、请求批量合并（Server 减负）、主备双实例故障切换。
 - **SSO / LDAP / OIDC（P2）**：对接企业统一身份源。
 - **单设备会话与审批流（P2）**：会话管理、高风险操作双人复核。
-- **数据保留策略（P2）**：时序数据生命周期管理、自动归档与清理。
+- **时序数据生命周期（P2）**：本地数据保留已落地（见上文「数据保留」）；**指标数据**的保留期仍由时序库启动参数决定（VictoriaMetrics 为 `-retentionPeriod`），Server 侧仅只读呈现，不做运行期修改。如需按指标 / 租户差异化保留，依赖时序库自身能力。
 
 **采集与生态扩展**
 
@@ -1539,6 +1540,9 @@ journalctl -u monitor-proxy-hub -f
 | GET | `/api/v1/system/upgrade/history` | 升级历史 |
 | GET | `/api/v1/system/upgrade/archive` | 已归档（可切换）版本列表 |
 | POST | `/api/v1/system/upgrade/rollback-to` | 切换到指定归档版本 |
+| GET | `/api/v1/system/retention` | 数据保留策略与各类数据现状（`system:config`） |
+| PUT | `/api/v1/system/retention` | 保存数据保留策略（热生效） |
+| POST | `/api/v1/system/retention/cleanup` | 立即执行一次清理，返回删除数量 |
 | GET | `/api/v1/system/geoip` | IP 地理库状态 |
 | POST | `/api/v1/system/geoip/upload` | 上传 IP 地理库 |
 | POST | `/api/v1/system/geoip/reset` | 重置 IP 地理库 |
