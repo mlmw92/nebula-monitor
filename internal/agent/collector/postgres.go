@@ -1,9 +1,9 @@
 package collector
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -26,8 +26,13 @@ func NewPostgresCollector(node string, instances []model.PostgresInstanceConfig)
 	return &PostgresCollector{node: node, instances: instances}
 }
 
-// Collect 采集所有 PostgreSQL 实例指标。
+// Collect 采集所有 PostgreSQL 实例指标（等价于 CollectCtx(context.Background())）。
 func (c *PostgresCollector) Collect() ([]model.Metric, []model.PostgresInstance) {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 采集所有 PostgreSQL 实例指标；ctx 取消或超时后停止采集剩余实例。
+func (c *PostgresCollector) CollectCtx(ctx context.Context) ([]model.Metric, []model.PostgresInstance) {
 	if len(c.instances) == 0 {
 		return nil, nil
 	}
@@ -36,13 +41,17 @@ func (c *PostgresCollector) Collect() ([]model.Metric, []model.PostgresInstance)
 	var instances []model.PostgresInstance
 
 	for _, cfg := range c.instances {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("PostgreSQL 采集被中断，跳过剩余实例", "err", err)
+			break
+		}
 		if cfg.ExporterURL != "" {
-			m, pi := c.collectExporter(cfg, now)
+			m, pi := c.collectExporter(ctx, cfg, now)
 			metrics = append(metrics, m...)
 			instances = append(instances, pi)
 			continue
 		}
-		m, pi := c.collectDirect(cfg, now)
+		m, pi := c.collectDirect(ctx, cfg, now)
 		metrics = append(metrics, m...)
 		instances = append(instances, pi)
 	}
@@ -50,7 +59,7 @@ func (c *PostgresCollector) Collect() ([]model.Metric, []model.PostgresInstance)
 }
 
 // collectDirect 直连 PostgreSQL 采集。
-func (c *PostgresCollector) collectDirect(cfg model.PostgresInstanceConfig, now int64) ([]model.Metric, model.PostgresInstance) {
+func (c *PostgresCollector) collectDirect(ctx context.Context, cfg model.PostgresInstanceConfig, now int64) ([]model.Metric, model.PostgresInstance) {
 	sslMode := cfg.SSLMode
 	if sslMode == "" {
 		sslMode = "disable"
@@ -64,21 +73,21 @@ func (c *PostgresCollector) collectDirect(cfg model.PostgresInstanceConfig, now 
 		return nil, c.downInstance(cfg, "unknown")
 	}
 	defer db.Close()
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		slog.Warn("PostgreSQL ping 失败", "addr", cfg.Addr, "err", err)
 		return nil, c.downInstance(cfg, "unknown")
 	}
 
 	// 1. pg_stat_database（当前连接的库）
-	dbStat, err := queryPGStatDatabase(db, cfg.Database)
+	dbStat, err := queryPGStatDatabase(ctx, db, cfg.Database)
 	if err != nil {
 		slog.Warn("pg_stat_database 查询失败", "addr", cfg.Addr, "err", err)
 		return nil, c.downInstance(cfg, "unknown")
 	}
 	// 2. SHOW max_connections / server_version
-	settings, _ := queryPGSettings(db)
+	settings, _ := queryPGSettings(ctx, db)
 	// 3. pg_stat_replication（复制延迟）
-	replLag, replState, isStandby, _ := queryPGReplication(db)
+	replLag, replState, isStandby, _ := queryPGReplication(ctx, db)
 
 	role := "master"
 	if isStandby {
@@ -128,16 +137,16 @@ func (c *PostgresCollector) collectDirect(cfg model.PostgresInstanceConfig, now 
 		labels["replication_state"] = replState
 	}
 	// 数据库大小
-	if size, err := queryPGDatabaseSize(db, cfg.Database); err == nil {
+	if size, err := queryPGDatabaseSize(ctx, db, cfg.Database); err == nil {
 		out = append(out, mk("postgres_database_size_bytes", float64(size)))
 	}
 	// 运行时长
-	if uptime, err := queryPGUptime(db); err == nil {
+	if uptime, err := queryPGUptime(ctx, db); err == nil {
 		out = append(out, mk("postgres_uptime_seconds", uptime))
 	}
 	// 平均语句响应时间（ms）：基于 pg_stat_statements 的累计执行时间/调用次数加权得出，
 	// 反映实例处理 SQL 的真实时延，用于巡检报告「响应时间」维度。
-	if lat, ok := queryPGStmtLatencyMs(db, settings["server_version"]); ok {
+	if lat, ok := queryPGStmtLatencyMs(ctx, db, settings["server_version"]); ok {
 		out = append(out, mk("postgres_query_latency_ms", round2(lat)))
 	}
 
@@ -162,17 +171,11 @@ func (c *PostgresCollector) downInstance(cfg model.PostgresInstanceConfig, role 
 	}
 }
 
-func (c *PostgresCollector) collectExporter(cfg model.PostgresInstanceConfig, now int64) ([]model.Metric, model.PostgresInstance) {
+func (c *PostgresCollector) collectExporter(ctx context.Context, cfg model.PostgresInstanceConfig, now int64) ([]model.Metric, model.PostgresInstance) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(cfg.ExporterURL)
+	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
 		slog.Warn("PostgreSQL exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
-		return nil, c.downInstance(cfg, "unknown")
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		slog.Warn("PostgreSQL exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, c.downInstance(cfg, "unknown")
 	}
 	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), "postgres_", now)
@@ -194,11 +197,11 @@ func (c *PostgresCollector) collectExporter(cfg model.PostgresInstanceConfig, no
 }
 
 // queryPGStatDatabase 查询 pg_stat_database 中指定库的统计。
-func queryPGStatDatabase(db *sql.DB, dbName string) (map[string]string, error) {
+func queryPGStatDatabase(ctx context.Context, db *sql.DB, dbName string) (map[string]string, error) {
 	query := `SELECT numbackends, xact_commit, xact_rollback, tup_returned, tup_fetched,
 		tup_inserted, tup_updated, tup_deleted, blks_hit, blks_read, deadlocks
 		FROM pg_stat_database WHERE datname = $1`
-	row := db.QueryRow(query, dbName)
+	row := db.QueryRowContext(ctx, query, dbName)
 	var numbackends, xactCommit, xactRollback, tupReturned, tupFetched,
 		tupInserted, tupUpdated, tupDeleted, blksHit, blksRead, deadlocks int64
 	err := row.Scan(&numbackends, &xactCommit, &xactRollback, &tupReturned, &tupFetched,
@@ -222,14 +225,14 @@ func queryPGStatDatabase(db *sql.DB, dbName string) (map[string]string, error) {
 }
 
 // queryPGSettings 查询关键 SHOW 设置。
-func queryPGSettings(db *sql.DB) (map[string]string, error) {
+func queryPGSettings(ctx context.Context, db *sql.DB) (map[string]string, error) {
 	out := map[string]string{}
 	settings := []string{"max_connections", "server_version"}
 	for _, s := range settings {
 		var val string
 		// PostgreSQL 中 SHOW 不支持参数化，直接拼接（仅固定字符串，无注入风险）
 		query := fmt.Sprintf("SHOW %s", s)
-		if err := db.QueryRow(query).Scan(&val); err == nil {
+		if err := db.QueryRowContext(ctx, query).Scan(&val); err == nil {
 			out[s] = val
 		}
 	}
@@ -238,9 +241,9 @@ func queryPGSettings(db *sql.DB) (map[string]string, error) {
 
 // queryPGReplication 查询复制延迟。返回 (lagBytes, state, isStandby, error)。
 // 在 standby 节点上 pg_stat_replication 为空，isStandby 通过 pg_is_in_recovery() 判断。
-func queryPGReplication(db *sql.DB) (float64, string, bool, error) {
+func queryPGReplication(ctx context.Context, db *sql.DB) (float64, string, bool, error) {
 	var isRecovery bool
-	err := db.QueryRow("SELECT pg_is_in_recovery()").Scan(&isRecovery)
+	err := db.QueryRowContext(ctx, "SELECT pg_is_in_recovery()").Scan(&isRecovery)
 	if err != nil {
 		return -1, "", false, err
 	}
@@ -248,7 +251,7 @@ func queryPGReplication(db *sql.DB) (float64, string, bool, error) {
 		// master 节点，查询 slave 连接
 		var lag float64
 		var state string
-		err := db.QueryRow("SELECT COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn), 0), state FROM pg_stat_replication LIMIT 1").Scan(&lag, &state)
+		err := db.QueryRowContext(ctx, "SELECT COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn), 0), state FROM pg_stat_replication LIMIT 1").Scan(&lag, &state)
 		if err != nil {
 			return -1, "", false, nil // 无 slave 连接不算错误
 		}
@@ -257,7 +260,7 @@ func queryPGReplication(db *sql.DB) (float64, string, bool, error) {
 	// standby 节点
 	var lag float64
 	var state string
-	err = db.QueryRow("SELECT pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn()), 'streaming'").Scan(&lag, &state)
+	err = db.QueryRowContext(ctx, "SELECT pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn()), 'streaming'").Scan(&lag, &state)
 	if err != nil {
 		return -1, "", true, nil
 	}
@@ -265,24 +268,24 @@ func queryPGReplication(db *sql.DB) (float64, string, bool, error) {
 }
 
 // queryPGDatabaseSize 查询数据库大小（字节）。
-func queryPGDatabaseSize(db *sql.DB, dbName string) (int64, error) {
+func queryPGDatabaseSize(ctx context.Context, db *sql.DB, dbName string) (int64, error) {
 	var size int64
-	err := db.QueryRow("SELECT pg_database_size($1)", dbName).Scan(&size)
+	err := db.QueryRowContext(ctx, "SELECT pg_database_size($1)", dbName).Scan(&size)
 	return size, err
 }
 
 // queryPGUptime 查询 PostgreSQL 运行时长（秒）。
-func queryPGUptime(db *sql.DB) (float64, error) {
+func queryPGUptime(ctx context.Context, db *sql.DB) (float64, error) {
 	var uptime float64
-	err := db.QueryRow("SELECT EXTRACT(EPOCH FROM (now() - pg_postmaster_start_time()))").Scan(&uptime)
+	err := db.QueryRowContext(ctx, "SELECT EXTRACT(EPOCH FROM (now() - pg_postmaster_start_time()))").Scan(&uptime)
 	return uptime, err
 }
 
 // queryPGStmtLatencyMs 返回实例平均语句响应时间（毫秒），基于 pg_stat_statements。
 // PG 13+ 使用 total_exec_time 列，更早版本使用 total_time 列；扩展未安装/未加载时返回 ok=false。
-func queryPGStmtLatencyMs(db *sql.DB, version string) (float64, bool) {
+func queryPGStmtLatencyMs(ctx context.Context, db *sql.DB, version string) (float64, bool) {
 	var exists int
-	if err := db.QueryRow("SELECT 1 FROM pg_extension WHERE extname='pg_stat_statements' LIMIT 1").Scan(&exists); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT 1 FROM pg_extension WHERE extname='pg_stat_statements' LIMIT 1").Scan(&exists); err != nil {
 		return 0, false // 扩展未安装
 	}
 	col := "total_exec_time"
@@ -291,7 +294,7 @@ func queryPGStmtLatencyMs(db *sql.DB, version string) (float64, bool) {
 	}
 	var avgMs float64
 	query := fmt.Sprintf("SELECT COALESCE(SUM(%s)/NULLIF(SUM(calls),0), 0) FROM pg_stat_statements", col)
-	if err := db.QueryRow(query).Scan(&avgMs); err != nil {
+	if err := db.QueryRowContext(ctx, query).Scan(&avgMs); err != nil {
 		return 0, false
 	}
 	return avgMs, true

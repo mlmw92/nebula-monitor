@@ -1,9 +1,9 @@
 package collector
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -26,8 +26,13 @@ func NewMySQLCollector(node string, instances []model.MySQLInstanceConfig) *MySQ
 	return &MySQLCollector{node: node, instances: instances}
 }
 
-// Collect 采集所有 MySQL 实例指标。
+// Collect 采集所有 MySQL 实例指标（等价于 CollectCtx(context.Background())）。
 func (c *MySQLCollector) Collect() ([]model.Metric, []model.MySQLInstance) {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 采集所有 MySQL 实例指标；ctx 取消或超时后停止采集剩余实例。
+func (c *MySQLCollector) CollectCtx(ctx context.Context) ([]model.Metric, []model.MySQLInstance) {
 	if len(c.instances) == 0 {
 		return nil, nil
 	}
@@ -36,13 +41,17 @@ func (c *MySQLCollector) Collect() ([]model.Metric, []model.MySQLInstance) {
 	var instances []model.MySQLInstance
 
 	for _, cfg := range c.instances {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("MySQL 采集被中断，跳过剩余实例", "err", err)
+			break
+		}
 		if cfg.ExporterURL != "" {
-			m, mi := c.collectExporter(cfg, now)
+			m, mi := c.collectExporter(ctx, cfg, now)
 			metrics = append(metrics, m...)
 			instances = append(instances, mi)
 			continue
 		}
-		m, mi := c.collectDirect(cfg, now)
+		m, mi := c.collectDirect(ctx, cfg, now)
 		metrics = append(metrics, m...)
 		instances = append(instances, mi)
 	}
@@ -50,7 +59,7 @@ func (c *MySQLCollector) Collect() ([]model.Metric, []model.MySQLInstance) {
 }
 
 // collectDirect 直连 MySQL 采集。
-func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64) ([]model.Metric, model.MySQLInstance) {
+func (c *MySQLCollector) collectDirect(ctx context.Context, cfg model.MySQLInstanceConfig, now int64) ([]model.Metric, model.MySQLInstance) {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s)/?timeout=5s&readTimeout=5s", cfg.User, cfg.Password, cfg.Addr)
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
@@ -58,24 +67,24 @@ func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64)
 		return nil, c.downInstance(cfg, "unknown")
 	}
 	defer db.Close()
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		slog.Warn("MySQL ping 失败", "addr", cfg.Addr, "err", err)
 		return nil, c.downInstance(cfg, "unknown")
 	}
 
 	// 1. SHOW GLOBAL STATUS
-	status, err := queryGlobalStatus(db)
+	status, err := queryGlobalStatus(ctx, db)
 	if err != nil {
 		slog.Warn("MySQL SHOW STATUS 失败", "addr", cfg.Addr, "err", err)
 		return nil, c.downInstance(cfg, "unknown")
 	}
 	// 2. SHOW GLOBAL VARIABLES（max_connections / version 等）
-	vars, err := queryGlobalVariables(db)
+	vars, err := queryGlobalVariables(ctx, db)
 	if err != nil {
 		slog.Warn("MySQL SHOW VARIABLES 失败", "addr", cfg.Addr, "err", err)
 	}
 	// 3. SHOW SLAVE STATUS（复制信息）
-	slave, err := querySlaveStatus(db)
+	slave, err := querySlaveStatus(ctx, db)
 
 	// 规范化实例地址：回环地址（127.0.0.1/localhost 等）替换为 Agent 本机真实 IP，
 	// 保留端口；非回环地址（用户配置的真实 IP/域名）原样保留，与 Redis/Nginx 行为一致。
@@ -110,7 +119,7 @@ func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64)
 	}
 	// Group Replication：优先使用成员真实角色（cluster 拓扑）。
 	// 非 GR 实例无本机记录或权限不足，queryGroupReplicationRole 返回空，不影响主从判定。
-	if grRole := queryGroupReplicationRole(db); grRole != "" {
+	if grRole := queryGroupReplicationRole(ctx, db); grRole != "" {
 		role = grRole
 		replicaOf = "" // GR 由前端 group 视图呈现，不依赖 replicaOf
 	}
@@ -176,7 +185,7 @@ func (c *MySQLCollector) collectDirect(cfg model.MySQLInstanceConfig, now int64)
 	out = append(out, mk("mysql_uptime", uptime))
 	// 平均语句响应时间（ms）：基于 performance_schema 中各语句类型的累计等待时间/次数加权威得出，
 	// 反映实例处理 SQL 的真实时延，用于巡检报告「响应时间」维度。
-	if lat, ok := queryMySQLStmtLatencyMs(db); ok {
+	if lat, ok := queryMySQLStmtLatencyMs(ctx, db); ok {
 		out = append(out, mk("mysql_query_latency_ms", round2(lat)))
 	}
 
@@ -208,17 +217,11 @@ func (c *MySQLCollector) downInstance(cfg model.MySQLInstanceConfig, role string
 }
 
 // collectExporter 从 Prometheus exporter 拉取 /metrics。
-func (c *MySQLCollector) collectExporter(cfg model.MySQLInstanceConfig, now int64) ([]model.Metric, model.MySQLInstance) {
+func (c *MySQLCollector) collectExporter(ctx context.Context, cfg model.MySQLInstanceConfig, now int64) ([]model.Metric, model.MySQLInstance) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(cfg.ExporterURL)
+	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
 		slog.Warn("MySQL exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
-		return nil, c.downInstance(cfg, "unknown")
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		slog.Warn("MySQL exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, c.downInstance(cfg, "unknown")
 	}
 	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeInstanceAddr(cfg.Addr), "mysql_", now)
@@ -248,12 +251,12 @@ func (c *MySQLCollector) collectExporter(cfg model.MySQLInstanceConfig, now int6
 // 基于 performance_schema.events_statements_summary_by_digest 的累计等待时间/语句数加权得出，
 // 即全部 SQL 类型的平均执行时延。需要 performance_schema 启用且当前用户可读该表；
 // 否则（表不存在/无权限/未启用）返回 ok=false，由调用方决定是否上报该指标。
-func queryMySQLStmtLatencyMs(db *sql.DB) (float64, bool) {
+func queryMySQLStmtLatencyMs(ctx context.Context, db *sql.DB) (float64, bool) {
 	var avgMs float64
 	// SUM_TIMER_WAIT 以皮秒为单位，1ms = 1e9 ps。
 	query := `SELECT COALESCE(SUM(SUM_TIMER_WAIT)/NULLIF(SUM(COUNT_STAR),0)/1000000000.0, 0)
 		FROM performance_schema.events_statements_summary_by_digest`
-	if err := db.QueryRow(query).Scan(&avgMs); err != nil {
+	if err := db.QueryRowContext(ctx, query).Scan(&avgMs); err != nil {
 		return 0, false
 	}
 	return avgMs, true
@@ -261,8 +264,8 @@ func queryMySQLStmtLatencyMs(db *sql.DB) (float64, bool) {
 
 // queryGroupReplicationRole 查询本节点在 Group Replication 中的角色（PRIMARY/SECONDARY）。
 // 非 GR 实例无本机记录或权限不足，返回空字符串。
-func queryGroupReplicationRole(db *sql.DB) string {
-	rows, err := db.Query(`SELECT MEMBER_ROLE FROM performance_schema.replication_group_members WHERE MEMBER_ID = (SELECT @@server_uuid)`)
+func queryGroupReplicationRole(ctx context.Context, db *sql.DB) string {
+	rows, err := db.QueryContext(ctx, `SELECT MEMBER_ROLE FROM performance_schema.replication_group_members WHERE MEMBER_ID = (SELECT @@server_uuid)`)
 	if err != nil {
 		return ""
 	}
@@ -277,8 +280,8 @@ func queryGroupReplicationRole(db *sql.DB) string {
 }
 
 // queryGlobalStatus 执行 SHOW GLOBAL STATUS，返回 Variable_name→Value 映射。
-func queryGlobalStatus(db *sql.DB) (map[string]string, error) {
-	rows, err := db.Query("SHOW GLOBAL STATUS")
+func queryGlobalStatus(ctx context.Context, db *sql.DB) (map[string]string, error) {
+	rows, err := db.QueryContext(ctx, "SHOW GLOBAL STATUS")
 	if err != nil {
 		return nil, err
 	}
@@ -295,8 +298,8 @@ func queryGlobalStatus(db *sql.DB) (map[string]string, error) {
 }
 
 // queryGlobalVariables 执行 SHOW GLOBAL VARIABLES。
-func queryGlobalVariables(db *sql.DB) (map[string]string, error) {
-	rows, err := db.Query("SHOW GLOBAL VARIABLES")
+func queryGlobalVariables(ctx context.Context, db *sql.DB) (map[string]string, error) {
+	rows, err := db.QueryContext(ctx, "SHOW GLOBAL VARIABLES")
 	if err != nil {
 		return nil, err
 	}
@@ -314,8 +317,8 @@ func queryGlobalVariables(db *sql.DB) (map[string]string, error) {
 
 // querySlaveStatus 执行 SHOW SLAVE STATUS，返回第一行的列名→值映射。
 // 非 slave 或无复制时返回 nil。
-func querySlaveStatus(db *sql.DB) (map[string]string, error) {
-	rows, err := db.Query("SHOW SLAVE STATUS")
+func querySlaveStatus(ctx context.Context, db *sql.DB) (map[string]string, error) {
+	rows, err := db.QueryContext(ctx, "SHOW SLAVE STATUS")
 	if err != nil {
 		return nil, err
 	}
