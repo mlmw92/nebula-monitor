@@ -65,6 +65,7 @@ type SecurityCollector struct {
 	mu                   sync.Mutex
 	fim                  *fimState          // FIM 基线状态（含本地偏移/哈希）
 	sshOff               map[string]int64   // 各 SSH 日志文件的读取偏移
+	sudoOff              map[string]int64   // 各 sudo 日志文件的读取偏移（**必须独立于 sshOff**，见 collectSudo 注释）
 	sshFailures          map[string][]int64 // SSH 失败记录，按来源 IP 保留检测窗口内时间戳
 	sshBruteforceAlertAt map[string]int64   // 同一来源 IP 在检测窗口内仅聚合告警一次
 }
@@ -89,6 +90,7 @@ func NewSecurityCollector(node, nodeIP string, cfg config.SecurityConfig) *Secur
 		nodeIP:               nodeIP,
 		cfg:                  cfg,
 		sshOff:               map[string]int64{},
+		sudoOff:              map[string]int64{},
 		sshFailures:          map[string][]int64{},
 		sshBruteforceAlertAt: map[string]int64{},
 	}
@@ -348,7 +350,10 @@ func (c *SecurityCollector) collectSudo() []model.SecurityEvent {
 	var events []model.SecurityEvent
 	now := time.Now()
 	for _, path := range paths {
-		offset, _ := c.sshOff[path]
+		// sudo 与 SSH 读的是同一个文件、但关注的是不同内容，因此**各用各的偏移**。
+		// 早先这里复用 sshOff：而 collectSSH 在本函数之前执行、已把偏移推到文件末尾，
+		// 于是 sudo 永远从末尾开始读——表现为「sudo 审计一条都收不到」，且没有任何报错。
+		offset, _ := c.sudoOff[path]
 		f, err := os.Open(path)
 		if err != nil {
 			continue
@@ -359,16 +364,22 @@ func (c *SecurityCollector) collectSudo() []model.SecurityEvent {
 			continue
 		}
 		if st.Size() < offset {
-			offset = 0
+			offset = 0 // 文件被轮转/重建：从头重读
 		}
 		if _, err := f.Seek(offset, 0); err != nil {
 			_ = f.Close()
 			continue
 		}
 		r := bufio.NewReader(f)
+		var readBytes int64
 		for {
 			line, err := r.ReadString('\n')
 			if line != "" {
+				readBytes += int64(len(line))
+				if readBytes > securityMaxBytes {
+					// 与 collectSSH 同一套洪峰保护：日志被灌爆时不能无上限读进内存
+					break
+				}
 				line = strings.TrimRight(line, "\r\n")
 				if m := reSudo.FindStringSubmatch(line); m != nil {
 					// m[1]=执行者 m[2]=目标用户 m[3]=命令
@@ -382,6 +393,10 @@ func (c *SecurityCollector) collectSudo() []model.SecurityEvent {
 			}
 		}
 		_ = f.Close()
+		// 只推进本函数真正读过的字节数：超限中断时下次从断点续读
+		c.mu.Lock()
+		c.sudoOff[path] = offset + readBytes
+		c.mu.Unlock()
 	}
 	return events
 }
