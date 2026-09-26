@@ -599,6 +599,10 @@ type AlertEvent struct {
 	GroupKey     string     `json:"groupKey,omitempty"`     // 分组键（相同键的告警合并为一组通知）
 	Notify       []string   `json:"notify,omitempty"`       // 本事件允许发送的通知渠道（运行时分组使用）
 	Test         bool       `json:"test,omitempty"`         // 是否为手动测试事件
+	// Labels 事件标签视图：由事件字段派生（name/rule/node/instance/severity/metric）并可由
+	// 告警事件管道（alert_pipeline.yaml）改写或增补（如 team/owner/env），用于通知模板渲染。
+	// 不参与告警判定与分组键计算。
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // NowMillis 返回当前毫秒时间戳。

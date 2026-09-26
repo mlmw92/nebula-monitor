@@ -111,9 +111,11 @@ func main() {
 	// 抑制规则与分组配置（P4）：热加载 YAML，可经 Web 端增删改。
 	inhibitStore := alert.NewInhibitStore(filepath.Join(filepath.Dir(cfg.Alert.RulesFile), "alert_inhibit.yaml"))
 	groupingStore := alert.NewGroupingStore(filepath.Join(filepath.Dir(cfg.Alert.RulesFile), "alert_grouping.yaml"))
+	// 告警事件管道（relabel / enrich / 消息模板）：独立 YAML，Web 端可编辑，保存即热生效。
+	pipelineStore := alert.NewPipelineStore(filepath.Join(filepath.Dir(cfg.Alert.RulesFile), "alert_pipeline.yaml"))
 	notifiers := alert.BuildNotifiers(cfg.Notify)
 	hub := api.NewHub()
-	engine := alert.NewEngine(store, nodeMgr, rules, alertStore, notifiers, hub, maintenance, cfg.Alert.EvalInterval, inhibitStore, groupingStore)
+	engine := alert.NewEngine(store, nodeMgr, rules, alertStore, notifiers, hub, maintenance, cfg.Alert.EvalInterval, inhibitStore, groupingStore, pipelineStore)
 
 	// 通知配置管理：独立文件（Web 端可配置），启动时优先加载该文件，不存在则
 	// 用 server.yaml 的 notify 段初始化并落盘；保存时通过 SetNotifiers 热加载。
@@ -220,6 +222,7 @@ func main() {
 	}
 	rest.SetDashboardManager(dashMgr)
 	rest.SetAnalyzer(analyzer)
+	rest.SetPipelineStore(pipelineStore)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)

@@ -106,6 +106,7 @@ type API struct {
 	defenseStore   *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空，关闭防护能力）
 	authStore      *auth.Store            // 多用户角色权限存储（可空：未启用登录认证时为 nil）
 	analysis       *analysis.Analyzer     // 只读智能分析服务（可空）
+	pipeline       *alert.PipelineStore   // 告警事件管道：relabel/enrich/消息模板（可空）
 }
 
 // SetDashboardManager 注入仪表盘配置管理器（可选，不注入则相关接口返回空列表）。
@@ -113,6 +114,9 @@ func (a *API) SetDashboardManager(m *dashboard.Manager) { a.dashMgr = m }
 
 // SetAnalyzer 注入只读智能分析服务。
 func (a *API) SetAnalyzer(analyzer *analysis.Analyzer) { a.analysis = analyzer }
+
+// SetPipelineStore 注入告警事件管道存储（可选；不注入时相关接口返回空配置）。
+func (a *API) SetPipelineStore(p *alert.PipelineStore) { a.pipeline = p }
 
 // New 创建 API。
 func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string, sec *security.Store, defenseStore *security.DefenseStore, auditStore *audit.Store, authStore *auth.Store) *API {
@@ -247,6 +251,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// 告警抑制规则（P4）
 	mux.HandleFunc("GET /api/v1/inhibit", a.handleInhibitGet)
 	mux.HandleFunc("PUT /api/v1/inhibit", a.handleInhibitPut)
+
+	// 告警事件管道（relabel / enrich / 消息模板）：独立配置，保存即热生效
+	mux.HandleFunc("GET /api/v1/alert-pipeline", a.handlePipelineGet)
+	mux.HandleFunc("PUT /api/v1/alert-pipeline", a.handlePipelinePut)
+	mux.HandleFunc("POST /api/v1/alert-pipeline/preview", a.handlePipelinePreview)
 
 	// 告警分组配置（P4）
 	mux.HandleFunc("GET /api/v1/grouping", a.handleGroupingGet)

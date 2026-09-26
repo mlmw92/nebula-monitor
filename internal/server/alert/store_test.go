@@ -154,7 +154,7 @@ func TestEngineRestoresSpecialAlertFiringIndex(t *testing.T) {
 	storage := &captureAlertStorage{active: active}
 	alerts := NewVMAlertStore(storage)
 	rules := &RulesStore{rules: map[string]model.AlertRule{}}
-	engine := NewEngine(nil, nil, rules, alerts, nil, nil, nil, 15, nil, nil)
+	engine := NewEngine(nil, nil, rules, alerts, nil, nil, nil, 15, nil, nil, nil)
 
 	if len(engine.firing) != 2 {
 		t.Fatalf("restored firing index size = %d, want 2", len(engine.firing))

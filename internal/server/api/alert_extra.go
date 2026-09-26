@@ -66,6 +66,97 @@ func (a *API) handleGroupingPut(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"status": "ok", "config": a.grouping.Get()})
 }
 
+// ---- 告警事件管道（relabel / enrich / 消息模板）----
+
+// handlePipelineGet 返回当前告警事件管道配置。
+func (a *API) handlePipelineGet(w http.ResponseWriter, r *http.Request) {
+	if a.pipeline == nil {
+		writeJSON(w, 200, alert.PipelineConfig{})
+		return
+	}
+	writeJSON(w, 200, a.pipeline.Get())
+}
+
+// handlePipelinePut 校验并保存管道配置（保存即热生效，无需重启）。
+func (a *API) handlePipelinePut(w http.ResponseWriter, r *http.Request) {
+	if a.pipeline == nil {
+		http.Error(w, "alert pipeline disabled", http.StatusServiceUnavailable)
+		return
+	}
+	var cfg alert.PipelineConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		http.Error(w, "invalid body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := a.pipeline.Save(cfg); err != nil {
+		http.Error(w, "save failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"status": "ok", "config": a.pipeline.Get()})
+}
+
+// pipelinePreviewRequest 管道预览请求：可携带「待保存的配置」与自定义事件，试算后返回结果。
+type pipelinePreviewRequest struct {
+	Config  *alert.PipelineConfig `json:"config"`
+	Channel string                `json:"channel"`
+	Event   *model.AlertEvent     `json:"event"`
+}
+
+// handlePipelinePreview 试算管道效果（relabel/enrich 后的标签 + 指定渠道渲染出的消息）。
+// 携带 config 时按待保存配置试算，不修改线上配置；便于前端保存前实时预览。
+func (a *API) handlePipelinePreview(w http.ResponseWriter, r *http.Request) {
+	if a.pipeline == nil {
+		http.Error(w, "alert pipeline disabled", http.StatusServiceUnavailable)
+		return
+	}
+	var req pipelinePreviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	ev := sampleAlertEvent()
+	if req.Event != nil {
+		ev = *req.Event
+	}
+
+	store := a.pipeline
+	if req.Config != nil {
+		if err := a.pipeline.Validate(*req.Config); err != nil {
+			http.Error(w, "config invalid: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		store = alert.NewPreviewPipelineStore(*req.Config)
+	}
+
+	applied := store.Apply(ev)
+	writeJSON(w, 200, map[string]any{
+		"event":           applied,
+		"labels":          applied.Labels,
+		"message":         store.RenderMessage(applied, req.Channel),
+		"originalMessage": ev.Message,
+	})
+}
+
+// sampleAlertEvent 返回管道预览用的样例告警事件（前端未传事件时代入）。
+func sampleAlertEvent() model.AlertEvent {
+	return model.AlertEvent{
+		ID:        "preview-1",
+		RuleID:    "rule-cpu-usage",
+		RuleName:  "CPU 使用率过高",
+		Node:      "web-01",
+		NodeIP:    "10.0.0.11",
+		Metric:    "cpu_usage",
+		Value:     92.4,
+		Operator:  ">",
+		Threshold: 90,
+		Severity:  model.SeverityCritical,
+		State:     model.AlertStateFiring,
+		Message:   "主机 web-01 CPU 使用率 92.40% 超过阈值 90.00%",
+		StartsAt:  time.Now().UnixMilli(),
+		Labels:    map[string]string{"env": "prod"},
+	}
+}
+
 // handleAlertStats 返回告警统计看板数据：活跃数、抑制数、24h 状态分布、级别分布、Top 规则。
 func (a *API) handleAlertStats(w http.ResponseWriter, r *http.Request) {
 	active := a.unacknowledgedAlerts(a.alerts.Active())

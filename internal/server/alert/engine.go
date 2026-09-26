@@ -61,6 +61,7 @@ type Engine struct {
 	firing             map[string]*firingEntry          // 活跃 firing 事件（用于抑制匹配），按 rule|node|instance 记录
 	inhibit            *InhibitStore                    // 抑制规则（可选）
 	grouping           *GroupingStore                   // 分组配置（可选）
+	pipeline           *PipelineStore                   // 告警事件管道：relabel/enrich/消息模板（可选）
 	grouper            *Grouper                         // 分组器（分组启用时非空）
 }
 
@@ -89,7 +90,7 @@ type firingEntry struct {
 // NewEngine 创建引擎。inhibit/grouping 为可选的高级能力（抑制/分组），为空则关闭。
 func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
 	alerts *VMAlertStore, notifiers []Notifier, broadcaster Broadcaster, maintenance *MaintenanceStore,
-	evalInterval int, inhibit *InhibitStore, grouping *GroupingStore) *Engine {
+	evalInterval int, inhibit *InhibitStore, grouping *GroupingStore, pipeline *PipelineStore) *Engine {
 	if evalInterval <= 0 {
 		evalInterval = 15
 	}
@@ -111,6 +112,7 @@ func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
 		firing:             map[string]*firingEntry{},
 		inhibit:            inhibit,
 		grouping:           grouping,
+		pipeline:           pipeline,
 	}
 	e.restoreActiveState()
 	// 分组启用时构建分组器：相同 groupBy 的告警合并为一组，按 groupWait/groupInterval 汇总发送。
@@ -1623,17 +1625,47 @@ func (e *Engine) notify(ev model.AlertEvent) {
 		slog.Info("未配置通知渠道，仅平台展示", "rule", ev.RuleName, "event", ev.ID)
 		return
 	}
+	// 告警事件管道：先对副本做 relabel/enrich，再按渠道渲染消息模板。
+	// 未配置管道/模板时为零开销直通，行为与改造前完全一致。
+	ev = e.applyPipeline(ev)
+	perChannel := e.pipeline != nil && e.pipeline.HasMessageTemplate()
 	ns := append([]Notifier(nil), e.notifiers...)
 	go func() {
 		for _, n := range ns {
 			if !contains(chs, n.Channel()) {
 				continue
 			}
-			if err := n.Notify(ev); err != nil {
+			out := ev
+			if perChannel {
+				out.Message = e.pipeline.RenderMessage(ev, n.Channel())
+			}
+			if err := n.Notify(out); err != nil {
 				slog.Warn("通知发送失败", "channel", n.Channel(), "err", err)
 			}
 		}
 	}()
+}
+
+// applyPipeline 对事件副本应用告警事件管道（relabel/enrich）；未配置管道时原样返回。
+func (e *Engine) applyPipeline(ev model.AlertEvent) model.AlertEvent {
+	if e.pipeline == nil {
+		return ev
+	}
+	return e.pipeline.Apply(ev)
+}
+
+// renderForChannel 返回「按指定渠道渲染消息模板」后的事件副本。
+// 未配置消息模板时直接返回原切片，避免无谓分配。
+func (e *Engine) renderForChannel(events []model.AlertEvent, channel string) []model.AlertEvent {
+	if e.pipeline == nil || !e.pipeline.HasMessageTemplate() {
+		return events
+	}
+	out := make([]model.AlertEvent, len(events))
+	for i, ev := range events {
+		out[i] = ev
+		out[i].Message = e.pipeline.RenderMessage(ev, channel)
+	}
+	return out
 }
 
 // SetNotifiers 热加载通知器列表。在 e.mu 锁内替换，与 evaluate/notify 共用同一把锁，
@@ -1902,6 +1934,8 @@ func (e *Engine) flushGroup(events []model.AlertEvent) {
 	groups := map[string][]model.AlertEvent{}
 	groupChannels := map[string][]string{}
 	for _, ev := range events {
+		// 告警事件管道：分组通知前先对副本做 relabel/enrich（空管道零开销直通）
+		ev = e.applyPipeline(ev)
 		chs := append([]string(nil), ev.Notify...)
 		if len(chs) == 0 {
 			chs = e.ruleNotifyChannels(ev.RuleID)
@@ -1919,7 +1953,8 @@ func (e *Engine) flushGroup(events []model.AlertEvent) {
 			if !contains(groupChannels[key], n.Channel()) {
 				continue
 			}
-			if err := n.NotifyGroup(grouped); err != nil {
+			// 消息模板按渠道渲染（未配置模板时直接复用原切片）
+			if err := n.NotifyGroup(e.renderForChannel(grouped, n.Channel())); err != nil {
 				slog.Warn("分组告警通知失败", "channel", n.Channel(), "err", err)
 			}
 		}
