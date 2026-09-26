@@ -220,17 +220,19 @@
       </el-row>
     </div>
 
-    <!-- 5. 高级：JSON 直编 -->
+    <!-- 5. 高级：YAML 直编（与服务端落盘文件同格式） -->
     <el-collapse class="adv">
       <el-collapse-item name="adv">
         <template #title>
-          <span class="section-title">高级：配置直编</span>
-          <span class="field-hint inline">服务端以 YAML 持久化；此处编辑等价 JSON，便于批量修改与复用</span>
+          <span class="section-title">高级：YAML 直编</span>
+          <span class="field-hint inline">与服务端落盘文件同格式，便于批量修改、复制与备份</span>
         </template>
-        <el-input v-model="rawJson" type="textarea" :rows="14" class="mono" />
+        <el-input v-model="rawYaml" type="textarea" :rows="16" class="mono" />
         <div class="btn-line">
-          <el-button size="small" @click="applyRawJson">应用到表单</el-button>
-          <el-button size="small" @click="rawJson = JSON.stringify(form, null, 2)">从表单生成</el-button>
+          <el-button size="small" @click="applyRawYaml">应用到表单</el-button>
+          <el-button size="small" @click="genRawYaml">从表单生成</el-button>
+          <el-button size="small" @click="checkYaml">仅做语法检查</el-button>
+          <span v-if="yamlMsg" class="yaml-msg" :class="{ bad: yamlBad }">{{ yamlMsg }}</span>
         </div>
       </el-collapse-item>
     </el-collapse>
@@ -241,6 +243,8 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
+// js-yaml v4 的 ESM 构建只提供具名导出，无 default
+import { dump as yamlDump, load as yamlLoad } from 'js-yaml'
 import http from '../../api/http'
 
 const OPS = [
@@ -287,7 +291,9 @@ const loading = ref(false)
 const saving = ref(false)
 const previewing = ref(false)
 const form = ref({ relabels: [], enrich: [], templates: [] })
-const rawJson = ref('')
+const rawYaml = ref('')
+const yamlMsg = ref('')
+const yamlBad = ref(false)
 const previewChannel = ref('dingtalk')
 const sampleEventText = ref(JSON.stringify(SAMPLE_EVENT, null, 2))
 const preview = ref({ labels: '—', message: '—', originalMessage: '—' })
@@ -336,6 +342,25 @@ function addTemplate() {
   form.value.templates.push({ name: '', channel: '', severity: [], ruleIds: [], template: '' })
 }
 
+// ---------- 类型规整：YAML 解析出的标量可能是数字/布尔，数组也可能写成单值 ----------
+function str(v) {
+  return v === undefined || v === null ? '' : String(v)
+}
+
+function toArray(v) {
+  if (Array.isArray(v)) return v.map(str).filter(Boolean)
+  const s = str(v).trim()
+  return s ? splitList(s) : []
+}
+
+function asArray(v) {
+  return Array.isArray(v) ? v.filter((x) => x && typeof x === 'object') : []
+}
+
+function whenOrNull(w) {
+  return w && typeof w === 'object' && !Array.isArray(w) ? w : null
+}
+
 // ---------- 配置归一化（提交前清理无关字段，避免服务端校验失败）----------
 function normalizeWhen(when) {
   if (!when) return null
@@ -357,24 +382,27 @@ function normalize() {
   const cfg = { relabels: [], enrich: [], templates: [] }
 
   for (const r of form.value.relabels) {
-    const op = (r.op || '').trim()
+    const op = str(r.op).trim()
     if (!op) continue
     const item = { op }
-    if (r.source && r.source.trim()) item.source = r.source.trim()
-    if (r.target && r.target.trim()) item.target = r.target.trim()
+    const source = str(r.source).trim()
+    const target = str(r.target).trim()
+    if (source) item.source = source
+    if (target) item.target = target
     if (op === 'replace') {
-      item.pattern = r.pattern || ''
-      item.replace = r.replace || ''
+      item.pattern = str(r.pattern)
+      item.replace = str(r.replace)
     }
-    if (op === 'set') item.value = r.value || ''
+    if (op === 'set') item.value = str(r.value)
     const when = normalizeWhen(r.when)
     if (when) item.when = when
     cfg.relabels.push(item)
   }
 
   for (const e of form.value.enrich) {
-    if (!e.target || !e.target.trim()) continue
-    const item = { target: e.target.trim(), value: e.value || '' }
+    const target = str(e.target).trim()
+    if (!target) continue
+    const item = { target, value: str(e.value) }
     const when = normalizeWhen(e.when)
     if (when) item.when = when
     cfg.enrich.push(item)
@@ -382,11 +410,11 @@ function normalize() {
 
   for (const t of form.value.templates) {
     const item = {
-      name: (t.name || '').trim() || '未命名模板',
-      channel: t.channel || '',
-      severity: (t.severity || []).filter(Boolean),
-      ruleIds: (t.ruleIds || []).filter(Boolean),
-      template: t.template || '',
+      name: str(t.name).trim() || '未命名模板',
+      channel: str(t.channel),
+      severity: toArray(t.severity),
+      ruleIds: toArray(t.ruleIds),
+      template: str(t.template),
     }
     const when = normalizeWhen(t.when)
     if (when) item.when = when
@@ -398,30 +426,33 @@ function normalize() {
 
 // ---------- 加载 / 保存 ----------
 function fillForm(cfg) {
+  const c = cfg && typeof cfg === 'object' ? cfg : {}
   form.value = {
-    relabels: (cfg.relabels || []).map((r) => ({
-      op: r.op || 'rename',
-      source: r.source || '',
-      target: r.target || '',
-      pattern: r.pattern || '',
-      replace: r.replace || '',
-      value: r.value || '',
-      when: r.when || null,
+    relabels: asArray(c.relabels).map((r) => ({
+      op: str(r.op) || 'rename',
+      source: str(r.source),
+      target: str(r.target),
+      pattern: str(r.pattern),
+      replace: str(r.replace),
+      value: str(r.value),
+      when: whenOrNull(r.when),
     })),
-    enrich: (cfg.enrich || []).map((e) => ({
-      target: e.target || '',
-      value: e.value || '',
-      when: e.when || null,
+    enrich: asArray(c.enrich).map((e) => ({
+      target: str(e.target),
+      value: str(e.value),
+      when: whenOrNull(e.when),
     })),
-    templates: (cfg.templates || []).map((t) => ({
-      name: t.name || '',
-      channel: t.channel || '',
-      severity: t.severity || [],
-      ruleIds: t.ruleIds || [],
-      template: t.template || '',
+    templates: asArray(c.templates).map((t) => ({
+      name: str(t.name),
+      channel: str(t.channel),
+      severity: toArray(t.severity),
+      ruleIds: toArray(t.ruleIds),
+      template: str(t.template),
+      when: whenOrNull(t.when),
     })),
   }
-  rawJson.value = JSON.stringify(form.value, null, 2)
+  rawYaml.value = yamlDump(form.value, { noRefs: true, lineWidth: 120 })
+  yamlMsg.value = ''
 }
 
 async function load() {
@@ -472,15 +503,49 @@ async function runPreview() {
   }
 }
 
-// ---------- 高级：JSON 直编 ----------
-function applyRawJson() {
+// ---------- 高级：YAML 直编 ----------
+function parseRawYaml() {
+  const text = (rawYaml.value || '').trim()
+  const parsed = text ? yamlLoad(text) : {}
+  if (parsed !== null && parsed !== undefined && typeof parsed !== 'object') {
+    throw new Error('顶层必须是映射（relabels / enrich / templates）')
+  }
+  return parsed || {}
+}
+
+// js-yaml 的异常信息含多行上下文，只取首行，避免占满界面
+function yamlReason(e) {
+  return String((e && e.message) || e).split('\n')[0]
+}
+
+function applyRawYaml() {
   try {
-    const parsed = JSON.parse(rawJson.value || '{}')
-    fillForm(parsed)
+    fillForm(parseRawYaml())
+    yamlBad.value = false
+    yamlMsg.value = '语法正确，已应用到表单，确认无误后请点击「保存」'
     ElMessage.success('已应用到表单，确认无误后请点击保存')
   } catch (e) {
-    ElMessage.error('JSON 解析失败：' + e.message)
+    yamlBad.value = true
+    yamlMsg.value = '语法错误：' + yamlReason(e)
+    ElMessage.error('YAML 解析失败：' + yamlReason(e))
   }
+}
+
+function checkYaml() {
+  try {
+    parseRawYaml()
+    yamlBad.value = false
+    yamlMsg.value = '语法正确'
+  } catch (e) {
+    yamlBad.value = true
+    yamlMsg.value = '语法错误：' + yamlReason(e)
+  }
+}
+
+function genRawYaml() {
+  rawYaml.value = yamlDump(form.value, { noRefs: true, lineWidth: 120 })
+  yamlBad.value = false
+  yamlMsg.value = '已按当前表单重新生成'
 }
 
 onMounted(load)
@@ -573,6 +638,19 @@ onMounted(load)
 .mono :deep(textarea) {
   font-family: var(--mono);
   font-size: 12.5px;
+}
+.btn-line {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.yaml-msg {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.yaml-msg.bad {
+  color: var(--el-color-danger, #f56c6c);
 }
 .adv {
   margin-top: 4px;
