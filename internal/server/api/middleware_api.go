@@ -127,6 +127,8 @@ func (a *API) handleMySQLInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 资源范围：受限用户只能看到范围内节点上的实例。
+	keys = filterByNodeScope(a, Principal(r), keys, nodeOfKey)
 	out := make([]mysqlInstanceInfo, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, *instances[k])
@@ -249,6 +251,8 @@ func (a *API) handlePostgresInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 资源范围：受限用户只能看到范围内节点上的实例。
+	keys = filterByNodeScope(a, Principal(r), keys, nodeOfKey)
 	out := make([]postgresInstanceInfo, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, *instances[k])
@@ -382,6 +386,8 @@ func (a *API) handleMongoDBInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 资源范围：受限用户只能看到范围内节点上的实例。
+	keys = filterByNodeScope(a, Principal(r), keys, nodeOfKey)
 	out := make([]mongoInstanceInfo, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, *instances[k])
@@ -495,6 +501,8 @@ func (a *API) handleFastDFSInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 资源范围：受限用户只能看到范围内节点上的实例。
+	keys = filterByNodeScope(a, Principal(r), keys, nodeOfKey)
 	out := make([]fastdfsInstanceInfo, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, *instances[k])
@@ -606,6 +614,8 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 资源范围：受限用户只能看到范围内节点上的实例。
+	keys = filterByNodeScope(a, Principal(r), keys, nodeOfKey)
 	out := make([]nginxInstanceInfo, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, *instances[k])
@@ -757,9 +767,14 @@ var middlewareTypes = []struct{ typ, label, upMetric string }{
 // handleMiddlewareOverview 返回中间件健康度总览（各类型实例数/在线率/告警数），
 // 供数据大屏中间件监控板块一次拉取，避免前端 8 个请求轮询。
 func (a *API) handleMiddlewareOverview(w http.ResponseWriter, r *http.Request) {
-	// 活跃告警按指标前缀归类
+	p := Principal(r)
+
+	// 活跃告警按指标前缀归类（仅统计当前用户可见节点，避免泄露范围外的告警量）
 	alertCount := map[string]int{}
 	for _, ev := range a.alerts.Active() {
+		if !a.nodeInScope(p, ev.Node) {
+			continue
+		}
 		metric := strings.ToLower(ev.Metric)
 		for _, t := range middlewareTypes {
 			if strings.HasPrefix(metric, t.typ+"_") {
@@ -780,6 +795,10 @@ func (a *API) handleMiddlewareOverview(w http.ResponseWriter, r *http.Request) {
 		}
 		seen := map[string]bool{}
 		for _, s := range series {
+			// 资源范围：范围外节点的实例不参与计数（总数/在线/离线均需在过滤后重算）
+			if !a.nodeInScope(p, s.Labels["node"]) {
+				continue
+			}
 			key := s.Labels["node"] + "|" + s.Labels["instance"]
 			if key == "|" || seen[key] {
 				continue
@@ -950,6 +969,8 @@ func (a *API) handleKafkaInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 资源范围：受限用户只能看到范围内节点上的实例。
+	keys = filterByNodeScope(a, Principal(r), keys, nodeOfKey)
 	out := make([]kafkaInstanceInfo, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, *instances[k])
@@ -1082,6 +1103,8 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 资源范围：受限用户只能看到范围内节点上的容器与 Docker 主机。
+	keys = filterByNodeScope(a, Principal(r), keys, nodeOfKey)
 	out := make([]dockerContainerInfo, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, *instances[k])
@@ -1152,6 +1175,7 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	hostKeys = filterByNodeScope(a, Principal(r), hostKeys, nodeOfKey)
 	hostOut := make([]dockerHostInfo, 0, len(hostKeys))
 	for _, k := range hostKeys {
 		hostOut = append(hostOut, *hosts[k])
@@ -1266,6 +1290,8 @@ func (a *API) handleRocketMQInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 资源范围：受限用户只能看到范围内节点上的实例。
+	keys = filterByNodeScope(a, Principal(r), keys, nodeOfKey)
 	out := make([]rocketmqInstanceInfo, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, *instances[k])
@@ -1553,6 +1579,8 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 资源范围：受限用户只能看到范围内节点上的集群。
+	keys = filterByNodeScope(a, Principal(r), keys, nodeOfKey)
 	clusterOut := make([]k8sClusterInfo, 0, len(keys))
 	for _, k := range keys {
 		clusterOut = append(clusterOut, *clusters[k])
@@ -1644,6 +1672,29 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.Slice(podOut, func(i, j int) bool { return podOut[i].Pod < podOut[j].Pod })
+
+	// 资源范围：K8s 工作节点与 Pod 数据自身不带 Agent 节点标签，
+	// 按「可见集群」的 instance 归属过滤（clusterOut 已按范围过滤）。
+	if p := Principal(r); p != nil && !p.Scope.IsGlobal() {
+		allowed := map[string]bool{}
+		for _, c := range clusterOut {
+			allowed[c.Instance] = true
+		}
+		keptNodes := nodeOut[:0]
+		for _, nd := range nodeOut {
+			if allowed[nd.Instance] {
+				keptNodes = append(keptNodes, nd)
+			}
+		}
+		nodeOut = keptNodes
+		keptPods := podOut[:0]
+		for _, pd := range podOut {
+			if allowed[pd.Instance] {
+				keptPods = append(keptPods, pd)
+			}
+		}
+		podOut = keptPods
+	}
 
 	writeJSON(w, 200, map[string]interface{}{"clusters": clusterOut, "nodes": nodeOut, "pods": podOut})
 }

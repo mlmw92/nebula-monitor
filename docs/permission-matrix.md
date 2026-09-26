@@ -5,11 +5,14 @@
 
 ## 实施状态
 
-| 批次 | 状态 | 已落地内容 |
+> **命名提醒**：下表的「批次 A~E」是本文档对 **B1 实施** 的内部拆分，属于路线图 `docs/refactor-plan.md` 第 4 节「**批次二 → B1（实施）**」这一项之下，**不是**路线图批次二/三的并列项。
+> 另注意与候选改造点 ID 的区别：这里的「批次 C 中间件授权」与路线图里的 **C1**（采集项 YML 模板化，批次三首位）**无关**。
+
+| 子批次 | 状态 | 已落地内容 |
 |---|---|---|
 | **A｜基础设施** | ✅ 已完成 | 新增 `dashboard:write`、`system:config` 两个权限点并补齐内置角色；新增 `api.API.permit(next, perm)` 业务接口权限包装器（未启用认证放行 / 未登录 401 / 缺权限 403 + 授权拒绝审计）；去除 `globalAuthStore` 包级单例，`AuthMiddleware` 改为显式接收 `*auth.Store`；11 个单元测试 |
 | **B｜主机与指标（含 `/ws`）** | ✅ 已完成 | 23 条路由挂载 `permit` / `permitNode`：`nodes/*`（8）、`groups/*`（3）、`query/*`+`processes`+`listeners`+`firewall`（6）、`metrics/*`（3）、`analysis/*`（2，范围过滤本已存在）、`/ws`（1）。列表类按范围过滤（`handleNodes` / `handleNodesLatest` / `handleGroups`），单节点类由 `permitNode` 统一校验（路径 `{name}` 或查询 `node`），批量升级用 `CheckBatchGroups` 整体校验；**`/ws` 补齐 topic 级授权**（`metrics`→`nodes:read`+节点范围、`alerts`→`alerts:read`、未知 topic 拒绝）。告警管理员补齐 `nodes:read`/`groups:read`（告警页面分组筛选与规则目标选择依赖）；前端 `hosts` / `node/:name` / `metrics/explore` 补 `meta.perm` 与菜单 `perm`。14 个新测试 |
-| C｜中间件 | ⬜ 待实施 | — |
+| **C｜中间件** | ✅ 已完成 | 13 条路由挂载 `middleware:read`；实例列表按「实例 → 所属节点 → 分组」过滤（Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / K8s / MongoDB / FastDFS 及 Nginx 访问汇总的实例列表）；`overview` 的实例计数与告警计数改为**过滤后重算**；K8s 工作节点/Pod 无 Agent 节点标签，按可见集群的 instance 归属过滤；前端中间件菜单与路由补 `perm`。8 个新测试 |
 | D｜告警与通知 | ⬜ 待实施 | — |
 | E｜安全、系统与其余 | ⬜ 待实施 | — |
 
@@ -329,6 +332,14 @@
 
 ### 8.7 不影响面
 `/api/v1/report`、`/api/v1/agent/check`、`/install/*`、`/bin/*` 面向 Agent，走 `X-Agent-Secret`，不纳入本次授权改造。
+
+### 8.8 聚合类数值未按资源范围过滤（已知限制，批次 C 遗留）
+
+- `/api/v1/middleware/overview` 的 Summary 卡片数值来自跨节点聚合查询（`mwAggregateLatest`）；
+- `/api/v1/middleware/nginx/access/summary` 的全局统计（总请求数 / 状态码分布 / Top URI / Top IP）来自 `nginxaccess.Window` 的窗口聚合。
+
+两者都**不携带节点维度**，因此未按资源范围过滤：受限用户可看到全局聚合值，但看不到范围外节点 / 实例的明细。
+如需彻底隔离，需为这两类聚合引入按节点分组的 label matcher（改动面较大，建议批次 E 完成后按需评估）。
 
 ## 9. 验收标准
 

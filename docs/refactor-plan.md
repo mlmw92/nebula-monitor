@@ -3,7 +3,8 @@
 > 适用范围：Nebula Monitor 全系统（Go Server + Go Agent + Vue 3 Web）。
 > 本文档为改造路线与实施规格，供后续开发、测试与评审依据使用。
 > 面向终端用户的操作说明见 `README.md`；角色权限模型细节见 `docs/role-permission-management.md`。
-> 状态：**批次一执行中**（4 项决策已落定，见第 3 节与第 7 节）。
+> 状态：**批次一已完成**（E1 / D2 / F2 / B1 设计件）；**批次二进行中**，当前推进项为「**B1 实施**」——其内部实施子批次（本文档用 `批次 A~E` 表示）见 `docs/permission-matrix.md`。
+> **命名提醒**：本节的「批次一 / 二 / 三」是**路线图批次**；`docs/permission-matrix.md` 中的「批次 A~E」是 **B1 实施**内部的子批次，两者不是同一层级。
 > 基线版本：`VERSION = 1.23.7`｜成文日期：2026-09-26。
 
 ---
@@ -380,6 +381,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | 2026-09-26 | **B1 完成**：产出 `docs/permission-matrix.md`（126 条路由逐条映射、7 条兼容策略、5 批实施顺序、7 项开放问题）；校正现状 authz 覆盖为 **14 条**（原记 16）；发现 `/ws` 存在 topic 级授权与范围校验缺口。**批次一全部完成** |
 | 2026-09-26 | **批次二启动：B1 批次 A（基础设施）完成**：新增 `dashboard:write` / `system:config` 权限点并补齐内置角色；新增 `api.API.permit(next, perm)`（未启用认证放行 / 未登录 401 / 缺权限 403 + 授权拒绝审计）；移除 `globalAuthStore` 包级单例，`AuthMiddleware` 改为显式传参。新增 11 个单测，全量测试绿 |
 | 2026-09-26 | **B1 批次 B（主机与指标 + `/ws`）完成**：23 条路由挂载授权（`permit` / `permitNode`），节点列表、全节点指标、分组列表按资源范围过滤，批量升级整体校验，**`/ws` 补齐 topic 级授权与节点范围校验**（修复设计件 8.2 越权缺口）；告警管理员补 `nodes:read`/`groups:read`；前端 3 条路由与 2 个菜单项补 `perm`。新增 14 个测试，全量测试与前端构建均绿 |
+| 2026-09-26 | **B1 批次 C（中间件）完成**：13 条路由挂 middleware:read；10 类实例列表（含 Nginx 访问汇总）按「实例→所属节点→分组」过滤，新增 `nodeGroup`/`nodeInScope`/`nodeOfKey`/`filterByNodeScope` 辅助；`overview` 的实例计数与告警计数改为过滤后重算；K8s 工作节点与 Pod 按可见集群归属过滤；前端中间件菜单与路由补 `perm`。新增 8 个测试（含 fake 存储端到端用例）。聚合类数值未过滤列为已知限制（设计件 8.8） |
 
 ---
 

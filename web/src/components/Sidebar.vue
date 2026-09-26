@@ -113,7 +113,7 @@ const groups = [
     icon: DataLine,
     items: [
       { key: 'hosts', to: '/hosts', label: '主机列表', icon: Monitor, perm: 'nodes:read' },
-      { key: 'middleware', to: '/middleware', label: '中间件监控', icon: Connection },
+      { key: 'middleware', to: '/middleware', label: '中间件监控', icon: Connection, perm: 'middleware:read' },
       { key: 'dialtest', to: '/dialtest', label: '服务拨测', icon: Aim },
       { key: 'metrics-explore', to: '/metrics/explore', label: '指标浏览', icon: DataLine, perm: 'nodes:read' },
       { key: 'dashboards', to: '/system/dashboards', label: '自定义仪表盘', icon: Grid },

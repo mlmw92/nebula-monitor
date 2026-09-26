@@ -150,19 +150,20 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/query/firewall", a.permitNode(a.handleFirewall, "nodes:read"))
 	mux.HandleFunc("GET /api/v1/query/firewall/status", a.permitNode(a.handleFirewallStatus, "nodes:read"))
 
-	mux.HandleFunc("GET /api/v1/middleware/redis/instances", a.handleRedisInstances)
-	mux.HandleFunc("GET /api/v1/middleware/mysql/instances", a.handleMySQLInstances)
-	mux.HandleFunc("GET /api/v1/middleware/postgres/instances", a.handlePostgresInstances)
-	mux.HandleFunc("GET /api/v1/middleware/nginx/instances", a.handleNginxInstances)
-	mux.HandleFunc("GET /api/v1/middleware/kafka/instances", a.handleKafkaInstances)
-	mux.HandleFunc("GET /api/v1/middleware/docker/containers", a.handleDockerContainers)
-	mux.HandleFunc("GET /api/v1/middleware/rocketmq/instances", a.handleRocketMQInstances)
-	mux.HandleFunc("GET /api/v1/middleware/k8s/instances", a.handleK8sInstances)
-	mux.HandleFunc("GET /api/v1/middleware/mongodb/instances", a.handleMongoDBInstances)
-	mux.HandleFunc("GET /api/v1/middleware/fastdfs/instances", a.handleFastDFSInstances)
-	mux.HandleFunc("GET /api/v1/middleware/overview", a.handleMiddlewareOverview)
-	mux.HandleFunc("GET /api/v1/middleware/nginx/access/summary", a.handleNginxAccessSummary)
-	mux.HandleFunc("GET /api/v1/middleware/nginx/access/geo", a.handleNginxAccessGeo)
+	// 中间件监控：middleware:read + 资源范围（实例列表按所属节点分组过滤）
+	mux.HandleFunc("GET /api/v1/middleware/redis/instances", a.permit(a.handleRedisInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/mysql/instances", a.permit(a.handleMySQLInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/postgres/instances", a.permit(a.handlePostgresInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/nginx/instances", a.permit(a.handleNginxInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/kafka/instances", a.permit(a.handleKafkaInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/docker/containers", a.permit(a.handleDockerContainers, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/rocketmq/instances", a.permit(a.handleRocketMQInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/k8s/instances", a.permit(a.handleK8sInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/mongodb/instances", a.permit(a.handleMongoDBInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/fastdfs/instances", a.permit(a.handleFastDFSInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/overview", a.permit(a.handleMiddlewareOverview, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/nginx/access/summary", a.permit(a.handleNginxAccessSummary, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/nginx/access/geo", a.permit(a.handleNginxAccessGeo, "middleware:read"))
 
 	mux.HandleFunc("GET /api/v1/alerts", a.handleAlerts)
 	mux.HandleFunc("GET /api/v1/alerts/acks", a.handleAlertAcks)
@@ -374,6 +375,44 @@ func (a *API) visibleNodes(nodes []model.Node, p *auth.Principal) []model.Node {
 		return nodes
 	}
 	return auth.FilterByGroup(p, nodes, func(n model.Node) string { return n.Group })
+}
+
+// nodeGroup 返回节点所属分组；nodeMgr 未注入或节点不存在时返回空串（视为不可归属）。
+func (a *API) nodeGroup(node string) string {
+	if a.nodeMgr == nil || node == "" {
+		return ""
+	}
+	nd, ok := a.nodeMgr.GetNode(node)
+	if !ok {
+		return ""
+	}
+	return nd.Group
+}
+
+// nodeInScope 判断节点是否在当前用户的资源范围内。
+// 未启用认证（p 为 nil）或全局范围恒为 true；节点不可归属（不存在/已移除）时受限用户不可见。
+func (a *API) nodeInScope(p *auth.Principal, node string) bool {
+	if p == nil || p.Scope.IsGlobal() {
+		return true
+	}
+	return p.CanAccessGroup(a.nodeGroup(node))
+}
+
+// nodeOfKey 从 "node|instance"（或 "node|instance|…"）形式的实例键中取出 Agent 节点名。
+func nodeOfKey(key string) string {
+	if i := strings.IndexByte(key, '|'); i > 0 {
+		return key[:i]
+	}
+	return ""
+}
+
+// filterByNodeScope 按资源范围过滤列表，nodeOf 返回元素所属的 Agent 节点名。
+// 未启用认证（p 为 nil）或全局范围时原样返回，不产生额外开销。
+func filterByNodeScope[T any](a *API, p *auth.Principal, items []T, nodeOf func(T) string) []T {
+	if p == nil || p.Scope.IsGlobal() {
+		return items
+	}
+	return auth.FilterByGroup(p, items, func(it T) string { return a.nodeGroup(nodeOf(it)) })
 }
 
 // deniedGroups 返回 names 中节点所属、但当前用户无权访问的分组（已去重）；
@@ -1399,7 +1438,8 @@ func (a *API) handleRedisInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3. 转为列表返回
+	// 3. 转为列表返回（先按资源范围过滤，受限用户不可见范围外节点上的实例）
+	keys = filterByNodeScope(a, Principal(r), keys, nodeOfKey)
 	out := make([]redisInstanceInfo, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, *instances[k])

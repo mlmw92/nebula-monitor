@@ -114,6 +114,8 @@ func (a *API) handleNginxAccessSummary(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// 资源范围：受限用户只能看到范围内节点上的实例。
+	keys = filterByNodeScope(a, Principal(r), keys, nodeOfKey)
 	resp.Instances = make([]nginxAccessInstance, 0, len(keys))
 	for _, key := range keys {
 		resp.Instances = append(resp.Instances, *instances[key])
