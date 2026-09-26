@@ -114,6 +114,7 @@ func main() {
 		cfg.NginxInstances, cfg.KafkaInstances, cfg.DockerInstances,
 		cfg.RocketMQInstances, cfg.K8sInstances, cfg.MongoDBInstances, cfg.FastDFSInstances,
 		cfg.PortChecks, cfg.Security,
+		time.Duration(cfg.CollectTimeout)*time.Second,
 	)
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
@@ -145,11 +146,14 @@ func main() {
 	ticker := time.NewTicker(time.Duration(cfg.Interval) * time.Second)
 	defer ticker.Stop()
 
+	// 采集任务上下文：进程生命周期内长期有效；每个采集任务再各自叠加 collectTimeout。
+	ctx := context.Background()
+
 	// 立即采集一次
-	collectAndReport(coll, rep, cfg)
+	collectAndReport(ctx, coll, rep, cfg)
 
 	for range ticker.C {
-		collectAndReport(coll, rep, cfg)
+		collectAndReport(ctx, coll, rep, cfg)
 	}
 }
 
@@ -250,82 +254,52 @@ func reportProxyMetrics(cfg *config.Config, p proxyMetricsProvider) {
 	}
 }
 
-func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *config.Config) {
-	metrics, procs := coll.Collect()
-
-	// 中间件采集
-	redisMetrics, redisInstances := coll.CollectRedis()
-	metrics = append(metrics, redisMetrics...)
-	mysqlMetrics, mysqlInstances := coll.CollectMySQL()
-	metrics = append(metrics, mysqlMetrics...)
-	pgMetrics, pgInstances := coll.CollectPostgres()
-	metrics = append(metrics, pgMetrics...)
-	nginxMetrics, nginxInstances := coll.CollectNginx()
-	metrics = append(metrics, nginxMetrics...)
-	nginxAccessStats := coll.CollectNginxAccess()
-	kafkaMetrics, kafkaInstances := coll.CollectKafka()
-	metrics = append(metrics, kafkaMetrics...)
-	dockerMetrics, dockerInstances := coll.CollectDocker()
-	metrics = append(metrics, dockerMetrics...)
-	rmqMetrics, rmqInstances := coll.CollectRocketMQ()
-	metrics = append(metrics, rmqMetrics...)
-	k8sMetrics, k8sInstances := coll.CollectK8s()
-	metrics = append(metrics, k8sMetrics...)
-	mongoMetrics, mongoInstances := coll.CollectMongoDB()
-	metrics = append(metrics, mongoMetrics...)
-	fastdfsMetrics, fastdfsInstances := coll.CollectFastDFS()
-	metrics = append(metrics, fastdfsMetrics...)
-	securityEvents, securityBaseline := coll.CollectSecurity()
-
-	// 监听端口列表（用于端口监控 Tab）
-	listeners := coll.CollectListeners()
-	// 防火墙规则列表（用于防火墙监控 Tab）
-	firewallRules := coll.CollectFirewallRules()
-	firewallStatus := coll.CollectFirewallStatus(len(firewallRules))
+func collectAndReport(ctx context.Context, coll *collector.Collector, rep *reporter.Reporter, cfg *config.Config) {
+	// 一轮采集：各来源并发执行、各自独立超时（collectTimeout），互不阻塞。
+	res := coll.CollectAll(ctx)
 
 	// 采集 fail2ban 封禁/解封事件（增量 JSONL 审计），合并进安全事件
 	banEvents := banCollector.Collect(cfg.Node)
 	if len(banEvents) > 0 {
-		securityEvents = append(securityEvents, banEvents...)
+		res.SecurityEvents = append(res.SecurityEvents, banEvents...)
 	}
 
-	osName, arch, ip := coll.HostInfo()
 	payload := model.ReportPayload{
 		Node:              cfg.Node,
 		Mode:              modeForModel(cfg),
-		IP:                ip,
-		OS:                osName,
-		Arch:              arch,
+		IP:                res.IP,
+		OS:                res.OS,
+		Arch:              res.Arch,
 		Group:             cfg.Group,
 		Labels:            cfg.Labels,
 		Version:           version.Version,
 		BinSHA256:         agentBinSHA,
-		HostInfo:          collector.CollectHostInfo(),
-		Metrics:           metrics,
-		Processes:         procs,
-		RedisInstances:    redisInstances,
-		MySQLInstances:    mysqlInstances,
-		PostgresInstances: pgInstances,
-		NginxInstances:    nginxInstances,
-		KafkaInstances:    kafkaInstances,
-		DockerInstances:   dockerInstances,
-		RocketMQInstances: rmqInstances,
-		K8sInstances:      k8sInstances,
-		MongoDBInstances:  mongoInstances,
-		FastDFSInstances:  fastdfsInstances,
-		NginxAccessStats:  nginxAccessStats,
-		SecurityEvents:    securityEvents,
-		SecurityBaseline:  securityBaseline,
+		HostInfo:          res.HostInfo,
+		Metrics:           res.Metrics,
+		Processes:         res.Processes,
+		RedisInstances:    res.Redis,
+		MySQLInstances:    res.MySQL,
+		PostgresInstances: res.Postgres,
+		NginxInstances:    res.Nginx,
+		KafkaInstances:    res.Kafka,
+		DockerInstances:   res.Docker,
+		RocketMQInstances: res.RocketMQ,
+		K8sInstances:      res.K8s,
+		MongoDBInstances:  res.MongoDB,
+		FastDFSInstances:  res.FastDFS,
+		NginxAccessStats:  res.NginxAccess,
+		SecurityEvents:    res.SecurityEvents,
+		SecurityBaseline:  res.SecurityBaseline,
 		// 声明 Agent 能力：支持结构化入侵防护指令（旧 Server 忽略此字段）
 		Capabilities: &model.ClientCapability{Defense: true},
 		// 上报当前 nebula 托管 SSH 防护状态
 		DefenseStatus: defenseExec.Status(),
 		// 携带上一次指令执行结果回执（若有）
-		DefenseResult: pendingResult,
-		Listeners:     listeners,
-		FirewallRules: firewallRules,
-		FirewallStatus: firewallStatus,
-		ReportAt:      model.NowMillis(),
+		DefenseResult:  pendingResult,
+		Listeners:      res.Listeners,
+		FirewallRules:  res.FirewallRules,
+		FirewallStatus: res.FirewallStatus,
+		ReportAt:       model.NowMillis(),
 	}
 	resp, err := rep.ReportFull(payload)
 	if err != nil {
@@ -336,7 +310,7 @@ func collectAndReport(coll *collector.Collector, rep *reporter.Reporter, cfg *co
 	if pendingResult != nil {
 		pendingResult = nil
 	}
-	slog.Debug("上报成功", "metrics", len(metrics), "procs", len(procs), "banEvents", len(banEvents))
+	slog.Debug("上报成功", "metrics", len(res.Metrics), "procs", len(res.Processes), "banEvents", len(banEvents))
 
 	// 检查 Server 下发的指令
 	if resp.Command == "upgrade" {

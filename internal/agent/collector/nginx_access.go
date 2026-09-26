@@ -2,6 +2,7 @@ package collector
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -239,8 +240,17 @@ func NewNginxAccessCollector(node, group string, instances []model.NginxInstance
 	return c
 }
 
-// Collect 读取自上次采集以来的增量日志并聚合统计，返回每实例一条聚合结果。
+// Collect 读取自上次采集以来的增量日志并聚合统计（等价于 CollectCtx(context.Background())）。
 func (c *NginxAccessCollector) Collect() []model.NginxAccessStat {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 读取自上次采集以来的增量日志并聚合统计，返回每实例一条聚合结果。
+// 日志为本地文件读取（不可取消），仅在入口做门控。
+func (c *NginxAccessCollector) CollectCtx(ctx context.Context) []model.NginxAccessStat {
+	if ctx.Err() != nil {
+		return nil
+	}
 	if len(c.files) == 0 {
 		return nil
 	}

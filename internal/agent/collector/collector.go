@@ -3,6 +3,7 @@ package collector
 
 import (
 	"context"
+	"time"
 
 	"github.com/shirou/gopsutil/v4/host"
 
@@ -16,6 +17,8 @@ type Collector struct {
 	group  string
 	labels map[string]string
 	cfg    config.CollectorToggle
+	// timeout 为单个采集任务的超时（来自 agent.yaml 的 collectTimeout）；0 表示不限制。
+	timeout time.Duration
 
 	cpu         *CPUCollector
 	disk        *DiskCollector
@@ -49,15 +52,17 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	fastdfsInstances []model.FastDFSInstanceConfig,
 	portChecks []string,
 	securityCfg config.SecurityConfig,
+	collectTimeout time.Duration,
 ) *Collector {
 	c := &Collector{
-		node:   node,
-		group:  group,
-		labels: labels,
-		cfg:    cfg,
-		cpu:    NewCPUCollector(),
-		disk:   NewDiskCollector(),
-		net:    NewNetworkCollector(),
+		node:    node,
+		group:   group,
+		labels:  labels,
+		cfg:     cfg,
+		timeout: collectTimeout,
+		cpu:     NewCPUCollector(),
+		disk:    NewDiskCollector(),
+		net:     NewNetworkCollector(),
 	}
 	if cfg.Redis {
 		c.redis = NewRedisCollector(node, redisInstances)
@@ -165,94 +170,6 @@ func (c *Collector) CollectCtx(ctx context.Context) ([]model.Metric, []model.Pro
 	return metrics, procs
 }
 
-// CollectRedis 采集 Redis 指标，返回 redis_* 指标与实例元信息。
-// 调用方负责将 metrics 合并到 ReportPayload.Metrics，instances 填入 ReportPayload.RedisInstances。
-func (c *Collector) CollectRedis() ([]model.Metric, []model.RedisInstance) {
-	if c.redis == nil {
-		return nil, nil
-	}
-	return c.redis.Collect()
-}
-
-// CollectMySQL 采集 MySQL 指标。
-func (c *Collector) CollectMySQL() ([]model.Metric, []model.MySQLInstance) {
-	if c.mysql == nil {
-		return nil, nil
-	}
-	return c.mysql.Collect()
-}
-
-// CollectPostgres 采集 PostgreSQL 指标。
-func (c *Collector) CollectPostgres() ([]model.Metric, []model.PostgresInstance) {
-	if c.pg == nil {
-		return nil, nil
-	}
-	return c.pg.Collect()
-}
-
-// CollectNginx 采集 Nginx 指标。
-func (c *Collector) CollectNginx() ([]model.Metric, []model.NginxInstance) {
-	if c.nginx == nil {
-		return nil, nil
-	}
-	return c.nginx.Collect()
-}
-
-// CollectNginxAccess 采集 Nginx access log 聚合统计（每实例一条）。
-func (c *Collector) CollectNginxAccess() []model.NginxAccessStat {
-	if c.nginxAccess == nil {
-		return nil
-	}
-	return c.nginxAccess.Collect()
-}
-
-// CollectKafka 采集 Kafka 指标。
-func (c *Collector) CollectKafka() ([]model.Metric, []model.KafkaInstance) {
-	if c.kafka == nil {
-		return nil, nil
-	}
-	return c.kafka.Collect()
-}
-
-// CollectDocker 采集 Docker 容器指标。
-func (c *Collector) CollectDocker() ([]model.Metric, []model.DockerInstance) {
-	if c.docker == nil {
-		return nil, nil
-	}
-	return c.docker.Collect()
-}
-
-// CollectRocketMQ 采集 RocketMQ 指标。
-func (c *Collector) CollectRocketMQ() ([]model.Metric, []model.RocketMQInstance) {
-	if c.rmq == nil {
-		return nil, nil
-	}
-	return c.rmq.Collect()
-}
-
-// CollectK8s 采集 Kubernetes 集群指标。
-func (c *Collector) CollectK8s() ([]model.Metric, []model.K8sInstance) {
-	if c.k8s == nil {
-		return nil, nil
-	}
-	return c.k8s.Collect()
-}
-
-// CollectMongoDB 采集 MongoDB 指标。
-func (c *Collector) CollectMongoDB() ([]model.Metric, []model.MongoDBInstance) {
-	if c.mongo == nil {
-		return nil, nil
-	}
-	return c.mongo.Collect()
-}
-
-// CollectFastDFS 采集 FastDFS 指标。
-func (c *Collector) CollectFastDFS() ([]model.Metric, []model.FastDFSInstance) {
-	if c.fastdfs == nil {
-		return nil, nil
-	}
-	return c.fastdfs.Collect()
-}
 
 // CollectSecurity 采集安全事件与基线检查结果（等价于 CollectSecurityCtx(context.Background())）。
 // 返回该节点的安全事件列表与基线评分（可为 nil，表示未启用安全采集）。
@@ -306,8 +223,17 @@ func (c *Collector) CollectFirewallStatusCtx(ctx context.Context, ruleCount int)
 	return collectFirewallStatus(ctx, ruleCount)
 }
 
-// HostInfo 返回主机静态信息（OS/Arch/IP），用于上报体。
+// HostInfo 返回主机静态信息（OS/Arch/IP）（等价于 HostInfoCtx(context.Background())）。
 func (c *Collector) HostInfo() (os, arch, ip string) {
+	return c.HostInfoCtx(context.Background())
+}
+
+// HostInfoCtx 返回主机静态信息（OS/Arch/IP），用于上报体。
+// host.Info() 为 gopsutil 本机调用，无 ctx 接口，仅在入口做门控。
+func (c *Collector) HostInfoCtx(ctx context.Context) (os, arch, ip string) {
+	if ctx.Err() != nil {
+		return "", "", ""
+	}
 	info, err := host.Info()
 	if err == nil {
 		os = info.OS + " " + info.Platform + " " + info.PlatformVersion
