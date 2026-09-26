@@ -4,6 +4,9 @@
       <el-tab-pane label="站点与品牌" name="brand">
         <BrandSettingsSubView />
       </el-tab-pane>
+      <el-tab-pane label="告警管道" name="pipeline">
+        <AlertPipelineSubView />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -12,6 +15,7 @@
 import { ref } from 'vue'
 import { useRoute } from 'vue-router'
 import BrandSettingsSubView from './BrandSettingsSubView.vue'
+import AlertPipelineSubView from './AlertPipelineSubView.vue'
 
 const route = useRoute()
 const active = ref('brand')

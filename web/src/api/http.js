@@ -155,6 +155,10 @@ const api = {
   deleteRole: (name) => api.del('/api/v1/roles/' + encodeURIComponent(name)),
   permissionCatalog: () => request('/api/v1/permissions/catalog'),
   listGroups: () => request('/api/v1/groups'),
+  // —— 告警事件管道（relabel / enrich / 消息模板）——
+  getAlertPipeline: () => request('/api/v1/alert-pipeline'),
+  saveAlertPipeline: (cfg) => api.put('/api/v1/alert-pipeline', cfg),
+  previewAlertPipeline: (payload) => api.post('/api/v1/alert-pipeline/preview', payload),
 }
 
 export default api

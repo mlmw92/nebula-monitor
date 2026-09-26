@@ -26,7 +26,7 @@ func (a *API) handleInhibitPut(w http.ResponseWriter, r *http.Request) {
 	}
 	var rules []alert.InhibitRule
 	if err := json.NewDecoder(r.Body).Decode(&rules); err != nil {
-		http.Error(w, "invalid body: "+err.Error(), http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体解析失败: " + err.Error()})
 		return
 	}
 	if err := a.inhibit.Save(rules); err != nil {
@@ -53,7 +53,7 @@ func (a *API) handleGroupingPut(w http.ResponseWriter, r *http.Request) {
 	}
 	var cfg alert.GroupingConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		http.Error(w, "invalid body: "+err.Error(), http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体解析失败: " + err.Error()})
 		return
 	}
 	if err := a.grouping.Save(cfg); err != nil {
@@ -80,16 +80,16 @@ func (a *API) handlePipelineGet(w http.ResponseWriter, r *http.Request) {
 // handlePipelinePut 校验并保存管道配置（保存即热生效，无需重启）。
 func (a *API) handlePipelinePut(w http.ResponseWriter, r *http.Request) {
 	if a.pipeline == nil {
-		http.Error(w, "alert pipeline disabled", http.StatusServiceUnavailable)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "告警管道功能未启用"})
 		return
 	}
 	var cfg alert.PipelineConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		http.Error(w, "invalid body: "+err.Error(), http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体解析失败: " + err.Error()})
 		return
 	}
 	if err := a.pipeline.Save(cfg); err != nil {
-		http.Error(w, "save failed: "+err.Error(), http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "配置校验未通过: " + err.Error()})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"status": "ok", "config": a.pipeline.Get()})
@@ -106,12 +106,12 @@ type pipelinePreviewRequest struct {
 // 携带 config 时按待保存配置试算，不修改线上配置；便于前端保存前实时预览。
 func (a *API) handlePipelinePreview(w http.ResponseWriter, r *http.Request) {
 	if a.pipeline == nil {
-		http.Error(w, "alert pipeline disabled", http.StatusServiceUnavailable)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "告警管道功能未启用"})
 		return
 	}
 	var req pipelinePreviewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid body: "+err.Error(), http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体解析失败: " + err.Error()})
 		return
 	}
 	ev := sampleAlertEvent()
@@ -122,7 +122,7 @@ func (a *API) handlePipelinePreview(w http.ResponseWriter, r *http.Request) {
 	store := a.pipeline
 	if req.Config != nil {
 		if err := a.pipeline.Validate(*req.Config); err != nil {
-			http.Error(w, "config invalid: "+err.Error(), http.StatusBadRequest)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "配置校验未通过: " + err.Error()})
 			return
 		}
 		store = alert.NewPreviewPipelineStore(*req.Config)
@@ -262,7 +262,7 @@ func (a *API) handleRulesImport(w http.ResponseWriter, r *http.Request) {
 		Replace bool              `json:"replace"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid body: "+err.Error(), http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体解析失败: " + err.Error()})
 		return
 	}
 	if len(body.Rules) == 0 {
