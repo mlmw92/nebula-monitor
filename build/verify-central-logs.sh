@@ -49,6 +49,9 @@ dataDir: "$WORK/server-data"
 logDir: "$WORK/server-data/logs"
 logMaxBytesPerDay: 10485760
 logUploadRateBps: 10485760
+# 必须显式指定：否则会读机器上默认路径的旧配置（那里没有 logsDays），
+# 保留清理就会「什么都不做」而脚本还以为是产品问题
+retentionFile: "$WORK/retention.yaml"
 tsdb:
   backend: victoriametrics
   addr: "http://127.0.0.1:$VM_PORT"
@@ -182,7 +185,7 @@ check(bool(cur), "截断时给出续读游标")
 p2 = get(f"/api/v1/logs?from={frm}&to={now}&limit=2&cursor={cur}") if cur else {"lines": []}
 texts = [l["text"] for l in p1["lines"]] + [l["text"] for l in p2.get("lines", [])]
 check(len(texts) == len(set(texts)), "两页之间没有重复行")
-check(len(texts) == 3, f"两页合计覆盖全部 3 条（实际 {len(texts)}）")
+check(len(texts) == 2, f"两页合计覆盖全部 2 条（实际 {len(texts)}）")
 check(p2.get("truncated") is False, "最后一页不再截断")
 
 # —— 诊断字段：解释「为什么有/没有结果」——
@@ -210,6 +213,7 @@ with open(os.path.join(old_dir, node + ".log"), "w", encoding="utf-8") as fh:
     fh.write('{"ts":1,"node":"' + node + '","source":"applog","text":"old"}\n')
 
 res = post("/api/v1/system/retention/cleanup")
+print("    清理结果：" + json.dumps(res, ensure_ascii=False))
 check(res.get("logDirsRemoved", 0) == 1, f"保留清理删掉 1 个过期日期分片（实际 {res.get('logDirsRemoved')}）")
 check(res.get("logFilesRemoved", 0) == 1, "清理结果报告删除的文件数")
 check(not os.path.exists(old_dir), "过期分片目录已从磁盘移除")

@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,19 @@ func newLogFixture(t *testing.T, content string) *logFixture {
 		offsetsPath: filepath.Join(dir, "offsets.json"),
 	}
 	if err := os.WriteFile(f.logPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// 预置偏移 0 = 「这个文件已经在跟踪中」，于是测试读的是文件里的既有内容。
+	// 「首次见到一个文件」的另一种行为（**从文件尾开始、不回溯历史**）由
+	// TestLogCollector_FirstSightStartsAtEOF 单独覆盖——那是上线时的默认行为，
+	// 不能由这些用例的夹具悄悄带过。
+	// 必须用 json.Marshal：Windows 路径里的反斜杠手工拼进 JSON 会变成非法转义，
+	// 偏移文件解析失败 → 采集器又回到「首次见到」的行为（这个坑在写夹具时踩到过）
+	seed, err := json.Marshal([]logOffsetEntry{{Key: "applog|" + f.logPath, Offset: 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.offsetsPath, seed, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -88,6 +102,39 @@ func logMetric(ms []model.Metric, name string, labels map[string]string) (model.
 		}
 	}
 	return model.Metric{}, false
+}
+
+// TestLogCollector_FirstSightStartsAtEOF 首次见到一个文件时**从文件尾开始读**（不回溯历史）。
+//
+// 这条守的是「刚打开日志开关」那一刻的行为：日志文件动辄几百 MB 到几 GB，
+// 若从头读，最坏情况是把整个历史文件按模式筛一遍全部上传——每日上限一次打满、
+// 检索页被无关历史淹没。up 仍记为 1：文件是可读的，只是本轮没有可读的增量
+// （记 0 会被误判成路径/权限问题）。
+func TestLogCollector_FirstSightStartsAtEOF(t *testing.T) {
+	f := newLogFixture(t, "error: 历史行（不该上传）\n")
+	_ = os.Remove(f.offsetsPath) // 模拟从未见过这个文件
+	src := f.source(t, nil)
+
+	c := f.collector(src, f.offsetsPath)
+	ms := c.CollectCtx(context.Background())
+	if len(f.lines) != 0 {
+		t.Fatalf("首次采集不应回溯历史行，got %+v", f.lines)
+	}
+	if m, ok := logMetric(ms, "applog_log_up", nil); !ok || m.Value != 1 {
+		t.Fatalf("文件可读时 up 应为 1（否则会被误读成路径/权限问题），got %+v", ms)
+	}
+	// 起点要落盘：重启后不会因为「又是首次」而再跳一次
+	if data, err := os.ReadFile(f.offsetsPath); err != nil || !strings.Contains(string(data), `"offset"`) {
+		t.Fatalf("首次采集应把起点写入偏移文件：err=%v data=%q", err, string(data))
+	}
+
+	// 之后追加的行要正常读到
+	f.append(t, "error: 新行\n")
+	c2 := f.collector(src, f.offsetsPath)
+	_ = c2.CollectCtx(context.Background())
+	if len(f.lines) != 1 || !strings.Contains(f.lines[0].Text, "新行") {
+		t.Fatalf("追加的行应被读到，got %+v", f.lines)
+	}
 }
 
 // TestLogCollector_OffsetPersistedAcrossRestart 偏移落盘：重启后不重复上传、也不漏读。

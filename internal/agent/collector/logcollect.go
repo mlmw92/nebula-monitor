@@ -168,7 +168,24 @@ func (c *LogCollector) collectFile(ctx context.Context, src config.LogSourceConf
 		return res
 	}
 
-	offset := c.offsets[key]
+	offset, tracked := c.offsets[key]
+	if !tracked {
+		// 首次见到这个文件：**从文件尾开始，不回溯历史**（设计决策见 docs/c2-central-logs.md §12 决策 3）。
+		//
+		// 为什么这条必须有：日志文件动辄几百 MB~几 GB，而在「刚打开日志开关」的那一刻，
+		// 最坏情况是把整个历史文件按模式筛一遍并全部上传——每日上限会被一次打满、
+		// 检索页被无关历史淹没，而运维看到的现象是「刚开启就丢数据 + 满屏老日志」。
+		// 需要历史请用其它工具导入（这一句也写进文档）。
+		//
+		// 注意 up 仍记为 1：这个文件**是**可读的，只是本轮没有可读的增量——
+		// 若记 0，「配了却看到 up=0」会被误判成路径/权限问题。
+		res.ok = true
+		c.offsets[key] = st.Size()
+		c.saveOffsets()
+		slog.Info("日志来源首次采集，从文件末尾开始（不回溯历史）",
+			"source", src.ID, "path", path, "startOffset", st.Size())
+		return res
+	}
 	// 文件变小 = 被轮转/重建：从头重读（与既有 nginx access / SSH 日志的处理一致）。
 	//
 	// 已知限制：若被替换成**更长**的内容，靠大小判断不出来（偏移落在新内容中间，会读到半行而跳过）。
