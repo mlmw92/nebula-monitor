@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -25,8 +24,14 @@ func NewDockerCollector(node string, instances []model.DockerInstanceConfig) *Do
 	return &DockerCollector{node: node, instances: instances}
 }
 
-// Collect 采集所有 Docker 实例（每个 cfg.Addr 对应一个 Docker daemon）下的容器指标。
+// Collect 采集所有 Docker 实例（等价于 CollectCtx(context.Background())）。
 func (c *DockerCollector) Collect() ([]model.Metric, []model.DockerInstance) {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 采集所有 Docker 实例（每个 cfg.Addr 对应一个 Docker daemon）下的容器指标；
+// ctx 取消或超时后停止采集剩余 daemon。
+func (c *DockerCollector) CollectCtx(ctx context.Context) ([]model.Metric, []model.DockerInstance) {
 	if len(c.instances) == 0 {
 		return nil, nil
 	}
@@ -35,7 +40,11 @@ func (c *DockerCollector) Collect() ([]model.Metric, []model.DockerInstance) {
 	var instances []model.DockerInstance
 
 	for _, cfg := range c.instances {
-		m, dis := c.collectDaemon(cfg, now)
+		if err := ctx.Err(); err != nil {
+			slog.Warn("Docker 采集被中断，跳过剩余 daemon", "err", err)
+			break
+		}
+		m, dis := c.collectDaemon(ctx, cfg, now)
 		metrics = append(metrics, m...)
 		instances = append(instances, dis...)
 	}
@@ -43,7 +52,7 @@ func (c *DockerCollector) Collect() ([]model.Metric, []model.DockerInstance) {
 }
 
 // collectDaemon 采集一个 Docker daemon 下所有容器。
-func (c *DockerCollector) collectDaemon(cfg model.DockerInstanceConfig, now int64) ([]model.Metric, []model.DockerInstance) {
+func (c *DockerCollector) collectDaemon(ctx context.Context, cfg model.DockerInstanceConfig, now int64) ([]model.Metric, []model.DockerInstance) {
 	client := newDockerHTTPClient(cfg.Addr)
 	if client == nil {
 		slog.Warn("Docker daemon 地址无效", "addr", cfg.Addr)
@@ -54,7 +63,7 @@ func (c *DockerCollector) collectDaemon(cfg model.DockerInstanceConfig, now int6
 	defer client.CloseIdleConnections()
 
 	// 1. 获取容器列表
-	containers, err := c.listContainers(client, cfg.Addr)
+	containers, err := c.listContainers(ctx, client, cfg.Addr)
 	if err != nil {
 		slog.Warn("Docker 获取容器列表失败", "addr", cfg.Addr, "err", err)
 		return nil, nil
@@ -112,7 +121,7 @@ func (c *DockerCollector) collectDaemon(cfg model.DockerInstanceConfig, now int6
 
 		// 采集容器资源统计（仅 running 容器）
 		if status == "running" {
-			stats := c.getContainerStats(client, cfg.Addr, ctr.ID)
+			stats := c.getContainerStats(ctx, client, cfg.Addr, ctr.ID)
 			if stats != nil {
 				cpuPercent := calcCPUPercent(stats)
 				memUsage, memLimit := calcMemStats(stats)
@@ -153,7 +162,7 @@ func (c *DockerCollector) collectDaemon(cfg model.DockerInstanceConfig, now int6
 	out = append(out, mk("docker_containers_stopped", float64(stopped), daemonLabels))
 
 	// 镜像数
-	if images, err := c.listImages(client, cfg.Addr); err == nil {
+	if images, err := c.listImages(ctx, client, cfg.Addr); err == nil {
 		out = append(out, mk("docker_images_total", float64(len(images)), daemonLabels))
 	}
 
@@ -240,42 +249,35 @@ func dockerBaseURL(addr string) string {
 	return addr
 }
 
-func (c *DockerCollector) listContainers(client *http.Client, addr string) ([]dockerContainer, error) {
+func (c *DockerCollector) listContainers(ctx context.Context, client *http.Client, addr string) ([]dockerContainer, error) {
 	url := dockerBaseURL(addr) + "/containers/json?all=true"
-	resp, err := client.Get(url)
+	body, err := fetchMetrics(ctx, client, url)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	var containers []dockerContainer
-	if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
+	if err := json.Unmarshal(body, &containers); err != nil {
 		return nil, err
 	}
 	return containers, nil
 }
 
-func (c *DockerCollector) listImages(client *http.Client, addr string) ([]dockerImage, error) {
+func (c *DockerCollector) listImages(ctx context.Context, client *http.Client, addr string) ([]dockerImage, error) {
 	url := dockerBaseURL(addr) + "/images/json"
-	resp, err := client.Get(url)
+	body, err := fetchMetrics(ctx, client, url)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	var images []dockerImage
-	if err := json.NewDecoder(resp.Body).Decode(&images); err != nil {
+	if err := json.Unmarshal(body, &images); err != nil {
 		return nil, err
 	}
 	return images, nil
 }
 
-func (c *DockerCollector) getContainerStats(client *http.Client, addr, containerID string) *dockerStats {
+func (c *DockerCollector) getContainerStats(ctx context.Context, client *http.Client, addr, containerID string) *dockerStats {
 	url := fmt.Sprintf("%s/containers/%s/stats?stream=false", dockerBaseURL(addr), containerID)
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := fetchMetrics(ctx, client, url)
 	if err != nil {
 		return nil
 	}

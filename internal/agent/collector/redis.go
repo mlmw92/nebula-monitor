@@ -2,6 +2,7 @@ package collector
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,8 +32,15 @@ func NewRedisCollector(node string, instances []model.RedisInstanceConfig) *Redi
 	return &RedisCollector{node: node, instances: instances, clusterSeeds: map[string][]string{}}
 }
 
-// Collect 采集所有 Redis 实例指标，返回 redis_* 前缀指标与实例元信息。
+// Collect 采集所有 Redis 实例指标（等价于 CollectCtx(context.Background())）。
 func (c *RedisCollector) Collect() ([]model.Metric, []model.RedisInstance) {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 采集所有 Redis 实例指标，返回 redis_* 前缀指标与实例元信息。
+// ctx 取消或超时后停止采集剩余实例；配合 dialRedis/sendCommand 的 ctx 感知，
+// 卡在 RESP 读写上的连接也会随 ctx 结束立即中止。
+func (c *RedisCollector) CollectCtx(ctx context.Context) ([]model.Metric, []model.RedisInstance) {
 	if len(c.instances) == 0 {
 		return nil, nil
 	}
@@ -41,24 +49,28 @@ func (c *RedisCollector) Collect() ([]model.Metric, []model.RedisInstance) {
 	var instances []model.RedisInstance
 
 	for _, cfg := range c.instances {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("Redis 采集被中断，跳过剩余实例", "err", err)
+			break
+		}
 		if cfg.ExporterURL != "" {
-			m, ri := c.collectExporter(cfg, now)
+			m, ri := c.collectExporter(ctx, cfg, now)
 			metrics = append(metrics, m...)
 			instances = append(instances, ri)
 			continue
 		}
 		switch cfg.Topology {
 		case "sentinel":
-			m, ris := c.collectSentinel(cfg, now)
+			m, ris := c.collectSentinel(ctx, cfg, now)
 			metrics = append(metrics, m...)
 			instances = append(instances, ris...)
 		case "cluster":
-			m, ris := c.collectCluster(cfg, now)
+			m, ris := c.collectCluster(ctx, cfg, now)
 			metrics = append(metrics, m...)
 			instances = append(instances, ris...)
 		default:
 			// standalone / replication 复用单实例采集
-			m, ri := c.collectStandalone(cfg, cfg.Addr, now)
+			m, ri := c.collectStandalone(ctx, cfg, cfg.Addr, now)
 			metrics = append(metrics, m...)
 			instances = append(instances, ri)
 		}
@@ -70,8 +82,8 @@ func (c *RedisCollector) Collect() ([]model.Metric, []model.RedisInstance) {
 
 // collectStandalone 采集单个 Redis 实例（standalone/replication 模式）。
 // addr 为实际连接地址（sentinel 发现 master 时与 cfg.Addr 不同）。
-func (c *RedisCollector) collectStandalone(cfg model.RedisInstanceConfig, addr string, now int64) ([]model.Metric, model.RedisInstance) {
-	info, err := redisInfo(addr, cfg.Password, "all")
+func (c *RedisCollector) collectStandalone(ctx context.Context, cfg model.RedisInstanceConfig, addr string, now int64) ([]model.Metric, model.RedisInstance) {
+	info, err := redisInfo(ctx, addr, cfg.Password, "all")
 	if err != nil {
 		slog.Warn("Redis 采集失败", "addr", addr, "err", err)
 		return nil, model.RedisInstance{
@@ -79,7 +91,7 @@ func (c *RedisCollector) collectStandalone(cfg model.RedisInstanceConfig, addr s
 			Role: "unknown", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		}
 	}
-	repInfo, _ := redisInfo(addr, cfg.Password, "replication")
+	repInfo, _ := redisInfo(ctx, addr, cfg.Password, "replication")
 	for k, v := range repInfo {
 		info[k] = v
 	}
@@ -116,12 +128,12 @@ func (c *RedisCollector) collectStandalone(cfg model.RedisInstanceConfig, addr s
 }
 
 // collectSentinel 采集哨兵自身 + 自动发现 master 并采集。
-func (c *RedisCollector) collectSentinel(cfg model.RedisInstanceConfig, now int64) ([]model.Metric, []model.RedisInstance) {
+func (c *RedisCollector) collectSentinel(ctx context.Context, cfg model.RedisInstanceConfig, now int64) ([]model.Metric, []model.RedisInstance) {
 	var metrics []model.Metric
 	var instances []model.RedisInstance
 
 	// 1. 采集哨兵自身
-	sentInfo, err := redisInfo(cfg.Addr, cfg.Password, "sentinel")
+	sentInfo, err := redisInfo(ctx, cfg.Addr, cfg.Password, "sentinel")
 	if err != nil {
 		slog.Warn("Sentinel 采集失败", "addr", cfg.Addr, "err", err)
 		instances = append(instances, model.RedisInstance{
@@ -150,12 +162,12 @@ func (c *RedisCollector) collectSentinel(cfg model.RedisInstanceConfig, now int6
 	if cfg.SentinelName == "" {
 		return metrics, instances
 	}
-	masterAddr, err := sentinelGetMaster(cfg.Addr, cfg.Password, cfg.SentinelName)
+	masterAddr, err := sentinelGetMaster(ctx, cfg.Addr, cfg.Password, cfg.SentinelName)
 	if err != nil {
 		slog.Warn("Sentinel 发现 master 失败", "sentinel", cfg.Addr, "name", cfg.SentinelName, "err", err)
 		return metrics, instances
 	}
-	m, ri := c.collectStandalone(cfg, masterAddr, now)
+	m, ri := c.collectStandalone(ctx, cfg, masterAddr, now)
 	// 覆盖 instance 标签为 master 地址，补充哨兵关联标签
 	for i := range m {
 		if m[i].Labels != nil {
@@ -176,12 +188,12 @@ func (c *RedisCollector) collectSentinel(cfg model.RedisInstanceConfig, now int6
 }
 
 // collectCluster 采集集群：解析拓扑 + 遍历所有 master + 集群级指标。
-func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64) ([]model.Metric, []model.RedisInstance) {
+func (c *RedisCollector) collectCluster(ctx context.Context, cfg model.RedisInstanceConfig, now int64) ([]model.Metric, []model.RedisInstance) {
 	var metrics []model.Metric
 	var instances []model.RedisInstance
 
 	// 1. 选取可用入口：首选配置地址，其次尝试上次成功发现的其他存活节点（入口宕机时故障转移）
-	entryAddr, clusterInfo, err := c.pickClusterEntry(cfg)
+	entryAddr, clusterInfo, err := c.pickClusterEntry(ctx, cfg)
 	if err != nil || clusterInfo == nil {
 		slog.Warn("Cluster 采集失败：所有种子节点不可达", "group", cfg.Name, "addr", cfg.Addr, "err", err)
 		instances = append(instances, model.RedisInstance{
@@ -201,7 +213,7 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 	}
 
 	// 2. CLUSTER NODES 解析拓扑（含 slot 区间），遍历所有 master 与 replica
-	masters, replicasByMaster, slotsByMaster, err := redisClusterNodes(entryAddr, cfg.Password)
+	masters, replicasByMaster, slotsByMaster, err := redisClusterNodes(ctx, entryAddr, cfg.Password)
 	if err != nil {
 		slog.Warn("CLUSTER NODES 解析失败", "addr", entryAddr, "err", err)
 		return metrics, instances
@@ -210,7 +222,7 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 	c.cacheClusterSeeds(cfg.Name, masters, replicasByMaster)
 	for _, masterAddr := range masters {
 		// 2.1 master 自身
-		m, ri := c.collectStandalone(cfg, masterAddr, now)
+		m, ri := c.collectStandalone(ctx, cfg, masterAddr, now)
 		for i := range m {
 			if m[i].Labels != nil {
 				m[i].Labels["instance"] = normalizeRemoteAddr(masterAddr, "")
@@ -244,7 +256,7 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 		}
 		// 2.2 replicas（关联到当前 master）
 		for _, replicaAddr := range replicasByMaster[masterAddr] {
-			rm, rri := c.collectStandalone(cfg, replicaAddr, now)
+			rm, rri := c.collectStandalone(ctx, cfg, replicaAddr, now)
 			for i := range rm {
 				if rm[i].Labels != nil {
 					rm[i].Labels["instance"] = normalizeRemoteAddr(replicaAddr, "")
@@ -269,7 +281,7 @@ func (c *RedisCollector) collectCluster(cfg model.RedisInstanceConfig, now int64
 // pickClusterEntry 选择可用的集群入口地址。
 // 优先使用配置的 addr；若该地址不可达，则依次尝试上次成功发现的其他节点（故障转移）。
 // 返回可用的入口地址与 CLUSTER INFO 结果；所有候选均不可达时返回最后的错误。
-func (c *RedisCollector) pickClusterEntry(cfg model.RedisInstanceConfig) (string, map[string]string, error) {
+func (c *RedisCollector) pickClusterEntry(ctx context.Context, cfg model.RedisInstanceConfig) (string, map[string]string, error) {
 	// 候选列表：首选配置 addr + 上次缓存的其他节点，去重
 	seen := map[string]bool{}
 	var addrs []string
@@ -281,7 +293,7 @@ func (c *RedisCollector) pickClusterEntry(cfg model.RedisInstanceConfig) (string
 	}
 	var lastErr error
 	for _, addr := range addrs {
-		info, err := redisClusterInfo(addr, cfg.Password)
+		info, err := redisClusterInfo(ctx, addr, cfg.Password)
 		if err != nil {
 			slog.Warn("Cluster 入口探测失败，尝试下一候选", "addr", addr, "err", err)
 			lastErr = err
@@ -316,20 +328,11 @@ func (c *RedisCollector) cacheClusterSeeds(group string, masters []string, repli
 // ---- exporter 模式 ----
 
 // collectExporter 从 Prometheus exporter 拉取 /metrics 并解析。
-func (c *RedisCollector) collectExporter(cfg model.RedisInstanceConfig, now int64) ([]model.Metric, model.RedisInstance) {
+func (c *RedisCollector) collectExporter(ctx context.Context, cfg model.RedisInstanceConfig, now int64) ([]model.Metric, model.RedisInstance) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(cfg.ExporterURL)
+	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
 		slog.Warn("Redis exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
-		return nil, model.RedisInstance{
-			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
-			Role: "unknown", Topology: cfg.Topology, Group: cfg.Name, Up: false,
-		}
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		slog.Warn("Redis exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, model.RedisInstance{
 			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 			Role: "unknown", Topology: cfg.Topology, Group: cfg.Name, Up: false,
@@ -492,13 +495,13 @@ func extractCmdstatField(val, field string) string {
 // ---- 最小 RESP 协议客户端 ----
 
 // redisInfo 连接 Redis 执行 INFO <section>，返回解析后的键值对。
-func redisInfo(addr, password, section string) (map[string]string, error) {
-	conn, err := dialRedis(addr, password)
+func redisInfo(ctx context.Context, addr, password, section string) (map[string]string, error) {
+	conn, err := dialRedis(ctx, addr, password)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-	resp, err := sendCommand(conn, "INFO", section)
+	resp, err := sendCommand(ctx, conn, "INFO", section)
 	if err != nil {
 		return nil, err
 	}
@@ -506,13 +509,13 @@ func redisInfo(addr, password, section string) (map[string]string, error) {
 }
 
 // redisClusterInfo 执行 CLUSTER INFO。
-func redisClusterInfo(addr, password string) (map[string]string, error) {
-	conn, err := dialRedis(addr, password)
+func redisClusterInfo(ctx context.Context, addr, password string) (map[string]string, error) {
+	conn, err := dialRedis(ctx, addr, password)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-	resp, err := sendCommand(conn, "CLUSTER", "INFO")
+	resp, err := sendCommand(ctx, conn, "CLUSTER", "INFO")
 	if err != nil {
 		return nil, err
 	}
@@ -520,13 +523,13 @@ func redisClusterInfo(addr, password string) (map[string]string, error) {
 }
 
 // redisClusterNodes 执行 CLUSTER NODES，返回 master 地址列表、master→replicas 映射、master→slot 区间映射。
-func redisClusterNodes(addr, password string) ([]string, map[string][]string, map[string][]string, error) {
-	conn, err := dialRedis(addr, password)
+func redisClusterNodes(ctx context.Context, addr, password string) ([]string, map[string][]string, map[string][]string, error) {
+	conn, err := dialRedis(ctx, addr, password)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	defer conn.Close()
-	resp, err := sendCommand(conn, "CLUSTER", "NODES")
+	resp, err := sendCommand(ctx, conn, "CLUSTER", "NODES")
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -626,13 +629,13 @@ func slotRangeCount(r string) float64 {
 }
 
 // sentinelGetMaster 执行 SENTINEL get-master-addr-by-name <name>，返回 master 的 host:port。
-func sentinelGetMaster(addr, password, name string) (string, error) {
-	conn, err := dialRedis(addr, password)
+func sentinelGetMaster(ctx context.Context, addr, password, name string) (string, error) {
+	conn, err := dialRedis(ctx, addr, password)
 	if err != nil {
 		return "", err
 	}
 	defer conn.Close()
-	resp, err := sendCommand(conn, "SENTINEL", "get-master-addr-by-name", name)
+	resp, err := sendCommand(ctx, conn, "SENTINEL", "get-master-addr-by-name", name)
 	if err != nil {
 		return "", err
 	}
@@ -654,13 +657,15 @@ func sentinelGetMaster(addr, password, name string) (string, error) {
 }
 
 // dialRedis 建立 TCP 连接并完成 AUTH。
-func dialRedis(addr, password string) (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+// ctx 取消或超时会让连接建立立即失败；连接建立后的在途 RESP 读写由 sendCommand
+// 设置的连接期限负责取消。
+func dialRedis(ctx context.Context, addr, password string) (net.Conn, error) {
+	conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("连接 Redis 失败: %w", err)
 	}
 	if password != "" {
-		resp, err := sendCommand(conn, "AUTH", password)
+		resp, err := sendCommand(ctx, conn, "AUTH", password)
 		if err != nil {
 			conn.Close()
 			return nil, fmt.Errorf("AUTH 失败: %w", err)
@@ -676,7 +681,17 @@ func dialRedis(addr, password string) (net.Conn, error) {
 }
 
 // sendCommand 编码 RESP 命令并读取响应。
-func sendCommand(conn net.Conn, cmd ...string) (string, error) {
+//
+// ctx 结束（取消或超时）时，通过 context.AfterFunc 把连接读期限置为当前时刻，
+// 使在途的 ReadString / io.ReadFull 立即返回，避免采集 goroutine 卡在网络读上
+// 直到 TCP 层超时——这是「一次到位」取消在途 I/O 的关键点。
+func sendCommand(ctx context.Context, conn net.Conn, cmd ...string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })
+	defer stop()
+
 	// 编码：*N\r\n$len\r\ncmd\r\n...
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "*%d\r\n", len(cmd))

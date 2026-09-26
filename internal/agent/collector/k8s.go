@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
@@ -31,8 +32,13 @@ func NewK8sCollector(node string, instances []model.K8sInstanceConfig) *K8sColle
 	return &K8sCollector{node: node, instances: instances}
 }
 
-// Collect 采集所有 K8s 集群指标。
+// Collect 采集所有 K8s 集群指标（等价于 CollectCtx(context.Background())）。
 func (c *K8sCollector) Collect() ([]model.Metric, []model.K8sInstance) {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 采集所有 K8s 集群指标；ctx 取消或超时后停止采集剩余集群。
+func (c *K8sCollector) CollectCtx(ctx context.Context) ([]model.Metric, []model.K8sInstance) {
 	if len(c.instances) == 0 {
 		return nil, nil
 	}
@@ -41,7 +47,11 @@ func (c *K8sCollector) Collect() ([]model.Metric, []model.K8sInstance) {
 	var instances []model.K8sInstance
 
 	for _, cfg := range c.instances {
-		m, ki := c.collectCluster(cfg, now)
+		if err := ctx.Err(); err != nil {
+			slog.Warn("K8s 采集被中断，跳过剩余集群", "err", err)
+			break
+		}
+		m, ki := c.collectCluster(ctx, cfg, now)
 		metrics = append(metrics, m...)
 		instances = append(instances, ki)
 	}
@@ -49,7 +59,7 @@ func (c *K8sCollector) Collect() ([]model.Metric, []model.K8sInstance) {
 }
 
 // collectCluster 采集单个 K8s 集群。
-func (c *K8sCollector) collectCluster(cfg model.K8sInstanceConfig, now int64) ([]model.Metric, model.K8sInstance) {
+func (c *K8sCollector) collectCluster(ctx context.Context, cfg model.K8sInstanceConfig, now int64) ([]model.Metric, model.K8sInstance) {
 	// 解析连接信息（apiserver 地址、token、TLS）
 	conn, err := buildK8sConn(cfg)
 	inst := model.K8sInstance{
@@ -74,7 +84,7 @@ func (c *K8sCollector) collectCluster(cfg model.K8sInstanceConfig, now int64) ([
 
 	// exporter 模式：抓取 kube-state-metrics /metrics 文本
 	if cfg.ExporterURL != "" {
-		m, up, version := c.collectExporter(cfg, conn, now)
+		m, up, version := c.collectExporter(ctx, cfg, conn, now)
 		inst.Up = up
 		inst.Version = version
 		return m, inst
@@ -84,7 +94,7 @@ func (c *K8sCollector) collectCluster(cfg model.K8sInstanceConfig, now int64) ([
 	var out []model.Metric
 
 	// 1. /version 探测存活与版本
-	version, err := c.getVersion(conn)
+	version, err := c.getVersion(ctx, conn)
 	up := 0.0
 	if err == nil {
 		up = 1
@@ -99,14 +109,14 @@ func (c *K8sCollector) collectCluster(cfg model.K8sInstanceConfig, now int64) ([
 	}
 
 	// 2. 节点
-	out = append(out, c.collectNodes(cfg, conn, now)...)
+	out = append(out, c.collectNodes(ctx, cfg, conn, now)...)
 	// 3. 工作负载（Deployment / StatefulSet / DaemonSet）
-	out = append(out, c.collectWorkloads(cfg, conn, now)...)
+	out = append(out, c.collectWorkloads(ctx, cfg, conn, now)...)
 	// 4. Pod
-	out = append(out, c.collectPods(cfg, conn, now)...)
+	out = append(out, c.collectPods(ctx, cfg, conn, now)...)
 	// 5. metrics-server（可选）
 	if cfg.MetricsServer {
-		out = append(out, c.collectNodeMetrics(cfg, conn, now)...)
+		out = append(out, c.collectNodeMetrics(ctx, cfg, conn, now)...)
 	}
 
 	return out, inst
@@ -135,9 +145,9 @@ func (c *K8sCollector) mk(name string, val float64, cfg model.K8sInstanceConfig,
 
 // ---- 直连采集 ----
 
-func (c *K8sCollector) collectNodes(cfg model.K8sInstanceConfig, conn *k8sConn, now int64) []model.Metric {
+func (c *K8sCollector) collectNodes(ctx context.Context, cfg model.K8sInstanceConfig, conn *k8sConn, now int64) []model.Metric {
 	var list k8sNodeList
-	if err := c.getJSON(conn, "/api/v1/nodes", &list); err != nil {
+	if err := c.getJSON(ctx, conn, "/api/v1/nodes", &list); err != nil {
 		slog.Warn("K8s 获取节点列表失败", "name", cfg.Name, "err", err)
 		return nil
 	}
@@ -172,12 +182,12 @@ func (c *K8sCollector) collectNodes(cfg model.K8sInstanceConfig, conn *k8sConn, 
 	return out
 }
 
-func (c *K8sCollector) collectWorkloads(cfg model.K8sInstanceConfig, conn *k8sConn, now int64) []model.Metric {
+func (c *K8sCollector) collectWorkloads(ctx context.Context, cfg model.K8sInstanceConfig, conn *k8sConn, now int64) []model.Metric {
 	var out []model.Metric
 
 	// Deployment
 	var deps k8sWorkloadList
-	if err := c.getJSON(conn, "/apis/apps/v1/deployments", &deps); err == nil {
+	if err := c.getJSON(ctx, conn, "/apis/apps/v1/deployments", &deps); err == nil {
 		unhealthy := 0
 		for _, d := range deps.Items {
 			desired := float64(d.Spec.Replicas)
@@ -196,7 +206,7 @@ func (c *K8sCollector) collectWorkloads(cfg model.K8sInstanceConfig, conn *k8sCo
 
 	// StatefulSet
 	var sts k8sWorkloadList
-	if err := c.getJSON(conn, "/apis/apps/v1/statefulsets", &sts); err == nil {
+	if err := c.getJSON(ctx, conn, "/apis/apps/v1/statefulsets", &sts); err == nil {
 		unhealthy := 0
 		for _, s := range sts.Items {
 			desired := float64(s.Spec.Replicas)
@@ -215,7 +225,7 @@ func (c *K8sCollector) collectWorkloads(cfg model.K8sInstanceConfig, conn *k8sCo
 
 	// DaemonSet
 	var ds k8sDaemonSetList
-	if err := c.getJSON(conn, "/apis/apps/v1/daemonsets", &ds); err == nil {
+	if err := c.getJSON(ctx, conn, "/apis/apps/v1/daemonsets", &ds); err == nil {
 		unhealthy := 0
 		for _, d := range ds.Items {
 			desired := float64(d.Status.DesiredNumberScheduled)
@@ -235,9 +245,9 @@ func (c *K8sCollector) collectWorkloads(cfg model.K8sInstanceConfig, conn *k8sCo
 	return out
 }
 
-func (c *K8sCollector) collectPods(cfg model.K8sInstanceConfig, conn *k8sConn, now int64) []model.Metric {
+func (c *K8sCollector) collectPods(ctx context.Context, cfg model.K8sInstanceConfig, conn *k8sConn, now int64) []model.Metric {
 	var list k8sPodList
-	if err := c.getJSON(conn, "/api/v1/pods", &list); err != nil {
+	if err := c.getJSON(ctx, conn, "/api/v1/pods", &list); err != nil {
 		slog.Warn("K8s 获取 Pod 列表失败", "name", cfg.Name, "err", err)
 		return nil
 	}
@@ -274,9 +284,9 @@ func (c *K8sCollector) collectPods(cfg model.K8sInstanceConfig, conn *k8sConn, n
 	return out
 }
 
-func (c *K8sCollector) collectNodeMetrics(cfg model.K8sInstanceConfig, conn *k8sConn, now int64) []model.Metric {
+func (c *K8sCollector) collectNodeMetrics(ctx context.Context, cfg model.K8sInstanceConfig, conn *k8sConn, now int64) []model.Metric {
 	var list k8sNodeMetricsList
-	if err := c.getJSON(conn, "/apis/metrics.k8s.io/v1beta1/nodes", &list); err != nil {
+	if err := c.getJSON(ctx, conn, "/apis/metrics.k8s.io/v1beta1/nodes", &list); err != nil {
 		slog.Warn("K8s metrics-server 查询失败", "name", cfg.Name, "err", err)
 		return nil
 	}
@@ -293,19 +303,22 @@ func (c *K8sCollector) collectNodeMetrics(cfg model.K8sInstanceConfig, conn *k8s
 }
 
 // getVersion 请求 /version 返回 gitVersion。
-func (c *K8sCollector) getVersion(conn *k8sConn) (string, error) {
+func (c *K8sCollector) getVersion(ctx context.Context, conn *k8sConn) (string, error) {
 	var v struct {
 		GitVersion string `json:"gitVersion"`
 	}
-	if err := c.getJSON(conn, "/version", &v); err != nil {
+	if err := c.getJSON(ctx, conn, "/version", &v); err != nil {
 		return "", err
 	}
 	return v.GitVersion, nil
 }
 
 // getJSON 向 apiserver 发起 GET 请求并解码 JSON。
-func (c *K8sCollector) getJSON(conn *k8sConn, path string, out interface{}) error {
-	req, err := http.NewRequest(http.MethodGet, conn.apiServer+path, nil)
+func (c *K8sCollector) getJSON(ctx context.Context, conn *k8sConn, path string, out interface{}) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, conn.apiServer+path, nil)
 	if err != nil {
 		return err
 	}
@@ -329,16 +342,11 @@ func (c *K8sCollector) getJSON(conn *k8sConn, path string, out interface{}) erro
 
 // collectExporter 抓取 kube-state-metrics /metrics 文本并映射到统一指标。
 // 返回 (metrics, up, version)。KSM 不暴露版本，version 恒为空。
-func (c *K8sCollector) collectExporter(cfg model.K8sInstanceConfig, conn *k8sConn, now int64) ([]model.Metric, bool, string) {
+func (c *K8sCollector) collectExporter(ctx context.Context, cfg model.K8sInstanceConfig, conn *k8sConn, now int64) ([]model.Metric, bool, string) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(cfg.ExporterURL)
+	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
 		slog.Warn("K8s 抓取 kube-state-metrics 失败", "name", cfg.Name, "url", cfg.ExporterURL, "err", err)
-		return []model.Metric{c.mk("k8s_cluster_up", 0, cfg, conn, nil, now)}, false, ""
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil || resp.StatusCode/100 != 2 {
 		return []model.Metric{c.mk("k8s_cluster_up", 0, cfg, conn, nil, now)}, false, ""
 	}
 	text := string(body)

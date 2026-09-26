@@ -3,7 +3,6 @@ package collector
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -24,8 +23,17 @@ func NewKafkaCollector(node string, instances []model.KafkaInstanceConfig) *Kafk
 	return &KafkaCollector{node: node, instances: instances}
 }
 
-// Collect 采集所有 Kafka 实例指标。
+// Collect 采集所有 Kafka 实例指标（等价于 CollectCtx(context.Background())）。
 func (c *KafkaCollector) Collect() ([]model.Metric, []model.KafkaInstance) {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 采集所有 Kafka 实例指标；ctx 取消或超时后停止采集剩余实例。
+//
+// 注意：sarama 直连路径（collectDirect）的 broker RPC 无 ctx 接口，只能由
+// sarama.Config.Net.*Timeout 约束，因此该路径的取消是「有上界但不可即时中止」，
+// 属已知边界；exporter 路径完全受 ctx 约束。
+func (c *KafkaCollector) CollectCtx(ctx context.Context) ([]model.Metric, []model.KafkaInstance) {
 	if len(c.instances) == 0 {
 		return nil, nil
 	}
@@ -34,8 +42,12 @@ func (c *KafkaCollector) Collect() ([]model.Metric, []model.KafkaInstance) {
 	var instances []model.KafkaInstance
 
 	for _, cfg := range c.instances {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("Kafka 采集被中断，跳过剩余实例", "err", err)
+			break
+		}
 		if cfg.ExporterURL != "" {
-			m, ki := c.collectExporter(cfg, now)
+			m, ki := c.collectExporter(ctx, cfg, now)
 			metrics = append(metrics, m...)
 			instances = append(instances, ki)
 			continue
@@ -193,20 +205,11 @@ func getConsumerGroupLag(admin sarama.ClusterAdmin, client sarama.Client, group 
 	return totalLag, nil
 }
 
-func (c *KafkaCollector) collectExporter(cfg model.KafkaInstanceConfig, now int64) ([]model.Metric, model.KafkaInstance) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", cfg.ExporterURL, nil)
+func (c *KafkaCollector) collectExporter(ctx context.Context, cfg model.KafkaInstanceConfig, now int64) ([]model.Metric, model.KafkaInstance) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
 		slog.Warn("Kafka exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
-		return nil, c.downInstance(cfg)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		slog.Warn("Kafka exporter 读取失败", "url", cfg.ExporterURL, "err", err)
 		return nil, c.downInstance(cfg)
 	}
 	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), "kafka_", now)

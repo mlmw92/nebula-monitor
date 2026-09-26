@@ -2,10 +2,7 @@ package collector
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -31,8 +28,13 @@ func NewMongoDBCollector(node string, instances []model.MongoDBInstanceConfig) *
 	return &MongoDBCollector{node: node, instances: instances}
 }
 
-// Collect 遍历所有实例采集指标与实例元信息。
+// Collect 遍历所有实例采集指标与实例元信息（等价于 CollectCtx(context.Background())）。
 func (c *MongoDBCollector) Collect() ([]model.Metric, []model.MongoDBInstance) {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 遍历所有实例采集指标与实例元信息；ctx 取消或超时后停止采集剩余实例。
+func (c *MongoDBCollector) CollectCtx(ctx context.Context) ([]model.Metric, []model.MongoDBInstance) {
 	if len(c.instances) == 0 {
 		return nil, nil
 	}
@@ -40,13 +42,17 @@ func (c *MongoDBCollector) Collect() ([]model.Metric, []model.MongoDBInstance) {
 	var metrics []model.Metric
 	var instances []model.MongoDBInstance
 	for _, cfg := range c.instances {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("MongoDB 采集被中断，跳过剩余实例", "err", err)
+			break
+		}
 		if cfg.ExporterURL != "" {
-			m, mi := c.collectExporter(cfg, now)
+			m, mi := c.collectExporter(ctx, cfg, now)
 			metrics = append(metrics, m...)
 			instances = append(instances, mi)
 			continue
 		}
-		m, mi := c.collectDirect(cfg, now)
+		m, mi := c.collectDirect(ctx, cfg, now)
 		metrics = append(metrics, m...)
 		instances = append(instances, mi)
 	}
@@ -63,9 +69,9 @@ func mongoInstanceMeta(c *MongoDBCollector, cfg model.MongoDBInstanceConfig) mod
 	}
 }
 
-func (c *MongoDBCollector) collectExporter(cfg model.MongoDBInstanceConfig, now int64) ([]model.Metric, model.MongoDBInstance) {
+func (c *MongoDBCollector) collectExporter(ctx context.Context, cfg model.MongoDBInstanceConfig, now int64) ([]model.Metric, model.MongoDBInstance) {
 	inst := mongoInstanceMeta(c, cfg)
-	body, err := fetchPrometheusText(cfg.ExporterURL)
+	body, err := fetchMetricsText(ctx, nil, cfg.ExporterURL)
 	if err != nil {
 		slog.Warn("MongoDB exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
 		inst.Up = false
@@ -90,7 +96,8 @@ func (c *MongoDBCollector) collectExporter(cfg model.MongoDBInstanceConfig, now 
 	return metrics, inst
 }
 
-func (c *MongoDBCollector) collectDirect(cfg model.MongoDBInstanceConfig, now int64) ([]model.Metric, model.MongoDBInstance) {
+// parent 为上游采集任务 ctx；本函数在其之上再叠加 6s 会话超时，两者取先到者。
+func (c *MongoDBCollector) collectDirect(parent context.Context, cfg model.MongoDBInstanceConfig, now int64) ([]model.Metric, model.MongoDBInstance) {
 	inst := mongoInstanceMeta(c, cfg)
 	base := map[string]string{
 		"node":     c.node,
@@ -100,7 +107,7 @@ func (c *MongoDBCollector) collectDirect(cfg model.MongoDBInstanceConfig, now in
 	}
 
 	uri := buildMongoURI(cfg)
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 6*time.Second)
 	defer cancel()
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
@@ -283,24 +290,6 @@ func buildMongoURI(cfg model.MongoDBInstanceConfig) string {
 		b.WriteString(cfg.AuthSource)
 	}
 	return b.String()
-}
-
-// fetchPrometheusText 拉取 exporter 的 /metrics 文本。
-func fetchPrometheusText(rawURL string) (string, error) {
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Get(rawURL)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("exporter 返回状态码 %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
 }
 
 // bsonFloat 从嵌套 bson.M 中按路径取出数值（兼容 float64/int32/int64/int）。

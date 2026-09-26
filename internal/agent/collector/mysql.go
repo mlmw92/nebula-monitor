@@ -108,13 +108,13 @@ func (c *MySQLCollector) collectDirect(ctx context.Context, cfg model.MySQLInsta
 	if slave != nil {
 		if ioRunning, ok := slave["Slave_IO_Running"]; ok && ioRunning == "Yes" {
 			role = "slave"
-		if masterHost, ok := slave["Master_Host"]; ok {
-			replicaOf = masterHost
-			if masterPort, ok2 := slave["Master_Port"]; ok2 {
-				replicaOf = masterHost + ":" + masterPort
+			if masterHost, ok := slave["Master_Host"]; ok {
+				replicaOf = masterHost
+				if masterPort, ok2 := slave["Master_Port"]; ok2 {
+					replicaOf = masterHost + ":" + masterPort
+				}
+				replicaOf = normalizeInstanceAddr(replicaOf)
 			}
-			replicaOf = normalizeInstanceAddr(replicaOf)
-		}
 		}
 	}
 	// Group Replication：优先使用成员真实角色（cluster 拓扑）。
