@@ -368,6 +368,8 @@ Collector.CollectAll(ctx)
 - 单测：校验器 13 项 + 模板执行 15 项全绿；`go vet ./internal/agent/...` 干净；`go build ./...` 通过。
 - 实机（dev-server）：28 项断言全过——三模板正常采集（keep/drop/rename/unlabel/labels、三种 kind 取值）、
   一个 target 失败时**只产该 target 的 `up=0`** 且其它模板不受影响、无模板时与 pre-C1 二进制上报体逐项等价。
+  该验证已固化为可重复脚本：`bash build/verify-templates.sh [pre-C1-Agent-二进制]`
+  （自建假端点与上报捕获器，不依赖外部服务）；阶段二改 DSL 或取数逻辑后应重跑一次。
 - 端到端（补"落 VM"）：Agent → Server → `remote_write`，11 项断言全过——模板指标与
   `cluster`/`template`/`instance`/`node` 标签确实到达时序库写入路径；keep/drop 未生效的指标未写入。
   验证用假时序库（仅解压 snappy 落盘）以避免依赖外网下载 VictoriaMetrics。
