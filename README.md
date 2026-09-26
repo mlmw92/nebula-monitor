@@ -753,11 +753,14 @@ Elasticsearch（需启用 prometheus 模块，端点 `/_prometheus/metrics`）�
 
 三种取数方式：
 
-| `kind` | 取数方式 | 取值规则 |
-|---|---|---|
-| `prometheus-exporter` | 拉取 Prometheus 文本 | 指标名直接来自响应，用 `keep`/`drop`/`rename` 收窄与改名 |
-| `http-json` | 拉取 JSON | `rules.metrics[].path`，支持 `a.b[0].c` |
-| `http-text` | 拉取纯文本 | `rules.metrics[].pattern`，取第 1 个捕获组 |
+| `kind` | 取数方式 | 取值规则 | 需本机放行 |
+|---|---|---|---|
+| `prometheus-exporter` | 拉取 Prometheus 文本 | 指标名直接来自响应，用 `keep`/`drop`/`rename` 收窄与改名 | — |
+| `http-json` | 拉取 JSON | `rules.metrics[].path`，支持 `a.b[0].c` | — |
+| `http-text` | 拉取纯文本 | `rules.metrics[].pattern`，取第 1 个捕获组 | — |
+| `jdbc` | 连数据库执行**只读**查询 | `rules.metrics[].query`（+ 可选 `column`） | `templateGuards.jdbc` |
+| `exec` | 在本机执行命令 | `rules.metrics[].pattern`（命令输出按正则取值） | `templateGuards.exec` |
+| `file` | 读取本机文件末尾 | `rules.metrics[].pattern` | `templateGuards.file` |
 
 ```yaml
 templates:
@@ -876,6 +879,76 @@ rules:
 标签取值会**净化**（指标名不允许的字符替换为下划线）；样本没有该标签、或取值净化后为空（如中文取值）时**保持原名与原标签**——
 宁可留一个未拆分的样本，也不产出含义不明的指标名或丢数据。不同取值净化后撞名（`a/b` 与 `a.b` 都变成 `a_b`）时，
 由上面那道重复序列护栏兜住（只保留第一条并告警）。
+
+**三类新取数方式（`jdbc` / `exec` / `file`）与它们的本机护栏**
+
+前五类都是「拉别人的端点」，这三类不是：`exec` 会在被监控机上**以 root 执行命令**、`file` 会以 root 读取文件、
+`jdbc` 会带着库凭据出网。而 Agent 由 systemd 以 `User=root` 运行，模板又能在 Web 端编辑并下发到整组节点——
+也就是「Web 端一个写权限 = 一批机器的 root」。因此这三类**默认全部关闭**，必须由**机器自己**在 `agent.yaml` 里放行：
+
+```yaml
+# 在目标机器的 agent.yaml 中（改动后需重启 Agent）
+templateGuards:
+  exec:
+    enabled: true
+    allow: ["/usr/local/bin/redis-cli"]        # 命令绝对路径，精确匹配（不支持通配）
+  file:
+    enabled: true
+    allow: ["/var/lib/myapp/metrics.txt"]      # 文件绝对路径，软链按**实际指向**校验
+  jdbc:
+    enabled: true
+    # allowHosts: ["10.0.0.5:3306"]            # 可选：留空表示不限制目标库
+```
+
+三道门控，缺一不可：
+
+1. **本机护栏**（上表配置）：机器自己决定放行哪些命令/路径。这是唯一由机器掌握的那道门——
+   即便 Server 被入侵或误配，影响也仅限于本机白名单里明确允许的目标。
+2. **能力协商**：Agent 只上报**已放行**的取数方式，Server 据此只把对应模板下发给它。
+   未启用的节点根本收不到这类模板，也就不会每轮各报一个 `template_target_up=0`（噪音与误判的来源）。
+3. **中心授权与审计**：模板的增删改仍受 `middleware:write` 与操作审计约束。
+
+各类的取值示例：
+
+```yaml
+  - id: bizdb                       # 数据库只读查询
+    kind: jdbc
+    driver: mysql                   # mysql | postgres（只用已依赖的驱动）
+    targets:
+      - { instance: biz-db-01, addr: "10.0.0.5:3306", database: appdb,
+          auth: { basic: { user: monitor, password: "enc:xxxx" } } }
+    rules:
+      metrics:
+        - { name: order_count, label: 近1小时订单,
+            query: "SELECT COUNT(*) FROM orders WHERE created_at > NOW() - INTERVAL 1 HOUR" }
+
+  - id: redisinfo                   # 执行本机命令
+    kind: exec
+    targets:
+      - { instance: cache-01, command: /usr/local/bin/redis-cli, args: ["-h", "127.0.0.1", "INFO"], timeoutSec: 5 }
+    rules:
+      metrics:
+        - { name: ops_per_sec, pattern: "instantaneous_ops_per_sec:(\\d+)" }
+
+  - id: appstate                    # 读取本机文件（快照：只读末尾，默认 1 MiB）
+    kind: file
+    targets:
+      - { instance: app-01, path: /var/lib/myapp/metrics.txt }
+    rules:
+      metrics:
+        - { name: queue_depth, pattern: "(?m)^queue_depth (\\d+)$" }
+```
+
+几条明确的行为约定（都是刻意的）：
+
+- `exec` 的**参数以 argv 直传，不经过 shell**：要管道/重定向请自己写脚本、把脚本路径放进白名单；
+  环境变量只给 `PATH`（不把 Agent 进程的敏感变量交给被执行的程序），工作目录固定为 `/`。
+- `jdbc` **只允许 `SELECT` / `SHOW` / `EXPLAIN` 开头的单条语句**（保存时与执行时各校验一次）：
+  一条模板会下发到整组节点，一句写操作就是整片的数据破坏，而模板配错的其它情形只是「没数据」。
+- `file` 只读、只接受普通文件、**软链按解析后的真实路径比对白名单**（否则可用软链绕过白名单）。
+- 三类的失败语义与其它 kind 一致：只产 `template_target_up=0`，不产数据（避免旧值被误读为当前值）。
+- 配置错误不会被静默忽略：护栏没放行、命令/路径不在白名单、写操作 SQL 等都在启动期或首次采集时
+  给出明确原因（护栏类问题按「模板 + 原因」去重告警，不按采集周期刷屏）。
 
 **约束与安全边界**
 

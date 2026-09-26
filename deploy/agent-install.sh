@@ -556,9 +556,9 @@ $( [[ -n "$LABELS_YAML" ]] && printf 'labels:\n%s' "$LABELS_YAML" )
 #   - "80"
 #   - "443"
 
-# ==================== 采集项模板示例（新增中间件无需改代码：拉取 HTTP 端点并映射为指标）====================
-# 适用对象：各类 exporter 或自研服务暴露的 Prometheus / JSON / 纯文本端点。三种 kind：
-#   prometheus-exporter（Prometheus 文本）｜http-json（JSON 路径取值）｜http-text（正则抓取）
+# ==================== 采集项模板示例（新增中间件无需改代码：取数并映射为指标）====================
+# 五类 kind：prometheus-exporter（Prometheus 文本）｜http-json（JSON 路径取值）｜http-text（正则抓取）
+#            ｜jdbc（数据库只读查询）｜exec（本机执行命令）｜file（读取本机文件）
 # 生效方式：改完重启 Agent；配置非法会拒绝启动并打印全部原因（不做静默跳过）。
 # 可见范围：模板指标可在「指标浏览」与自定义仪表盘查询；但不会出现在中间件 Tab、首页概览、
 #           巡检报告与「服务离线」告警中（那属于后续版本要做的「模板 → 中间件类型」注册）。
@@ -594,8 +594,47 @@ $( [[ -n "$LABELS_YAML" ]] && printf 'labels:\n%s' "$LABELS_YAML" )
 #     rules:
 #       metrics:
 #         - { name: customtext_active_conns, pattern: 'Active connections:\s+(\d+)' }
+#   - id: bizdb                        # 数据库只读查询（只允许 SELECT/SHOW/EXPLAIN 单条语句）
+#     kind: jdbc
+#     driver: mysql                    # mysql | postgres
+#     targets:
+#       - { instance: biz-db-01, addr: "10.0.0.5:3306", database: appdb,
+#           auth: { basic: { user: monitor, password: "enc:xxxx" } } }
+#     rules:
+#       metrics:
+#         - { name: order_count, query: "SELECT COUNT(*) FROM orders" }
+#   - id: redisinfo                    # 本机执行命令（argv 直传，不经 shell；环境变量只给 PATH）
+#     kind: exec
+#     targets:
+#       - { instance: cache-01, command: /usr/local/bin/redis-cli, args: ["-h", "127.0.0.1", "INFO"], timeoutSec: 5 }
+#     rules:
+#       metrics:
+#         - { name: ops_per_sec, pattern: "instantaneous_ops_per_sec:(\\d+)" }
+#   - id: appstate                     # 读取本机文件末尾（快照语义，默认只读 1 MiB）
+#     kind: file
+#     targets:
+#       - { instance: app-01, path: /var/lib/myapp/metrics.txt }
+#     rules:
+#       metrics:
+#         - { name: queue_depth, pattern: "(?m)^queue_depth (\\d+)$" }
 # 每轮每个 target 都会产出 template_target_up（1=拉取并解析成功；0=失败，且失败时不产出其它指标，
 # 以免上一轮的值被误读为当前值）。上限：模板 ≤20、单模板 target ≤32、单轮单模板产出 ≤2000 条。
+#
+# ==================== 本机护栏（jdbc / exec / file 三类必须在此放行，默认全关）====================
+# 这三类不是「拉别人的端点」：exec 会以 root 执行命令、file 会以 root 读文件、jdbc 会带库凭据出网。
+# 因此必须由**这台机器自己**放行；未放行时即使 Server 下发对应模板也不会执行（只会记一条告警）。
+# 白名单为**精确绝对路径匹配**，不支持通配；exec/file 启用了就必须给出白名单，否则拒绝启动。
+# 权限相关：Agent 以 root 运行，放行前请确认命令/路径确属可信（它们等于把 root 能力交给模板作者）。
+# templateGuards:
+#   exec:
+#     enabled: false
+#     allow: ["/usr/local/bin/redis-cli"]
+#   file:
+#     enabled: false
+#     allow: ["/var/lib/myapp/metrics.txt"]
+#   jdbc:
+#     enabled: false
+#     # allowHosts: ["10.0.0.5:3306"]   # 留空表示不限制目标库
 # 注意：若改用 Web 端「采集项模板」由 Server 统一下发，本段应保持为空——下发的模板会替换本机配置
 # （下发模板需在 Server 侧声明生效的节点分组 groups，本机模板不需要填 groups）。
 EOF

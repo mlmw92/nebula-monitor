@@ -94,11 +94,15 @@
           <el-input v-model="form.title" placeholder="如 RabbitMQ（用于 Tab 与卡片展示）" />
         </el-form-item>
         <el-form-item label="类型">
-          <el-select v-model="form.kind" style="width: 260px">
+          <el-select v-model="form.kind" style="width: 320px">
             <el-option label="prometheus-exporter（Prometheus 文本）" value="prometheus-exporter" />
             <el-option label="http-json（JSON 路径取值）" value="http-json" />
             <el-option label="http-text（正则抓取）" value="http-text" />
+            <el-option label="jdbc（数据库只读查询）" value="jdbc" />
+            <el-option label="exec（本机执行命令）" value="exec" />
+            <el-option label="file（读取本机文件）" value="file" />
           </el-select>
+          <div class="hint-inline">{{ kindHint }}</div>
         </el-form-item>
         <el-form-item label="生效分组">
           <el-select
@@ -190,6 +194,20 @@ const rulesText = ref('')
 const presets = ref([])
 const presetId = ref('')
 const presetNote = ref('')
+
+// kindHint 按类型给出「该配哪些字段」与前置条件。
+// 三类本机/数据库取数（jdbc/exec/file）会以 root 触碰被监控机或携带库凭据，
+// 因此**必须在目标机器的 agent.yaml 里通过 templateGuards 放行**——
+// 这一点不写出来，用户就会陷入「模板建好了却一直没有数据」的排查。
+const KIND_HINTS = {
+  'prometheus-exporter': '拉取 Prometheus 文本端点；指标名直接来自响应，用 keep/drop/rename 收窄。',
+  'http-json': '拉取 JSON 接口；每条指标给 path（如 a.b[0].c）。',
+  'http-text': '拉取纯文本页面；每条指标给 pattern（取第 1 个捕获组）。',
+  jdbc: '连库执行只读查询：需 driver（mysql/postgres）+ 目标 addr(host:port)/database 与库账号；每条指标给 query（只允许 SELECT/SHOW/EXPLAIN 单条语句）。需在目标机器的 templateGuards.jdbc 中放行。',
+  exec: '在本机执行命令：需目标的 command（绝对路径）与可选 args，每条指标给 pattern。argv 直传、不经 shell；需在目标机器的 templateGuards.exec.allow 中精确列出该命令。',
+  file: '读取本机文件末尾：需目标的 path（绝对路径），每条指标给 pattern。需在目标机器的 templateGuards.file.allow 中精确列出该路径（软链按实际指向校验）。',
+}
+const kindHint = computed(() => KIND_HINTS[form.value.kind] || '')
 
 // applyPreset 用预设填好表单：不覆盖生效分组（分组取决于用户环境，预设刻意留空）。
 function applyPreset(id) {
