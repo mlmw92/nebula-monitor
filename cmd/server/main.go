@@ -174,6 +174,7 @@ func main() {
 
 	// 采集项模板（C1 阶段二）：Web 端统一 CRUD，并作为下发给 Agent 的数据源
 	templateStore := templates.NewStore(cfg.TemplatesFile)
+	recv.SetTemplateStore(templateStore)
 
 	// 拨测模块
 	dialtestStore := dialtest.NewStore(cfg.DialtestFile)

@@ -447,3 +447,42 @@ Collector.CollectAll(ctx)
 `internal/server/metrics/catalog_guard_test.go` 扫描产出方源码，校验「目录登记的每个中间件指标名都有产出方」
 与「每个中间件的存活指标都已登记」；`internal/server/alert/service_metric_test.go` 校验
 「服务映射 ↔ 指标目录」一致。守卫已做过**注入验证**：把 `mysql_instance_up` 改回 `mysql_up` 后测试立即失败并报出该名字。
+
+## 13. 阶段二实施记录（进行中）
+
+阶段二把模板从「逐台写 agent.yaml」变成「Web 端统一存管 + 下发」，分四个子批次。
+评审决策（2026-09-26）：① 下发范围按**节点分组**（`groups` 必填）；② 只走响应下发，不加 SIGHUP；
+③ 每个模板 = 一个独立中间件类型（前端用一个通用 Tab 组件渲染）；④ `template_target_up` 纳入「服务离线」告警。
+
+| 子批次 | 内容 | 状态 |
+|---|---|---|
+| 0 | DSL 移到共享包 `internal/template`（Server 与 Agent 用同一份校验器，否则两处必然漂移） | ✅ |
+| A | Server 侧存储（CRUD + 校验 + 原子落盘 + revision）+ CRUD/校验 API + 权限门（`middleware:read` / `middleware:write`） | ✅ |
+| B | 下发与热生效（响应携带 + 分组过滤 + 能力/版本协商 + Agent 原子替换） | ✅ |
+| C | 注册化：模板 → 中间件类型（后端 `middlewareTypes`/`mwSummarySpecs`/`mwDefs`/`serviceMetric`/`KnownServices` 5 处 + 前端 4 处收敛到一份运行时注册表） | ⬜ |
+| D | 前端模板管理页（照 `DialTestView.vue` 形态）+ 中间件 Tab 动态化 + 「已配置但无数据」提示 | ⬜ |
+
+### 13.1 子批次 B 的关键取舍
+
+1. **`groups` 在共享 DSL 里可选、在 Server 侧必填**：`agent.yaml` 的本机模板天然只对本机生效，
+   强制填写会多一个不起作用的字段；而 Server 管理的模板若允许留空并默认「全部节点」，
+   一台只跑某中间件的机器配一个模板，会让其余节点每轮各报一个 `up=0`（序列与日志双噪声）。
+2. **不需要 SIGHUP、也不需要重启**：`CollectAll` 每轮都重建任务表（`tasks()`），
+   因此下发只需原子替换模板集，下一个采集周期自然生效。
+3. **三条下发闸门**：Agent 必须声明 `capabilities.templates`（旧 Agent 发了也白发）、
+   版本号必须与已生效版本不同（否则每轮心跳背负整份配置，随节点数成倍放大）、按分组过滤。
+4. **空集合照样下发**：某分组内模板被删空时必须让 Agent 收到「清空」这个事实，
+   否则它会继续跑已被删除的模板。
+5. **非法下发保留旧模板**：校验失败只记一次告警（按版本号去重）并继续用旧配置；
+   Server 会持续重发，配置修好后自动恢复——宁可暂时用旧配置，也不能因模板把采集打断。
+6. **首次接管时的替换是显式的**：Agent 日志明确提示「本机 agent.yaml 中的模板被 Server 下发替换」，
+   避免运维困惑于「本地写的模板怎么不见了」。
+
+### 13.2 子批次 B 的验证
+
+- 单测：receiver 6 例（分组过滤 / 版本一致跳过 / 缺能力跳过 / 未注入不下发 / 空集合清空 / 分组匹配细节）
+  + collector 2 例（热替换无需重启、非法下发保留原配置）+ 存储 9 例 + API 5 例。
+- 实机端到端（`bash build/verify-template-delivery.sh`）：Agent 的 `agent.yaml` **不配任何模板**，
+  因此被测指标只能来自下发路径；9 项断言全过——模板经 Server → 上报响应 → Agent 应用
+  （日志 `已应用 Server 下发的采集项模板 count=1 revision=1`）→ 采集 → 落库写入路径，
+  且 `rename` / `keep` / 静态标签均正确生效。假时序库见 `build/template-fakes/fakevm`。

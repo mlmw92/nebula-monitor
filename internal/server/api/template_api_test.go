@@ -19,9 +19,10 @@ func newTemplateTestAPI(t *testing.T) *API {
 	return a
 }
 
-// templateJSON 生成一个最小合法模板的请求体。
+// templateJSON 生成一个最小合法模板的请求体（含 Server 侧必填的 groups）。
 func templateJSON(id string) string {
-	return `{"id":"` + id + `","kind":"prometheus-exporter","targets":[{"instance":"` + id + `-01:15692","addr":"http://127.0.0.1:15692/metrics"}]}`
+	return `{"id":"` + id + `","kind":"prometheus-exporter","groups":["default"],` +
+		`"targets":[{"instance":"` + id + `-01:15692","addr":"http://127.0.0.1:15692/metrics"}]}`
 }
 
 // do 以持有 middleware:read + middleware:write 的主体发起请求。
@@ -76,7 +77,7 @@ func TestTemplatesAPI_CreateUpdateDelete(t *testing.T) {
 	}
 
 	// 正常更新
-	updated := `{"id":"rabbitmq","title":"RabbitMQ 集群","kind":"prometheus-exporter","targets":[{"addr":"http://127.0.0.1:15692/metrics"}]}`
+	updated := `{"id":"rabbitmq","title":"RabbitMQ 集群","kind":"prometheus-exporter","groups":["mq"],"targets":[{"addr":"http://127.0.0.1:15692/metrics"}]}`
 	rec = do(a, http.MethodPut, "/api/v1/middleware/templates/rabbitmq", updated)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("更新应 200，got %d（body=%s）", rec.Code, rec.Body.String())
@@ -122,6 +123,16 @@ func TestTemplatesAPI_CreateRejectsInvalid(t *testing.T) {
 	rec = do(a, http.MethodPost, "/api/v1/middleware/templates", "{not json")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("非法 JSON 应 400，got %d", rec.Code)
+	}
+
+	// 缺 groups（Server 侧要求声明生效分组，否则会在所有节点上产出 up=0）
+	rec = do(a, http.MethodPost, "/api/v1/middleware/templates",
+		`{"id":"rabbitmq","kind":"prometheus-exporter","targets":[{"addr":"http://127.0.0.1:15692/metrics"}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("缺 groups 应 400，got %d（body=%s）", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || !strings.Contains(resp.Error, "groups") {
+		t.Fatalf("错误应指明缺 groups，got %s", rec.Body.String())
 	}
 }
 

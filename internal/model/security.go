@@ -166,6 +166,12 @@ type DefenseStatus struct {
 type ClientCapability struct {
 	// Defense 是否支持结构化防护指令（enable/disable/status）。
 	Defense bool `json:"defense,omitempty"`
+	// Templates 是否支持接收 Server 下发的采集项模板（C1 阶段二）。
+	// 旧 Agent 不报此字段，Server 据此不下发——模板可达数 KB，不该发给用不上的节点。
+	Templates bool `json:"templates,omitempty"`
+	// TemplateRevision 是 Agent 当前**已生效**的模板版本号（0 = 仅本机 agent.yaml 配置）。
+	// Server 仅在版本号不一致时携带模板下发，避免每轮心跳都背负整份配置。
+	TemplateRevision uint64 `json:"templateRevision,omitempty"`
 }
 
 // ReportPayload 扩展：新增 Capabilities 与 DefenseResult 字段（不影响既有字段）。

@@ -378,6 +378,79 @@ func TestCollectAll_TemplateTasksAppended(t *testing.T) {
 	}
 }
 
+// TestCollector_ApplyDeliveredHotSwap Server 下发的模板无需重启即生效：
+// tasks() 每轮重建任务表，换掉模板集后下一轮就有对应任务。
+// 同时覆盖「本机未配任何模板的 Agent 也能接受下发」——执行器按需创建，不依赖启动时有模板。
+func TestCollector_ApplyDeliveredHotSwap(t *testing.T) {
+	c := newTestCollector(t, 0) // 构造时不带任何模板
+	var res Result
+	var mu sync.Mutex
+	before := len(c.tasks(&res, &mu))
+
+	delivered := template.Config{
+		ID:      "rabbitmq",
+		Kind:    template.KindPrometheusExporter,
+		Groups:  []string{"mq"},
+		Targets: []template.Target{{Addr: "http://127.0.0.1:15692/metrics"}},
+	}
+	if err := c.ApplyDelivered([]template.Config{delivered}, 5); err != nil {
+		t.Fatalf("下发应成功：%v", err)
+	}
+	if got := c.TemplateRevision(); got != 5 {
+		t.Fatalf("版本号 = %d，want 5", got)
+	}
+
+	tasks := c.tasks(&res, &mu)
+	if len(tasks) != before+1 {
+		t.Fatalf("下发后应多出一个模板任务：before=%d after=%d", before, len(tasks))
+	}
+	found := false
+	for _, task := range tasks {
+		if task.name == "template:rabbitmq" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("缺少 template:rabbitmq 任务")
+	}
+
+	// 空集合下发 = 清空（该分组已无模板），任务表应回到基线
+	if err := c.ApplyDelivered(nil, 6); err != nil {
+		t.Fatalf("清空下发应成功：%v", err)
+	}
+	if got := len(c.tasks(&res, &mu)); got != before {
+		t.Fatalf("清空后任务数应回到 %d，got %d", before, got)
+	}
+}
+
+// TestCollector_ApplyDeliveredRejectsInvalid 非法下发必须**保留现有模板**：
+// 模板下发属运维便利功能，绝不能因它把采集打断（宁可继续用旧配置）。
+func TestCollector_ApplyDeliveredRejectsInvalid(t *testing.T) {
+	c := newTestCollector(t, 0)
+	good := template.Config{
+		ID:      "rabbitmq",
+		Kind:    template.KindPrometheusExporter,
+		Groups:  []string{"mq"},
+		Targets: []template.Target{{Addr: "http://127.0.0.1:15692/metrics"}},
+	}
+	if err := c.ApplyDelivered([]template.Config{good}, 3); err != nil {
+		t.Fatalf("下发应成功：%v", err)
+	}
+
+	// id 与保留指标族前缀冲突（DSL 校验会拒）
+	bad := good
+	bad.ID = "redis"
+	if err := c.ApplyDelivered([]template.Config{bad}, 4); err == nil {
+		t.Fatal("非法模板应被拒绝")
+	}
+	if got := c.TemplateRevision(); got != 3 {
+		t.Fatalf("被拒后版本号不应前进，got %d", got)
+	}
+	if list := c.Templates(); len(list) != 1 || list[0].ID != "rabbitmq" {
+		t.Fatalf("应保留原有模板，got %+v", list)
+	}
+}
+
 // TestCollectTemplate_CtxCanceledNoFetch 已取消的 ctx 直接返回 up=0，不发请求。
 func TestCollectTemplate_CtxCanceledNoFetch(t *testing.T) {
 	hit := false

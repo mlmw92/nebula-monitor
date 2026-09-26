@@ -52,6 +52,8 @@ const (
 	MaxBodyBytes = 8 << 20
 	// MaxMetricNameLen 产出指标名长度上限。
 	MaxMetricNameLen = 200
+	// MaxGroupNameLen 节点分组名长度上限。
+	MaxGroupNameLen = 64
 	// UpMetricName 是每个 target 每轮必产出的存活指标名。
 	//
 	// 刻意不叫 `<id>_instance_up`：既有的 `*_instance_up` 有两种产出范式
@@ -92,6 +94,15 @@ type Config struct {
 	Interval int `yaml:"interval" json:"interval"`
 	// AllowHosts 出站主机白名单。阶段一未实现，仅预留字段位置（见设计件 §5）。
 	AllowHosts []string `yaml:"allowHosts" json:"allowHosts"`
+	// Groups 生效的节点分组——仅 Server 下发的模板使用。
+	//
+	// 两处刻意的不对称：
+	//   - 在共享 DSL 里**可选**：`agent.yaml` 的本机模板天然只对本机生效，填它无意义，
+	//     强制填写会让本机配置多一个不起作用的字段；
+	//   - 在 Server 侧**必填**（见 internal/server/templates）：若允许留空而默认「全部节点」，
+	//     一台只跑某中间件的机器配一个模板，会让其余节点每轮各报一个 template_target_up=0，
+	//     序列与日志双噪声。
+	Groups []string `yaml:"groups" json:"groups"`
 	// Targets 拉取目标。
 	Targets []Target `yaml:"targets" json:"targets"`
 	// Rules 解析与映射规则。
@@ -260,6 +271,22 @@ func (c *Config) Validate() error {
 		// 两个方向都要拦：id 落在保留族内（redis_custom），或保留族落在 id 内（redis）
 		if strings.HasPrefix(c.ID+"_", rp) || strings.HasPrefix(rp, c.ID+"_") {
 			errs = append(errs, fmt.Errorf("id %q 与保留前缀 %q 冲突：会与既有指标族形成同名双序列", c.ID, rp))
+		}
+	}
+
+	// groups 可选（见字段注释），但一旦填写就要格式合法且去重
+	seenGroup := make(map[string]bool, len(c.Groups))
+	for i, g := range c.Groups {
+		g = strings.TrimSpace(g)
+		switch {
+		case g == "":
+			errs = append(errs, fmt.Errorf("groups[%d] 为空", i))
+		case len(g) > MaxGroupNameLen:
+			errs = append(errs, fmt.Errorf("groups[%d] 长度 %d 超过上限 %d", i, len(g), MaxGroupNameLen))
+		case seenGroup[g]:
+			errs = append(errs, fmt.Errorf("groups[%d] %q 重复", i, g))
+		default:
+			seenGroup[g] = true
 		}
 	}
 

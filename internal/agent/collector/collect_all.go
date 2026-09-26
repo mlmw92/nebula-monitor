@@ -197,16 +197,15 @@ func (c *Collector) tasks(res *Result, mu *sync.Mutex) []collectTask {
 
 	// 采集项模板：每个模板一个任务，直接继承 per-task 超时与失败隔离
 	// （一个模板卡住/写坏不应拖累其它模板与主机采集）。
-	// templates 为空时不追加任何任务——无模板配置的节点与改造前完全等价。
-	for _, tpl := range c.templates {
-		tpl := tpl
-		if c.templateRunner == nil {
-			break
+	// 模板集每轮现取（下发可随时替换），为空时不追加任何任务——无模板的节点与改造前完全等价。
+	if tpls, runner := c.templateState(); runner != nil {
+		for _, tpl := range tpls {
+			tpl := tpl
+			tasks = append(tasks, collectTask{name: "template:" + tpl.ID, run: func(ctx context.Context) error {
+				addMetrics(runner.CollectTemplate(ctx, tpl))
+				return nil
+			}})
 		}
-		tasks = append(tasks, collectTask{name: "template:" + tpl.ID, run: func(ctx context.Context) error {
-			addMetrics(c.templateRunner.CollectTemplate(ctx, tpl))
-			return nil
-		}})
 	}
 	return tasks
 }

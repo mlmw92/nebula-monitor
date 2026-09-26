@@ -11,6 +11,7 @@
 package templates
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -76,7 +77,7 @@ func (s *Store) Upsert(cfg dsl.Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := dsl.ValidateAll(s.candidateLocked(cfg)); err != nil {
+	if err := s.validateLocked(cfg); err != nil {
 		return err
 	}
 
@@ -107,7 +108,7 @@ func (s *Store) Upsert(cfg dsl.Config) error {
 func (s *Store) Validate(cfg dsl.Config) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return dsl.ValidateAll(s.candidateLocked(cfg))
+	return s.validateLocked(cfg)
 }
 
 // candidateLocked 构造「用 cfg 替换同 id 条目后」的完整集合，供校验使用。
@@ -120,6 +121,29 @@ func (s *Store) candidateLocked(cfg dsl.Config) []dsl.Config {
 		candidate = append(candidate, s.items[id])
 	}
 	return append(candidate, cfg)
+}
+
+// validateLocked 校验候选集合 = 共享 DSL 规则 + Server 侧附加规则。
+func (s *Store) validateLocked(cfg dsl.Config) error {
+	candidate := s.candidateLocked(cfg)
+	return errors.Join(dsl.ValidateAll(candidate), requireGroups(candidate))
+}
+
+// requireGroups 是 Server 侧的附加规则：由 Server 下发的模板必须声明生效的节点分组。
+//
+// 为什么不放进共享 DSL：`agent.yaml` 的本机模板天然只对本机生效，填 groups 无意义，
+// 放进 DSL 会迫使本机配置多写一个不起作用的字段。
+// 为什么必须要求：若允许留空而默认「全部节点」，一台只跑某中间件的机器配一个模板，
+// 会让其余节点每轮各报一个 `template_target_up=0`——序列与日志双噪声。
+func requireGroups(cfgs []dsl.Config) error {
+	var errs []error
+	for _, c := range cfgs {
+		if len(c.Groups) == 0 {
+			errs = append(errs, fmt.Errorf(
+				"模板 %s 未指定 groups：由 Server 下发的模板必须声明生效的节点分组，否则会在所有节点上产出 template_target_up=0", c.ID))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Delete 删除模板；不存在时返回 os.ErrNotExist。

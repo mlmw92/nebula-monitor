@@ -13,11 +13,12 @@ import (
 	dsl "github.com/nebula/monitor/internal/template"
 )
 
-// validCfg 返回一个最小合法模板。
+// validCfg 返回一个最小合法模板（含 Server 侧要求的 groups）。
 func validCfg(id string) dsl.Config {
 	return dsl.Config{
-		ID:   id,
-		Kind: dsl.KindPrometheusExporter,
+		ID:     id,
+		Kind:   dsl.KindPrometheusExporter,
+		Groups: []string{"default"},
 		Targets: []dsl.Target{
 			{Instance: id + "-01:15692", Addr: "http://127.0.0.1:15692/metrics"},
 		},
@@ -134,6 +135,43 @@ func TestStore_UpsertRejectsInvalid(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].ID != "rabbitmq" {
 		t.Fatalf("磁盘内容被非法配置污染：%+v", list)
+	}
+}
+
+// TestStore_RequiresGroups Server 侧附加规则：由 Server 下发的模板必须声明生效分组。
+//
+// 若允许留空而默认「全部节点」，一台只跑某中间件的机器配一个模板，
+// 会让其余节点每轮各报一个 template_target_up=0（序列与日志双噪声）。
+// 注意这条规则**不在共享 DSL 里**：agent.yaml 的本机模板天然只对本机生效，不该被迫填它。
+func TestStore_RequiresGroups(t *testing.T) {
+	s, _ := newTestStore(t)
+
+	noGroups := validCfg("rabbitmq")
+	noGroups.Groups = nil
+	if err := s.Upsert(noGroups); err == nil {
+		t.Fatal("缺 groups 应被 Server 侧拒绝")
+	} else if !strings.Contains(err.Error(), "groups") {
+		t.Fatalf("错误信息应指明 groups，got %v", err)
+	}
+
+	// 共享 DSL 单独看是合法的（可选字段），差别只在 Server 侧规则
+	if err := dsl.ValidateAll([]dsl.Config{noGroups}); err != nil {
+		t.Fatalf("DSL 层不应要求 groups（agent.yaml 本机模板无需填写）：%v", err)
+	}
+	if err := s.Validate(noGroups); err == nil {
+		t.Fatal("Validate 也应报出缺 groups（编辑器要能提前发现）")
+	}
+
+	// 格式问题由共享 DSL 负责
+	badGroup := validCfg("rabbitmq")
+	badGroup.Groups = []string{"mq", " "}
+	if err := s.Upsert(badGroup); err == nil {
+		t.Fatal("groups 含空项应被拒绝")
+	}
+	dupGroup := validCfg("rabbitmq")
+	dupGroup.Groups = []string{"mq", "mq"}
+	if err := s.Upsert(dupGroup); err == nil {
+		t.Fatal("groups 重复应被拒绝")
 	}
 }
 

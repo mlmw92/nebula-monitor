@@ -596,6 +596,8 @@ $( [[ -n "$LABELS_YAML" ]] && printf 'labels:\n%s' "$LABELS_YAML" )
 #         - { name: customtext_active_conns, pattern: 'Active connections:\s+(\d+)' }
 # 每轮每个 target 都会产出 template_target_up（1=拉取并解析成功；0=失败，且失败时不产出其它指标，
 # 以免上一轮的值被误读为当前值）。上限：模板 ≤20、单模板 target ≤32、单轮单模板产出 ≤2000 条。
+# 注意：若改用 Web 端「采集项模板」由 Server 统一下发，本段应保持为空——下发的模板会替换本机配置
+# （下发模板需在 Server 侧声明生效的节点分组 groups，本机模板不需要填 groups）。
 EOF
   c_ok "配置已写入: $CONFIG_DIR/agent.yaml"
 }

@@ -3,6 +3,8 @@ package collector
 
 import (
 	"context"
+	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/host"
@@ -38,9 +40,11 @@ type Collector struct {
 	fastdfs     *FastDFSCollector
 	security    *SecurityCollector
 
-	// templates 是采集项模板配置（阶段一：prometheus-exporter / http-json / http-text）。
-	// 为空时 tasks() 不追加任何任务，与改造前完全等价（阶段一最重要的回归保证）。
+	// 采集项模板（阶段一：来自本机 agent.yaml；阶段二：可被 Server 下发替换）。
+	// 加锁的原因：tasks() 每轮都会读取该集合，而下发路径可在任意时刻原子替换它。
+	tplMu          sync.RWMutex
 	templates      []template.Config
+	tplRevision    uint64 // 已生效的模板版本号（0 = 仅本机配置，从未接受过下发）
 	templateRunner *TemplateRunner
 }
 
@@ -116,6 +120,63 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 		c.templateRunner = NewTemplateRunner(node)
 	}
 	return c
+}
+
+// SetTemplates 原子替换模板集（Server 下发路径使用）。
+//
+// 为什么不需要重启、也不需要 SIGHUP：CollectAll 每轮都重建任务表（tasks()），
+// 这里换掉集合，下一个采集周期自然生效。
+// 版本号 0 表示「仅本机 agent.yaml 配置」，因此首次下发（revision ≥ 1）必然与 0 不等而生效。
+func (c *Collector) SetTemplates(tpls []template.Config, revision uint64) {
+	c.tplMu.Lock()
+	defer c.tplMu.Unlock()
+	if c.templateRunner == nil {
+		c.templateRunner = NewTemplateRunner(c.node)
+	}
+	c.templates = tpls
+	c.tplRevision = revision
+}
+
+// Templates 返回当前生效的模板集（副本）。
+func (c *Collector) Templates() []template.Config {
+	c.tplMu.RLock()
+	defer c.tplMu.RUnlock()
+	return append([]template.Config(nil), c.templates...)
+}
+
+// TemplateRevision 返回当前已生效的模板版本号（0 表示从未接受过下发）。
+func (c *Collector) TemplateRevision() uint64 {
+	c.tplMu.RLock()
+	defer c.tplMu.RUnlock()
+	return c.tplRevision
+}
+
+// ApplyDelivered 应用 Server 下发的模板集：先整体校验，通过后才原子替换。
+//
+// 校验不通过时**保留现有模板**并返回错误——模板下发属运维便利功能，
+// 绝不能因为它把采集打断（宁可继续用旧配置，也不能进入「没有模板」的状态）。
+func (c *Collector) ApplyDelivered(tpls []template.Config, revision uint64) error {
+	if err := template.ValidateAll(tpls); err != nil {
+		return err
+	}
+	// 首次被 Server 接管时明确告知：本机 agent.yaml 里的模板将被替换，
+	// 否则运维会困惑于「本地写的模板怎么不见了」。
+	if c.TemplateRevision() == 0 && len(c.Templates()) > 0 {
+		slog.Warn("Server 下发的模板将替换本机 agent.yaml 中的模板（之后以 Server 配置为准）",
+			"local", len(c.Templates()), "delivered", len(tpls), "revision", revision)
+	}
+	c.SetTemplates(tpls, revision)
+	return nil
+}
+
+// templateState 一次性取出「模板集 + 执行器」，避免分别加锁读到不一致的组合。
+func (c *Collector) templateState() ([]template.Config, *TemplateRunner) {
+	c.tplMu.RLock()
+	defer c.tplMu.RUnlock()
+	if len(c.templates) == 0 || c.templateRunner == nil {
+		return nil, nil
+	}
+	return append([]template.Config(nil), c.templates...), c.templateRunner
 }
 
 // Collect 采集所有启用指标（等价于 CollectCtx(context.Background())）。
