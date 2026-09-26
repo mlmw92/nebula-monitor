@@ -338,7 +338,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | D2 | | 2. engine 接入 pipeline 阶段 | ✅ | — | `notify` + `flushGroup` 两个派发点；空管道零开销直通 |
 | D2 | | 3. 消息模板可加载 + 渲染失败兜底 | ✅ | — | 渲染失败/为空回退内置描述，绝不丢告警 |
 | D2 | | 4. API：GET / PUT / preview | ✅ | — | preview 支持携带待保存配置试算 |
-| D2 | | 5. 前端编辑页 + 预览 + 构建 | ⬜ | — | 系统设置子页 |
+| D2 | | 5. 前端编辑页 + 预览 + 构建 | ✅ | — | 「系统设置 → 告警管道」标签页；三阶段表格编辑 + 试算预览 + 配置直编；`npm run build` 通过 |
 | D2 | | 6. TDD（含校验失败路径） | ✅ | 1.23.9 | 8 个管道单测（含空管道回归等价） |
 | D2 | | 7. `AlertEvent` 标签视图（`Labels` 字段） | ✅ | — | 由事件字段派生 + 事件自有标签，与分组键命名一致 |
 | F2 | 文档一致性 | 1. README 8 类 → 十类 | ⬜ | — | README:89 |
@@ -373,7 +373,8 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | 2026-09-26 | E1 主体完成：`Result` + `CollectAll`（16 任务并发）接线到 `main.go`；删除 11 个会绕过 ctx 的中间件包装；防火墙规则+状态合并单任务。新增 5 个 CollectAll 测试（共 15 个用例全绿） |
 | 2026-09-26 | **E1 收尾验证完成**（Ubuntu 24.04 / Go 1.27.1 / 2C2G 实机）：① `CGO_ENABLED=1 go test -race -count=1 ./internal/agent/...` 全绿无竞态；② 新旧 Agent 同节点各跑一轮真实采集，结构比对 IDENTICAL（78 指标/66 签名、43 监听、93 安全事件、9 类实例结构全一致）。**E1 完成，可发布 1.23.8** |
 | 2026-09-26 | 新增 `build/verify-agent-parity.sh`：把上述对照验证环境固化为可复用脚本（远端辅助文件由脚本自身生成，含假 exporter / 假 Redis / 上报捕获 / 结构比对），任何 Agent 采集改动均可一键回归。用法 `bash build/verify-agent-parity.sh --baseline <ref> [--race] [--install-go] [--keep]`。实测通过 |
-| 2026-09-26 | **D2 后端完成**：`alert/pipeline.go`（relabel/enrich/template + `PipelineStore` 热加载）、`AlertEvent` 新增标签视图 `Labels`、引擎 `notify`/`flushGroup` 双派发点接入、三个 API（GET/PUT/preview）。8 个管道单测通过，全部 internal 测试通过。**待办：D2 前端编辑页** |
+| 2026-09-26 | **D2 后端完成**：`alert/pipeline.go`（relabel/enrich/template + `PipelineStore` 热加载）、`AlertEvent` 新增标签视图 `Labels`、引擎 `notify`/`flushGroup` 双派发点接入、三个 API（GET/PUT/preview）。8 个管道单测通过 |
+| 2026-09-26 | **D2 前端完成**：`settings/AlertPipelineSubView.vue`（三阶段表格编辑 + when 简写 + 试算预览 + 配置直编）、SettingsView 注册标签页、http.js 三个方法；接口错误响应 JSON 化（前端可展示校验文案）。另补 6 个 API 冒烟测试。`npm run build` 通过。**D2 全部完成；批次一剩 F2、B1** |
 
 ---
 
