@@ -110,9 +110,12 @@
         </el-table-column>
         <el-table-column label="状态" width="120">
           <template #default="{ row }">
-            <el-tag v-if="row.state === 'firing' && acks[ackKey(row)]" type="info" size="small" effect="plain">已确认</el-tag>
-            <el-tag v-else :type="row.state === 'firing' ? 'danger' : 'success'" size="small" effect="dark">
-              {{ row.state === 'firing' ? '告警中' : '已恢复' }}
+            <el-tag
+              :type="ackTagType(row)"
+              size="small"
+              :effect="row.state === 'firing' && ackStatus(row) === 'pending' ? 'dark' : 'plain'"
+            >
+              {{ ackStatusLabel(row) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -425,8 +428,17 @@
           <span>
             <el-link type="primary" @click="gotoNode(detail)">{{ detail.node }}</el-link>
             <span class="muted" v-if="detail.nodeIp"> ({{ detail.nodeIp }})</span>
-            <span v-if="acks[ackKey(detail)]" class="ev-acked">· 已确认</span>
           </span>
+        </div>
+        <div class="ev-field">
+          <span>处置</span>
+          <span>
+            <el-tag :type="ackTagType(detail)" size="small" effect="plain">{{ ackStatusLabel(detail) }}</el-tag>
+            <span v-if="ackInfo(detail)?.assignee" class="muted"> · 处理人 {{ ackInfo(detail).assignee }}</span>
+          </span>
+        </div>
+        <div class="ev-field" v-if="ackInfo(detail)?.closeReason">
+          <span>关闭原因</span><span>{{ ackInfo(detail).closeReason }}</span>
         </div>
         <div class="ev-field"><span>触发条件</span><span class="mono">{{ detail.metric }} {{ detail.operator }} {{ detail.threshold }}</span></div>
         <div class="ev-field"><span>触发值</span><span class="mono">{{ detail.value }}</span></div>
@@ -435,11 +447,54 @@
         <div class="ev-field"><span>恢复</span><span>{{ detail.state === 'resolved' ? fmt(detail.endsAt) : '—' }}</span></div>
         <div class="ev-chart-title" v-if="detail.metric">触发指标近 1 小时趋势</div>
         <div class="ev-chart" ref="chartRef" v-if="detail.metric"></div>
+
+        <div class="ev-chart-title">处置记录</div>
+        <div class="collab-timeline">
+          <div v-for="(c, i) in ackInfo(detail)?.comments || []" :key="i" class="collab-item">
+            <div class="collab-head">
+              <span class="collab-user">{{ c.user }}</span>
+              <span class="collab-time">{{ fmt(c.time) }}</span>
+            </div>
+            <div class="collab-text">{{ c.text }}</div>
+          </div>
+          <div v-if="!(ackInfo(detail)?.comments || []).length" class="muted">暂无处置记录</div>
+        </div>
+        <div class="collab-input">
+          <el-input
+            v-model="commentText"
+            type="textarea"
+            :rows="2"
+            maxlength="2000"
+            show-word-limit
+            placeholder="补充处置说明（如「已扩容」「误报，已调整阈值」）…"
+          />
+        </div>
         <div class="ev-actions">
-          <el-button type="primary" size="small" :disabled="detail.state !== 'firing' || acks[ackKey(detail)]" @click="ackEvent(detail)">
-            {{ detail.state !== 'firing' ? '已恢复' : (acks[ackKey(detail)] ? '已确认' : '确认告警') }}
+          <el-button
+            v-if="detail.state === 'firing' && ackStatus(detail) === 'pending'"
+            type="primary"
+            size="small"
+            @click="ackEvent(detail)"
+          >
+            认领
           </el-button>
-          <el-button size="small" @click="drawer = false">关闭</el-button>
+          <el-button
+            v-if="detail.state === 'firing' && ackStatus(detail) !== 'closed'"
+            size="small"
+            @click="assignEvent(detail)"
+          >
+            指派
+          </el-button>
+          <el-button
+            v-if="detail.state === 'firing' && ackStatus(detail) !== 'closed'"
+            size="small"
+            @click="closeEvent(detail)"
+          >
+            关闭告警
+          </el-button>
+          <el-button v-if="ackStatus(detail) === 'closed'" size="small" @click="reopenEvent(detail)">重新打开</el-button>
+          <el-button size="small" :loading="commenting" @click="commentEvent(detail)">评论</el-button>
+          <el-button size="small" @click="drawer = false">返回</el-button>
         </div>
       </template>
     </el-drawer>
@@ -562,6 +617,23 @@ watch([evPageSize, eventFilter], () => {
 function ackKey(e) {
   return `${e.ruleName}|${e.node}|${e.instance || ''}|${e.startsAt || 0}`
 }
+// 处置记录（含状态 / 处理人 / 关闭原因 / 评论）
+function ackInfo(e) {
+  return e ? acks.value[ackKey(e)] || null : null
+}
+// 处置状态；旧记录没有 status 字段，一律视为「已认领」——与后端 EffectiveStatus 同口径。
+function ackStatus(e) {
+  if (!e) return 'pending'
+  if (e.state && e.state !== 'firing') return 'resolved'
+  const info = ackInfo(e)
+  return info ? info.status || 'ack' : 'pending'
+}
+function ackStatusLabel(e) {
+  return { pending: '待处理', ack: '已认领', closed: '已关闭', resolved: '已恢复' }[ackStatus(e)] || '告警中'
+}
+function ackTagType(e) {
+  return { pending: 'danger', ack: 'warning', closed: 'info', resolved: 'success' }[ackStatus(e)] || 'danger'
+}
 function sevType(s) {
   return { critical: 'danger', warning: 'warning', info: 'info' }[s] || 'info'
 }
@@ -569,7 +641,7 @@ function sevLabel(s) {
   return { critical: '紧急', warning: '警告', info: '信息' }[s] || s
 }
 function stateLabel(e) {
-  if (e.state === 'firing' && acks.value[ackKey(e)]) return '已确认'
+  if (e.state === 'firing') return ackStatusLabel(e)
   return { firing: '告警中', resolved: '已恢复', pending: '待触发' }[e.state] || e.state
 }
 function channelLabel(v) {
@@ -902,14 +974,78 @@ function openDetail(row) {
 function gotoNode(row) {
   router.push({ path: '/hosts', query: { node: row.node } })
 }
-async function ackEvent(row) {
+// ---- D4 告警协作处置：认领 / 指派 / 关闭 / 重新打开 / 评论 ----
+// 处置只影响「谁在处理」，不改变监控条件的真实 firing 状态。
+function collabPayload(row, extra = {}) {
+  return {
+    rule: row.ruleName,
+    host: row.node,
+    instance: row.instance || '',
+    startsAt: row.startsAt || 0,
+    ...extra,
+  }
+}
+
+// 处置后只刷新数据、不关闭抽屉：抽屉的处置区读的是 acks，因此会自动更新。
+async function runCollab(path, row, extra, okText) {
   try {
-    await http.post('/api/v1/alerts/ack', { rule: row.ruleName, host: row.node, instance: row.instance || '', startsAt: row.startsAt })
-    ElMessage.success('已确认')
-    drawer.value = false
+    await http.post(path, collabPayload(row, extra))
+    ElMessage.success(okText)
     await load()
+    return true
   } catch (e) {
-    ElMessage.error('确认失败')
+    ElMessage.error(e.message || '操作失败')
+    return false
+  }
+}
+
+async function ackEvent(row) {
+  await runCollab('/api/v1/alerts/ack', row, {}, '已认领')
+}
+
+async function assignEvent(row) {
+  let value
+  try {
+    const res = await ElMessageBox.prompt('指派给（填写用户名）', '指派告警', {
+      inputPlaceholder: '如 ops1',
+      inputValidator: (v) => (v && v.trim() ? true : '请填写用户名'),
+    })
+    value = res.value
+  } catch {
+    return
+  }
+  await runCollab('/api/v1/alerts/ack', row, { assignee: value.trim() }, '已指派给 ' + value.trim())
+}
+
+async function closeEvent(row) {
+  let reason
+  try {
+    const res = await ElMessageBox.prompt('关闭原因（便于日后回溯）', '关闭告警', {
+      inputPlaceholder: '如 误报 / 已扩容 / 已重启服务',
+    })
+    reason = res.value || ''
+  } catch {
+    return
+  }
+  await runCollab('/api/v1/alerts/close', row, { reason }, '已关闭')
+}
+
+async function reopenEvent(row) {
+  await runCollab('/api/v1/alerts/reopen', row, {}, '已重新打开，回到待处理')
+}
+
+async function commentEvent(row) {
+  const text = commentText.value.trim()
+  if (!text) {
+    ElMessage.warning('请输入评论内容')
+    return
+  }
+  commenting.value = true
+  try {
+    const ok = await runCollab('/api/v1/alerts/comment', row, { comment: text }, '已提交')
+    if (ok) commentText.value = ''
+  } finally {
+    commenting.value = false
   }
 }
 async function batchAck() {
@@ -1164,6 +1300,38 @@ onUnmounted(() => {
 .ev-chart {
   width: 100%;
   height: 240px;
+}
+.collab-timeline {
+  max-height: 220px;
+  overflow-y: auto;
+  border-left: 2px solid var(--el-border-color, #30363d);
+  padding-left: 10px;
+  margin-bottom: 10px;
+}
+.collab-item {
+  margin-bottom: 10px;
+}
+.collab-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.collab-user {
+  font-size: 13px;
+  font-weight: 600;
+}
+.collab-time {
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.collab-text {
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.collab-input {
+  margin-bottom: 10px;
 }
 .ev-actions {
   margin-top: 16px;

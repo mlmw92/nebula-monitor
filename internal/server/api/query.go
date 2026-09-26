@@ -175,10 +175,15 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/middleware/nginx/access/summary", a.permit(a.handleNginxAccessSummary, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/nginx/access/geo", a.permit(a.handleNginxAccessGeo, "middleware:read"))
 
-	// 告警事件：读 alerts:read、确认 alerts:write（列表与统计按节点资源范围过滤）
+	// 告警事件：读 alerts:read、处置 alerts:write（列表与统计按节点资源范围过滤）
+	// 协作处置（D4）：认领 / 关闭 / 重新打开 / 评论，均为 alerts:write；
+	// 节点资源范围在各 handler 内经 decodeAlertAction 统一校验。
 	mux.HandleFunc("GET /api/v1/alerts", a.permitNode(a.handleAlerts, "alerts:read"))
 	mux.HandleFunc("GET /api/v1/alerts/acks", a.permit(a.handleAlertAcks, "alerts:read"))
 	mux.HandleFunc("POST /api/v1/alerts/ack", a.permit(a.handleAlertAck, "alerts:write"))
+	mux.HandleFunc("POST /api/v1/alerts/close", a.permit(a.handleAlertClose, "alerts:write"))
+	mux.HandleFunc("POST /api/v1/alerts/reopen", a.permit(a.handleAlertReopen, "alerts:write"))
+	mux.HandleFunc("POST /api/v1/alerts/comment", a.permit(a.handleAlertComment, "alerts:write"))
 	// 告警规则：读 alerts:read、写 alerts:write、临时静默 silence:write
 	mux.HandleFunc("GET /api/v1/rules", a.permit(a.handleRulesList, "alerts:read"))
 	mux.HandleFunc("GET /api/v1/rules/export", a.permit(a.handleRulesExport, "alerts:read"))
@@ -1033,8 +1038,9 @@ func (a *API) unacknowledgedAlerts(events []model.AlertEvent) []model.AlertEvent
 	}
 	out := make([]model.AlertEvent, 0, len(events))
 	for _, event := range events {
-		// 确认接口当前使用 RuleName 作为键，保持与既有确认记录兼容。
-		if !a.acks.IsMarked(event.RuleName, event.Node, event.Instance, event.StartsAt) {
+		// 处置接口使用 RuleName 作为键，保持与既有确认记录兼容。
+		// 已认领/已关闭的告警从待处理列表移除；被「重新打开」的会重新出现。
+		if !a.acks.IsHandled(event.RuleName, event.Node, event.Instance, event.StartsAt) {
 			out = append(out, event)
 		}
 	}
@@ -1125,31 +1131,7 @@ func (a *API) handleAlertAcks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"acks": acks})
 }
 
-// handleAlertAck 确认（认领）一条告警。
-func (a *API) handleAlertAck(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Rule     string `json:"rule"`
-		Host     string `json:"host"`
-		Instance string `json:"instance"`
-		StartsAt int64  `json:"startsAt"`
-		User     string `json:"user"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Rule == "" || body.Host == "" || body.StartsAt <= 0 {
-		http.Error(w, "rule, host and startsAt required", http.StatusBadRequest)
-		return
-	}
-	// 资源范围：不允许对范围外节点的告警进行确认。
-	if p := Principal(r); !a.nodeInScope(p, body.Host) {
-		a.denyScope(w, r, "alerts:write", a.nodeGroup(body.Host))
-		return
-	}
-	user := AuthenticatedUser(r)
-	if user == "" {
-		user = "anonymous"
-	}
-	a.acks.Mark(body.Rule, body.Host, body.Instance, body.StartsAt, user)
-	writeJSON(w, 200, map[string]string{"status": "ok"})
-}
+// handleAlertAck 等协作处置接口见 alert_collab.go。
 
 // handleRuleToggle 切换规则启用/停用状态。
 func (a *API) handleRuleToggle(w http.ResponseWriter, r *http.Request) {

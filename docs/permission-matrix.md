@@ -1,7 +1,7 @@
 # 权限矩阵设计（路由 → 权限点 → 资源范围）
 
 > 本文为 B1 改造的设计件，用于评审后进入实施。
-> 事实基线：VERSION 1.24.0；路由清点自 `internal/server/api/query.go` 的 `RegisterRoutes`（122 条）加 `ws.go`（1）、`spa.go`（1）、`cmd/server/main.go`（1）、`internal/server/agentdist/agentdist.go`（2），合计 **127 条**（批次 E 新增 `GET /api/v1/audit/export` 前为 126 条）；F3 新增 3 条（`GET /healthz`、`GET /readyz` 公开，`GET /api/v1/self/status` 需 `dashboard:read`），当前共 **130 条**。
+> 事实基线：VERSION 1.24.0；路由清点自 `internal/server/api/query.go` 的 `RegisterRoutes`（122 条）加 `ws.go`（1）、`spa.go`（1）、`cmd/server/main.go`（1）、`internal/server/agentdist/agentdist.go`（2），合计 **127 条**（批次 E 新增 `GET /api/v1/audit/export` 前为 126 条）；F3 新增 3 条（`GET /healthz`、`GET /readyz` 公开，`GET /api/v1/self/status` 需 `dashboard:read`）；D4 新增 3 条（`POST /api/v1/alerts/close|reopen|comment`，均 `alerts:write`），当前共 **133 条**。
 
 ## 实施状态
 
@@ -159,6 +159,9 @@
 | GET | `/api/v1/alerts/stats` | `alerts:read` | 分组 |
 | GET | `/api/v1/alerts/acks` | `alerts:read` | 分组 |
 | POST | `/api/v1/alerts/ack` | `alerts:write` | 分组 |
+| POST | `/api/v1/alerts/close` | `alerts:write`（D4） | 分组 |
+| POST | `/api/v1/alerts/reopen` | `alerts:write`（D4） | 分组 |
+| POST | `/api/v1/alerts/comment` | `alerts:write`（D4） | 分组 |
 | POST | `/api/v1/alerts/test` | `alerts:write` | — |
 | GET | `/api/v1/rules` | `alerts:read` | — |
 | POST | `/api/v1/rules` | `alerts:write` | — |
@@ -362,11 +365,11 @@
 
 | 项 | 数量 |
 |---|---|
-| 路由总数 | **130**（批次 E 新增 `GET /api/v1/audit/export`；F3 新增 `/healthz`、`/readyz`、`GET /api/v1/self/status`） |
+| 路由总数 | **133**（批次 E 新增 `GET /api/v1/audit/export`；F3 新增 `/healthz`、`/readyz`、`GET /api/v1/self/status`；D4 新增 3 条告警处置接口） |
 | 公开接口 | 9（`login`、`report`、`agent/check`、`/healthz`、`/readyz`、`install/*`、`bin/*`、`/`、`GET ui/settings`） |
 | 无需权限点（登录即可 / 自身资源） | 6（`version`、`auth-info`、`logout`、`auth/me` ×2、`change-password`） |
 | 已生效（现状 `authz`） | 14（`users:manage` 8 + `roles:manage` 3 + `roles:read` 3） |
-| **需校验项** | **101** = 130 − 9 − 6 − 14（其中 B1 实施覆盖 100 条，F3 新增 1 条 `dashboard:read`） |
+| **需校验项** | **104** = 133 − 9 − 6 − 14（B1 实施覆盖 100 条；F3 新增 1 条 `dashboard:read`；D4 新增 3 条 `alerts:write`） |
 | 新增权限点 | 2（`dashboard:write`、`system:config`） |
 | 高风险权限点 | 8（现状） |
 
