@@ -112,6 +112,7 @@ type API struct {
 	pipeline       *alert.PipelineStore   // 告警事件管道：relabel/enrich/消息模板（可空）
 	selfmon        *selfmon.Monitor       // 自监控收集器（可空；不注入时探针仍可用，只是没有进程指标）
 	retention      *retention.Manager     // 数据保留策略（可空；不注入时接口返回默认策略）
+	templates      TemplatesProvider      // 采集项模板（可空；未注入时模板接口返回空集合）
 	startedAt      time.Time              // 进程启动时间，供 /healthz、/readyz 报告运行时长
 }
 
@@ -129,6 +130,9 @@ func (a *API) SetAnalyzer(analyzer *analysis.Analyzer) {
 
 // SetPipelineStore 注入告警事件管道存储（可选；不注入时相关接口返回空配置）。
 func (a *API) SetPipelineStore(p *alert.PipelineStore) { a.pipeline = p }
+
+// SetTemplateStore 注入采集项模板存储（C1 阶段二；未注入时模板接口返回空集合）。
+func (a *API) SetTemplateStore(p TemplatesProvider) { a.templates = p }
 
 // New 创建 API。
 func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string, sec *security.Store, defenseStore *security.DefenseStore, auditStore *audit.Store, authStore *auth.Store) *API {
@@ -174,6 +178,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/middleware/mongodb/instances", a.permit(a.handleMongoDBInstances, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/fastdfs/instances", a.permit(a.handleFastDFSInstances, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/overview", a.permit(a.handleMiddlewareOverview, "middleware:read"))
+	// 采集项模板（C1 阶段二）：读 middleware:read，写 middleware:write。
+	// templates 是字面量路径段，与既有 /middleware/{type}/instances 一类参数段不冲突（字面量优先）。
+	mux.HandleFunc("GET /api/v1/middleware/templates", a.permit(a.handleTemplatesList, "middleware:read"))
+	mux.HandleFunc("POST /api/v1/middleware/templates", a.permit(a.handleTemplateCreate, "middleware:write"))
+	mux.HandleFunc("POST /api/v1/middleware/templates/validate", a.permit(a.handleTemplateValidate, "middleware:write"))
+	mux.HandleFunc("PUT /api/v1/middleware/templates/{id}", a.permit(a.handleTemplateUpdate, "middleware:write"))
+	mux.HandleFunc("DELETE /api/v1/middleware/templates/{id}", a.permit(a.handleTemplateDelete, "middleware:write"))
 	mux.HandleFunc("GET /api/v1/middleware/nginx/access/summary", a.permit(a.handleNginxAccessSummary, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/nginx/access/geo", a.permit(a.handleNginxAccessGeo, "middleware:read"))
 

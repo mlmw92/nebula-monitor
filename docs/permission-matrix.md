@@ -139,8 +139,16 @@
 | GET | `/api/v1/middleware/fastdfs/instances` | `middleware:read` | 分组 |
 | GET | `/api/v1/middleware/nginx/access/summary` | `middleware:read` | 分组 |
 | GET | `/api/v1/middleware/nginx/access/geo` | `middleware:read` | 分组 |
+| GET | `/api/v1/middleware/templates` | `middleware:read` | 见下方说明 |
+| POST | `/api/v1/middleware/templates` | `middleware:write` | 见下方说明 |
+| POST | `/api/v1/middleware/templates/validate` | `middleware:write` | 见下方说明 |
+| PUT | `/api/v1/middleware/templates/{id}` | `middleware:write` | 见下方说明 |
+| DELETE | `/api/v1/middleware/templates/{id}` | `middleware:write` | 见下方说明 |
 
-> `middleware:write` 当前**无对应路由**（中间件采集配置在 `agent.yaml` 侧维护），保留为预留权限点。
+> **采集项模板（C1 阶段二）**：读写权限点刻意分离——读只是看配置，写会改变各 Agent 去拉取哪些地址
+> （等于让被监控机主动出站访问指定 URL），属高危操作，故归 `middleware:write`。
+> 至此 `middleware:write` 不再是预留权限点（此前无对应路由，中间件采集配置在 `agent.yaml` 侧维护）。
+> 模板的**下发范围**（全局 / 按节点分组）在阶段二子批次「下发」中落地，届时本节补充范围列。
 
 ### 4.5 智能分析（2 条）
 

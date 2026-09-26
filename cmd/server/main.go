@@ -34,6 +34,7 @@ import (
 	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/selfmon"
 	"github.com/nebula/monitor/internal/server/storage"
+	"github.com/nebula/monitor/internal/server/templates"
 	"github.com/nebula/monitor/internal/server/uicfg"
 	"github.com/nebula/monitor/internal/server/upgrade"
 	"github.com/nebula/monitor/internal/version"
@@ -171,6 +172,9 @@ func main() {
 	defenseStore := security.NewDefenseStore(filepath.Join(filepath.Dir(cfg.SecurityStoreFile), "defense_tasks.json"))
 	recv := receiver.New(store, nodeMgr, cfg.AgentAuth, ngxWin, securityStore, engine, defenseStore)
 
+	// 采集项模板（C1 阶段二）：Web 端统一 CRUD，并作为下发给 Agent 的数据源
+	templateStore := templates.NewStore(cfg.TemplatesFile)
+
 	// 拨测模块
 	dialtestStore := dialtest.NewStore(cfg.DialtestFile)
 	dialtestSched := dialtest.NewScheduler(dialtestStore, store)
@@ -261,6 +265,7 @@ func main() {
 	rest.SetPipelineStore(pipelineStore)
 	rest.SetSelfMon(mon)
 	rest.SetRetention(retentionMgr)
+	rest.SetTemplateStore(templateStore)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)
