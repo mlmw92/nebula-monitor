@@ -94,9 +94,11 @@ collectors:
 logSources:
   - id: applog
     paths: ["$WORK/app.log"]
+    # 正则用 YAML **单引号**：双引号里 \b 会被解析成退格字符，
+    # 正则就变成 (?i)<退格>error<退格>，什么都匹配不到（这个坑在实机验证时踩到过）
     patterns:
-      - { name: err, regex: "(?i)\\berror\\b" }
-      - { name: slow, regex: "(?i)slow request" }
+      - { name: err, regex: '(?i)\berror\b' }
+      - { name: slow, regex: '(?i)slow request' }
 YAML
 
 "$WORK/agent" -config "$WORK/agent.yaml" > "$WORK/agent.log" 2>&1 &
@@ -174,8 +176,10 @@ check(res.get("truncated") is False, "未达上限时 truncated=false")
 # —— 命中上限与游标翻页（不重不漏）——
 p1 = get(f"/api/v1/logs?from={frm}&to={now}&limit=2")
 check(len(p1.get("lines", [])) == 2 and p1.get("truncated") is True, "命中上限触发 truncated=true")
-check(bool(p1.get("cursor")), "截断时给出续读游标")
-p2 = get(f"/api/v1/logs?from={frm}&to={now}&limit=2&cursor={p1['cursor']}")
+cur = p1.get("cursor", "")
+check(bool(cur), "截断时给出续读游标")
+# 游标缺失时不要让整个脚本崩掉——后面的断言也得跑完，才能一次看清全貌
+p2 = get(f"/api/v1/logs?from={frm}&to={now}&limit=2&cursor={cur}") if cur else {"lines": []}
 texts = [l["text"] for l in p1["lines"]] + [l["text"] for l in p2.get("lines", [])]
 check(len(texts) == len(set(texts)), "两页之间没有重复行")
 check(len(texts) == 3, f"两页合计覆盖全部 3 条（实际 {len(texts)}）")
