@@ -17,22 +17,23 @@ const (
 	// ModeCollect 普通采集模式（默认，现状不变）。
 	ModeCollect = "collect"
 	// ModeEdge 网闸区 A 边界代理：本地监听汇聚采集 Agent 上报，TLS 隧道转发至 Hub。
-	ModeEdge    = "edge"
+	ModeEdge = "edge"
 	// ModeHub 网闸区 B 边界代理：TLS 监听接收 Edge 隧道，还原请求转发至真实 Server。
-	ModeHub     = "hub"
+	ModeHub = "hub"
 )
 
 // Config 是 Agent 运行配置。
 type Config struct {
-	Mode              string                    `yaml:"mode"`              // 运行模式：collect(默认) | edge | hub
-	ServerURL         string                    `yaml:"serverURL"`         // Server 接收地址，如 http://10.0.0.1:8080
-	Node              string                    `yaml:"node"`              // 节点名（默认自动取 hostname）
-	Group             string                    `yaml:"group"`             // 默认分组
-	Secret            string                    `yaml:"secret"`            // 接入授权密钥（与 Server agentAuth.secret 一致）
-	Labels            map[string]string         `yaml:"labels"`            // 自定义标签
-	Interval          int                       `yaml:"interval"`          // 采集间隔（秒）
-	BatchSize         int                       `yaml:"batchSize"`         // 单批最大指标数
-	Collectors        CollectorToggle           `yaml:"collectors"`        // 采集项开关
+	Mode              string                         `yaml:"mode"`              // 运行模式：collect(默认) | edge | hub
+	ServerURL         string                         `yaml:"serverURL"`         // Server 接收地址，如 http://10.0.0.1:8080
+	Node              string                         `yaml:"node"`              // 节点名（默认自动取 hostname）
+	Group             string                         `yaml:"group"`             // 默认分组
+	Secret            string                         `yaml:"secret"`            // 接入授权密钥（与 Server agentAuth.secret 一致）
+	Labels            map[string]string              `yaml:"labels"`            // 自定义标签
+	Interval          int                            `yaml:"interval"`          // 采集间隔（秒）
+	BatchSize         int                            `yaml:"batchSize"`         // 单批最大指标数
+	CollectTimeout    int                            `yaml:"collectTimeout"`    // 单个采集任务超时（秒），默认 8；0 表示不限制
+	Collectors        CollectorToggle                `yaml:"collectors"`        // 采集项开关
 	RedisInstances    []model.RedisInstanceConfig    `yaml:"redisInstances"`    // Redis 实例连接配置
 	MySQLInstances    []model.MySQLInstanceConfig    `yaml:"mysqlInstances"`    // MySQL 实例连接配置
 	PostgresInstances []model.PostgresInstanceConfig `yaml:"postgresInstances"` // PostgreSQL 实例连接配置
@@ -41,12 +42,12 @@ type Config struct {
 	DockerInstances   []model.DockerInstanceConfig   `yaml:"dockerInstances"`   // Docker 连接配置
 	RocketMQInstances []model.RocketMQInstanceConfig `yaml:"rocketmqInstances"` // RocketMQ 实例连接配置
 	K8sInstances      []model.K8sInstanceConfig      `yaml:"k8sInstances"`      // Kubernetes 集群连接配置
-	MongoDBInstances  []model.MongoDBInstanceConfig  `yaml:"mongoInstances"`   // MongoDB 实例连接配置
-	FastDFSInstances  []model.FastDFSInstanceConfig  `yaml:"fastdfsInstances"` // FastDFS 实例连接配置
-	PortChecks        []string                  `yaml:"portChecks"`         // TCP 端口存活检测列表，如 ["80","443","3306"]
-	Proxy             ProxyConfig               `yaml:"proxy"`              // 代理模式配置，mode=edge/hub 时生效
-	Security          SecurityConfig            `yaml:"security"`           // 安全采集配置（collectors.security 开启时生效）
-	CryptoKey         string                    `yaml:"cryptoKey"`          // 中间件密码 AES-GCM 主密钥（留空用内置默认密钥；配置密文以 enc: 前缀标识）
+	MongoDBInstances  []model.MongoDBInstanceConfig  `yaml:"mongoInstances"`    // MongoDB 实例连接配置
+	FastDFSInstances  []model.FastDFSInstanceConfig  `yaml:"fastdfsInstances"`  // FastDFS 实例连接配置
+	PortChecks        []string                       `yaml:"portChecks"`        // TCP 端口存活检测列表，如 ["80","443","3306"]
+	Proxy             ProxyConfig                    `yaml:"proxy"`             // 代理模式配置，mode=edge/hub 时生效
+	Security          SecurityConfig                 `yaml:"security"`          // 安全采集配置（collectors.security 开启时生效）
+	CryptoKey         string                         `yaml:"cryptoKey"`         // 中间件密码 AES-GCM 主密钥（留空用内置默认密钥；配置密文以 enc: 前缀标识）
 }
 
 // SecurityConfig 是安全采集（SSH 审计/FIM/基线/异常进程/sudo）的可配置项。
@@ -123,6 +124,9 @@ func Default() *Config {
 		Group:     "default",
 		Interval:  15,
 		BatchSize: 200,
+		// 单个采集任务的超时（秒）。默认 8s（小于默认采集间隔 15s）；
+		// 设为 0 表示不限制，任务仅受父 context 约束。
+		CollectTimeout: 8,
 		Collectors: CollectorToggle{
 			CPU: true, Memory: true, Disk: true, Network: true, Process: true, Load: true,
 			Security: true,
@@ -170,6 +174,10 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 200
+	}
+	// 采集任务超时：0 表示不限制；负值统一归零（等价于不限制）
+	if cfg.CollectTimeout < 0 {
+		cfg.CollectTimeout = 0
 	}
 	// 规范化 Mode：空值/未知值统一回退为 collect，确保向后兼容
 	switch cfg.Mode {
