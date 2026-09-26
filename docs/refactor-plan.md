@@ -379,6 +379,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | 2026-09-26 | **F2 完成**：README 统一「十类」、路线图移除已实现的 RBAC 前端页并新增「权限管理界面」小节、API 章节按代码重写（44 行 → 127 行，修正 `docker/containers` 错路径，双向差集为空）；`vite.config.js` / `release.sh` 三处 embed 表述修正；Makefile `build-web` 改为调用 `build/build-web.sh` |
 | 2026-09-26 | **B1 完成**：产出 `docs/permission-matrix.md`（126 条路由逐条映射、7 条兼容策略、5 批实施顺序、7 项开放问题）；校正现状 authz 覆盖为 **14 条**（原记 16）；发现 `/ws` 存在 topic 级授权与范围校验缺口。**批次一全部完成** |
 | 2026-09-26 | **批次二启动：B1 批次 A（基础设施）完成**：新增 `dashboard:write` / `system:config` 权限点并补齐内置角色；新增 `api.API.permit(next, perm)`（未启用认证放行 / 未登录 401 / 缺权限 403 + 授权拒绝审计）；移除 `globalAuthStore` 包级单例，`AuthMiddleware` 改为显式传参。新增 11 个单测，全量测试绿 |
+| 2026-09-26 | **B1 批次 B（主机与指标 + `/ws`）完成**：23 条路由挂载授权（`permit` / `permitNode`），节点列表、全节点指标、分组列表按资源范围过滤，批量升级整体校验，**`/ws` 补齐 topic 级授权与节点范围校验**（修复设计件 8.2 越权缺口）；告警管理员补 `nodes:read`/`groups:read`；前端 3 条路由与 2 个菜单项补 `perm`。新增 14 个测试，全量测试与前端构建均绿 |
 
 ---
 

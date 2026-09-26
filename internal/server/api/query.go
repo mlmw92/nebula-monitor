@@ -125,27 +125,30 @@ func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts A
 
 // RegisterRoutes 注册所有路由到 mux。
 func (a *API) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/nodes", a.handleNodes)
-	mux.HandleFunc("GET /api/v1/nodes/latest", a.handleNodesLatest)
-	mux.HandleFunc("GET /api/v1/nodes/{name}", a.handleNode)
-	mux.HandleFunc("DELETE /api/v1/nodes/{name}", a.handleNodeDelete)
-	mux.HandleFunc("PUT /api/v1/nodes/{name}/group", a.handleNodeGroup)
-	mux.HandleFunc("PUT /api/v1/nodes/{name}/display-name", a.handleNodeDisplayName)
-	mux.HandleFunc("POST /api/v1/nodes/{name}/upgrade", a.handleNodeUpgrade)
-	mux.HandleFunc("POST /api/v1/nodes/upgrade", a.handleNodesUpgrade)
+	// 主机与节点：读取 nodes:read，写操作 nodes:write，Agent 升级 agent:upgrade；均含资源范围校验
+	mux.HandleFunc("GET /api/v1/nodes", a.permit(a.handleNodes, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/nodes/latest", a.permit(a.handleNodesLatest, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/nodes/{name}", a.permitNode(a.handleNode, "nodes:read"))
+	mux.HandleFunc("DELETE /api/v1/nodes/{name}", a.permitNode(a.handleNodeDelete, "nodes:write"))
+	mux.HandleFunc("PUT /api/v1/nodes/{name}/group", a.permitNode(a.handleNodeGroup, "nodes:write"))
+	mux.HandleFunc("PUT /api/v1/nodes/{name}/display-name", a.permitNode(a.handleNodeDisplayName, "nodes:write"))
+	mux.HandleFunc("POST /api/v1/nodes/{name}/upgrade", a.permitNode(a.handleNodeUpgrade, "agent:upgrade"))
+	mux.HandleFunc("POST /api/v1/nodes/upgrade", a.permit(a.handleNodesUpgrade, "agent:upgrade"))
 
-	mux.HandleFunc("GET /api/v1/groups", a.handleGroups)
-	mux.HandleFunc("POST /api/v1/groups", a.handleGroupCreate)
-	mux.HandleFunc("DELETE /api/v1/groups/{name}", a.handleGroupDelete)
+	// 节点分组：groups:read / groups:write
+	mux.HandleFunc("GET /api/v1/groups", a.permit(a.handleGroups, "groups:read"))
+	mux.HandleFunc("POST /api/v1/groups", a.permit(a.handleGroupCreate, "groups:write"))
+	mux.HandleFunc("DELETE /api/v1/groups/{name}", a.permit(a.handleGroupDelete, "groups:write"))
 
-	mux.HandleFunc("GET /api/v1/query/range", a.handleQueryRange)
-	mux.HandleFunc("GET /api/v1/query/latest", a.handleQueryLatest)
-	mux.HandleFunc("GET /api/v1/analysis/summary", a.handleAnalysisSummary)
-	mux.HandleFunc("GET /api/v1/analysis/hosts/{name}", a.handleAnalysisHost)
-	mux.HandleFunc("GET /api/v1/processes", a.handleProcesses)
-	mux.HandleFunc("GET /api/v1/query/listeners", a.handleListeners)
-	mux.HandleFunc("GET /api/v1/query/firewall", a.handleFirewall)
-	mux.HandleFunc("GET /api/v1/query/firewall/status", a.handleFirewallStatus)
+	// 指标查询与智能分析：nodes:read + 资源范围（单节点接口由 permitNode 校验归属）
+	mux.HandleFunc("GET /api/v1/query/range", a.permitNode(a.handleQueryRange, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/query/latest", a.permitNode(a.handleQueryLatest, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/analysis/summary", a.permit(a.handleAnalysisSummary, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/analysis/hosts/{name}", a.permitNode(a.handleAnalysisHost, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/processes", a.permitNode(a.handleProcesses, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/query/listeners", a.permitNode(a.handleListeners, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/query/firewall", a.permitNode(a.handleFirewall, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/query/firewall/status", a.permitNode(a.handleFirewallStatus, "nodes:read"))
 
 	mux.HandleFunc("GET /api/v1/middleware/redis/instances", a.handleRedisInstances)
 	mux.HandleFunc("GET /api/v1/middleware/mysql/instances", a.handleMySQLInstances)
@@ -278,9 +281,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/proxy/status", a.handleProxyStatus)
 
 	// 可观测性增强：指标目录（自动发现）+ 历史数据导出
-	mux.HandleFunc("GET /api/v1/metrics/catalog", a.handleMetricsCatalog)
-	mux.HandleFunc("GET /api/v1/metrics/active", a.handleMetricsActive)
-	mux.HandleFunc("GET /api/v1/metrics/export", a.handleMetricsExport)
+	mux.HandleFunc("GET /api/v1/metrics/catalog", a.permit(a.handleMetricsCatalog, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/metrics/active", a.permitNode(a.handleMetricsActive, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/metrics/export", a.permitNode(a.handleMetricsExport, "metrics:export"))
 
 	// 可观测性增强：自定义仪表盘
 	mux.HandleFunc("GET /api/v1/dashboards", a.handleDashboardsList)
@@ -362,7 +365,39 @@ func (a *API) handleVersion(w http.ResponseWriter, r *http.Request) {
 // ---- 节点与分组 ----
 
 func (a *API) handleNodes(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]interface{}{"nodes": a.nodeMgr.ListHostNodes()})
+	writeJSON(w, 200, map[string]interface{}{"nodes": a.visibleNodes(a.nodeMgr.ListHostNodes(), Principal(r))})
+}
+
+// visibleNodes 按资源范围过滤节点列表；未启用认证（Principal 为 nil）或全局范围时原样返回。
+func (a *API) visibleNodes(nodes []model.Node, p *auth.Principal) []model.Node {
+	if p == nil {
+		return nodes
+	}
+	return auth.FilterByGroup(p, nodes, func(n model.Node) string { return n.Group })
+}
+
+// deniedGroups 返回 names 中节点所属、但当前用户无权访问的分组（已去重）；
+// 未启用认证或全局范围时返回 nil。用于批量操作的「先整体校验、再执行」。
+func (a *API) deniedGroups(r *http.Request, names []string) []string {
+	p := Principal(r)
+	if p == nil || p.Scope.IsGlobal() || a.nodeMgr == nil {
+		return nil
+	}
+	groups := make([]string, 0, len(names))
+	for _, name := range names {
+		if nd, ok := a.nodeMgr.GetNode(name); ok {
+			groups = append(groups, nd.Group)
+		}
+	}
+	seen := map[string]bool{}
+	uniq := make([]string, 0, len(groups))
+	for _, g := range auth.CheckBatchGroups(p, groups) {
+		if !seen[g] {
+			seen[g] = true
+			uniq = append(uniq, g)
+		}
+	}
+	return uniq
 }
 
 // handleNodesLatest 一次性聚合所有节点的关键指标，供主机列表展示。
@@ -481,6 +516,15 @@ func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 资源范围：受限用户只应看到范围内节点的指标。
+	if p := Principal(r); p != nil && !p.Scope.IsGlobal() && a.nodeMgr != nil {
+		for name := range out {
+			if nd, ok := a.nodeMgr.GetNode(name); ok && !p.CanAccessGroup(nd.Group) {
+				delete(out, name)
+			}
+		}
+	}
+
 	writeJSON(w, 200, map[string]interface{}{"metrics": out})
 }
 
@@ -536,6 +580,14 @@ func (a *API) handleNodesUpgrade(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Names) == 0 {
 		http.Error(w, "names is empty", http.StatusBadRequest)
+		return
+	}
+	// 资源范围：请求中若包含范围外节点，整体拒绝并回报涉及的分组。
+	if denied := a.deniedGroups(r, req.Names); len(denied) > 0 {
+		writeJSON(w, http.StatusForbidden, map[string]interface{}{
+			"error":  "部分节点不在您的资源范围内",
+			"groups": denied,
+		})
 		return
 	}
 	details := make([]map[string]string, 0, len(req.Names))
@@ -618,7 +670,11 @@ func (a *API) handleNodeDisplayName(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleGroups(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]interface{}{"groups": a.nodeMgr.ListGroups()})
+	groups := a.nodeMgr.ListGroups()
+	if p := Principal(r); p != nil {
+		groups = auth.FilterByGroup(p, groups, func(g model.Group) string { return g.Name })
+	}
+	writeJSON(w, 200, map[string]interface{}{"groups": groups})
 }
 
 func (a *API) handleGroupCreate(w http.ResponseWriter, r *http.Request) {

@@ -213,28 +213,85 @@ func AuthMiddleware(next http.Handler, authCfg config.AuthConfig, authStore *aut
 	})
 }
 
-// permit 是业务接口的权限包装器：校验登录用户是否拥有 perm 权限点。
+// checkPerm 校验权限点，返回 false 表示已写出响应（调用方应直接返回）。
+//
+// 语义要点：authStore 仅在 auth.enabled=true 时被注入（见 cmd/server/main.go），
+// 因此 a.authStore == nil 即表示当前未启用登录认证——此时业务接口一律放行，
+// 与开启认证前的行为保持一致（等效超级管理员），避免升级后锁死既有部署。
+func (a *API) checkPerm(w http.ResponseWriter, r *http.Request, perm string) bool {
+	if a.authStore == nil {
+		return true
+	}
+	p := Principal(r)
+	if p == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录或会话已失效"})
+		return false
+	}
+	if !p.HasPermission(perm) {
+		RecordPermissionDenied(a.audit, r, p.Username, perm)
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权限执行该操作", "permission": perm})
+		return false
+	}
+	return true
+}
+
+// permit 是业务接口的权限包装器：只校验权限点，不做资源范围判断。
 //
 // 与 authz 的差别在于「未启用登录认证」时的语义：
 //   - authz（权限管理接口）：未启用多用户存储时返回 503——无认证即无权限管理；
-//   - permit（业务接口）：未启用登录认证时直接放行——与开启认证前的行为一致（等效超级管理员）。
-//
-// authStore 仅在 auth.enabled=true 时被注入（见 cmd/server/main.go），
-// 因此 a.authStore == nil 即表示当前未启用登录认证。
+//   - permit（业务接口）：未启用登录认证时直接放行——见 checkPerm 的说明。
 func (a *API) permit(next http.HandlerFunc, perm string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if a.authStore == nil {
-			next(w, r)
+		if !a.checkPerm(w, r, perm) {
 			return
 		}
-		p := Principal(r)
-		if p == nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录或会话已失效"})
+		next(w, r)
+	}
+}
+
+// denyScope 写出资源范围拒绝响应（含审计），始终返回 false 便于与校验函数串用。
+func (a *API) denyScope(w http.ResponseWriter, r *http.Request, perm, group string) bool {
+	if p := Principal(r); p != nil {
+		RecordPermissionDenied(a.audit, r, p.Username, perm)
+	}
+	writeJSON(w, http.StatusForbidden, map[string]string{
+		"error":      "无权访问该节点分组",
+		"permission": perm,
+		"group":      group,
+	})
+	return false
+}
+
+// checkNodeScope 校验单个节点是否落在当前用户的资源范围内；返回 false 表示已写出响应。
+// 节点不存在时不在此处拦截（交由 handler 返回 404），避免用 403 泄露资源存在性。
+func (a *API) checkNodeScope(w http.ResponseWriter, r *http.Request, perm, nodeName string) bool {
+	p := Principal(r)
+	if p == nil || p.Scope.IsGlobal() || nodeName == "" || a.nodeMgr == nil {
+		return true
+	}
+	nd, ok := a.nodeMgr.GetNode(nodeName)
+	if !ok {
+		return true
+	}
+	if p.CanAccessGroup(nd.Group) {
+		return true
+	}
+	return a.denyScope(w, r, perm, nd.Group)
+}
+
+// permitNode 在 permit 之上追加节点资源范围校验。
+// 节点名优先取路径参数 {name}，其次取查询参数 node（如 /query/range?node=）；
+// 两者都没有时视为列表类接口，范围过滤由 handler 用 auth.FilterByGroup 完成。
+func (a *API) permitNode(next http.HandlerFunc, perm string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !a.checkPerm(w, r, perm) {
 			return
 		}
-		if !p.HasPermission(perm) {
-			RecordPermissionDenied(a.audit, r, p.Username, perm)
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权限执行该操作", "permission": perm})
+		name := param(r, "name")
+		if name == "" {
+			name = r.URL.Query().Get("node")
+		}
+		if !a.checkNodeScope(w, r, perm, name) {
 			return
 		}
 		next(w, r)

@@ -8,7 +8,7 @@
 | 批次 | 状态 | 已落地内容 |
 |---|---|---|
 | **A｜基础设施** | ✅ 已完成 | 新增 `dashboard:write`、`system:config` 两个权限点并补齐内置角色；新增 `api.API.permit(next, perm)` 业务接口权限包装器（未启用认证放行 / 未登录 401 / 缺权限 403 + 授权拒绝审计）；去除 `globalAuthStore` 包级单例，`AuthMiddleware` 改为显式接收 `*auth.Store`；11 个单元测试 |
-| B｜主机与指标（含 `/ws`） | ⬜ 待实施 | — |
+| **B｜主机与指标（含 `/ws`）** | ✅ 已完成 | 23 条路由挂载 `permit` / `permitNode`：`nodes/*`（8）、`groups/*`（3）、`query/*`+`processes`+`listeners`+`firewall`（6）、`metrics/*`（3）、`analysis/*`（2，范围过滤本已存在）、`/ws`（1）。列表类按范围过滤（`handleNodes` / `handleNodesLatest` / `handleGroups`），单节点类由 `permitNode` 统一校验（路径 `{name}` 或查询 `node`），批量升级用 `CheckBatchGroups` 整体校验；**`/ws` 补齐 topic 级授权**（`metrics`→`nodes:read`+节点范围、`alerts`→`alerts:read`、未知 topic 拒绝）。告警管理员补齐 `nodes:read`/`groups:read`（告警页面分组筛选与规则目标选择依赖）；前端 `hosts` / `node/:name` / `metrics/explore` 补 `meta.perm` 与菜单 `perm`。14 个新测试 |
 | C｜中间件 | ⬜ 待实施 | — |
 | D｜告警与通知 | ⬜ 待实施 | — |
 | E｜安全、系统与其余 | ⬜ 待实施 | — |
@@ -309,8 +309,9 @@
 原 `internal/server/api/auth.go` 的 `globalAuthStore` / `SetAuthStore` / `authStoreFromContext` 是包级单例，测试之间会互相污染，且与 **A1（Server 高可用）** 议题直接冲突（多实例下 Principal 解析依赖实例内状态）。
 批次 A 已改为 `AuthMiddleware(next, cfg, *auth.Store)` 显式传参（`cmd/server/main.go` 同步调整），包级单例已移除，A1 的实施障碍相应减少。
 
-### 8.2 WebSocket 授权缺口（当前已存在）
-`/ws` 已通过 Cookie 兜底完成**认证**，但**没有 topic 级授权与范围校验**：任何已登录用户都能 `GET /ws?topic=metrics&node=<任意节点>` 订阅任意节点实时指标，绕过节点分组资源范围。批次 B 需补：`topic` 合法性校验 + `nodes:read`/`alerts:read` + 节点归属分组校验。
+### 8.2 WebSocket 授权缺口 —— 已在批次 B 解决
+`/ws` 的**认证**原本已由 Cookie 兜底完成，但缺少 topic 级授权与范围校验：任何已登录用户都能 `GET /ws?topic=metrics&node=<任意节点>` 订阅任意节点实时指标，绕过节点分组资源范围。
+批次 B 已改为由 `API.RegisterWS` 注册、经 `wsAuthorize` 在握手前完成「topic 合法性 + 权限点 + 节点归属分组」三重校验（未知 topic 直接 400，不再存在「登录即可订阅任意数据」的面）。
 
 ### 8.3 同一路由承载「查看」与「导出」
 - `GET /api/v1/audit/events`：带导出参数时语义为导出（`audit:export`，高风险）。

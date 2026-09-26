@@ -256,6 +256,8 @@ func BuiltinRoles() []Role {
 			Permissions: []string{
 				"dashboard:read", "alerts:read", "alerts:write",
 				"notify:read", "notify:write", "silence:read", "silence:write",
+				// 告警页面与规则编辑依赖节点/分组名称（分组筛选器、规则目标选择）
+				"nodes:read", "groups:read",
 				"roles:read",
 			},
 		},

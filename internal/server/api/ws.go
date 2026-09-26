@@ -124,12 +124,48 @@ func (h *Hub) BroadcastAlert(e model.AlertEvent) {
 	}
 }
 
-// RegisterWS 将 WebSocket 端点 /ws 注册到 mux。
+// RegisterWS 注册带授权的 WebSocket 端点 /ws。
 // 查询参数：topic=metrics&node=<name> 推送节点实时指标；topic=alerts 接收告警广播。
-func (h *Hub) RegisterWS(mux *http.ServeMux, store storage.Storage) {
-	mux.HandleFunc("GET /ws", func(w http.ResponseWriter, r *http.Request) {
-		h.handleWS(store, w, r)
-	})
+//
+// 授权在握手前完成（由 API 包装而非 Hub 自身），因为范围校验需要节点与分组信息：
+//   - topic=metrics：需 nodes:read，且 node 必须落在当前用户的资源范围内；
+//   - topic=alerts：需 alerts:read；
+//   - 其它 topic：直接拒绝，避免出现「登录即可订阅任意数据」的越权面。
+func (a *API) RegisterWS(mux *http.ServeMux, store storage.Storage) {
+	mux.HandleFunc("GET /ws", a.wsAuthorize(func(w http.ResponseWriter, r *http.Request) {
+		a.hub.handleWS(store, w, r)
+	}))
+}
+
+// wsAuthorize 校验 WebSocket 订阅授权（topic 级权限点 + 节点资源范围）。
+func (a *API) wsAuthorize(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		topic := r.URL.Query().Get("topic")
+		var perm string
+		switch topic {
+		case "metrics":
+			perm = "nodes:read"
+		case "alerts":
+			perm = "alerts:read"
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "未知的 topic 参数"})
+			return
+		}
+		if !a.checkPerm(w, r, perm) {
+			return
+		}
+		if topic == "metrics" {
+			node := r.URL.Query().Get("node")
+			if node == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "topic=metrics 需要 node 参数"})
+				return
+			}
+			if !a.checkNodeScope(w, r, perm, node) {
+				return
+			}
+		}
+		next(w, r)
+	}
 }
 
 // handleWS 处理 WebSocket 连接。

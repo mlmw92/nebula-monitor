@@ -43,6 +43,29 @@ func TestBuiltinRolesUseValidKeys(t *testing.T) {
 	}
 }
 
+// TestBuiltinRoles_AlertAdminCanReadNodes 告警管理员必须能读取节点与分组：
+// 告警页面（分组筛选器）与规则编辑（目标节点选择）依赖这两个接口。
+func TestBuiltinRoles_AlertAdminCanReadNodes(t *testing.T) {
+	for _, r := range BuiltinRoles() {
+		if r.Name != RoleAlertAdmin {
+			continue
+		}
+		need := map[string]bool{"nodes:read": false, "groups:read": false}
+		for _, p := range r.Permissions {
+			if _, ok := need[p]; ok {
+				need[p] = true
+			}
+		}
+		for k, ok := range need {
+			if !ok {
+				t.Fatalf("告警管理员缺少 %s（告警页面与规则编辑依赖）", k)
+			}
+		}
+		return
+	}
+	t.Fatal("缺少告警管理员角色")
+}
+
 // TestBuiltinRolesCoverAddedKeys 新增权限点必须有内置角色可用：
 // 超级管理员走 allKeys() 自动覆盖；运维管理员需显式补齐，否则新权限无角色可选。
 func TestBuiltinRolesCoverAddedKeys(t *testing.T) {

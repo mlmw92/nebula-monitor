@@ -224,7 +224,8 @@ func main() {
 	recvMux.register(mux)
 	rest.RegisterRoutes(mux)
 	rest.RegisterDashboard(mux)
-	hub.RegisterWS(mux, store)
+	// WebSocket 端点经 API 注册：在握手前完成 topic 级授权与节点资源范围校验。
+	rest.RegisterWS(mux, store)
 
 	// Agent 分发（自带 CDN：安装脚本 + 各架构二进制）
 	agentdist.New(cfg.AgentBinDir, cfg.AgentScriptPath, cfg.AgentAuth).Register(mux)
