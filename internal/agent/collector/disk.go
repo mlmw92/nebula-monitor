@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"strings"
 	"sync"
 
@@ -21,8 +22,17 @@ func NewDiskCollector() *DiskCollector {
 	return &DiskCollector{prevIO: map[string]disk.IOCountersStat{}}
 }
 
-// Collect 返回各挂载点使用率与各设备读写速率（字节/秒）。
+// Collect 返回各挂载点使用率与各设备读写速率（字节/秒）（等价于 CollectCtx(context.Background())）。
 func (c *DiskCollector) Collect() []model.Metric {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 返回各挂载点使用率与各设备读写速率（字节/秒）。
+// gopsutil 磁盘采集为本机系统调用，无 ctx 接口，仅在入口做门控。
+func (c *DiskCollector) CollectCtx(ctx context.Context) []model.Metric {
+	if ctx.Err() != nil {
+		return nil
+	}
 	var out []model.Metric
 	for _, d := range CollectDiskStats() {
 		labels := map[string]string{"mountpoint": d.Mountpoint, "device": d.Device, "fstype": d.Fstype}
@@ -45,16 +55,16 @@ func (c *DiskCollector) Collect() []model.Metric {
 				if !ok {
 					continue
 				}
-			readRate := float64(cur.ReadBytes-prev.ReadBytes) / dt
-			writeRate := float64(cur.WriteBytes-prev.WriteBytes) / dt
-			readIops := float64(cur.ReadCount-prev.ReadCount) / dt
-			writeIops := float64(cur.WriteCount-prev.WriteCount) / dt
-			out = append(out,
-				model.Metric{Name: "disk_read_rate", Value: round2(readRate), Labels: map[string]string{"device": dev}},
-				model.Metric{Name: "disk_write_rate", Value: round2(writeRate), Labels: map[string]string{"device": dev}},
-				model.Metric{Name: "disk_read_iops", Value: round2(readIops), Labels: map[string]string{"device": dev}},
-				model.Metric{Name: "disk_write_iops", Value: round2(writeIops), Labels: map[string]string{"device": dev}},
-			)
+				readRate := float64(cur.ReadBytes-prev.ReadBytes) / dt
+				writeRate := float64(cur.WriteBytes-prev.WriteBytes) / dt
+				readIops := float64(cur.ReadCount-prev.ReadCount) / dt
+				writeIops := float64(cur.WriteCount-prev.WriteCount) / dt
+				out = append(out,
+					model.Metric{Name: "disk_read_rate", Value: round2(readRate), Labels: map[string]string{"device": dev}},
+					model.Metric{Name: "disk_write_rate", Value: round2(writeRate), Labels: map[string]string{"device": dev}},
+					model.Metric{Name: "disk_read_iops", Value: round2(readIops), Labels: map[string]string{"device": dev}},
+					model.Metric{Name: "disk_write_iops", Value: round2(writeIops), Labels: map[string]string{"device": dev}},
+				)
 			}
 		}
 		c.prevIO = ioCounters

@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"sync"
 
 	"github.com/shirou/gopsutil/v4/net"
@@ -21,8 +22,18 @@ func NewNetworkCollector() *NetworkCollector {
 	return &NetworkCollector{prevIO: map[string]net.IOCountersStat{}}
 }
 
-// Collect 返回各网络接口收发速率（字节/秒）、丢包速率，以及系统级 TCP 重传速率。
+// Collect 返回各网络接口收发速率（字节/秒）、丢包速率与系统级 TCP 重传速率
+// （等价于 CollectCtx(context.Background())）。
 func (c *NetworkCollector) Collect() []model.Metric {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 返回各网络接口收发速率（字节/秒）、丢包速率，以及系统级 TCP 重传速率。
+// gopsutil 网络采集为本机系统调用，无 ctx 接口，仅在入口做门控。
+func (c *NetworkCollector) CollectCtx(ctx context.Context) []model.Metric {
+	if ctx.Err() != nil {
+		return nil
+	}
 	counters, err := net.IOCounters(true)
 	if err != nil {
 		return nil

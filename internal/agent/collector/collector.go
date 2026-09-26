@@ -101,9 +101,18 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	return c
 }
 
-// Collect 采集所有启用指标，并填充节点基础信息。
-// 返回的 metrics 已带 node 标签；group 由 Server 在写入时补充。
+// Collect 采集所有启用指标（等价于 CollectCtx(context.Background())）。
 func (c *Collector) Collect() ([]model.Metric, []model.ProcessStat) {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 采集所有启用指标，并填充节点基础信息。
+// 返回的 metrics 已带 node 标签；group 由 Server 在写入时补充。
+//
+// 主机类采集（CPU / 内存 / 负载 / 磁盘 / 网络 / 进程）走 gopsutil 本机系统调用，
+// 无 ctx 接口、耗时本身有上界，因此这里做「入口门控」：ctx 已结束时跳过该阶段，
+// 避免任务超时后仍继续做无意义的本机扫描；端口探测属网络 I/O，完整受 ctx 约束。
+func (c *Collector) CollectCtx(ctx context.Context) ([]model.Metric, []model.ProcessStat) {
 	now := model.NowMillis()
 	var metrics []model.Metric
 	add := func(name string, value float64, labels map[string]string) {
@@ -113,40 +122,41 @@ func (c *Collector) Collect() ([]model.Metric, []model.ProcessStat) {
 		}
 		metrics = append(metrics, m)
 	}
+	aborted := func() bool { return ctx.Err() != nil }
 
-	if c.cfg.CPU {
-		for _, m := range c.cpu.Collect() {
+	if c.cfg.CPU && !aborted() {
+		for _, m := range c.cpu.CollectCtx(ctx) {
 			add(m.Name, m.Value, m.Labels)
 		}
 	}
-	if c.cfg.Memory {
+	if c.cfg.Memory && !aborted() {
 		for _, m := range collectMemory() {
 			add(m.Name, m.Value, m.Labels)
 		}
 	}
-	if c.cfg.Load {
+	if c.cfg.Load && !aborted() {
 		for _, m := range collectLoad() {
 			add(m.Name, m.Value, m.Labels)
 		}
 	}
-	if c.cfg.Disk {
-		for _, m := range c.disk.Collect() {
+	if c.cfg.Disk && !aborted() {
+		for _, m := range c.disk.CollectCtx(ctx) {
 			add(m.Name, m.Value, m.Labels)
 		}
 	}
-	if c.cfg.Network {
-		for _, m := range c.net.Collect() {
+	if c.cfg.Network && !aborted() {
+		for _, m := range c.net.CollectCtx(ctx) {
 			add(m.Name, m.Value, m.Labels)
 		}
 	}
 	if c.cfg.Port && c.port != nil {
-		for _, m := range c.port.Collect() {
+		for _, m := range c.port.CollectCtx(ctx) {
 			add(m.Name, m.Value, m.Labels)
 		}
 	}
 
 	var procs []model.ProcessStat
-	if c.cfg.Process {
+	if c.cfg.Process && !aborted() {
 		var total int
 		procs, total = collectProcessTop()
 		// 进程总数单独上报为时序指标，供大屏「进程总数」等聚合展示使用

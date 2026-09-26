@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"sync"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -22,8 +23,17 @@ func NewCPUCollector() *CPUCollector {
 	return &CPUCollector{}
 }
 
-// Collect 返回 cpu_usage（总体百分比）、cpu_cores（核数）。
+// Collect 返回 cpu_usage（总体百分比）、cpu_cores（核数）（等价于 CollectCtx(context.Background())）。
 func (c *CPUCollector) Collect() []model.Metric {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 返回 cpu_usage（总体百分比）、cpu_cores（核数）。
+// gopsutil 的 cpu.Times/Counts 为本机系统调用，无 ctx 接口，仅在入口做门控。
+func (c *CPUCollector) CollectCtx(ctx context.Context) []model.Metric {
+	if ctx.Err() != nil {
+		return nil
+	}
 	times, err := cpu.Times(false)
 	if err != nil || len(times) == 0 {
 		return nil
@@ -58,8 +68,16 @@ func (c *CPUCollector) Collect() []model.Metric {
 	}
 }
 
-// CollectHostInfo 采集主机系统与硬件信息。
+// CollectHostInfo 采集主机系统与硬件信息（等价于 CollectHostInfoCtx(context.Background())）。
 func CollectHostInfo() model.HostInfo {
+	return CollectHostInfoCtx(context.Background())
+}
+
+// CollectHostInfoCtx 采集主机系统与硬件信息；ctx 已结束时返回空结构。
+func CollectHostInfoCtx(ctx context.Context) model.HostInfo {
+	if ctx.Err() != nil {
+		return model.HostInfo{}
+	}
 	info := model.HostInfo{Disks: CollectDiskStats()}
 	if cpuInfo, err := cpu.Info(); err == nil && len(cpuInfo) > 0 {
 		info.CPUModel = cpuInfo[0].ModelName
