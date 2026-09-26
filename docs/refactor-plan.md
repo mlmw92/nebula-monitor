@@ -321,10 +321,10 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | ID | 任务 | 子项 | 状态 | 版本 | 备注 |
 |---|---|---|---|---|---|
 | E1 | 采集并发化 + ctx 一次到位 | 0. 并发调度内核 `runTasks` + 单元测试（7 用例） | ✅ | — | `collector/task.go`、`task_test.go`；本地已验证（含 3 次重复） |
-| E1 | | 1. 采集器签名统一加 `ctx`（`CollectCtx` + 兼容包装） | 🟨 | — | 23 个文件 |
+| E1 | | 1. 采集器签名统一加 `ctx`（`CollectCtx` + 兼容包装） | 🟨 | — | 已完成 6/23：rocketmq、nginx、fastdfs、port、mysql、postgres |
 | E1 | | 2. `Result` 结构 + `CollectAll(ctx)`（per-task timeout） | ⬜ | — | collector.go；内核已就绪 |
-| E1 | | 3. 统一 `fetchMetrics(ctx,…)` 替换 9 处分散 `client.Get` | ⬜ | — | 含 mongo/fastdfs 的 `fetchPrometheusText` |
-| E1 | | 4. DB（mysql/postgres）改 `*Context` 版本 | ⬜ | — | 13 处 |
+| E1 | | 3. 统一 `fetchMetrics(ctx,…)` 替换 9 处分散 `client.Get` | 🟨 | — | 辅助已落地；已完成 5/9（mysql、postgres、nginx×2、rocketmq×2、fastdfs）；待 redis、k8s、docker、mongo |
+| E1 | | 4. DB（mysql/postgres）改 `*Context` 版本 | ✅ | — | 共 15 处（mysql 6 + postgres 9） |
 | E1 | | 5. Redis dial ctx + `SetDeadline` 取消在途读 | ⬜ | — | 一次到位关键点 |
 | E1 | | 6. exec 改 `CommandContext`（firewall/security） | ⬜ | — | 20+ 处 |
 | E1 | | 7. 实例循环内 `ctx.Err()` 检查 | ⬜ | — | 立即停止后续实例 |
@@ -363,6 +363,8 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | 2026-09-26 | 初稿：候选改造点、优先级矩阵、批次一计划 |
 | 2026-09-26 | 落定 4 项决策（E1 一次到位、不加并发上限、D2 含前端、B1 落 docs/ + F2 全量补齐）；新增第 8 节进度追踪表与附录 C I/O 清点 |
 | 2026-09-26 | E1 实施：完成并发调度内核 `runTasks` + 7 个单元测试；`config.go` 新增 `collectTimeout`（默认 8s）。本地 `go build ./...` 通过、`go test ./internal/agent/...` 全绿 |
+| 2026-09-26 | E1 实施：新增 `fetch.go` 统一 ctx 感知 HTTP 拉取；完成 rocketmq、nginx、fastdfs、port 四个采集器的 `CollectCtx`（HTTP + 裸 TCP）。提交 `54e6a71` |
+| 2026-09-26 | E1 实施：完成 mysql、postgres 的 `CollectCtx`，Ping/Query/QueryRow 全部改 `*Context`（15 处）。提交 `e19169e` |
 
 ---
 
