@@ -155,11 +155,19 @@ func (s *Store) Query(q model.LogQuery, cursor Cursor) (model.LogQueryResult, er
 	stop := false
 	for i := startIdx; i < len(files) && !stop; i++ {
 		rel := files[i]
-		res.Files++
 		offset := int64(0) // 0 表示「从文件末尾开始」
 		if i == startIdx && cursor.File == rel {
+			if cursor.Offset <= 0 {
+				// 该文件已扫完（游标停在文件头）→ 直接看下一个文件。
+				//
+				// 这一步不能省：0 在 scanBackward 里表示「从文件末尾开始」，
+				// 若把「已扫完」也编码成 0，续读会把同一批结果**再返回一次**
+				// （单页刚好等于文件内容时必现——这是实机验证抓出来的）。
+				continue
+			}
 			offset = cursor.Offset
 		}
+		res.Files++
 		path := filepath.Join(s.root, rel)
 		err := scanBackward(path, offset, func(lineStart int64, line []byte) bool {
 			res.ScannedLines++

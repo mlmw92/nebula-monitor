@@ -191,6 +191,46 @@ func TestQuery_CursorPagingNoLossNoDup(t *testing.T) {
 	}
 }
 
+// TestQuery_CursorExactlyAtFileStartIsExhausted 单页刚好等于文件内容时的边界：
+// 续读**不能**把同一批结果再返回一次。
+//
+// 这条守的是一个真实踩过的坑：游标停在文件头时（offset=0），而 0 在反向读取里表示
+// 「从文件末尾开始」——两种含义混用会让「加载更多」把同一页再吐一遍。
+func TestQuery_CursorExactlyAtFileStartIsExhausted(t *testing.T) {
+	root := t.TempDir()
+	base := dayTS(t, "2026-09-26", 10, 0)
+	shard(t, root, "applog", "2026-09-26", "n1",
+		model.LogHit{Ts: base, Text: "line-a"},
+		model.LogHit{Ts: base + 1000, Text: "line-b"})
+
+	s := New(root, 0)
+	q := model.LogQuery{From: base - 1000, To: base + 100000, Limit: 2} // 恰好等于文件内容
+	p1, err := s.Query(q, Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p1.Lines) != 2 || !p1.Truncated || p1.Cursor == "" {
+		t.Fatalf("首页应满 2 条并给出游标：%+v", p1)
+	}
+	cursor, err := DecodeCursor(p1.Cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := s.Query(q, cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p2.Lines) != 0 {
+		t.Fatalf("续读不应重复返回已翻过的那一页，got %v", textsOf(p2.Lines))
+	}
+	if p2.Truncated {
+		t.Fatal("内容已全部翻完，不应再标记截断")
+	}
+	if p2.Cursor != "" {
+		t.Fatalf("不该再给游标：%q", p2.Cursor)
+	}
+}
+
 // TestQuery_CursorSurvivesFileGrowth 翻页途中文件追加新行，续读**不能跳过还没看过的老行**。
 //
 // 这正是游标用「绝对字节偏移」而不是「距末尾多少字节」的原因：后者在文件长大时会整体前移，
