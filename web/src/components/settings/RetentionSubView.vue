@@ -31,6 +31,11 @@
           <span class="field-hint inline">天（0 = 不清理）</span>
         </div>
         <div class="form-item">
+          <span class="label">集中日志保留</span>
+          <el-input-number v-model="form.logsDays" :min="0" :max="3650" size="small" controls-position="right" />
+          <span class="field-hint inline">天（0 = 不清理；按日期分片整天删除，当天不删）</span>
+        </div>
+        <div class="form-item">
           <span class="label">清理周期</span>
           <el-input-number v-model="form.intervalHours" :min="1" :max="720" size="small" controls-position="right" />
           <span class="field-hint inline">小时</span>
@@ -47,7 +52,8 @@
     <el-alert v-if="lastResult" type="success" :closable="false" show-icon class="err">
       <template #title>
         上次清理：{{ fmt(lastResult.at) }} · 告警记录 {{ lastResult.acksRemoved }} 条 · 报告文件
-        {{ lastResult.reportFilesRemoved }} 个（历史 {{ lastResult.reportHistoryRemoved }} 条）· 释放
+        {{ lastResult.reportFilesRemoved }} 个（历史 {{ lastResult.reportHistoryRemoved }} 条）· 日志
+        {{ lastResult.logFilesRemoved ?? 0 }} 个文件（分片 {{ lastResult.logDirsRemoved ?? 0 }}）· 释放
         {{ fileSize(lastResult.freedBytes) }}
         <span v-if="lastResult.skipped" class="field-hint inline">（{{ lastResult.skipped }}）</span>
       </template>
@@ -63,6 +69,10 @@
         </el-descriptions-item>
         <el-descriptions-item label="巡检报告">
           {{ status.reports?.files ?? '—' }} 个文件 · {{ fileSize(status.reports?.bytes) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="集中日志">
+          {{ status.logs?.files ?? '—' }} 个文件 · {{ fileSize(status.logs?.bytes) }}
+          <span class="field-hint inline">来源 {{ status.logs?.sources ?? 0 }} · 日期分片 {{ status.logs?.days ?? 0 }}</span>
         </el-descriptions-item>
         <el-descriptions-item label="审计事件">
           {{ status.audit?.count ?? '—' }} / {{ status.audit?.cap ?? '—' }} 条
@@ -104,7 +114,7 @@ const cleaning = ref(false)
 const error = ref('')
 const status = ref({})
 const lastResult = ref(null)
-const form = ref({ enabled: true, acksDays: 90, reportsDays: 180, intervalHours: 24 })
+const form = ref({ enabled: true, acksDays: 90, reportsDays: 180, logsDays: 7, intervalHours: 24 })
 
 function fmt(ms) {
   if (!ms || ms <= 0) return '—'
@@ -128,6 +138,7 @@ function apply(statusBody) {
       enabled: !!cfg.enabled,
       acksDays: cfg.acksDays ?? 0,
       reportsDays: cfg.reportsDays ?? 0,
+      logsDays: cfg.logsDays ?? 0,
       intervalHours: cfg.intervalHours ?? 24,
     }
   }

@@ -28,6 +28,7 @@ import (
 	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/audit"
 	"github.com/nebula/monitor/internal/server/config"
+	"github.com/nebula/monitor/internal/server/logstore"
 	"github.com/nebula/monitor/internal/server/report"
 	"github.com/nebula/monitor/internal/server/security"
 	"gopkg.in/yaml.v3"
@@ -39,6 +40,10 @@ const (
 	DefaultAcksDays = 90
 	// DefaultReportsDays 巡检报告的默认保留天数。
 	DefaultReportsDays = 180
+	// DefaultLogsDays 集中日志的默认保留天数（C2）。
+	// 取 7 天：日志量远大于其它类别，而「刚过去的这一周」覆盖了绝大多数排查场景；
+	// 与 reports 的量级一致，避免「一个新开关悄悄吃掉磁盘」。
+	DefaultLogsDays = 7
 	// DefaultIntervalHours 自动清理的默认周期（小时）。
 	DefaultIntervalHours = 24
 	// minIntervalHours 自动清理周期下限，避免配置成 0 导致忙循环。
@@ -55,13 +60,21 @@ type Config struct {
 	AcksDays int `yaml:"acksDays" json:"acksDays"`
 	// ReportsDays 巡检报告的保留天数；0 表示不清理该类。
 	ReportsDays int `yaml:"reportsDays" json:"reportsDays"`
+	// LogsDays 集中日志的保留天数（C2）；0 表示不清理该类。
+	LogsDays int `yaml:"logsDays" json:"logsDays"`
 	// IntervalHours 自动清理周期（小时）。
 	IntervalHours int `yaml:"intervalHours" json:"intervalHours"`
 }
 
 // DefaultConfig 返回默认保留策略。
 func DefaultConfig() Config {
-	return Config{Enabled: true, AcksDays: DefaultAcksDays, ReportsDays: DefaultReportsDays, IntervalHours: DefaultIntervalHours}
+	return Config{
+		Enabled:       true,
+		AcksDays:      DefaultAcksDays,
+		ReportsDays:   DefaultReportsDays,
+		LogsDays:      DefaultLogsDays,
+		IntervalHours: DefaultIntervalHours,
+	}
 }
 
 func (c *Config) normalize() {
@@ -70,6 +83,9 @@ func (c *Config) normalize() {
 	}
 	if c.ReportsDays < 0 {
 		c.ReportsDays = 0
+	}
+	if c.LogsDays < 0 {
+		c.LogsDays = 0
 	}
 	if c.IntervalHours < minIntervalHours {
 		c.IntervalHours = DefaultIntervalHours
@@ -97,6 +113,9 @@ type CleanupResult struct {
 	ReportFilesRemoved   int    `json:"reportFilesRemoved"`
 	ReportHistoryRemoved int    `json:"reportHistoryRemoved"`
 	ReportsCutoff        int64  `json:"reportsCutoff,omitempty"`
+	LogDirsRemoved       int    `json:"logDirsRemoved"`  // 集中日志：删除的日期分片数
+	LogFilesRemoved      int    `json:"logFilesRemoved"` // 集中日志：删除的文件数
+	LogsCutoff           int64  `json:"logsCutoff,omitempty"`
 	FreedBytes           int64  `json:"freedBytes"`
 	Skipped              string `json:"skipped,omitempty"` // 未执行清理的原因（如未接入对应存储）
 }
@@ -106,6 +125,7 @@ type Status struct {
 	Config      Config             `json:"config"`
 	Acks        alert.AckStats     `json:"acks"`
 	Reports     report.ReportStats `json:"reports"`
+	Logs        logstore.Stats     `json:"logs"`
 	Audit       BuiltinLimit       `json:"audit"`
 	Security    BuiltinLimit       `json:"security"`
 	TSDB        TSDBRetention      `json:"tsdb"`
@@ -123,6 +143,11 @@ type Manager struct {
 	audit    *audit.Store
 	security *security.Store
 	tsdbAddr string
+
+	// logs 为集中日志存储（C2，可空）。用注入而不是构造参数：
+	// 它是本包最后纳入的一类数据，而构造参数已经很长——再加一个会迫使所有调用点（含测试）跟着改，
+	// 收益却只有「少一行注入」。可选能力一律走 Set* 注入（与模板存储、日志存储的写法一致）。
+	logs *logstore.Store
 
 	lastMu sync.Mutex
 	last   *CleanupResult
@@ -151,6 +176,13 @@ func New(path string, initial Config, acks *alert.AckStore, reports *report.Gene
 	cfg.normalize()
 	m.cfg = cfg
 	return m, nil
+}
+
+// SetLogStore 注入集中日志存储（C2；未注入时该类不参与清理与统计）。
+func (m *Manager) SetLogStore(s *logstore.Store) {
+	if m != nil {
+		m.logs = s
+	}
 }
 
 // Config 返回当前策略。
@@ -197,6 +229,8 @@ func (m *Manager) Status() Status {
 	if m.security != nil {
 		out.Security = BuiltinLimit{Count: m.security.Count(), Cap: security.MaxEvents}
 	}
+	// 集中日志的实际占用：这是运维开关日志前最想知道的事（「一天到底占多少盘」）
+	out.Logs = m.logs.Stats()
 	out.TSDB = TSDBRetention{Addr: m.tsdbAddr}
 	if setting, err := ProbeTSDBRetention(m.tsdbAddr); err != nil {
 		out.TSDB.Error = err.Error()
@@ -218,11 +252,16 @@ func (m *Manager) CleanupNow() CleanupResult {
 func (m *Manager) cleanup(cfg Config) CleanupResult {
 	res := CleanupResult{At: time.Now().UnixMilli()}
 	now := time.Now()
+	// 「有没有真正可做的事」比「天数是否为 0」更准确：天数 > 0 但对应数据源没接入时，
+	// 实际什么都不会发生——此时不给原因，会让人以为清理已经跑过了。
+	actionable := (cfg.AcksDays > 0 && m.acks != nil) ||
+		(cfg.ReportsDays > 0 && m.reports != nil) ||
+		(cfg.LogsDays > 0 && m.logs != nil)
 	switch {
-	case m.acks == nil && m.reports == nil:
+	case m.acks == nil && m.reports == nil && m.logs == nil:
 		res.Skipped = "未接入可清理的数据源"
-	case cfg.AcksDays <= 0 && cfg.ReportsDays <= 0:
-		res.Skipped = "保留天数均为 0（表示不清理）"
+	case !actionable:
+		res.Skipped = "保留天数均为 0 或对应数据源未接入（无可清理内容）"
 	}
 	if cfg.AcksDays > 0 && m.acks != nil {
 		cutoff := now.AddDate(0, 0, -cfg.AcksDays)
@@ -235,7 +274,15 @@ func (m *Manager) cleanup(cfg Config) CleanupResult {
 		pruned := m.reports.PruneBefore(cutoff)
 		res.ReportFilesRemoved = pruned.Files
 		res.ReportHistoryRemoved = pruned.History
-		res.FreedBytes = pruned.Bytes
+		res.FreedBytes += pruned.Bytes
+	}
+	if cfg.LogsDays > 0 && m.logs != nil {
+		cutoff := now.AddDate(0, 0, -cfg.LogsDays)
+		res.LogsCutoff = cutoff.UnixMilli()
+		pruned := m.logs.PruneBefore(cutoff)
+		res.LogDirsRemoved = pruned.DirsRemoved
+		res.LogFilesRemoved = pruned.FilesRemoved
+		res.FreedBytes += pruned.Bytes
 	}
 	m.setLast(res)
 	return res

@@ -276,6 +276,8 @@ func main() {
 		slog.Error("初始化数据保留策略失败", "err", err)
 		os.Exit(1)
 	}
+	// 集中日志也纳入保留清理（C2，默认 7 天）：按「来源/日期/节点」的日期分片整天删除
+	retentionMgr.SetLogStore(logStore)
 	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath, securityStore, defenseStore, auditStore, authStore)
 	rest.SetDashboardManager(dashMgr)
 	rest.SetAnalyzer(analyzer)

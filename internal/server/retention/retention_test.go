@@ -7,11 +7,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/audit"
+	"github.com/nebula/monitor/internal/server/logstore"
 	"github.com/nebula/monitor/internal/server/report"
 	"github.com/nebula/monitor/internal/server/security"
 )
@@ -217,18 +219,76 @@ func TestManager_StatusAndSkipped(t *testing.T) {
 		t.Fatal("未配置时序库地址时应给出可读原因")
 	}
 
-	// 两类保留天数都为 0 时不做任何清理，但应说明原因
+	// 各类保留天数都为 0 时不做任何清理，但应说明原因
 	cfg := DefaultConfig()
-	cfg.AcksDays, cfg.ReportsDays = 0, 0
+	cfg.AcksDays, cfg.ReportsDays, cfg.LogsDays = 0, 0, 0
 	if err := m.Save(cfg); err != nil {
 		t.Fatalf("保存失败: %v", err)
 	}
 	if res := m.CleanupNow(); res.Skipped == "" {
 		t.Fatalf("应说明未清理原因：%+v", res)
 	}
+	// 天数 > 0 但该类数据源未接入时同样是「什么也没做」，也要给原因
+	// （否则界面会显示一次「清理完成」，而实际上没有清理任何东西）
+	cfg = DefaultConfig()
+	cfg.AcksDays, cfg.ReportsDays = 0, 0
+	cfg.LogsDays = 7 // 本测试未给 Manager 注入日志存储 → 该类无法执行
+	if err := m.Save(cfg); err != nil {
+		t.Fatalf("保存失败: %v", err)
+	}
+	if res := m.CleanupNow(); res.Skipped == "" {
+		t.Fatalf("天数 > 0 但未接入对应数据源时应说明原因：%+v", res)
+	}
 	// 上次清理结果应出现在状态里
 	if m.Status().LastCleanup == nil {
 		t.Fatal("状态应带上次清理结果")
+	}
+}
+
+// TestManager_CleansCentralLogs 集中日志纳入保留清理（C2）：
+// 按「来源/日期/节点」的日期分片**整天删除**，当天分片永不删（清理不碰正在写的数据），
+// 并在状态里报告实际占用（这是运维开关日志前最想知道的事）。
+func TestManager_CleansCentralLogs(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "logs")
+	oldDate := time.Now().AddDate(0, 0, -10).Format("2006-01-02")
+	today := time.Now().Format("2006-01-02")
+	for _, d := range []string{oldDate, today} {
+		p := filepath.Join(root, "applog", d)
+		if err := os.MkdirAll(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(p, "n1.log"), []byte(strings.Repeat("x", 256)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := logstore.New(root, 0)
+
+	cfg := DefaultConfig()
+	cfg.AcksDays, cfg.ReportsDays = 0, 0 // 只验证日志类别
+	cfg.LogsDays = 7
+	m, err := New(filepath.Join(dir, "retention.yaml"), cfg, nil, nil, nil, nil, "")
+	if err != nil {
+		t.Fatalf("创建管理器失败: %v", err)
+	}
+	m.SetLogStore(store)
+
+	if st := m.Status(); st.Logs.Files != 2 || st.Logs.Bytes == 0 || st.Logs.Sources != 1 {
+		t.Fatalf("状态应报告日志占用，got %+v", st.Logs)
+	}
+
+	res := m.CleanupNow()
+	if res.LogsCutoff == 0 {
+		t.Fatal("应报告日志类别的清理截止时间")
+	}
+	if res.LogDirsRemoved != 1 || res.LogFilesRemoved != 1 || res.FreedBytes == 0 {
+		t.Fatalf("应删掉 1 个过期日期分片并报告释放量，got %+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(root, "applog", today)); err != nil {
+		t.Fatalf("当天分片必须保留：%v", err)
+	}
+	if st := m.Status(); st.Logs.Days != 1 {
+		t.Fatalf("清理后应只剩当天分片，got %+v", st.Logs)
 	}
 }
 
