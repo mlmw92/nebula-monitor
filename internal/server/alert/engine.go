@@ -64,6 +64,7 @@ type Engine struct {
 	pipeline           *PipelineStore                   // 告警事件管道：relabel/enrich/消息模板（可选）
 	grouper            *Grouper                         // 分组器（分组启用时非空）
 	correlator         CorrelationProvider              // 关联结论提供者（可选，由 API 层用 analysis 实现）
+	onEval             func()                           // 每轮评估完成后的回调（可选，自监控用于判断评估节拍）
 }
 
 type ruleState struct {
@@ -151,16 +152,48 @@ func (e *Engine) Start(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(time.Duration(e.evalInterval) * time.Second)
 		defer ticker.Stop()
-		e.evaluate()
+		e.evalOnce()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				e.evaluate()
+				e.evalOnce()
 			}
 		}
 	}()
+}
+
+// evalOnce 执行一轮评估，并在完成后通知观测者。
+// 自监控据此判断评估循环是否停摆（见 /readyz），因此必须放在评估之后。
+func (e *Engine) evalOnce() {
+	e.evaluate()
+	e.mu.Lock()
+	obs := e.onEval
+	e.mu.Unlock()
+	if obs != nil {
+		obs()
+	}
+}
+
+// SetEvalObserver 注入「每轮评估完成」回调（可选）。
+func (e *Engine) SetEvalObserver(f func()) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.onEval = f
+}
+
+// ActiveCounts 返回当前活跃 firing 事件数与其中被抑制的数量（自监控用）。
+func (e *Engine) ActiveCounts() (firing, suppressed int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, fe := range e.firing {
+		firing++
+		if fe.suppressed {
+			suppressed++
+		}
+	}
+	return firing, suppressed
 }
 
 // IngestSecurityEvents 接收 Agent 上报的安全事件，后续由评估循环按安全事件规则处理。

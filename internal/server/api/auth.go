@@ -153,6 +153,10 @@ func isPublicPath(path string) bool {
 	if strings.HasPrefix(path, "/install/") || strings.HasPrefix(path, "/bin/") {
 		return true
 	}
+	// 健康探针：探针通常无法携带登录令牌，且仅暴露「存活 / 就绪」这类非敏感信息。
+	if path == "/healthz" || path == "/readyz" {
+		return true
+	}
 	// WebSocket 不属于公开接口：认证开启时由本中间件校验 Cookie/Bearer Token。
 	// 不能仅依赖 Origin 校验，因为 Origin 只解决跨站连接，不能证明用户已登录。
 	return false

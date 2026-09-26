@@ -159,6 +159,25 @@ const api = {
   getAlertPipeline: () => request('/api/v1/alert-pipeline'),
   saveAlertPipeline: (cfg) => api.put('/api/v1/alert-pipeline', cfg),
   previewAlertPipeline: (payload) => api.post('/api/v1/alert-pipeline/preview', payload),
+  // —— 自监控与健康探针 ——
+  getSelfStatus: () => request('/api/v1/self/status'),
+  // 探针在 /api/v1 之外，且 /readyz 以 503 表达「未就绪」——那不是请求失败，
+  // 因此不能走统一 request（它会把非 2xx 抛成错误，反而丢掉检查明细）。
+  probeHealth: async () => {
+    const headers = {}
+    const token = getToken()
+    if (token) headers['Authorization'] = 'Bearer ' + token
+    const read = async (path) => {
+      try {
+        const r = await fetch(path, { headers })
+        return { ok: r.ok, status: r.status, body: (await r.json().catch(() => ({}))) || {} }
+      } catch (e) {
+        return { ok: false, status: 0, body: {}, error: e.message }
+      }
+    }
+    const [health, ready] = await Promise.all([read('/healthz'), read('/readyz')])
+    return { health, ready }
+  },
 }
 
 export default api

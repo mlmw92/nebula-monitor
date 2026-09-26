@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/alert"
@@ -30,6 +31,7 @@ import (
 	"github.com/nebula/monitor/internal/server/report"
 	"github.com/nebula/monitor/internal/server/screencfg"
 	"github.com/nebula/monitor/internal/server/security"
+	"github.com/nebula/monitor/internal/server/selfmon"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/uicfg"
 	"github.com/nebula/monitor/internal/server/upgrade"
@@ -107,6 +109,8 @@ type API struct {
 	authStore      *auth.Store            // 多用户角色权限存储（可空：未启用登录认证时为 nil）
 	analysis       *analysis.Analyzer     // 只读智能分析服务（可空）
 	pipeline       *alert.PipelineStore   // 告警事件管道：relabel/enrich/消息模板（可空）
+	selfmon        *selfmon.Monitor       // 自监控收集器（可空；不注入时探针仍可用，只是没有进程指标）
+	startedAt      time.Time              // 进程启动时间，供 /healthz、/readyz 报告运行时长
 }
 
 // SetDashboardManager 注入仪表盘配置管理器（可选，不注入则相关接口返回空列表）。
@@ -126,7 +130,7 @@ func (a *API) SetPipelineStore(p *alert.PipelineStore) { a.pipeline = p }
 
 // New 创建 API。
 func New(store storage.Storage, mgr *node.Manager, rules RulesProvider, alerts AlertStore, hub *Hub, agentAuth config.AgentAuthConfig, agentBinDir string, webDir string, auth config.AuthConfig, upgrader *upgrade.Manager, notifyMgr *notify.Manager, engine *alert.Engine, maintenance MaintenanceProvider, dt DialtestProvider, rpt ReportProvider, screenMgr *screencfg.Manager, acks *alert.AckStore, inhibit *alert.InhibitStore, grouping *alert.GroupingStore, ngx *nginxaccess.Window, uiMgr *uicfg.Manager, configPath string, sec *security.Store, defenseStore *security.DefenseStore, auditStore *audit.Store, authStore *auth.Store) *API {
-	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince(), configPath: configPath, security: sec, defenseStore: defenseStore, audit: auditStore, authStore: authStore}
+	return &API{store: store, nodeMgr: mgr, rules: rules, alerts: alerts, hub: hub, agentAuth: agentAuth, agentBinDir: agentBinDir, webDir: webDir, auth: auth, upgrader: upgrader, notifyMgr: notifyMgr, engine: engine, maintenance: maintenance, dialtest: dt, report: rpt, screenMgr: screenMgr, acks: acks, inhibit: inhibit, grouping: grouping, ngx: ngx, uiMgr: uiMgr, serverProvince: detectServerProvince(), configPath: configPath, security: sec, defenseStore: defenseStore, audit: auditStore, authStore: authStore, startedAt: time.Now()}
 }
 
 // RegisterRoutes 注册所有路由到 mux。
@@ -205,6 +209,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// 安装信息含 Agent 长期密钥 → agent:secret:read（高危）；version 登录即可；agent/check 走 X-Agent-Secret（公开）
 	mux.HandleFunc("GET /api/v1/install-info", a.permit(a.handleInstallInfo, "agent:secret:read"))
 	mux.HandleFunc("GET /api/v1/version", a.handleVersion)
+	// 健康探针：公开（见 auth.isPublicPath）——探针语义是「进程是否存活 / 依赖是否就绪」，
+	// k8s、systemd 与反向代理通常无法携带登录令牌。
+	mux.HandleFunc("GET /healthz", a.handleHealthz)
+	mux.HandleFunc("GET /readyz", a.handleReadyz)
+	// 自监控快照属运维只读概览信息 → dashboard:read（与「查看概览」同级）
+	mux.HandleFunc("GET /api/v1/self/status", a.permit(a.handleSelfStatus, "dashboard:read"))
 	mux.HandleFunc("GET /api/v1/agent/check", a.handleAgentCheck)
 
 	// 系统升级：system:upgrade（高危权限点）

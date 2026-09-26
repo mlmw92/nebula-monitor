@@ -31,6 +31,7 @@ import (
 	"github.com/nebula/monitor/internal/server/report"
 	"github.com/nebula/monitor/internal/server/screencfg"
 	"github.com/nebula/monitor/internal/server/security"
+	"github.com/nebula/monitor/internal/server/selfmon"
 	"github.com/nebula/monitor/internal/server/storage"
 	"github.com/nebula/monitor/internal/server/uicfg"
 	"github.com/nebula/monitor/internal/server/upgrade"
@@ -66,6 +67,11 @@ func main() {
 		slog.Error("初始化时序库失败", "err", err)
 		os.Exit(1)
 	}
+	// 自监控：包装存储后，Server 侧全部 TSDB 读写自动计数（装饰器，无需改动各调用点）。
+	// rawStore 保留未包装引用，供自监控自身上报使用，免得把自己的写入也统计进去。
+	rawStore := store
+	mon := selfmon.New(version.Version)
+	store = selfmon.NewStorage(rawStore, mon)
 
 	// 节点管理
 	nodeMgr := node.New(cfg.NodeMeta, time.Duration(cfg.OfflineTimeout)*time.Second)
@@ -113,21 +119,43 @@ func main() {
 	groupingStore := alert.NewGroupingStore(filepath.Join(filepath.Dir(cfg.Alert.RulesFile), "alert_grouping.yaml"))
 	// 告警事件管道（relabel / enrich / 消息模板）：独立 YAML，Web 端可编辑，保存即热生效。
 	pipelineStore := alert.NewPipelineStore(filepath.Join(filepath.Dir(cfg.Alert.RulesFile), "alert_pipeline.yaml"))
-	notifiers := alert.BuildNotifiers(cfg.Notify)
+	// 通知器统一经自监控装饰器包装：按渠道统计发送成功/失败（含配置热加载路径）
+	buildNotifiers := func(c config.NotifyConfig) []alert.Notifier {
+		return selfmon.WrapNotifiers(alert.BuildNotifiers(c), mon)
+	}
+	notifiers := buildNotifiers(cfg.Notify)
 	hub := api.NewHub()
 	engine := alert.NewEngine(store, nodeMgr, rules, alertStore, notifiers, hub, maintenance, cfg.Alert.EvalInterval, inhibitStore, groupingStore, pipelineStore)
 
 	// 通知配置管理：独立文件（Web 端可配置），启动时优先加载该文件，不存在则
 	// 用 server.yaml 的 notify 段初始化并落盘；保存时通过 SetNotifiers 热加载。
 	notifyMgr, err := notify.New(cfg.NotifyFile, cfg.Notify, func(c config.NotifyConfig) {
-		engine.SetNotifiers(alert.BuildNotifiers(c))
+		engine.SetNotifiers(buildNotifiers(c))
 	})
 	if err != nil {
 		slog.Error("初始化通知配置失败", "err", err)
 		os.Exit(1)
 	}
 	// 用加载后的配置同步内存通知器（若文件存在则覆盖初始 cfg.Notify）。
-	engine.SetNotifiers(alert.BuildNotifiers(notifyMgr.Get()))
+	engine.SetNotifiers(buildNotifiers(notifyMgr.Get()))
+
+	// 自监控采集点接在「已有的真实状态」上（拉取式），避免另记一份而漂移。
+	mon.SetWSStats(hub.ClientCount)
+	mon.SetAlertStats(engine.ActiveCounts)
+	mon.SetNodeStats(func() (online, total int) {
+		nodes := nodeMgr.ListNodes()
+		for _, n := range nodes {
+			if n.Status == "online" {
+				online++
+			}
+		}
+		return online, len(nodes)
+	})
+	// 仅在启用告警时注入评估节拍，否则 /readyz 会把「未启用」误判为「评估停摆」。
+	if cfg.Alert.Enabled {
+		mon.SetEvalInterval(time.Duration(cfg.Alert.EvalInterval) * time.Second)
+		engine.SetEvalObserver(mon.AddEval)
+	}
 
 	// IP 地理库：优先加载磁盘上的覆盖文件（Web 端「IP 地理库」入口上传更新），
 	// 文件缺失或损坏时回退到随程序内置的库，不影响启动。
@@ -219,6 +247,7 @@ func main() {
 	rest.SetDashboardManager(dashMgr)
 	rest.SetAnalyzer(analyzer)
 	rest.SetPipelineStore(pipelineStore)
+	rest.SetSelfMon(mon)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}
 	recvMux.register(mux)
@@ -236,6 +265,9 @@ func main() {
 		engine.Start(ctx)
 	}
 	go offlineChecker(ctx, nodeMgr, 10*time.Second)
+	// 自监控指标周期写入时序库（走未包装的原始存储）：self_* 指标因此可查询、可画趋势，
+	// 也能直接复用现有告警规则来监控 Server 自身。
+	go selfmon.NewReporter(rawStore, mon, selfmon.DefaultReportInterval).Run(ctx)
 
 	// 认证中间件（启用 auth 时保护 /api/v1/* 业务接口）。
 	// authStore 显式传入（非包级单例），避免多实例部署与测试之间的状态污染。
@@ -246,6 +278,9 @@ func main() {
 		handler = api.AuditMiddleware(mux, auditStore)
 		handler = api.AuthMiddleware(handler, cfg.Auth, authStore)
 	}
+	// 自监控放最外层：被鉴权拒绝的请求（401/403）也要计数，
+	// 否则「大量 401」这种最该被看见的信号反而看不到。
+	handler = api.MetricsMiddleware(handler, mon)
 
 	srv := &http.Server{
 		Addr:    cfg.Listen,

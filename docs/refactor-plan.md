@@ -378,7 +378,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | E2 | 更多中间件 | 1. MariaDB / RabbitMQ / Elasticsearch / ClickHouse / Nacos / Etcd / ZooKeeper | ⬜ | — | 现需改 6 处联动；C1 模板化后可退化为写模板 |
 | E3 | 容量预测扩展 | 1. 内存 / CPU / 网络 / 中间件容量预测 | ⬜ | — | `analysis` 当前仅覆盖磁盘 |
 | A3 | 数据保留策略 | 1. TSDB retention 纳管 + 归档清理 | ⬜ | — | — |
-| F3 | 自监控与健康检查 | 1. `/healthz` + 自监控指标 | ⬜ | — | — |
+| F3 | 自监控与健康检查 | 1. `/healthz` + 自监控指标 | ✅ | — | 新增 `internal/server/selfmon`（快照 + `self_*` 指标 + Storage/Notifier 装饰器 + 30s 上报）；`GET /healthz`（存活）、`GET /readyz`（就绪：时序库真实查询 + 告警评估节拍，未就绪 503）均公开；`GET /api/v1/self/status`（`dashboard:read`）；`api.MetricsMiddleware` 置于中间件链最外层（401/403 也计入）；前端「系统设置 → 系统自监控」页 |
 
 ### 批次三
 
@@ -444,6 +444,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | 2026-09-26 | **版本递增**：按决策将 E1/D2/F2/B1（含子批次 A~E）整批合并递增为 **`1.24.0`**（次版本号递增：已启用认证部署的运行时行为变更 + 新增 1 条路由与 2 个权限点）；前端版本号经 `npm run version:sync` 同步为 `1.24.0`。原计划的分次递增（1.23.8 / 1.23.9）未执行，第 6 节执行顺序图与第 8 节「版本与发布」表已同步实际结果。打包仍待明确指示 |
 | 2026-09-26 | **打包**：`build/release.sh` 组装出 `nebula-monitor-v1.24.0-full.tar.gz`（138 MB）与 `-upgrade.tar.gz`（66 MB）；包内 `manifest.json` 版本、二进制注入版本、前端 `WEB_VERSION` 均为 `1.24.0`，包内 `SHA256SUMS` 逐条校验通过；未执行任何部署/升级 |
 | 2026-09-26 | **F1 完成**：Go 侧补齐 5 个目标点单测（storage 编码与注入防护、告警状态机、鉴权 token、两处国密错误分支）；前端引入 Vitest（`api/http.js` + `useAuth`，14 用例）；新增 `ci.yml` 并把测试设为 `release.yml` 发布门禁；顺带修正 `release.yml` 的 Go 版本（1.22 → 1.25，与 go.mod 一致）。全量 Go 测试与前端构建均绿 |
+| 2026-09-26 | **F3 完成**：自监控与健康检查。新增 `internal/server/selfmon`（进程/HTTP/时序库/通知/WebSocket/告警/节点指标，快照与 `self_*` 指标同源）；存储与通知器用**装饰器**采集，不改动既有调用点；指标每 30 秒写入现有 TSDB（复用查询、图表与告警规则，而非另造 `/metrics`）；新增公开探针 `/healthz`（存活）与 `/readyz`（就绪：时序库真实即时查询 + 告警评估节拍，未就绪 503 并给出逐项原因）；新增 `GET /api/v1/self/status`（`dashboard:read`）；`api.MetricsMiddleware` 置于中间件链**最外层**（401/403 亦计入）并实现 Hijack/Flush 透传（否则 `/ws` 握手会全部失败）；引擎新增 `SetEvalObserver`/`ActiveCounts`。前端新增「系统设置 → 系统自监控」页（探针徽标 + 关键指标 + 按渠道通知 + 近 1 小时趋势）。新增 17 个测试（9 selfmon + 8 api） |
 | 2026-09-26 | **D1 完成**：告警风暴收敛落地。`GroupingConfig` 新增 `converge`/`convergeBy`/`convergeWindow`/`headCount` 并统一 `normalize()`；`Grouper` 新增相似度聚类键与时间窗换代（旧代异步发出，避免在持有 engine 锁的调用栈内回调造成自锁）；新增 `alert/converge.go` 实现「头部告警 + 规则/范围/级别统计 + Top N + 折叠计数 + 关联结论」；关联结论经 `CorrelationProvider` 由 API 层反向注入（analysis 依赖 alert，不可反向 import）；前端分组面板新增收敛开关与参数。**默认关闭**（通知内容属用户可见行为，升级不改变既有通知）。新增 19 个测试 |
 
 ---

@@ -1,7 +1,7 @@
 # 权限矩阵设计（路由 → 权限点 → 资源范围）
 
 > 本文为 B1 改造的设计件，用于评审后进入实施。
-> 事实基线：VERSION 1.24.0；路由清点自 `internal/server/api/query.go` 的 `RegisterRoutes`（122 条）加 `ws.go`（1）、`spa.go`（1）、`cmd/server/main.go`（1）、`internal/server/agentdist/agentdist.go`（2），合计 **127 条**（批次 E 新增 `GET /api/v1/audit/export` 前为 126 条）。
+> 事实基线：VERSION 1.24.0；路由清点自 `internal/server/api/query.go` 的 `RegisterRoutes`（122 条）加 `ws.go`（1）、`spa.go`（1）、`cmd/server/main.go`（1）、`internal/server/agentdist/agentdist.go`（2），合计 **127 条**（批次 E 新增 `GET /api/v1/audit/export` 前为 126 条）；F3 新增 3 条（`GET /healthz`、`GET /readyz` 公开，`GET /api/v1/self/status` 需 `dashboard:read`），当前共 **130 条**。
 
 ## 实施状态
 
@@ -77,13 +77,15 @@
 - **范围** 列 `分组` 表示需按节点分组过滤/校验；`节点` 表示需按单节点归属分组校验；`—` 表示不涉及范围。
 - 「权限点」列 `—` 表示登录即可访问，不增加校验。
 
-### 4.1 公开接口（6 条，不动）
+### 4.1 公开接口（8 条，不动）
 
 | 方法 | 路径 | 权限点 | 范围 |
 |---|---|---|---|
 | POST | `/api/v1/login` | 公开 | — |
 | POST | `/api/v1/report` | 公开（`X-Agent-Secret`） | — |
 | GET | `/api/v1/agent/check` | 公开（`X-Agent-Secret`） | — |
+| GET | `/healthz` | 公开（存活探针，F3 新增） | — |
+| GET | `/readyz` | 公开（就绪探针，F3 新增） | — |
 | GET | `/install/agent-install.sh` | 公开 | — |
 | GET | `/bin/` | 公开 | — |
 | GET | `/` | 公开（SPA） | — |
@@ -213,6 +215,7 @@
 | 方法 | 路径 | 权限点 | 范围 |
 |---|---|---|---|
 | GET | `/api/v1/version` | — | — |
+| GET | `/api/v1/self/status` | `dashboard:read`（F3 新增：运维只读概览类，与「查看概览」同级） | — |
 | GET | `/api/v1/install-info` | `agent:secret:read`（高风险） | — |
 | GET | `/api/v1/proxy/status` | `agent:read` | — |
 | POST | `/api/v1/system/upgrade/upload` | `system:upgrade`（高风险） | — |
@@ -359,11 +362,11 @@
 
 | 项 | 数量 |
 |---|---|
-| 路由总数 | **127**（批次 E 新增 `GET /api/v1/audit/export`） |
-| 公开接口 | 7（`login`、`report`、`agent/check`、`install/*`、`bin/*`、`/`、`GET ui/settings`） |
+| 路由总数 | **130**（批次 E 新增 `GET /api/v1/audit/export`；F3 新增 `/healthz`、`/readyz`、`GET /api/v1/self/status`） |
+| 公开接口 | 9（`login`、`report`、`agent/check`、`/healthz`、`/readyz`、`install/*`、`bin/*`、`/`、`GET ui/settings`） |
 | 无需权限点（登录即可 / 自身资源） | 6（`version`、`auth-info`、`logout`、`auth/me` ×2、`change-password`） |
 | 已生效（现状 `authz`） | 14（`users:manage` 8 + `roles:manage` 3 + `roles:read` 3） |
-| **本次新增校验** | **100** = 127 − 7 − 6 − 14 |
+| **需校验项** | **101** = 130 − 9 − 6 − 14（其中 B1 实施覆盖 100 条，F3 新增 1 条 `dashboard:read`） |
 | 新增权限点 | 2（`dashboard:write`、`system:config`） |
 | 高风险权限点 | 8（现状） |
 

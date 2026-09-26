@@ -115,6 +115,13 @@ func (h *Hub) Unregister(c *Client) {
 	}
 }
 
+// ClientCount 返回当前已注册的 WebSocket 客户端数量（自监控用）。
+func (h *Hub) ClientCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.clients)
+}
+
 // BroadcastAlert 广播告警事件给所有 WS 客户端。
 func (h *Hub) BroadcastAlert(e model.AlertEvent) {
 	select {

@@ -1385,7 +1385,11 @@ journalctl -u monitor-proxy-hub -f
 
 接口统一以 `/api/v1` 为前缀（WebSocket、前端静态资源与 Agent 下发路径除外）。除下表标注「公开」的接口外均需登录会话，请求头携带 `Authorization: Bearer <token>`；标注权限点的接口在服务端额外校验权限，资源范围（节点分组）过滤同样在服务端执行。
 
-**公开白名单**：`POST /api/v1/login`、`POST /api/v1/report`（Agent 上报，走 `X-Agent-Secret`）、`GET /api/v1/agent/check`、`GET /api/v1/ui/settings`（匿名只读）、`/install/*`、`/bin/*`、前端静态资源。
+**公开白名单**：`POST /api/v1/login`、`POST /api/v1/report`（Agent 上报，走 `X-Agent-Secret`）、`GET /api/v1/agent/check`、`GET /api/v1/ui/settings`（匿名只读）、`GET /healthz`、`GET /readyz`、`/install/*`、`/bin/*`、前端静态资源。
+
+> **健康探针**：`GET /healthz` 为存活探针（仅表明进程仍在服务，不做依赖检查）；`GET /readyz` 为就绪探针（校验时序库可用性与告警评估节拍，未就绪时返回 503 并给出逐项原因）。两者免登录——k8s、systemd 与反向代理通常无法携带登录令牌。
+>
+> **自监控**：Server 自身指标以 `self_*` 前缀每 30 秒写入时序库，因此可直接用「指标浏览」查看趋势，也能用现有告警规则监控 Server 自身（如 `self_alert_eval_age_seconds` 停摆、`self_tsdb_write_errors_total` 增长）。即时快照见 `GET /api/v1/self/status` 与「系统设置 → 系统自监控」。
 
 ### 公开接口
 
@@ -1394,6 +1398,8 @@ journalctl -u monitor-proxy-hub -f
 | POST | `/api/v1/login` | 登录换取访问令牌 |
 | POST | `/api/v1/report` | Agent 指标上报（`X-Agent-Secret` 校验，不受登录令牌影响） |
 | GET | `/api/v1/agent/check` | Agent 接入鉴权预检 |
+| GET | `/healthz` | 存活探针（进程可服务即 200） |
+| GET | `/readyz` | 就绪探针（时序库 / 告警评估节拍，未就绪返回 503 + 逐项原因） |
 | GET | `/install/agent-install.sh` | 下发 Agent 安装脚本 |
 | GET | `/bin/` | 下发各架构 Agent 二进制 |
 | GET | `/` | 前端静态资源（SPA 回退 index.html） |
@@ -1517,6 +1523,7 @@ journalctl -u monitor-proxy-hub -f
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/v1/version` | Server 版本信息 |
+| GET | `/api/v1/self/status` | 自监控快照（进程 / HTTP / 时序库 / 通知 / 告警 / 节点统计，`dashboard:read`） |
 | GET | `/api/v1/install-info` | Agent 安装信息（serverURL + 一行命令 + 代理配置模板） |
 | GET | `/api/v1/proxy/status` | 代理节点状态（Edge / Hub 自监控指标聚合） |
 | POST | `/api/v1/system/upgrade/upload` | 上传升级包（multipart） |
