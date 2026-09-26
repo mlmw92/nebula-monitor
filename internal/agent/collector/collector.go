@@ -2,6 +2,8 @@
 package collector
 
 import (
+	"context"
+
 	"github.com/shirou/gopsutil/v4/host"
 
 	"github.com/nebula/monitor/internal/agent/config"
@@ -15,9 +17,9 @@ type Collector struct {
 	labels map[string]string
 	cfg    config.CollectorToggle
 
-	cpu    *CPUCollector
-	disk   *DiskCollector
-	net    *NetworkCollector
+	cpu         *CPUCollector
+	disk        *DiskCollector
+	net         *NetworkCollector
 	redis       *RedisCollector
 	mysql       *MySQLCollector
 	pg          *PostgresCollector
@@ -242,33 +244,56 @@ func (c *Collector) CollectFastDFS() ([]model.Metric, []model.FastDFSInstance) {
 	return c.fastdfs.Collect()
 }
 
-// CollectSecurity 采集安全事件与基线检查结果。
+// CollectSecurity 采集安全事件与基线检查结果（等价于 CollectSecurityCtx(context.Background())）。
 // 返回该节点的安全事件列表与基线评分（可为 nil，表示未启用安全采集）。
 func (c *Collector) CollectSecurity() ([]model.SecurityEvent, *model.SecurityBaseline) {
+	return c.CollectSecurityCtx(context.Background())
+}
+
+// CollectSecurityCtx 采集安全事件与基线检查结果；ctx 结束时跳过后续基线检查。
+func (c *Collector) CollectSecurityCtx(ctx context.Context) ([]model.SecurityEvent, *model.SecurityBaseline) {
 	if c.security == nil {
 		return nil, nil
 	}
-	return c.security.Collect()
+	return c.security.CollectCtx(ctx)
 }
 
-// CollectListeners 采集监听端口列表（TCP/UDP），用于端口监控 Tab。
+// CollectListeners 采集监听端口列表（等价于 CollectListenersCtx(context.Background())）。
+func (c *Collector) CollectListeners() []model.ListenerStat {
+	return c.CollectListenersCtx(context.Background())
+}
+
+// CollectListenersCtx 采集监听端口列表（TCP/UDP），用于端口监控 Tab。
 // 该采集为只读本地端口快照（类似 ss -tlnp），开销极小，
 // 不依赖 port 存活探测开关（cfg.Port），默认即开启。
-func (c *Collector) CollectListeners() []model.ListenerStat {
+func (c *Collector) CollectListenersCtx(ctx context.Context) []model.ListenerStat {
+	if ctx.Err() != nil {
+		return nil
+	}
 	return collectListeners()
 }
 
-// CollectFirewallRules 采集防火墙规则列表，用于防火墙监控 Tab。
-// 该采集为只读本地规则快照（iptables/nftables/ufw），开销极小，
-// 不依赖 security 安全扫描开关（cfg.Security），默认即开启。
+// CollectFirewallRules 采集防火墙规则列表（等价于 CollectFirewallRulesCtx(context.Background())）。
 func (c *Collector) CollectFirewallRules() []model.FirewallRule {
-	return collectFirewallRules()
+	return c.CollectFirewallRulesCtx(context.Background())
 }
 
-// CollectFirewallStatus 采集防火墙整体状态（后端类型/运行/自启/版本等），用于防火墙监控 Tab 顶部状态展示。
-// ruleCount 为本次已采集到的防火墙规则条数。
+// CollectFirewallRulesCtx 采集防火墙规则列表，用于防火墙监控 Tab。
+// 该采集为只读本地规则快照（iptables/nftables/ufw），开销极小，
+// 不依赖 security 安全扫描开关（cfg.Security），默认即开启。
+func (c *Collector) CollectFirewallRulesCtx(ctx context.Context) []model.FirewallRule {
+	return collectFirewallRules(ctx)
+}
+
+// CollectFirewallStatus 采集防火墙整体状态（等价于 CollectFirewallStatusCtx(context.Background())）。
 func (c *Collector) CollectFirewallStatus(ruleCount int) *model.FirewallStatus {
-	return collectFirewallStatus(ruleCount)
+	return c.CollectFirewallStatusCtx(context.Background(), ruleCount)
+}
+
+// CollectFirewallStatusCtx 采集防火墙整体状态（后端类型/运行/自启/版本等），用于防火墙监控 Tab 顶部状态展示。
+// ruleCount 为本次已采集到的防火墙规则条数。
+func (c *Collector) CollectFirewallStatusCtx(ctx context.Context, ruleCount int) *model.FirewallStatus {
+	return collectFirewallStatus(ctx, ruleCount)
 }
 
 // HostInfo 返回主机静态信息（OS/Arch/IP），用于上报体。

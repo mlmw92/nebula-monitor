@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"os/exec"
 	"strings"
 
@@ -14,17 +15,17 @@ import (
 //   - ufw (ufw status numbered)
 //
 // 返回 FirewallRule 列表。若所有后端均不可用则返回空切片。
-func collectFirewallRules() []model.FirewallRule {
+func collectFirewallRules(ctx context.Context) []model.FirewallRule {
 	var rules []model.FirewallRule
 
 	// 优先尝试 firewalld
-	if r := collectFirewalld(); len(r) > 0 {
+	if r := collectFirewalld(ctx); len(r) > 0 {
 		rules = append(rules, r...)
-	} else if r := collectIptables(); len(r) > 0 {
+	} else if r := collectIptables(ctx); len(r) > 0 {
 		rules = append(rules, r...)
-	} else if r := collectNftables(); len(r) > 0 {
+	} else if r := collectNftables(ctx); len(r) > 0 {
 		rules = append(rules, r...)
-	} else if r := collectUfw(); len(r) > 0 {
+	} else if r := collectUfw(ctx); len(r) > 0 {
 		rules = append(rules, r...)
 	}
 
@@ -36,18 +37,18 @@ func collectFirewallRules() []model.FirewallRule {
 
 // ---- firewalld ----
 
-func collectFirewalld() []model.FirewallRule {
+func collectFirewalld(ctx context.Context) []model.FirewallRule {
 	path, err := exec.LookPath("firewall-cmd")
 	if err != nil {
 		return nil
 	}
-	out, err := exec.Command(path, "--state").Output()
+	out, err := exec.CommandContext(ctx, path, "--state").Output()
 	if err != nil || strings.TrimSpace(string(out)) != "running" {
 		return nil
 	}
 
 	// 获取所有 zone
-	zonesOut, err := exec.Command(path, "--get-zones").Output()
+	zonesOut, err := exec.CommandContext(ctx, path, "--get-zones").Output()
 	if err != nil {
 		return nil
 	}
@@ -55,7 +56,7 @@ func collectFirewalld() []model.FirewallRule {
 
 	var rules []model.FirewallRule
 	for _, zone := range zones {
-		allOut, err := exec.Command(path, "--list-all", "--zone="+zone).Output()
+		allOut, err := exec.CommandContext(ctx, path, "--list-all", "--zone="+zone).Output()
 		if err != nil {
 			continue
 		}
@@ -115,12 +116,12 @@ func collectFirewalld() []model.FirewallRule {
 
 // ---- iptables ----
 
-func collectIptables() []model.FirewallRule {
+func collectIptables(ctx context.Context) []model.FirewallRule {
 	path, err := exec.LookPath("iptables")
 	if err != nil {
 		return nil
 	}
-	out, err := exec.Command(path, "-L", "-n", "-v", "--line-numbers").Output()
+	out, err := exec.CommandContext(ctx, path, "-L", "-n", "-v", "--line-numbers").Output()
 	if err != nil {
 		return nil
 	}
@@ -184,12 +185,12 @@ func parseIptablesOutput(output, backend string) []model.FirewallRule {
 
 // ---- nftables ----
 
-func collectNftables() []model.FirewallRule {
+func collectNftables(ctx context.Context) []model.FirewallRule {
 	path, err := exec.LookPath("nft")
 	if err != nil {
 		return nil
 	}
-	out, err := exec.Command(path, "list", "ruleset").Output()
+	out, err := exec.CommandContext(ctx, path, "list", "ruleset").Output()
 	if err != nil {
 		return nil
 	}
@@ -273,12 +274,12 @@ func parseNftOutput(output string) []model.FirewallRule {
 
 // ---- ufw ----
 
-func collectUfw() []model.FirewallRule {
+func collectUfw(ctx context.Context) []model.FirewallRule {
 	path, err := exec.LookPath("ufw")
 	if err != nil {
 		return nil
 	}
-	out, err := exec.Command(path, "status", "numbered").Output()
+	out, err := exec.CommandContext(ctx, path, "status", "numbered").Output()
 	if err != nil {
 		return nil
 	}
@@ -331,130 +332,130 @@ func parseUfwOutput(output string) []model.FirewallRule {
 			SrcAddr:  srcAddr,
 			DstPort:  dport,
 			Options:  line,
-			})
-			}
-			return rules
-			}
+		})
+	}
+	return rules
+}
 
-			// systemdUnitState 返回指定 systemd 单元是否处于 active / enabled 状态。
-			// 若 systemctl 不可用或单元不存在，两者均返回 false。
-			func systemdUnitState(unit string) (active, enabled bool) {
-			path, err := exec.LookPath("systemctl")
-			if err != nil {
-			return false, false
-			}
-			if out, err := exec.Command(path, "is-active", unit).Output(); err == nil {
-			active = strings.TrimSpace(string(out)) == "active"
-			}
-			if out, err := exec.Command(path, "is-enabled", unit).Output(); err == nil {
-			enabled = strings.TrimSpace(string(out)) == "enabled"
-			}
-			return
-			}
+// systemdUnitState 返回指定 systemd 单元是否处于 active / enabled 状态。
+// 若 systemctl 不可用或单元不存在，两者均返回 false。
+func systemdUnitState(ctx context.Context, unit string) (active, enabled bool) {
+	path, err := exec.LookPath("systemctl")
+	if err != nil {
+		return false, false
+	}
+	if out, err := exec.CommandContext(ctx, path, "is-active", unit).Output(); err == nil {
+		active = strings.TrimSpace(string(out)) == "active"
+	}
+	if out, err := exec.CommandContext(ctx, path, "is-enabled", unit).Output(); err == nil {
+		enabled = strings.TrimSpace(string(out)) == "enabled"
+	}
+	return
+}
 
-			// collectFirewallStatus 探测当前主机生效的防火墙后端及其运行状态。
-			// ruleCount 为本次已采集到的防火墙规则条数，用于回填状态中的规则总数。
-			// 探测优先级：firewalld > ufw > nftables > iptables，避免被底层后端（如 firewalld 依赖的 nftables/iptables）误判。
-			func collectFirewallStatus(ruleCount int) *model.FirewallStatus {
-			st := &model.FirewallStatus{
-			UpdatedAt: model.NowMillis(),
-			RuleCount: ruleCount,
-			Backend:   "none",
-			Message:   "未发现已启用的防火墙后端",
-			}
+// collectFirewallStatus 探测当前主机生效的防火墙后端及其运行状态。
+// ruleCount 为本次已采集到的防火墙规则条数，用于回填状态中的规则总数。
+// 探测优先级：firewalld > ufw > nftables > iptables，避免被底层后端（如 firewalld 依赖的 nftables/iptables）误判。
+func collectFirewallStatus(ctx context.Context, ruleCount int) *model.FirewallStatus {
+	st := &model.FirewallStatus{
+		UpdatedAt: model.NowMillis(),
+		RuleCount: ruleCount,
+		Backend:   "none",
+		Message:   "未发现已启用的防火墙后端",
+	}
 
-			// 1. firewalld
-			if path, err := exec.LookPath("firewall-cmd"); err == nil {
-			if out, err := exec.Command(path, "--state").Output(); err == nil && strings.TrimSpace(string(out)) == "running" {
-				st.Backend = "firewalld"
+	// 1. firewalld
+	if path, err := exec.LookPath("firewall-cmd"); err == nil {
+		if out, err := exec.CommandContext(ctx, path, "--state").Output(); err == nil && strings.TrimSpace(string(out)) == "running" {
+			st.Backend = "firewalld"
+			st.Running = true
+			st.Supported = true
+			st.Message = ""
+			if v, err := exec.CommandContext(ctx, path, "--version").Output(); err == nil {
+				st.Version = strings.TrimSpace(string(v))
+			}
+			if z, err := exec.CommandContext(ctx, path, "--get-default-zone").Output(); err == nil {
+				st.DefaultZone = strings.TrimSpace(string(z))
+			}
+			if az, err := exec.CommandContext(ctx, path, "--get-active-zones").Output(); err == nil {
+				for _, line := range strings.Split(strings.TrimSpace(string(az)), "\n") {
+					line = strings.TrimSpace(line)
+					if line == "" || strings.HasSuffix(line, ":") {
+						continue
+					}
+					st.ActiveZones++
+				}
+			}
+			_, enabled := systemdUnitState(ctx, "firewalld")
+			st.Enabled = enabled
+			return st
+		}
+	}
+
+	// 2. ufw
+	if path, err := exec.LookPath("ufw"); err == nil {
+		out, err := exec.CommandContext(ctx, path, "status").Output()
+		if err == nil {
+			text := string(out)
+			if strings.Contains(text, "Status: active") {
+				st.Backend = "ufw"
 				st.Running = true
 				st.Supported = true
 				st.Message = ""
-				if v, err := exec.Command(path, "--version").Output(); err == nil {
+				if v, err := exec.CommandContext(ctx, path, "version").Output(); err == nil {
 					st.Version = strings.TrimSpace(string(v))
 				}
-				if z, err := exec.Command(path, "--get-default-zone").Output(); err == nil {
-					st.DefaultZone = strings.TrimSpace(string(z))
-				}
-				if az, err := exec.Command(path, "--get-active-zones").Output(); err == nil {
-					for _, line := range strings.Split(strings.TrimSpace(string(az)), "\n") {
-						line = strings.TrimSpace(line)
-						if line == "" || strings.HasSuffix(line, ":") {
-							continue
-						}
-						st.ActiveZones++
-					}
-				}
-				_, enabled := systemdUnitState("firewalld")
+				_, enabled := systemdUnitState(ctx, "ufw")
 				st.Enabled = enabled
 				return st
 			}
+			if strings.Contains(text, "Status: inactive") {
+				st.Backend = "ufw"
+				st.Running = false
+				st.Supported = true
+				st.Message = "ufw 已安装但未启用"
+				return st
 			}
+		}
+	}
 
-			// 2. ufw
-			if path, err := exec.LookPath("ufw"); err == nil {
-			out, err := exec.Command(path, "status").Output()
-			if err == nil {
-				text := string(out)
-				if strings.Contains(text, "Status: active") {
-					st.Backend = "ufw"
-					st.Running = true
-					st.Supported = true
-					st.Message = ""
-					if v, err := exec.Command(path, "version").Output(); err == nil {
-						st.Version = strings.TrimSpace(string(v))
-					}
-					_, enabled := systemdUnitState("ufw")
-					st.Enabled = enabled
-					return st
-				}
-				if strings.Contains(text, "Status: inactive") {
-					st.Backend = "ufw"
-					st.Running = false
-					st.Supported = true
-					st.Message = "ufw 已安装但未启用"
-					return st
-				}
+	// 3. nftables
+	if path, err := exec.LookPath("nft"); err == nil {
+		out, rerr := exec.CommandContext(ctx, path, "list", "ruleset").Output()
+		_ = rerr
+		rules := strings.TrimSpace(string(out))
+		active, enabled := systemdUnitState(ctx, "nftables")
+		if active || enabled || rules != "" {
+			st.Backend = "nftables"
+			st.Supported = true
+			st.Running = active || rules != ""
+			st.Enabled = enabled
+			if v, verr := exec.CommandContext(ctx, path, "--version").Output(); verr == nil {
+				st.Version = strings.TrimSpace(string(v))
 			}
+			if rules == "" {
+				st.Message = "nftables 已启用但规则集为空"
 			}
-
-			// 3. nftables
-			if path, err := exec.LookPath("nft"); err == nil {
-				out, rerr := exec.Command(path, "list", "ruleset").Output()
-				_ = rerr
-				rules := strings.TrimSpace(string(out))
-				active, enabled := systemdUnitState("nftables")
-				if active || enabled || rules != "" {
-					st.Backend = "nftables"
-					st.Supported = true
-					st.Running = active || rules != ""
-					st.Enabled = enabled
-					if v, verr := exec.Command(path, "--version").Output(); verr == nil {
-						st.Version = strings.TrimSpace(string(v))
-					}
-					if rules == "" {
-						st.Message = "nftables 已启用但规则集为空"
-					}
-					return st
-				}
-			}
-
-			// 4. iptables（兜底）
-			if path, err := exec.LookPath("iptables"); err == nil {
-				out, rerr := exec.Command(path, "-L", "-n").Output()
-				if rerr == nil && len(parseIptablesOutput(string(out), "iptables")) > 0 {
-					st.Backend = "iptables"
-					st.Running = true
-					st.Supported = true
-					st.Message = ""
-					if v, verr := exec.Command(path, "--version").Output(); verr == nil {
-						st.Version = strings.TrimSpace(string(v))
-					}
-					_, enabled := systemdUnitState("iptables")
-					st.Enabled = enabled
-					return st
-				}
-			}
-
 			return st
+		}
+	}
+
+	// 4. iptables（兜底）
+	if path, err := exec.LookPath("iptables"); err == nil {
+		out, rerr := exec.CommandContext(ctx, path, "-L", "-n").Output()
+		if rerr == nil && len(parseIptablesOutput(string(out), "iptables")) > 0 {
+			st.Backend = "iptables"
+			st.Running = true
+			st.Supported = true
+			st.Message = ""
+			if v, verr := exec.CommandContext(ctx, path, "--version").Output(); verr == nil {
+				st.Version = strings.TrimSpace(string(v))
 			}
+			_, enabled := systemdUnitState(ctx, "iptables")
+			st.Enabled = enabled
+			return st
+		}
+	}
+
+	return st
+}

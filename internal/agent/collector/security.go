@@ -2,6 +2,7 @@ package collector
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -130,8 +131,15 @@ func (c *SecurityCollector) saveFIMBaseline() {
 	}
 }
 
-// Collect 采集安全事件与基线检查结果。
+// Collect 采集安全事件与基线检查结果（等价于 CollectCtx(context.Background())）。
 func (c *SecurityCollector) Collect() ([]model.SecurityEvent, *model.SecurityBaseline) {
+	return c.CollectCtx(context.Background())
+}
+
+// CollectCtx 采集安全事件与基线检查结果。
+// 基线阶段入口检查 ctx：采集任务已超时/取消时跳过后续检查。本机文件与 /proc 读取
+// 不可取消（无 ctx 接口），但防火墙 / fail2ban 等命令类探测会随 ctx 立即终止。
+func (c *SecurityCollector) CollectCtx(ctx context.Context) ([]model.SecurityEvent, *model.SecurityBaseline) {
 	var events []model.SecurityEvent
 
 	// 1) SSH 登录审计 + 暴力破解
@@ -147,7 +155,12 @@ func (c *SecurityCollector) Collect() ([]model.SecurityEvent, *model.SecurityBas
 	events = append(events, c.collectProcessAnomalies()...)
 
 	// 5) 安全基线检查
-	baseline := c.collectBaseline()
+	var baseline *model.SecurityBaseline
+	if err := ctx.Err(); err != nil {
+		slog.Warn("安全基线检查被跳过（采集任务已结束）", "err", err)
+	} else {
+		baseline = c.collectBaseline(ctx)
+	}
 
 	// 限流：单周期最多上报 securityMaxEvents 条事件，避免洪峰。
 	if len(events) > securityMaxEvents {
@@ -408,7 +421,7 @@ func (c *SecurityCollector) collectProcessAnomalies() []model.SecurityEvent {
 }
 
 // collectBaseline 执行安全基线检查，输出 0-100 合规评分与逐项结果。
-func (c *SecurityCollector) collectBaseline() *model.SecurityBaseline {
+func (c *SecurityCollector) collectBaseline(ctx context.Context) *model.SecurityBaseline {
 	now := time.Now().UnixMilli()
 	var items []model.SecurityBaselineItem
 
@@ -421,11 +434,11 @@ func (c *SecurityCollector) collectBaseline() *model.SecurityBaseline {
 	items = append(items, mkBaselineItem("ssh_password_auth", "SSH 密码认证已禁用（建议密钥）", passPwd, sevPwd, detailPwd))
 
 	// 3) 防火墙启用
-	passFw, detailFw, sevFw := c.checkFirewall()
+	passFw, detailFw, sevFw := c.checkFirewall(ctx)
 	items = append(items, mkBaselineItem("firewall_enabled", "防火墙已启用", passFw, sevFw, detailFw))
 
 	// 4) fail2ban 运行
-	passF2b, detailF2b, sevF2b := c.checkFail2ban()
+	passF2b, detailF2b, sevF2b := c.checkFail2ban(ctx)
 	items = append(items, mkBaselineItem("fail2ban_running", "fail2ban 入侵防御运行中", passF2b, sevF2b, detailF2b))
 
 	// 5) 空口令账户（需 root 权限，默认开启）
@@ -510,9 +523,9 @@ func (c *SecurityCollector) checkSSHPasswordAuth() (pass bool, detail string, se
 }
 
 // checkFirewall 探测防火墙是否启用（ufw/firewalld/iptables 任一活跃即可）。
-func (c *SecurityCollector) checkFirewall() (pass bool, detail string, sev model.Severity) {
+func (c *SecurityCollector) checkFirewall(ctx context.Context) (pass bool, detail string, sev model.Severity) {
 	if cmdExists("ufw") {
-		if out, err := exec.Command("ufw", "status").Output(); err == nil {
+		if out, err := exec.CommandContext(ctx, "ufw", "status").Output(); err == nil {
 			s := string(out)
 			if strings.Contains(s, "Status: active") {
 				return true, "ufw 已启用", ""
@@ -521,13 +534,13 @@ func (c *SecurityCollector) checkFirewall() (pass bool, detail string, sev model
 		}
 	}
 	if cmdExists("firewall-cmd") {
-		if out, err := exec.Command("firewall-cmd", "--state").Output(); err == nil && strings.TrimSpace(string(out)) == "running" {
+		if out, err := exec.CommandContext(ctx, "firewall-cmd", "--state").Output(); err == nil && strings.TrimSpace(string(out)) == "running" {
 			return true, "firewalld 运行中", ""
 		}
 		return false, "firewalld 未运行", model.SeverityWarning
 	}
 	if cmdExists("iptables") {
-		if out, err := exec.Command("iptables", "-L", "-n").Output(); err == nil {
+		if out, err := exec.CommandContext(ctx, "iptables", "-L", "-n").Output(); err == nil {
 			s := string(out)
 			// 存在非空的默认策略或规则（非全 ACCEPT 且无规则）视为已配置
 			if !strings.Contains(s, "Chain INPUT (policy ACCEPT)") || strings.Count(s, "ACCEPT") != strings.Count(s, "Chain") {
@@ -540,9 +553,9 @@ func (c *SecurityCollector) checkFirewall() (pass bool, detail string, sev model
 }
 
 // checkFail2ban 探测 fail2ban 服务是否运行。
-func (c *SecurityCollector) checkFail2ban() (pass bool, detail string, sev model.Severity) {
+func (c *SecurityCollector) checkFail2ban(ctx context.Context) (pass bool, detail string, sev model.Severity) {
 	if cmdExists("fail2ban-client") {
-		if out, err := exec.Command("fail2ban-client", "status").Output(); err == nil {
+		if out, err := exec.CommandContext(ctx, "fail2ban-client", "status").Output(); err == nil {
 			if strings.Contains(string(out), "Status") {
 				return true, "fail2ban 运行中", ""
 			}
