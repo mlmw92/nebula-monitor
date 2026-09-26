@@ -216,10 +216,6 @@ func main() {
 	// API
 	auditStore := audit.New(filepath.Join(filepath.Dir(*cfgPath), "audit_events.json"))
 	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath, securityStore, defenseStore, auditStore, authStore)
-	// 供 AuthMiddleware 解析多用户授权身份（单例 Server 场景）。
-	if authStore != nil {
-		api.SetAuthStore(authStore)
-	}
 	rest.SetDashboardManager(dashMgr)
 	rest.SetAnalyzer(analyzer)
 	rest.SetPipelineStore(pipelineStore)
@@ -241,12 +237,13 @@ func main() {
 	go offlineChecker(ctx, nodeMgr, 10*time.Second)
 
 	// 认证中间件（启用 auth 时保护 /api/v1/* 业务接口）。
+	// authStore 显式传入（非包级单例），避免多实例部署与测试之间的状态污染。
 	// 注意顺序：AuthMiddleware 必须在 AuditMiddleware 外层，
 	// 由其先解析 token 写入操作者，审计中间件才能取到正确的登录用户。
 	var handler http.Handler = mux
 	if cfg.Auth.Enabled {
 		handler = api.AuditMiddleware(mux, auditStore)
-		handler = api.AuthMiddleware(handler, cfg.Auth)
+		handler = api.AuthMiddleware(handler, cfg.Auth, authStore)
 	}
 
 	srv := &http.Server{

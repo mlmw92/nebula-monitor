@@ -42,9 +42,9 @@ func Principal(r *http.Request) *auth.Principal {
 // 登录失败限流：每个源 IP 在窗口内最多允许 loginLimitMax 次失败，超出返回 429。
 var (
 	// loginMu 保护登录限流状态的并发访问。
-	loginMu       sync.Mutex
+	loginMu sync.Mutex
 	// loginFails 记录各来源 IP 的登录失败计数与窗口起始时间。
-	loginFails    = map[string]*loginAttempt{}
+	loginFails = map[string]*loginAttempt{}
 	// loginLimitMax 窗口内允许的登录失败最大次数，超出返回 429。
 	loginLimitMax = 5
 	// loginLimitWin 登录失败计数的滑动窗口时长。
@@ -158,8 +158,9 @@ func isPublicPath(path string) bool {
 	return false
 }
 
-// AuthMiddleware 校验 token；未启用 auth 则全放行
-func AuthMiddleware(next http.Handler, authCfg config.AuthConfig) http.Handler {
+// AuthMiddleware 校验 token；未启用 auth 则全放行。
+// authStore 显式传入（而非包级单例），避免多实例部署与测试之间的状态污染。
+func AuthMiddleware(next http.Handler, authCfg config.AuthConfig, authStore *auth.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !authCfg.Enabled {
 			next.ServeHTTP(w, r)
@@ -189,8 +190,8 @@ func AuthMiddleware(next http.Handler, authCfg config.AuthConfig) http.Handler {
 			return
 		}
 		// 展开授权身份（多用户模式）：校验用户启用状态与会话版本，实现即时失效。
-		if a := authStoreFromContext(r); a != nil {
-			p := a.GetPrincipal(user)
+		if authStore != nil {
+			p := authStore.GetPrincipal(user)
 			if p == nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
@@ -212,14 +213,33 @@ func AuthMiddleware(next http.Handler, authCfg config.AuthConfig) http.Handler {
 	})
 }
 
-// authStoreFromContext 通过全局注入点获取 authStore（避免改 AuthMiddleware 签名）。
-// 由 SetAuthStore 在启动时设置；认证关闭时为 nil。
-var globalAuthStore *auth.Store
-
-// SetAuthStore 注入全局 authStore 供中间件使用（单例 Server 场景）。
-func SetAuthStore(s *auth.Store) { globalAuthStore = s }
-
-func authStoreFromContext(_ *http.Request) *auth.Store { return globalAuthStore }
+// permit 是业务接口的权限包装器：校验登录用户是否拥有 perm 权限点。
+//
+// 与 authz 的差别在于「未启用登录认证」时的语义：
+//   - authz（权限管理接口）：未启用多用户存储时返回 503——无认证即无权限管理；
+//   - permit（业务接口）：未启用登录认证时直接放行——与开启认证前的行为一致（等效超级管理员）。
+//
+// authStore 仅在 auth.enabled=true 时被注入（见 cmd/server/main.go），
+// 因此 a.authStore == nil 即表示当前未启用登录认证。
+func (a *API) permit(next http.HandlerFunc, perm string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if a.authStore == nil {
+			next(w, r)
+			return
+		}
+		p := Principal(r)
+		if p == nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录或会话已失效"})
+			return
+		}
+		if !p.HasPermission(perm) {
+			RecordPermissionDenied(a.audit, r, p.Username, perm)
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权限执行该操作", "permission": perm})
+			return
+		}
+		next(w, r)
+	}
+}
 
 // authz 是 handler 级授权包装器：校验登录用户是否拥有 perm 权限点。
 // 未启用多用户存储（单管理员/认证关闭）时，权限管理不可用，返回 503。

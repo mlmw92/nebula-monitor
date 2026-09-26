@@ -89,17 +89,17 @@ func (r Role) RoleScope() Scope {
 
 // User 表示一个可登录主体。
 type User struct {
-	Username     string    `yaml:"username" json:"username"`
-	DisplayName  string    `yaml:"display_name" json:"display_name"`
-	PasswordHash string    `yaml:"password_hash" json:"-"`
-	Roles        []string  `yaml:"roles" json:"roles"`
-	Scope        Scope     `yaml:"scope" json:"scope"`
-	Status       string    `yaml:"status" json:"status"`
-	TokenVersion int64     `yaml:"token_version" json:"token_version"`
-	CreatedBy    string    `yaml:"created_by" json:"created_by"`
-	CreatedAt    time.Time `yaml:"created_at" json:"created_at"`
+	Username     string     `yaml:"username" json:"username"`
+	DisplayName  string     `yaml:"display_name" json:"display_name"`
+	PasswordHash string     `yaml:"password_hash" json:"-"`
+	Roles        []string   `yaml:"roles" json:"roles"`
+	Scope        Scope      `yaml:"scope" json:"scope"`
+	Status       string     `yaml:"status" json:"status"`
+	TokenVersion int64      `yaml:"token_version" json:"token_version"`
+	CreatedBy    string     `yaml:"created_by" json:"created_by"`
+	CreatedAt    time.Time  `yaml:"created_at" json:"created_at"`
 	LastLoginAt  *time.Time `yaml:"last_login_at,omitempty" json:"last_login_at,omitempty"`
-	LastLoginIP  string    `yaml:"last_login_ip,omitempty" json:"last_login_ip,omitempty"`
+	LastLoginIP  string     `yaml:"last_login_ip,omitempty" json:"last_login_ip,omitempty"`
 }
 
 // Principal 是请求上下文中的已认证身份（含展开后的权限与范围）。
@@ -194,7 +194,7 @@ type Permission struct {
 // PermissionCatalog 返回全部权限点（按业务域分组）。
 func PermissionCatalog() []permDomain {
 	return []permDomain{
-		{Domain: "仪表盘", Items: []Permission{{"dashboard:read", "查看概览"}}},
+		{Domain: "仪表盘", Items: []Permission{{"dashboard:read", "查看概览"}, {"dashboard:write", "管理自定义仪表盘"}}},
 		{Domain: "主机 / 节点", Items: []Permission{{"nodes:read", "查看主机"}, {"nodes:write", "管理主机"}}},
 		{Domain: "节点分组", Items: []Permission{{"groups:read", "查看分组"}, {"groups:write", "管理分组"}}},
 		{Domain: "告警", Items: []Permission{{"alerts:read", "查看规则"}, {"alerts:write", "管理规则"}}},
@@ -208,6 +208,7 @@ func PermissionCatalog() []permDomain {
 		{Domain: "Agent", Items: []Permission{{"agent:read", "查看"}, {"agent:upgrade", "升级"}}},
 		{Domain: "系统", Items: []Permission{
 			{"system:upgrade", "系统升级"},
+			{"system:config", "系统配置（IP 地理库 / 大屏 / 品牌）"},
 			{"audit:read", "查看审计"},
 			{"audit:export", "导出审计"},
 			{"users:manage", "用户管理"},
@@ -242,10 +243,10 @@ func BuiltinRoles() []Role {
 			Description: "主机、分组、Agent、中间件、拨测、报告与告警运维；不可管理权限模型",
 			ScopeMode:   ScopeGlobal,
 			Permissions: []string{
-				"dashboard:read", "nodes:read", "nodes:write", "groups:read", "groups:write",
+				"dashboard:read", "dashboard:write", "nodes:read", "nodes:write", "groups:read", "groups:write",
 				"middleware:read", "middleware:write", "probe:read", "probe:write",
 				"report:read", "report:export", "metrics:export", "agent:read", "agent:upgrade",
-				"alerts:read", "roles:read",
+				"alerts:read", "roles:read", "system:config",
 			},
 		},
 		{

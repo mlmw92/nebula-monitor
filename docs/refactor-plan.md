@@ -378,6 +378,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | 2026-09-26 | **直编改 YAML**：引入 `js-yaml`（v4 具名导入），直编面板改为与服务端落盘同格式的 YAML，新增语法检查与类型规整（`str/toArray/asArray/whenOrNull`）。`npm run build` 通过 |
 | 2026-09-26 | **F2 完成**：README 统一「十类」、路线图移除已实现的 RBAC 前端页并新增「权限管理界面」小节、API 章节按代码重写（44 行 → 127 行，修正 `docker/containers` 错路径，双向差集为空）；`vite.config.js` / `release.sh` 三处 embed 表述修正；Makefile `build-web` 改为调用 `build/build-web.sh` |
 | 2026-09-26 | **B1 完成**：产出 `docs/permission-matrix.md`（126 条路由逐条映射、7 条兼容策略、5 批实施顺序、7 项开放问题）；校正现状 authz 覆盖为 **14 条**（原记 16）；发现 `/ws` 存在 topic 级授权与范围校验缺口。**批次一全部完成** |
+| 2026-09-26 | **批次二启动：B1 批次 A（基础设施）完成**：新增 `dashboard:write` / `system:config` 权限点并补齐内置角色；新增 `api.API.permit(next, perm)`（未启用认证放行 / 未登录 401 / 缺权限 403 + 授权拒绝审计）；移除 `globalAuthStore` 包级单例，`AuthMiddleware` 改为显式传参。新增 11 个单测，全量测试绿 |
 
 ---
 

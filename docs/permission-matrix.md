@@ -1,7 +1,17 @@
 # 权限矩阵设计（路由 → 权限点 → 资源范围）
 
-> 本文为 B1 改造的设计件（不含代码改动），用于评审后再进入实施。
+> 本文为 B1 改造的设计件，用于评审后进入实施。
 > 事实基线：VERSION 1.23.7；路由清点自 `internal/server/api/query.go` 的 `RegisterRoutes`（121 条）加 `ws.go`（1）、`spa.go`（1）、`cmd/server/main.go`（1）、`internal/server/agentdist/agentdist.go`（2），合计 **126 条**。
+
+## 实施状态
+
+| 批次 | 状态 | 已落地内容 |
+|---|---|---|
+| **A｜基础设施** | ✅ 已完成 | 新增 `dashboard:write`、`system:config` 两个权限点并补齐内置角色；新增 `api.API.permit(next, perm)` 业务接口权限包装器（未启用认证放行 / 未登录 401 / 缺权限 403 + 授权拒绝审计）；去除 `globalAuthStore` 包级单例，`AuthMiddleware` 改为显式接收 `*auth.Store`；11 个单元测试 |
+| B｜主机与指标（含 `/ws`） | ⬜ 待实施 | — |
+| C｜中间件 | ⬜ 待实施 | — |
+| D｜告警与通知 | ⬜ 待实施 | — |
+| E｜安全、系统与其余 | ⬜ 待实施 | — |
 
 ---
 
@@ -295,8 +305,9 @@
 
 ## 8. 开放问题与风险
 
-### 8.1 `globalAuthStore` 包级单例
-`internal/server/api/auth.go:217` 的 `globalAuthStore` 与 `SetAuthStore` 是包级单例，测试之间会互相污染，且与 **A1（Server 高可用）** 议题直接冲突（多实例下 Principal 解析依赖实例内状态）。建议在批次 A 一并改造为显式注入（`API` 结构体字段），该改动同时降低 A1 的实施成本。
+### 8.1 `globalAuthStore` 包级单例 —— 已在批次 A 解决
+原 `internal/server/api/auth.go` 的 `globalAuthStore` / `SetAuthStore` / `authStoreFromContext` 是包级单例，测试之间会互相污染，且与 **A1（Server 高可用）** 议题直接冲突（多实例下 Principal 解析依赖实例内状态）。
+批次 A 已改为 `AuthMiddleware(next, cfg, *auth.Store)` 显式传参（`cmd/server/main.go` 同步调整），包级单例已移除，A1 的实施障碍相应减少。
 
 ### 8.2 WebSocket 授权缺口（当前已存在）
 `/ws` 已通过 Cookie 兜底完成**认证**，但**没有 topic 级授权与范围校验**：任何已登录用户都能 `GET /ws?topic=metrics&node=<任意节点>` 订阅任意节点实时指标，绕过节点分组资源范围。批次 B 需补：`topic` 合法性校验 + `nodes:read`/`alerts:read` + 节点归属分组校验。
