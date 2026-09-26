@@ -1,0 +1,66 @@
+name: CI
+
+# 日常提交/PR 的质量门禁（发布流程的门禁另见 release.yml）。
+# 目标：让「测试不通过」在合并前就暴露，而不是等到出包时。
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go vet & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          # 必须与 go.mod 的 go 指令一致
+          go-version: '1.25'
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test -count=1 ./...
+
+      # 采集器并发是 E1 改造的核心，竞态必须显式覆盖（本机 Windows 无 cgo，只能在 Linux 跑）
+      - name: go test -race（Agent 采集并发关键路径）
+        run: go test -race -count=1 ./internal/agent/...
+
+  web:
+    name: Web build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install deps
+        working-directory: web
+        run: npm ci
+
+      - name: Build（含 version:sync，会校验 VERSION 能否被前端读取）
+        working-directory: web
+        run: npm run build
+
+      - name: Unit tests（Vitest）
+        working-directory: web
+        run: npm test

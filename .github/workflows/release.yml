@@ -59,15 +59,25 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          # 必须与 go.mod 的 go 指令一致：低于该版本无法构建本模块
+          go-version: '1.25'
           cache: true
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
+
+      # 发布门禁：测试不通过则不出包（此前本 workflow 无任何测试步骤）
+      - name: Go vet & test（发布门禁）
+        run: |
+          go vet ./...
+          go test -count=1 ./...
+
+      - name: Go race 检测（并发关键路径）
+        run: go test -race -count=1 ./internal/agent/...
 
       - name: Build binaries (server + agent, 3 archs)
         run: bash build/cross-compile.sh

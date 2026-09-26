@@ -20,4 +20,10 @@ export default defineConfig({
       '/ws': { target: 'ws://localhost:8080', ws: true, changeOrigin: true },
     },
   },
+  // 单元测试配置（Vitest 与构建共用同一份配置）。
+  // Vitest 2.x 与 Vite 5 兼容；Vitest 3+ 要求 Vite 6+，升级前请同步升 Vite。
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.js'],
+  },
 })

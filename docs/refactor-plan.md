@@ -369,9 +369,9 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | D1 | | 2. 组内按严重度与依赖排序，推选头部告警 + N 条摘要 | ⬜ | — | — |
 | D1 | | 3. 附注 `analysis/correlation.go` 的关联结论 | ⬜ | — | — |
 | D1 | | 4. 参数热生效 + 测试 | ⬜ | — | — |
-| F1 | 测试体系补齐 | 1. Go 高价值单测（remote_write 编码 / `buildExpr` 注入防护 / firing 状态机 / 鉴权中间件 / SM2·SM3·SM4） | 🟨 | — | 本会话已随 E1/D2/B1 累计新增约 55 个用例，但上述 5 条仍未被系统性覆盖 |
-| F1 | | 2. 前端引入 Vitest（`api/http.js` + 2-3 个关键组件） | ⬜ | — | 前端仍为零自动化测试 |
-| F1 | | 3. CI 将 `go test ./...` 设为发布门禁 | ⬜ | — | `release.sh` 现无测试门禁 |
+| F1 | 测试体系补齐 | 1. Go 高价值单测（remote_write 编码 / `buildExpr` 注入防护 / firing 状态机 / 鉴权中间件 / SM2·SM3·SM4） | ✅ | — | 5 个目标点全部落地：`storage/writer_test.go`（protobuf **逐字节 wire 断言** + varint 边界 + 分组/重试策略）、`storage/buildexpr_test.go`（注入转义 + 白名单边界）、`alert/engine_state_test.go`（去重键 / 活跃索引 / 抑制链路 / 重启恢复）、`api/token_test.go`（token 往返/篡改/过期 + `AuthMiddleware` 四条 401 分支与 Cookie 兜底）、`agent·server/crypto` 错误分支与随机化 |
+| F1 | | 2. 前端引入 Vitest | ✅ | — | `vitest@2.1.9`（须与 Vite 5 配套；Vitest 3+ 要求 Vite 6+）+ jsdom；覆盖 `api/http.js`（9 用例：token 注入 / 401 失效 / 错误文案提取）与 `useAuth` 权限语义（5 用例）；`npm test` 已接入。**未做组件级测试**（Element Plus 组件需全局插件注册，留待后续） |
+| F1 | | 3. CI 将 `go test ./...` 设为发布门禁 | ✅ | — | 新增 `.github/workflows/ci.yml`（push/PR：go vet + build + test + `-race` + 前端构建与单测）；`release.yml` 增加发布门禁 step，并**修正其 `go-version: 1.22` → `1.25`**（与 `go.mod` 的 `go 1.25` 不一致，原值会让发布因版本不足直接失败） |
 | D4 | 告警认领与协作 | 1. `AckStore` 扩展为 pending / ack / closed 状态机 | ⬜ | — | — |
 | D4 | | 2. 评论与指派（复用 `audit` 记录） | ⬜ | — | — |
 | D4 | | 3. 前端处置流 | ⬜ | — | — |
@@ -442,6 +442,8 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | 2026-09-26 | **B1 批次 E（安全、系统与其余）完成，B1 实施全部收尾**：37 条路由挂权限点 + **新增 `GET /api/v1/audit/export`**（按设计件 8.3 拆分「查看/导出」）；安全事件、基线、防护状态与任务列表按节点范围过滤；`permitNode` 扩展支持 `{node}` 路径参数；前端审计导出改调新路由，8 个菜单与 6 条路由补 `perm`。新增 4 个测试（含 12 个权限点区分用例）；既有审计鉴权测试迁移到 `permit` 层并加强。README API 表同步新增路由（127 条）。**五个子批次 A~E 全部完成** |
 | 2026-09-26 | **进度追踪补全**：批次二 / 批次三由占位表展开为逐子项追踪表（批次二 27 行、批次三 9 行、待办 4 行）；新增「版本与发布」现状表，明确 `VERSION` 仍为 `1.23.7`、本批未递增版本号；修正批次一中两处把计划版本当作实际版本的表述 |
 | 2026-09-26 | **版本递增**：按决策将 E1/D2/F2/B1（含子批次 A~E）整批合并递增为 **`1.24.0`**（次版本号递增：已启用认证部署的运行时行为变更 + 新增 1 条路由与 2 个权限点）；前端版本号经 `npm run version:sync` 同步为 `1.24.0`。原计划的分次递增（1.23.8 / 1.23.9）未执行，第 6 节执行顺序图与第 8 节「版本与发布」表已同步实际结果。打包仍待明确指示 |
+| 2026-09-26 | **打包**：`build/release.sh` 组装出 `nebula-monitor-v1.24.0-full.tar.gz`（138 MB）与 `-upgrade.tar.gz`（66 MB）；包内 `manifest.json` 版本、二进制注入版本、前端 `WEB_VERSION` 均为 `1.24.0`，包内 `SHA256SUMS` 逐条校验通过；未执行任何部署/升级 |
+| 2026-09-26 | **F1 完成**：Go 侧补齐 5 个目标点单测（storage 编码与注入防护、告警状态机、鉴权 token、两处国密错误分支）；前端引入 Vitest（`api/http.js` + `useAuth`，14 用例）；新增 `ci.yml` 并把测试设为 `release.yml` 发布门禁；顺带修正 `release.yml` 的 Go 版本（1.22 → 1.25，与 go.mod 一致）。全量 Go 测试与前端构建均绿 |
 
 ---
 
