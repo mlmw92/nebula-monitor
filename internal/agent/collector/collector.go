@@ -8,6 +8,7 @@ import (
 	"github.com/shirou/gopsutil/v4/host"
 
 	"github.com/nebula/monitor/internal/agent/config"
+	"github.com/nebula/monitor/internal/agent/template"
 	"github.com/nebula/monitor/internal/model"
 )
 
@@ -36,6 +37,11 @@ type Collector struct {
 	mongo       *MongoDBCollector
 	fastdfs     *FastDFSCollector
 	security    *SecurityCollector
+
+	// templates 是采集项模板配置（阶段一：prometheus-exporter / http-json / http-text）。
+	// 为空时 tasks() 不追加任何任务，与改造前完全等价（阶段一最重要的回归保证）。
+	templates      []template.Config
+	templateRunner *TemplateRunner
 }
 
 // New 创建 Collector。
@@ -53,6 +59,7 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	portChecks []string,
 	securityCfg config.SecurityConfig,
 	collectTimeout time.Duration,
+	templates []template.Config,
 ) *Collector {
 	c := &Collector{
 		node:    node,
@@ -102,6 +109,11 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	}
 	if cfg.Security {
 		c.security = NewSecurityCollector(node, primaryIP(), securityCfg)
+	}
+	// 模板不设独立开关：配置了模板即启用；为空则 tasks() 不追加任务（零行为变化）。
+	if len(templates) > 0 {
+		c.templates = templates
+		c.templateRunner = NewTemplateRunner(node)
 	}
 	return c
 }
@@ -169,7 +181,6 @@ func (c *Collector) CollectCtx(ctx context.Context) ([]model.Metric, []model.Pro
 	}
 	return metrics, procs
 }
-
 
 // CollectSecurity 采集安全事件与基线检查结果（等价于 CollectSecurityCtx(context.Background())）。
 // 返回该节点的安全事件列表与基线评分（可为 nil，表示未启用安全采集）。

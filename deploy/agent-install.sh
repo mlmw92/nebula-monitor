@@ -555,6 +555,47 @@ $( [[ -n "$LABELS_YAML" ]] && printf 'labels:\n%s' "$LABELS_YAML" )
 # portChecks:
 #   - "80"
 #   - "443"
+
+# ==================== 采集项模板示例（新增中间件无需改代码：拉取 HTTP 端点并映射为指标）====================
+# 适用对象：各类 exporter 或自研服务暴露的 Prometheus / JSON / 纯文本端点。三种 kind：
+#   prometheus-exporter（Prometheus 文本）｜http-json（JSON 路径取值）｜http-text（正则抓取）
+# 生效方式：改完重启 Agent；配置非法会拒绝启动并打印全部原因（不做静默跳过）。
+# 可见范围：模板指标可在「指标浏览」与自定义仪表盘查询；但不会出现在中间件 Tab、首页概览、
+#           巡检报告与「服务离线」告警中（那属于后续版本要做的「模板 → 中间件类型」注册）。
+# templates:
+#   - id: rabbitmq                     # 唯一标识，同时作为指标名前缀与 template 标签；不得与既有指标族前缀冲突
+#     title: RabbitMQ                  # 展示名（当前仅用于日志）
+#     kind: prometheus-exporter
+#     targets:
+#       - instance: mq-01:15692        # 写入 instance 标签；留空则取 addr 的 host:port
+#         addr: http://127.0.0.1:15692/metrics
+#         # headers: { Accept: "text/plain" }
+#         # auth:                       # 凭据支持 enc: 密文（与中间件实例密码共用 cryptoKey，且永不上报 Server）
+#         #   basic: { user: monitor, password: "enc:xxxx" }
+#     rules:
+#       keep: "^rabbitmq_"             # 只保留匹配的指标名（正则，可选）
+#       drop: "_bucket$|_sum$|_count$" # 丢弃匹配的指标名（先 keep 后 drop，可选）
+#       rename:                        # 指标改名（支持正则反向引用）
+#         - { match: "^rabbitmq_queue_messages$", to: "rabbitmq_queue_depth" }
+#       labels: { cluster: prod }      # 追加静态标签（不得覆盖 node/instance/group/template）
+#       unlabel: ["job", "namespace"]  # 删除响应自带的标签
+#   - id: ownapp                       # JSON 端点：path 支持 a.b[0].c 形式
+#     kind: http-json
+#     targets:
+#       - { instance: app-01:8081, addr: "http://127.0.0.1:8081/stats" }
+#     rules:
+#       metrics:
+#         - { name: ownapp_requests_total, path: "http.requests.total" }
+#       labels: { env: prod }
+#   - id: customtext                   # 纯文本端点：按正则抓取（取第 1 个捕获组）
+#     kind: http-text
+#     targets:
+#       - { instance: web-01, addr: "http://127.0.0.1/status" }
+#     rules:
+#       metrics:
+#         - { name: customtext_active_conns, pattern: 'Active connections:\s+(\d+)' }
+# 每轮每个 target 都会产出 template_target_up（1=拉取并解析成功；0=失败，且失败时不产出其它指标，
+# 以免上一轮的值被误读为当前值）。上限：模板 ≤20、单模板 target ≤32、单轮单模板产出 ≤2000 条。
 EOF
   c_ok "配置已写入: $CONFIG_DIR/agent.yaml"
 }

@@ -67,7 +67,7 @@ func (c *Collector) tasks(res *Result, mu *sync.Mutex) []collectTask {
 		mu.Unlock()
 	}
 
-	return []collectTask{
+	tasks := []collectTask{
 		{name: "host", run: func(ctx context.Context) error {
 			m, procs := c.CollectCtx(ctx)
 			addMetrics(m)
@@ -194,4 +194,19 @@ func (c *Collector) tasks(res *Result, mu *sync.Mutex) []collectTask {
 			return nil
 		}},
 	}
+
+	// 采集项模板：每个模板一个任务，直接继承 per-task 超时与失败隔离
+	// （一个模板卡住/写坏不应拖累其它模板与主机采集）。
+	// templates 为空时不追加任何任务——无模板配置的节点与改造前完全等价。
+	for _, tpl := range c.templates {
+		tpl := tpl
+		if c.templateRunner == nil {
+			break
+		}
+		tasks = append(tasks, collectTask{name: "template:" + tpl.ID, run: func(ctx context.Context) error {
+			addMetrics(c.templateRunner.CollectTemplate(ctx, tpl))
+			return nil
+		}})
+	}
+	return tasks
 }

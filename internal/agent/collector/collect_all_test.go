@@ -32,7 +32,7 @@ func newTestCollector(t *testing.T, timeout time.Duration) *Collector {
 	cfg := config.CollectorToggle{CPU: true, Memory: true, Disk: true}
 	return New("test-node", "default", nil, cfg,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		config.SecurityConfig{}, timeout)
+		config.SecurityConfig{}, timeout, nil)
 }
 
 // TestCollectAll_TaskListIsComplete 断言任务清单完整，且防火墙规则与状态被合并为单个任务

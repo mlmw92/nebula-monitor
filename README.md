@@ -742,6 +742,87 @@ redisInstances:
 | `sentinelName` | 哨兵必填 | sentinel 模式监控的 master 名称 |
 | `exporterURL` | exporter 必填 | Prometheus exporter 的 `/metrics` URL；**一旦填写即走 exporter 拉取模式，忽略直连** |
 
+#### 采集项模板（`templates`）：新增一类指标不改 Go 代码
+
+需要监控的中间件/自研服务如果已经暴露了 **Prometheus 指标端点、JSON 接口或纯文本页面**，
+就不必等新版本支持——在 `agent.yaml` 里写一个模板即可采集上报。适用对象举例：
+RabbitMQ（`:15692/metrics`）、ClickHouse（`:9363/metrics`）、Etcd（`:2379/metrics`）、
+ZooKeeper（exporter）、Elasticsearch（`_nodes/stats`）、Nacos（`/metrics`）等。
+
+三种取数方式：
+
+| `kind` | 取数方式 | 取值规则 |
+|---|---|---|
+| `prometheus-exporter` | 拉取 Prometheus 文本 | 指标名直接来自响应，用 `keep`/`drop`/`rename` 收窄与改名 |
+| `http-json` | 拉取 JSON | `rules.metrics[].path`，支持 `a.b[0].c` |
+| `http-text` | 拉取纯文本 | `rules.metrics[].pattern`，取第 1 个捕获组 |
+
+```yaml
+templates:
+  - id: rabbitmq                     # 唯一标识，同时作为指标名前缀与 template 标签
+    title: RabbitMQ
+    kind: prometheus-exporter
+    targets:
+      - instance: mq-01:15692        # 写入 instance 标签；留空则取 addr 的 host:port
+        addr: http://127.0.0.1:15692/metrics
+        # headers: { Accept: "text/plain" }
+        # auth:                       # 凭据支持 enc: 密文（与中间件实例密码共用 cryptoKey，永不上报 Server）
+        #   basic: { user: monitor, password: "enc:xxxx" }
+      - instance: mq-02:15692
+        addr: http://10.0.0.12:15692/metrics
+    rules:
+      keep: "^rabbitmq_"             # 只保留匹配的指标名（正则，可选）
+      drop: "_bucket$|_sum$|_count$" # 丢弃匹配的指标名（先 keep 后 drop，可选）
+      rename:
+        - { match: "^rabbitmq_queue_messages$", to: "rabbitmq_queue_depth" }
+      labels: { cluster: prod }      # 追加静态标签
+      unlabel: ["job", "namespace"]  # 删除响应自带的标签
+
+  - id: ownapp                       # JSON 端点
+    kind: http-json
+    targets:
+      - { instance: app-01:8081, addr: "http://127.0.0.1:8081/stats" }
+    rules:
+      metrics:
+        - { name: ownapp_requests_total, path: "http.requests.total" }
+        - { name: ownapp_queue_depth, path: "worker.queue.size" }
+      labels: { env: prod }
+
+  - id: customtext                   # 纯文本端点
+    kind: http-text
+    targets:
+      - { instance: web-01, addr: "http://127.0.0.1/status" }
+    rules:
+      metrics:
+        - { name: customtext_active_conns, pattern: 'Active connections:\s+(\d+)' }
+```
+
+**产出与可见范围**
+
+- 指标名 = `id` + `_` + 响应中的原名（原名已带该前缀时不重复添加）。
+- 每轮每个 target 都会产出 `template_target_up`：`1` 表示拉取并解析成功，`0` 表示失败。
+  **失败时不产出该 target 的其它指标**——避免上一轮的值被误读为当前值，也让「静默无数据」可见。
+  采集失败会打 WARN 日志（含模板 id、instance、URL，不含凭据与响应体）。
+- 标签：除响应自带标签外，额外注入 `node`（本机主机名）、`instance`（target）、`template`（模板 id），
+  这三个标签与静态标签 `labels` 中的保留名（`node`/`instance`/`group`/`template`）不可被覆盖。
+- 模板指标可在**「指标浏览」与自定义仪表盘**中查询；但**不会**出现在中间件 Tab、首页概览、
+  巡检报告与「服务离线」告警中（这需要「模板 → 中间件类型」注册能力，属后续版本）。
+
+**约束与安全边界**
+
+| 项 | 说明 |
+|---|---|
+| 协议白名单 | 仅 `http` / `https`（拒绝 `file://` 等） |
+| 启动校验 | 配置非法**拒绝启动并一次打印全部原因**（id 格式/重复/互为前缀、保留前缀冲突、正则不合法、标签越权、缺 `path`/`pattern` 等），不会静默跳过 |
+| 上限 | 模板 ≤ 20（每模板一个采集任务）、单模板 target ≤ 32、单轮单模板产出 ≤ 2000 条（超出截断并告警）、单指标标签 ≤ 16、标签值 ≤ 128 字节、响应体 ≤ 8 MiB |
+| 独立周期 | 暂不支持（`interval` 仅接受 `0`，即跟随全局采集间隔；非 0 会告警并忽略） |
+| 凭据 | `auth` 三种方式（`basic` / `bearer` / `header`）至多启用一种；密码/token 不打 JSON 标签，**永不进入上报体**，日志也不回显 |
+| 隔离 | 每个模板是独立采集任务，单模板卡住/失败不影响其它模板与主机采集 |
+
+> 注意 `id` 不得与既有指标族前缀冲突（`cpu_`/`mem_`/`redis_`/`mysql_`/`nginx_`/`kafka_`/`docker_`/
+> `rocketmq_`/`k8s_`/`mongodb_`/`fastdfs_`/`template_`/`self_`/`proxy_` 等），也不得与其它模板 `id` 互为前缀
+> ——否则指标名无法分辨来源，启动时即被拒绝。
+
 #### 采集高可用：Agent 冗余部署（避免单点故障）
 
 中间件采集依赖部署在某台机器上的 Agent。**如果只装了一台 Agent，它所在的服务器宕机或进程退出，则该 Agent 负责采集的所有 Redis 实例（含整个集群）监控数据全部中断**——Redis 本身照常运行，只是监控出现盲区（前端显示"未采集"/离线，该 Agent 节点被 Server 标为 offline）。

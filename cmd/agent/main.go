@@ -31,9 +31,9 @@ const pidFile = "/var/run/monitor-agent.pid"
 // 受控 fail2ban 入侵防御相关全局组件（agent 单例）。
 var (
 	// defenseExec 受控 fail2ban 入侵防御执行器单例。
-	defenseExec   = defense.NewExecutor()
+	defenseExec = defense.NewExecutor()
 	// banCollector 封禁事件采集器单例。
-	banCollector  = defense.NewBanEventCollector()
+	banCollector = defense.NewBanEventCollector()
 	// pendingResult 已执行指令的结果，将在下一次 report 带回服务端。
 	pendingResult *model.DefenseCommandResult
 )
@@ -115,31 +115,70 @@ func main() {
 		cfg.RocketMQInstances, cfg.K8sInstances, cfg.MongoDBInstances, cfg.FastDFSInstances,
 		cfg.PortChecks, cfg.Security,
 		time.Duration(cfg.CollectTimeout)*time.Second,
+		cfg.Templates,
 	)
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
 	// 构建已开启的采集器列表
 	var enabledCollectors []string
 	cs := cfg.Collectors
-	if cs.CPU { enabledCollectors = append(enabledCollectors, "cpu") }
-	if cs.Memory { enabledCollectors = append(enabledCollectors, "memory") }
-	if cs.Disk { enabledCollectors = append(enabledCollectors, "disk") }
-	if cs.Network { enabledCollectors = append(enabledCollectors, "network") }
-	if cs.Process { enabledCollectors = append(enabledCollectors, "process") }
-	if cs.Load { enabledCollectors = append(enabledCollectors, "load") }
-	if cs.Redis { enabledCollectors = append(enabledCollectors, "redis") }
-	if cs.MySQL { enabledCollectors = append(enabledCollectors, "mysql") }
-	if cs.Postgres { enabledCollectors = append(enabledCollectors, "postgres") }
-	if cs.Nginx { enabledCollectors = append(enabledCollectors, "nginx") }
-	if cs.NginxLog { enabledCollectors = append(enabledCollectors, "nginxLog") }
-	if cs.Kafka { enabledCollectors = append(enabledCollectors, "kafka") }
-	if cs.Docker { enabledCollectors = append(enabledCollectors, "docker") }
-	if cs.RocketMQ { enabledCollectors = append(enabledCollectors, "rocketmq") }
-	if cs.K8s { enabledCollectors = append(enabledCollectors, "k8s") }
-	if cs.MongoDB { enabledCollectors = append(enabledCollectors, "mongodb") }
-	if cs.FastDFS { enabledCollectors = append(enabledCollectors, "fastdfs") }
-	if cs.Port { enabledCollectors = append(enabledCollectors, "port") }
-	if cs.Security { enabledCollectors = append(enabledCollectors, "security") }
+	if cs.CPU {
+		enabledCollectors = append(enabledCollectors, "cpu")
+	}
+	if cs.Memory {
+		enabledCollectors = append(enabledCollectors, "memory")
+	}
+	if cs.Disk {
+		enabledCollectors = append(enabledCollectors, "disk")
+	}
+	if cs.Network {
+		enabledCollectors = append(enabledCollectors, "network")
+	}
+	if cs.Process {
+		enabledCollectors = append(enabledCollectors, "process")
+	}
+	if cs.Load {
+		enabledCollectors = append(enabledCollectors, "load")
+	}
+	if cs.Redis {
+		enabledCollectors = append(enabledCollectors, "redis")
+	}
+	if cs.MySQL {
+		enabledCollectors = append(enabledCollectors, "mysql")
+	}
+	if cs.Postgres {
+		enabledCollectors = append(enabledCollectors, "postgres")
+	}
+	if cs.Nginx {
+		enabledCollectors = append(enabledCollectors, "nginx")
+	}
+	if cs.NginxLog {
+		enabledCollectors = append(enabledCollectors, "nginxLog")
+	}
+	if cs.Kafka {
+		enabledCollectors = append(enabledCollectors, "kafka")
+	}
+	if cs.Docker {
+		enabledCollectors = append(enabledCollectors, "docker")
+	}
+	if cs.RocketMQ {
+		enabledCollectors = append(enabledCollectors, "rocketmq")
+	}
+	if cs.K8s {
+		enabledCollectors = append(enabledCollectors, "k8s")
+	}
+	if cs.MongoDB {
+		enabledCollectors = append(enabledCollectors, "mongodb")
+	}
+	if cs.FastDFS {
+		enabledCollectors = append(enabledCollectors, "fastdfs")
+	}
+	if cs.Port {
+		enabledCollectors = append(enabledCollectors, "port")
+	}
+	if cs.Security {
+		enabledCollectors = append(enabledCollectors, "security")
+	}
 
 	slog.Info("Agent 启动", "node", cfg.Node, "server", cfg.ServerURL, "interval", cfg.Interval, "version", version.Version, "collectors", enabledCollectors)
 

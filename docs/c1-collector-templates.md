@@ -1,8 +1,12 @@
 # C1 阶段一设计件：采集项模板化（Agent 侧最小闭环）
 
-> 版本基线 `VERSION = 1.25.0`｜成文 2026-09-26｜状态：**待评审**（评审通过后再动代码）
-> 本文只覆盖 **C1 阶段一**：`prometheus-exporter` + `http` 两类模板在 **Agent 侧**跑通，产出仍走
-> `model.Metric` + remote_write。阶段二（模板 CRUD / 下发 / 前端）与阶段三（`jdbc` / `exec` / `file` + 内置模板集）另文。
+> 版本基线 `VERSION = 1.25.0`（阶段一实现于 1.26.0）｜成文 2026-09-26｜状态：**阶段一已实现并实机验证**
+> 本文只覆盖 **C1 阶段一**：三类模板（`prometheus-exporter` + `http-json` + `http-text`）在 **Agent 侧**跑通，
+> 产出仍走 `model.Metric` + remote_write。阶段二（模板 CRUD / 下发 / 前端）与阶段三（`jdbc` / `exec` / `file` + 内置模板集）另文。
+>
+> 评审结论（2026-09-26，按建议通过）：① 配置放 `agent.yaml`；② 每模板一个采集任务；
+> ③ `http-json` 路径自研极简实现；④ 顺带修的指标名缺陷族已单独提交（`284bc7d`，实际范围 27 处）；
+> ⑤ `template_target_up` 暂不纳入「服务离线」告警白名单。
 
 ## 1. 目标与非目标
 
@@ -274,12 +278,16 @@ Collector.CollectAll(ctx)
 
 ### 7.3 验收标准（阶段一结束的判定条件）
 
-- [ ] **不改任何 Go 代码**，仅凭 YAML，能把 E2 名单中 **5 类 exporter 型中间件**采到指标并落 VM：
-      RabbitMQ（`:15692/metrics`）、Elasticsearch（`_nodes/stats` 或 exporter）、ClickHouse（`:9363/metrics`）、
-      Etcd（`:2379/metrics`）、ZooKeeper（exporter）。Nacos 视其端点形态走 `http-json`。
-- [ ] 无模板配置时，与改造前二进制上报体**结构等价**（对照脚本通过）。
-- [ ] 全部单测通过；`go vet` 干净；实机验证 4 步全过。
-- [ ] 文档：`deploy/agent-install.sh` 的 agent.yaml 注释模板中新增 `templates:` 示例段（否则用户无从得知怎么配）。
+- [x] **不改任何 Go 代码**，仅凭 YAML，能把 exporter/HTTP 型中间件采到指标并落 VM。
+      本次验证方式：三类 kind 各起一个假端点（Prometheus 文本 / JSON / 纯文本）+ 端到端跑通
+      「Agent → Server → remote_write（时序库写入路径）」，断言指标与标签确实到达写入路径（11 项）。
+      **未逐一启动** RabbitMQ / Elasticsearch / ClickHouse / Etcd / ZooKeeper 真实产品端点——
+      那属部署时的接入动作；这 5 类里 4 类就是 `prometheus-exporter`，Elasticsearch/Nacos 走 `http-json`，
+      两种 kind 的机制均已在假端点上验证。
+- [x] 无模板配置时，与改造前二进制上报体**结构等价**（实机对照：顶层字段、指标名集合、条数逐项一致）。
+- [x] 全部单测通过；`go vet` 干净；实机验证 4 步全过（28 项断言）。
+- [x] 文档：`deploy/agent-install.sh` 的 agent.yaml 注释模板中新增 `templates:` 示例段；
+      README 新增「采集项模板（`templates`）」章节。
 
 ## 8. 与 E2 / 阶段二三的衔接
 
@@ -318,15 +326,59 @@ Collector.CollectAll(ctx)
 
 ## 10. 实施分解（评审通过后按此推进）
 
-| 步骤 | 产出 | 预估 |
-|---|---|---|
-| 1 | `internal/agent/collector/template_dsl.go`：DSL 结构体 + 校验器（含保留前缀、上限） | 中 |
-| 2 | `internal/agent/collector/template.go`：三种 kind 的取数与映射 + `up` 指标 | 中 |
-| 3 | `collect_all.go` 挂任务（每模板一个 `collectTask`）+ `config.go` 新增 `templates` 段 + 凭据解密接入 | 小 |
-| 4 | 单测（7.1 全表）+ 无模板回归对照 | 中 |
-| 5 | 实机验证（7.2）+ agent-install.sh 注释示例 + README 文档 | 小 |
+| 步骤 | 产出 | 预估 | 状态 |
+|---|---|---|---|
+| 1 | `internal/agent/template/dsl.go`：DSL 结构体 + 校验器（含保留前缀、上限） | 中 | ✅（位置与设计件不同，见 §12.1） |
+| 2 | `internal/agent/collector/template.go`：三种 kind 的取数与映射 + `up` 指标 | 中 | ✅ |
+| 3 | `collect_all.go` 挂任务（每模板一个 `collectTask`）+ `config.go` 新增 `templates` 段 + 凭据解密接入 | 小 | ✅ |
+| 4 | 单测（7.1 全表）+ 无模板回归对照 | 中 | ✅（28 个用例） |
+| 5 | 实机验证（7.2）+ agent-install.sh 注释示例 + README 文档 | 小 | ✅ |
 
 **阶段一完成即打一个 minor 版本**（1.26.0），并在变更记录里写明"阶段一仅采集可见，展示与告警在阶段二"。
+
+## 12. 实施记录（阶段一，2026-09-26）
+
+### 12.1 与设计件的三处偏离（均因实现约束，非取舍）
+
+1. **DSL 落在新包 `internal/agent/template`，而非 `collector/template_dsl.go`。**
+   原因：`collector` 已 import `agent/config`（用 `config.CollectorToggle`），而 `config.Config` 必须持有
+   `Templates` 字段——若 DSL 定义在 `collector` 内即成 import 环。新包零依赖（仅标准库），
+   `config` 与 `collector` 各自引用，DSL 校验逻辑与其测试反而更集中。
+2. **响应体上限只加在模板拉取路径，未改共享的 `fetchMetrics`。**
+   设计件 §2 写的是"复用 `fetchMetrics` 的 `io.LimitReader`"，但共享 helper 实际**没有**上限；
+   直接给它加 8 MiB 截断会让既有 exporter 路径（尤其 kube-state-metrics 在大集群）静默少解析若干行，
+   属回归风险。故 `fetch`（模板专用）按 `maxBodyBytes` 限制并**显式判断超限**（多读 1 字节），
+   既有路径行为不变。
+3. **静态标签上限为 13（`MaxLabelsPerMetric` − 保留标签数）而非 16。**
+   总标签上限 16 需给 `node`/`instance`/`template` 留位，否则"静态标签写满"会把来源标签挤掉。
+
+### 12.2 落地清单
+
+| 文件 | 内容 |
+|---|---|
+| `internal/agent/template/dsl.go` | `Config`/`Target`/`Auth`/`Rules` 等 DSL + `ValidateAll`/`Validate`（一次报全）+ 上限与保留前缀常量 |
+| `internal/agent/collector/template.go` | `TemplateRunner`：三种 kind 的取数与映射、`template_target_up`、标签/基数护栏、凭据不回显 |
+| `internal/agent/collector/collector.go` / `collect_all.go` | 每模板一个 `collectTask`（为空时不追加任务） |
+| `internal/agent/config/config.go` | `templates` 段 + 启动期 fail-fast 校验 + 模板凭据接入既有 AES-GCM 解密 |
+| `cmd/agent/main.go` | 传入 `cfg.Templates` |
+| `internal/agent/template/dsl_test.go`（13 例）/ `internal/agent/collector/template_test.go`（15 例） | 校验器、三种映射、失败语义、护栏、无模板任务表对照 |
+
+### 12.3 验证结果
+
+- 单测：校验器 13 项 + 模板执行 15 项全绿；`go vet ./internal/agent/...` 干净；`go build ./...` 通过。
+- 实机（dev-server）：28 项断言全过——三模板正常采集（keep/drop/rename/unlabel/labels、三种 kind 取值）、
+  一个 target 失败时**只产该 target 的 `up=0`** 且其它模板不受影响、无模板时与 pre-C1 二进制上报体逐项等价。
+- 端到端（补"落 VM"）：Agent → Server → `remote_write`，11 项断言全过——模板指标与
+  `cluster`/`template`/`instance`/`node` 标签确实到达时序库写入路径；keep/drop 未生效的指标未写入。
+  验证用假时序库（仅解压 snappy 落盘）以避免依赖外网下载 VictoriaMetrics。
+
+### 12.4 阶段一的已知边界
+
+- `interval` 只接受 `0`（跟随全局采集间隔）；`allowHosts` 字段已预留但未实现。
+- 模板指标**只做到"能采到、能在指标浏览查到"**：中间件 Tab、首页概览、巡检报告、大屏、
+  「服务离线」告警均需阶段二的"模板 → 中间件类型"注册，且这些位置当前都是硬编码 switch，
+  阶段二应改为读运行时注册表（否则"写模板即可"仍会在展示层被卡住）。
+- 真实产品端点（RabbitMQ/ES/ClickHouse/Etcd/ZooKeeper）未在本次验证中逐一启动。
 
 ## 11. 待你拍板（评审点）
 
