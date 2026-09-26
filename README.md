@@ -1582,8 +1582,15 @@ journalctl -u monitor-proxy-hub -f
 | GET | `/api/v1/middleware/k8s/instances` | Kubernetes 集群列表（集群聚合 + Node / 异常 Pod 明细） |
 | GET | `/api/v1/middleware/mongodb/instances` | MongoDB 实例列表（含副本集角色） |
 | GET | `/api/v1/middleware/fastdfs/instances` | FastDFS 实例列表 |
+| GET | `/api/v1/middleware/{type}/instances` | 模板派生类型的通用实例列表（内置类型由各自的字面量路由优先命中） |
 | GET | `/api/v1/middleware/nginx/access/summary` | Nginx 访问日志汇总（总请求 / 速率 / 状态码分布 / Top URI / Top IP） |
 | GET | `/api/v1/middleware/nginx/access/geo?scope=cn\|world` | 请求来源地理分布（热力点 / 部署点 / 动线） |
+| GET | `/api/v1/middleware/templates` | 采集项模板列表（含各类型的采集情况） |
+| POST | `/api/v1/middleware/templates` | 新建采集项模板（id 冲突返回 409） |
+| POST | `/api/v1/middleware/templates/validate` | 校验模板配置（保存前预检，一次报出全部原因） |
+| PUT | `/api/v1/middleware/templates/{id}` | 更新采集项模板（id 不可改，它决定指标名前缀） |
+| DELETE | `/api/v1/middleware/templates/{id}` | 删除采集项模板 |
+| GET | `/api/v1/middleware/templates/presets` | 内置模板预设（RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper） |
 
 ### 智能分析
 
