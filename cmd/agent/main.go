@@ -121,7 +121,7 @@ func main() {
 		cfg.RocketMQInstances, cfg.K8sInstances, cfg.MongoDBInstances, cfg.FastDFSInstances,
 		cfg.PortChecks, cfg.Security,
 		time.Duration(cfg.CollectTimeout)*time.Second,
-		cfg.Templates,
+		cfg.Templates, cfg.TemplateGuards,
 	)
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
@@ -341,6 +341,9 @@ func collectAndReport(ctx context.Context, coll *collector.Collector, rep *repor
 			Templates: true,
 			// 回执当前已生效的模板版本号：Server 仅在版本不一致时才携带模板（避免每轮背负整份配置）
 			TemplateRevision: coll.TemplateRevision(),
+			// 声明本机已放行的取数方式（阶段三）：Server 只把 exec/file/jdbc 模板下发给声明过的节点，
+			// 未启用的节点不会收到，因而不会每轮各报一个 up=0
+			TemplateKinds: cfg.TemplateGuards.EnabledKinds(),
 		},
 		// 上报当前 nebula 托管 SSH 防护状态
 		DefenseStatus: defenseExec.Status(),

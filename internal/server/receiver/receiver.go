@@ -388,11 +388,28 @@ func attachDeliveredTemplates(resp map[string]interface{}, caps *model.ClientCap
 		return
 	}
 	scoped := templatesForGroup(list, group)
+	// 再按该节点**本机放行**的取数方式过滤（阶段三：jdbc / exec / file 会以 root 触碰本机或携带库凭据，
+	// 由各机器自己在 agent.yaml 里决定是否放行）。未放行的节点收到也用不了，只会多出 up=0 噪音。
+	scoped = templatesForKinds(scoped, caps.TemplateKinds)
 	resp["templates"] = scoped
 	resp["templateRevision"] = rev
 	// 用 Debug：Agent 若因模板非法而拒绝应用会持续落后（设计如此，配置修好后自愈），
 	// 此处用 Info 会在该场景下按上报周期刷屏；「是否真的生效」由 Agent 日志与 up 指标体现。
 	slog.Debug("已下发采集项模板", "group", group, "count", len(scoped), "revision", rev)
+}
+
+// templatesForKinds 过滤出该节点能执行的模板（见 template.KindEnabledOnNode）。
+//
+// 网络取数类（prometheus-exporter / http-json / http-text）任何节点都能执行；
+// 护栏类（jdbc / exec / file）必须由该节点在上报能力里声明已放行。
+func templatesForKinds(list []template.Config, declared []string) []template.Config {
+	out := make([]template.Config, 0, len(list))
+	for _, t := range list {
+		if template.KindEnabledOnNode(t.Kind, declared) {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // templatesForGroup 过滤出对该节点分组生效的模板。

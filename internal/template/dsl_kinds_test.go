@@ -250,7 +250,7 @@ func TestValidate_FileDefaults(t *testing.T) {
 }
 
 // TestValidateReadOnlyQuery 只读判定是「防批量数据损坏」的第一道防线
-//（第二道在执行侧再次调用），因此要覆盖常见的绕过写法。
+// （第二道在执行侧再次调用），因此要覆盖常见的绕过写法。
 func TestValidateReadOnlyQuery(t *testing.T) {
 	ok := []string{
 		"SELECT 1",
@@ -298,6 +298,37 @@ func TestIsAbsolutePath(t *testing.T) {
 		if IsAbsolutePath(p) {
 			t.Errorf("%q 不应判定为绝对路径", p)
 		}
+	}
+}
+
+// TestKindEnabledOnNode 节点能否执行某 kind 的模板（Server 据此过滤下发）。
+func TestKindEnabledOnNode(t *testing.T) {
+	// 网络取数：任何节点都能执行，与声明无关
+	for _, k := range []Kind{KindPrometheusExporter, KindHTTPJSON, KindHTTPText} {
+		if !KindEnabledOnNode(k, nil) {
+			t.Errorf("%s 不依赖本机能力，任何节点都应能执行", k)
+		}
+	}
+	// 护栏类：必须由该节点声明
+	for _, k := range GuardedKinds {
+		if KindEnabledOnNode(k, nil) {
+			t.Errorf("%s 未声明时不应下发", k)
+		}
+		if !KindEnabledOnNode(k, []string{string(k)}) {
+			t.Errorf("%s 声明后应下发", k)
+		}
+		// 声明了别的取数方式不算
+		other := string(KindExec)
+		if k == KindExec {
+			other = string(KindFile)
+		}
+		if KindEnabledOnNode(k, []string{other}) {
+			t.Errorf("%s 不应因声明了 %s 而被下发", k, other)
+		}
+	}
+	// 旧 Agent 上报空清单（或压根不报）：护栏类一律不下发
+	if KindEnabledOnNode(KindExec, []string{}) {
+		t.Error("旧 Agent 不应收到 exec 模板")
 	}
 }
 

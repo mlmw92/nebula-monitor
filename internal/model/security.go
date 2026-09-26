@@ -172,6 +172,13 @@ type ClientCapability struct {
 	// TemplateRevision 是 Agent 当前**已生效**的模板版本号（0 = 仅本机 agent.yaml 配置）。
 	// Server 仅在版本号不一致时携带模板下发，避免每轮心跳都背负整份配置。
 	TemplateRevision uint64 `json:"templateRevision,omitempty"`
+	// TemplateKinds 是 Agent **本机已放行**的取数方式（C1 阶段三：jdbc / exec / file）。
+	//
+	// 这几类会以 root 触碰被监控机本身或携带库凭据，因此由各机器自己在 agent.yaml 的
+	// templateGuards 里决定是否放行；Server 只把模板下发给声明过的节点——
+	// 未启用的节点收到也用不了，只会多出 up=0 噪音与「模板存在却无数据」的误判。
+	// 旧 Agent 不报此字段，因此护栏类模板对它们一律不下发。
+	TemplateKinds []string `json:"templateKinds,omitempty"`
 }
 
 // ReportPayload 扩展：新增 Capabilities 与 DefenseResult 字段（不影响既有字段）。

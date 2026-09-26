@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nebula/monitor/internal/agent/config"
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/template"
 )
@@ -37,15 +38,27 @@ type TemplateRunner struct {
 	// warned 记录已告警过的产出问题（如「同名同标签序列」）：同一问题只告警一次，
 	// 否则每轮采集都刷屏，反而把其它问题淹掉。
 	warned sync.Map // key: tplID\x00metric
+	// guards 是本机护栏（阶段三）：决定 exec/file/jdbc 三类是否放行、以及允许哪些命令与路径。
+	guards config.TemplateGuardsConfig
 }
 
 // NewTemplateRunner 创建模板执行器。
+//
+// 未注入护栏时（零值）三类「本机 / 数据库取数」全部视为**未放行**，
+// 因此忘记注入的后果是这些模板不产出，而不是悄悄获得 root 能力——
+// 默认值必须站在安全的一侧。
 func NewTemplateRunner(node string) *TemplateRunner {
 	return &TemplateRunner{
 		node:   node,
 		now:    model.NowMillis,
 		client: &http.Client{Timeout: templateFetchTimeout},
 	}
+}
+
+// WithGuards 注入本机护栏（阶段三）。返回自身便于链式构造。
+func (r *TemplateRunner) WithGuards(g config.TemplateGuardsConfig) *TemplateRunner {
+	r.guards = g
+	return r
 }
 
 // CollectTemplate 采集单个模板的全部 target。

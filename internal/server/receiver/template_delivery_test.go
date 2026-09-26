@@ -56,6 +56,53 @@ func TestAttachDeliveredTemplates_DeliversScoped(t *testing.T) {
 	}
 }
 
+// TestAttachDeliveredTemplates_FiltersByDeclaredKinds 阶段三：护栏类模板（jdbc/exec/file）
+// 只下发给**声明放行**了对应取数方式的节点。
+//
+// 为什么必须过滤：未放行的节点收到也执行不了，只会每轮各报一个 up=0——
+// 既是序列与日志噪音，也会让人误判成「模板配置有问题」。
+func TestAttachDeliveredTemplates_FiltersByDeclaredKinds(t *testing.T) {
+	execTpl := tpl("execjob", "mq")
+	execTpl.Kind = template.KindExec
+	execTpl.Targets = []template.Target{{Command: "/bin/echo"}}
+	execTpl.Rules = template.Rules{Metrics: []template.MetricRule{{Name: "v", Pattern: `(\d+)`}}}
+
+	provider := &fakeTemplates{
+		rev: 1,
+		list: []template.Config{
+			tpl("rabbitmq", "mq"), // 网络取数：任何节点都能执行
+			execTpl,               // 护栏类：需节点声明
+		},
+	}
+
+	// ① 未声明任何取数方式（也含旧 Agent 不报该字段的情形）→ 只剩网络取数那条
+	resp := map[string]interface{}{}
+	attachDeliveredTemplates(resp, capsWith(0), "mq", provider)
+	got, _ := resp["templates"].([]template.Config)
+	if len(got) != 1 || got[0].ID != "rabbitmq" {
+		t.Fatalf("未声明放行的节点不应收到 exec 模板，got %+v", idsOf(got))
+	}
+
+	// ② 声明放行 exec → 两条都下发
+	caps := capsWith(0)
+	caps.TemplateKinds = []string{string(template.KindExec)}
+	resp2 := map[string]interface{}{}
+	attachDeliveredTemplates(resp2, caps, "mq", provider)
+	got2, _ := resp2["templates"].([]template.Config)
+	if len(got2) != 2 {
+		t.Fatalf("声明放行后应下发全部适用模板，got %+v", idsOf(got2))
+	}
+}
+
+// idsOf 便于断言失败时看清实际下发了哪些模板。
+func idsOf(list []template.Config) []string {
+	out := make([]string, 0, len(list))
+	for _, t := range list {
+		out = append(out, t.ID)
+	}
+	return out
+}
+
 // TestAttachDeliveredTemplates_SkipsWhenRevisionCurrent 版本号一致即不重发
 // （模板可达数 KB，每轮心跳都带会随节点数成倍放大）。
 func TestAttachDeliveredTemplates_SkipsWhenRevisionCurrent(t *testing.T) {

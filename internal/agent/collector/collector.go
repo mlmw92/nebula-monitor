@@ -46,6 +46,11 @@ type Collector struct {
 	templates      []template.Config
 	tplRevision    uint64 // 已生效的模板版本号（0 = 仅本机配置，从未接受过下发）
 	templateRunner *TemplateRunner
+
+	// guards 是模板「从本机 / 数据库取数」的本机护栏（阶段三）。
+	// 零值 = 三类全部未放行，因此「忘记注入」的后果是「本机取数不可用」，
+	// 而不是「悄悄允许了 root 执行」——默认值必须站在安全的一侧。
+	guards config.TemplateGuardsConfig
 }
 
 // New 创建 Collector。
@@ -64,6 +69,7 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	securityCfg config.SecurityConfig,
 	collectTimeout time.Duration,
 	templates []template.Config,
+	guards config.TemplateGuardsConfig,
 ) *Collector {
 	c := &Collector{
 		node:    node,
@@ -71,6 +77,7 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 		labels:  labels,
 		cfg:     cfg,
 		timeout: collectTimeout,
+		guards:  guards,
 		cpu:     NewCPUCollector(),
 		disk:    NewDiskCollector(),
 		net:     NewNetworkCollector(),
@@ -117,7 +124,7 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	// 模板不设独立开关：配置了模板即启用；为空则 tasks() 不追加任务（零行为变化）。
 	if len(templates) > 0 {
 		c.templates = templates
-		c.templateRunner = NewTemplateRunner(node)
+		c.templateRunner = NewTemplateRunner(node).WithGuards(guards)
 	}
 	return c
 }
@@ -131,7 +138,7 @@ func (c *Collector) SetTemplates(tpls []template.Config, revision uint64) {
 	c.tplMu.Lock()
 	defer c.tplMu.Unlock()
 	if c.templateRunner == nil {
-		c.templateRunner = NewTemplateRunner(c.node)
+		c.templateRunner = NewTemplateRunner(c.node).WithGuards(c.guards)
 	}
 	c.templates = tpls
 	c.tplRevision = revision
@@ -156,17 +163,42 @@ func (c *Collector) TemplateRevision() uint64 {
 // 校验不通过时**保留现有模板**并返回错误——模板下发属运维便利功能，
 // 绝不能因为它把采集打断（宁可继续用旧配置，也不能进入「没有模板」的状态）。
 func (c *Collector) ApplyDelivered(tpls []template.Config, revision uint64) error {
-	if err := template.ValidateAll(tpls); err != nil {
+	// 纵深防御：Server 侧已按节点能力过滤，但「机器自身的同意」不能只依赖中心。
+	// 丢弃而非拒绝整份下发——一台机器不该因为别人的 exec 模板而丢掉自己所有的模板。
+	kept, skipped := c.dropUnpermittedKinds(tpls)
+	if len(skipped) > 0 {
+		slog.Warn("Server 下发的模板含本机未放行的取数方式，已忽略",
+			"kinds", skipped, "hint", "如需使用，请在 agent.yaml 的 templateGuards 中启用并加入白名单")
+	}
+	if err := template.ValidateAll(kept); err != nil {
 		return err
 	}
 	// 首次被 Server 接管时明确告知：本机 agent.yaml 里的模板将被替换，
 	// 否则运维会困惑于「本地写的模板怎么不见了」。
 	if c.TemplateRevision() == 0 && len(c.Templates()) > 0 {
 		slog.Warn("Server 下发的模板将替换本机 agent.yaml 中的模板（之后以 Server 配置为准）",
-			"local", len(c.Templates()), "delivered", len(tpls), "revision", revision)
+			"local", len(c.Templates()), "delivered", len(kept), "revision", revision)
 	}
-	c.SetTemplates(tpls, revision)
+	c.SetTemplates(kept, revision)
 	return nil
+}
+
+// dropUnpermittedKinds 丢弃本机未放行的护栏类模板，返回保留的模板与被丢弃的取数方式（去重）。
+func (c *Collector) dropUnpermittedKinds(tpls []template.Config) ([]template.Config, []string) {
+	kept := make([]template.Config, 0, len(tpls))
+	var skipped []string
+	seen := make(map[string]bool, len(tpls))
+	for _, t := range tpls {
+		if template.IsGuardedKind(t.Kind) && !c.guards.AllowsKind(t.Kind) {
+			if !seen[string(t.Kind)] {
+				seen[string(t.Kind)] = true
+				skipped = append(skipped, string(t.Kind))
+			}
+			continue
+		}
+		kept = append(kept, t)
+	}
+	return kept, skipped
 }
 
 // templateState 一次性取出「模板集 + 执行器」，避免分别加锁读到不一致的组合。

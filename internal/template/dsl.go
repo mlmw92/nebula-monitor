@@ -78,6 +78,23 @@ func IsKnownKind(k Kind) bool {
 	return false
 }
 
+// KindEnabledOnNode 判断某节点能否执行该 kind 的模板（按其上报的「已启用取数方式」清单）。
+//
+// 非护栏类 kind（网络取数）任何节点都能执行；护栏类必须由该节点显式声明。
+// 这样「未启用的节点」根本收不到这类模板 —— 否则它们会每轮各报一个 up=0，
+// 既是序列与日志噪音，也会让人误判成「模板配置有问题」。
+func KindEnabledOnNode(kind Kind, declared []string) bool {
+	if !IsGuardedKind(kind) {
+		return true
+	}
+	for _, d := range declared {
+		if Kind(d) == kind {
+			return true
+		}
+	}
+	return false
+}
+
 // IsAbsolutePath 判断是否为本机绝对路径。
 //
 // Agent 只运行在 Linux 上（不做 Windows 节点），故要求 POSIX 风格绝对路径；

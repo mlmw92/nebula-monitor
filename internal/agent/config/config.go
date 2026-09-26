@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -50,6 +51,95 @@ type Config struct {
 	Proxy             ProxyConfig                    `yaml:"proxy"`             // 代理模式配置，mode=edge/hub 时生效
 	Security          SecurityConfig                 `yaml:"security"`          // 安全采集配置（collectors.security 开启时生效）
 	CryptoKey         string                         `yaml:"cryptoKey"`         // 中间件密码 AES-GCM 主密钥（留空用内置默认密钥；配置密文以 enc: 前缀标识）
+	// TemplateGuards 是模板「从本机 / 数据库取数」的本机护栏（C1 阶段三），**三类默认全部关闭**。
+	TemplateGuards TemplateGuardsConfig `yaml:"templateGuards"`
+}
+
+// TemplateGuardsConfig 是模板三类「非网络取数」方式的本机护栏。
+//
+// 为什么默认全关：`exec` 会以 root 执行命令、`file` 会以 root 读取文件、`jdbc` 会带着库凭据出网；
+// 而 Agent 由 systemd 以 root 运行，模板又可由持有 middleware:write 的账号在 Web 端编辑并下发到整组节点——
+// 也就是「Web 端一个写权限 = 一批机器的 root」。本机护栏是**唯一由机器自己掌握**的那道门：
+// 即便 Server 被入侵或运维误配，影响也只限于本机白名单已明确允许的命令与路径。
+//
+// 与中心授权的关系：Server 侧仍按权限点与分组过滤下发（第一道），Agent 还会按本机护栏再筛一次（纵深防御）。
+type TemplateGuardsConfig struct {
+	JDBC GuardRule `yaml:"jdbc"`
+	Exec GuardRule `yaml:"exec"`
+	File GuardRule `yaml:"file"`
+}
+
+// GuardRule 是单个取数方式的本机放行规则。
+type GuardRule struct {
+	// Enabled 是否放行该取数方式。
+	Enabled bool `yaml:"enabled"`
+	// Allow 白名单：exec 为**命令绝对路径**、file 为**文件绝对路径**。精确匹配，不支持通配——
+	// 通配会把「明确允许」退化成「猜哪些能中」，而白名单的用途正是明确。
+	Allow []string `yaml:"allow"`
+	// AllowHosts 目标库白名单（仅 jdbc）：留空表示不限制（凭据本就由配置方掌握，风险等级低于本机取数）。
+	AllowHosts []string `yaml:"allowHosts"`
+}
+
+// guardRule 返回某 kind 对应的护栏段；非护栏类 kind 返回 false。
+//
+// kind 的字符串与护栏段名刻意保持一致（jdbc / exec / file），这样错误信息可以直接拼出
+// 「templateGuards.exec.enabled」这种可照抄的路径，而不必再维护一份映射表。
+func (g TemplateGuardsConfig) guardRule(kind template.Kind) (GuardRule, bool) {
+	switch kind {
+	case template.KindJDBC:
+		return g.JDBC, true
+	case template.KindExec:
+		return g.Exec, true
+	case template.KindFile:
+		return g.File, true
+	default:
+		return GuardRule{}, false
+	}
+}
+
+// AllowsKind 判断某取数方式是否已被本机放行。
+func (g TemplateGuardsConfig) AllowsKind(kind template.Kind) bool {
+	rule, ok := g.guardRule(kind)
+	return ok && rule.Enabled
+}
+
+// EnabledKinds 返回本机已放行的取数方式（上报给 Server，Server 据此只下发该节点能跑的模板）。
+func (g TemplateGuardsConfig) EnabledKinds() []string {
+	out := make([]string, 0, len(template.GuardedKinds))
+	for _, k := range template.GuardedKinds {
+		if g.AllowsKind(k) {
+			out = append(out, string(k))
+		}
+	}
+	return out
+}
+
+// AllowsCommand 判断命令是否在本机白名单内（exec）。未放行该方式时一律 false。
+func (g TemplateGuardsConfig) AllowsCommand(cmd string) bool {
+	return g.Exec.Enabled && containsExact(g.Exec.Allow, cmd)
+}
+
+// AllowsPath 判断文件是否在本机白名单内（file）。未放行该方式时一律 false。
+func (g TemplateGuardsConfig) AllowsPath(path string) bool {
+	return g.File.Enabled && containsExact(g.File.Allow, path)
+}
+
+// AllowsDBHost 判断目标库地址是否被允许（jdbc）；未配置白名单表示不限制。
+func (g TemplateGuardsConfig) AllowsDBHost(addr string) bool {
+	if len(g.JDBC.AllowHosts) == 0 {
+		return true
+	}
+	return containsExact(g.JDBC.AllowHosts, addr)
+}
+
+// containsExact 精确匹配（不折叠大小写、不解析通配）。
+func containsExact(list []string, s string) bool {
+	for _, v := range list {
+		if strings.TrimSpace(v) == s {
+			return true
+		}
+	}
+	return false
 }
 
 // SecurityConfig 是安全采集（SSH 审计/FIM/基线/异常进程/sudo）的可配置项。
@@ -213,6 +303,13 @@ func Load(path string) (*Config, error) {
 				"template", cfg.Templates[i].ID, "interval", cfg.Templates[i].Interval)
 		}
 	}
+	// 本机护栏（阶段三）：先校验护栏自身是否自洽，再校验本机模板是否真的被放行。
+	if err := validateTemplateGuards(&cfg.TemplateGuards); err != nil {
+		return nil, fmt.Errorf("templateGuards 配置非法: %w", err)
+	}
+	if err := validateGuardedLocalTemplates(cfg); err != nil {
+		return nil, err
+	}
 	// 解密中间件连接密码：以 enc: 前缀的密文经 AES-GCM 解密为明文供采集器使用；
 	// 旧明文配置直接保留（向后兼容）。解密失败仅告警并保留原值，避免 agent 启动失败。
 	cipher, err := crypto.NewCipher([]byte(cfg.CryptoKey))
@@ -223,6 +320,60 @@ func Load(path string) (*Config, error) {
 		decryptTemplateCredentials(cfg, cipher)
 	}
 	return cfg, nil
+}
+
+// validateTemplateGuards 校验本机护栏配置自身是否自洽。
+//
+// 两类问题都在启动期拒绝，因为它们在运行期的表现都是「模板静默不产出」，排查成本极高：
+//   - 白名单里写了非绝对路径（白名单按规范化路径精确比对，相对路径永远匹配不上）；
+//   - 启用了 exec/file 却没给白名单（等于放行了一切方向、却没放行任何一条，规则必然失败）。
+func validateTemplateGuards(g *TemplateGuardsConfig) error {
+	for _, it := range []struct {
+		kind       string
+		rule       GuardRule
+		needsAllow bool
+	}{
+		{string(template.KindExec), g.Exec, true},
+		{string(template.KindFile), g.File, true},
+		{string(template.KindJDBC), g.JDBC, false},
+	} {
+		for i, p := range it.rule.Allow {
+			if !template.IsAbsolutePath(p) {
+				return fmt.Errorf("templateGuards.%s.allow[%d] %q 必须是绝对路径且不含 ..（白名单按规范化后的路径精确比对）", it.kind, i, p)
+			}
+		}
+		if it.rule.Enabled && it.needsAllow && len(it.rule.Allow) == 0 {
+			return fmt.Errorf("templateGuards.%s.enabled=true 但 allow 为空：没有放行任何命令/路径，该取数方式必然失败", it.kind)
+		}
+		if !it.rule.Enabled && len(it.rule.Allow) > 0 {
+			// 配了白名单却忘了开开关：多半是漏了一步，告警比静默忽略更有用
+			slog.Warn("templateGuards 配了白名单但未启用，白名单不生效", "kind", it.kind)
+		}
+	}
+	for i, h := range g.JDBC.AllowHosts {
+		if strings.TrimSpace(h) == "" {
+			return fmt.Errorf("templateGuards.jdbc.allowHosts[%d] 为空", i)
+		}
+	}
+	if !g.JDBC.Enabled && len(g.JDBC.AllowHosts) > 0 {
+		slog.Warn("templateGuards 配了目标库白名单但未启用 jdbc，白名单不生效")
+	}
+	return nil
+}
+
+// validateGuardedLocalTemplates 校验本机 agent.yaml 里的模板是否都被护栏放行。
+//
+// 本机模板不会经过 Server 侧的能力过滤（它压根不走下发），所以这里必须自己挡：
+// 否则模板每轮都失败，而界面上只看到「配了却没数据」。
+func validateGuardedLocalTemplates(cfg *Config) error {
+	for i := range cfg.Templates {
+		k := cfg.Templates[i].Kind
+		if template.IsGuardedKind(k) && !cfg.TemplateGuards.AllowsKind(k) {
+			return fmt.Errorf("模板 %s 使用 kind=%s，但 templateGuards.%s.enabled 未开启：本机未放行该取数方式（exec/file 会以 root 触碰本机、jdbc 会携带库凭据，故默认关闭）",
+				cfg.Templates[i].ID, k, k)
+		}
+	}
+	return nil
 }
 
 // decryptTemplateCredentials 解密模板 target 的凭据（basic.password / bearer.token / header.value），
