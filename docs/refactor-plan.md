@@ -365,10 +365,10 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | B1 | | 6. 前端守卫同步（菜单 `perm` + 路由 `meta.perm`） | ✅ | — | 共 8 个菜单项 + 11 条路由 |
 | B1 | | 7. README / 设计件路由表同步（127 条，双向差集为空） | ✅ | — | 每次新增路由均同步校准 |
 | B1 | | 8. 版本递增（整批合并为 `1.24.0`） | ✅ | 1.24.0 | 前端版本号已同步；打包（`full`/`upgrade`）待你明确指示后执行 |
-| D1 | 告警风暴收敛 | 1. `Grouper` 增加「时间窗 + 标签相似度」聚类 key | ⬜ | — | 复用 `alert/grouping.go` |
-| D1 | | 2. 组内按严重度与依赖排序，推选头部告警 + N 条摘要 | ⬜ | — | — |
-| D1 | | 3. 附注 `analysis/correlation.go` 的关联结论 | ⬜ | — | — |
-| D1 | | 4. 参数热生效 + 测试 | ⬜ | — | — |
+| D1 | 告警风暴收敛 | 1. `Grouper` 增加「时间窗 + 标签相似度」聚类 key | ✅ | — | `alert/grouping.go`：新增 `converge` / `convergeBy`（默认 rule+severity）/ `convergeWindow`（默认 10m）；**开启收敛后收敛维度取代分组维度**——否则 `groupBy` 含 host 时键只会更细，收敛恒不生效（实现中发现并修正） |
+| D1 | | 2. 组内按严重度与依赖排序，推选头部告警 + N 条摘要 | ✅ | — | `alert/converge.go`：头部取「级别最高、同级最早」，正文附「规则 / 范围 / 级别分布」+ Top N 明细 + 折叠计数；`headCount` 默认 5、上限 20；摘要以**追加**方式写入头部 Message（故必须在渠道模板渲染之后收敛） |
+| D1 | | 3. 附注 `analysis/correlation.go` 的关联结论 | ✅ | — | alert 侧定义 `CorrelationProvider` 接口，API 侧 `(*API).CorrelationNotes` 实现并随 `SetAnalyzer` 注入：analysis 依赖 alert（`SetAlertStore`），只能反向注入；节点去重 + 限量（3 节点 / 6 条）。接口实现为 `internal/server/api/correlation_provider.go` |
+| D1 | | 4. 参数热生效 + 测试 | ✅ | — | `SetGrouping` 统一 `normalize()` 后重建 `Grouper`；前端「告警中心 → 高级设置 → 告警分组」新增收敛开关与参数；新增 19 个测试（17 alert + 2 api） |
 | F1 | 测试体系补齐 | 1. Go 高价值单测（remote_write 编码 / `buildExpr` 注入防护 / firing 状态机 / 鉴权中间件 / SM2·SM3·SM4） | ✅ | — | 5 个目标点全部落地：`storage/writer_test.go`（protobuf **逐字节 wire 断言** + varint 边界 + 分组/重试策略）、`storage/buildexpr_test.go`（注入转义 + 白名单边界）、`alert/engine_state_test.go`（去重键 / 活跃索引 / 抑制链路 / 重启恢复）、`api/token_test.go`（token 往返/篡改/过期 + `AuthMiddleware` 四条 401 分支与 Cookie 兜底）、`agent·server/crypto` 错误分支与随机化 |
 | F1 | | 2. 前端引入 Vitest | ✅ | — | `vitest@2.1.9`（须与 Vite 5 配套；Vitest 3+ 要求 Vite 6+）+ jsdom；覆盖 `api/http.js`（9 用例：token 注入 / 401 失效 / 错误文案提取）与 `useAuth` 权限语义（5 用例）；`npm test` 已接入。**未做组件级测试**（Element Plus 组件需全局插件注册，留待后续） |
 | F1 | | 3. CI 将 `go test ./...` 设为发布门禁 | ✅ | — | 新增 `.github/workflows/ci.yml`（push/PR：go vet + build + test + `-race` + 前端构建与单测）；`release.yml` 增加发布门禁 step，并**修正其 `go-version: 1.22` → `1.25`**（与 `go.mod` 的 `go 1.25` 不一致，原值会让发布因版本不足直接失败） |
@@ -444,6 +444,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | 2026-09-26 | **版本递增**：按决策将 E1/D2/F2/B1（含子批次 A~E）整批合并递增为 **`1.24.0`**（次版本号递增：已启用认证部署的运行时行为变更 + 新增 1 条路由与 2 个权限点）；前端版本号经 `npm run version:sync` 同步为 `1.24.0`。原计划的分次递增（1.23.8 / 1.23.9）未执行，第 6 节执行顺序图与第 8 节「版本与发布」表已同步实际结果。打包仍待明确指示 |
 | 2026-09-26 | **打包**：`build/release.sh` 组装出 `nebula-monitor-v1.24.0-full.tar.gz`（138 MB）与 `-upgrade.tar.gz`（66 MB）；包内 `manifest.json` 版本、二进制注入版本、前端 `WEB_VERSION` 均为 `1.24.0`，包内 `SHA256SUMS` 逐条校验通过；未执行任何部署/升级 |
 | 2026-09-26 | **F1 完成**：Go 侧补齐 5 个目标点单测（storage 编码与注入防护、告警状态机、鉴权 token、两处国密错误分支）；前端引入 Vitest（`api/http.js` + `useAuth`，14 用例）；新增 `ci.yml` 并把测试设为 `release.yml` 发布门禁；顺带修正 `release.yml` 的 Go 版本（1.22 → 1.25，与 go.mod 一致）。全量 Go 测试与前端构建均绿 |
+| 2026-09-26 | **D1 完成**：告警风暴收敛落地。`GroupingConfig` 新增 `converge`/`convergeBy`/`convergeWindow`/`headCount` 并统一 `normalize()`；`Grouper` 新增相似度聚类键与时间窗换代（旧代异步发出，避免在持有 engine 锁的调用栈内回调造成自锁）；新增 `alert/converge.go` 实现「头部告警 + 规则/范围/级别统计 + Top N + 折叠计数 + 关联结论」；关联结论经 `CorrelationProvider` 由 API 层反向注入（analysis 依赖 alert，不可反向 import）；前端分组面板新增收敛开关与参数。**默认关闭**（通知内容属用户可见行为，升级不改变既有通知）。新增 19 个测试 |
 
 ---
 

@@ -112,8 +112,14 @@ type API struct {
 // SetDashboardManager 注入仪表盘配置管理器（可选，不注入则相关接口返回空列表）。
 func (a *API) SetDashboardManager(m *dashboard.Manager) { a.dashMgr = m }
 
-// SetAnalyzer 注入只读智能分析服务。
-func (a *API) SetAnalyzer(analyzer *analysis.Analyzer) { a.analysis = analyzer }
+// SetAnalyzer 注入只读智能分析服务，并把它接到告警风暴收敛的关联结论来源上。
+func (a *API) SetAnalyzer(analyzer *analysis.Analyzer) {
+	a.analysis = analyzer
+	if a.engine != nil && analyzer != nil {
+		// alert 侧只认接口（避免 analysis ↔ alert 循环依赖），由持有 Analyzer 的 API 层反向注入。
+		a.engine.SetCorrelationProvider(a)
+	}
+}
 
 // SetPipelineStore 注入告警事件管道存储（可选；不注入时相关接口返回空配置）。
 func (a *API) SetPipelineStore(p *alert.PipelineStore) { a.pipeline = p }

@@ -63,6 +63,7 @@ type Engine struct {
 	grouping           *GroupingStore                   // 分组配置（可选）
 	pipeline           *PipelineStore                   // 告警事件管道：relabel/enrich/消息模板（可选）
 	grouper            *Grouper                         // 分组器（分组启用时非空）
+	correlator         CorrelationProvider              // 关联结论提供者（可选，由 API 层用 analysis 实现）
 }
 
 type ruleState struct {
@@ -117,16 +118,7 @@ func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
 	e.restoreActiveState()
 	// 分组启用时构建分组器：相同 groupBy 的告警合并为一组，按 groupWait/groupInterval 汇总发送。
 	if grouping != nil && grouping.Get().Enabled {
-		cfg := grouping.Get()
-		wait, err1 := time.ParseDuration(cfg.GroupWait)
-		interval, err2 := time.ParseDuration(cfg.GroupInterval)
-		if err1 != nil || err2 != nil {
-			slog.Warn("分组配置时间解析失败，使用默认", "groupWait", cfg.GroupWait, "groupInterval", cfg.GroupInterval)
-			wait, interval = 30*time.Second, 5*time.Minute
-		}
-		g := NewGrouper(cfg.GroupBy, wait, interval, nil)
-		g.flush = func(events []model.AlertEvent) { e.flushGroup(events) }
-		e.grouper = g
+		e.grouper = e.newGrouper(grouping.Get())
 	}
 	return e
 }
@@ -1948,13 +1940,29 @@ func (e *Engine) flushGroup(events []model.AlertEvent) {
 		groups[key] = append(groups[key], ev)
 		groupChannels[key] = chs
 	}
+	// 收敛配置随分组配置热更新，故每次派发时读取当前值
+	var conv GroupingConfig
+	if e.grouping != nil {
+		conv = e.grouping.Get()
+	}
+	var notes []string
+	if conv.Converge {
+		notes = e.correlationNotes(events)
+	}
+
 	for key, grouped := range groups {
 		for _, n := range ns {
 			if !contains(groupChannels[key], n.Channel()) {
 				continue
 			}
 			// 消息模板按渠道渲染（未配置模板时直接复用原切片）
-			if err := n.NotifyGroup(e.renderForChannel(grouped, n.Channel())); err != nil {
+			rendered := e.renderForChannel(grouped, n.Channel())
+			if conv.Converge {
+				// 收敛必须在模板渲染之后：摘要以追加方式写入头部 Message，
+				// 若先收敛再渲染，渠道模板会把摘要覆盖掉。
+				rendered = convergeEvents(rendered, conv.HeadCount, notes)
+			}
+			if err := n.NotifyGroup(rendered); err != nil {
 				slog.Warn("分组告警通知失败", "channel", n.Channel(), "err", err)
 			}
 		}
@@ -1963,6 +1971,9 @@ func (e *Engine) flushGroup(events []model.AlertEvent) {
 
 // SetGrouping 热更新分组配置并重建分组器（无需重启 Server）。
 func (e *Engine) SetGrouping(cfg GroupingConfig) {
+	// 统一补齐默认值：接口可能只提交部分字段，缺省值必须在生效前补全，
+	// 否则会出现「保存成功但时间参数解析失败回落默认」的隐性偏差。
+	cfg.normalize()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.grouper != nil {
@@ -1971,15 +1982,8 @@ func (e *Engine) SetGrouping(cfg GroupingConfig) {
 	}
 	e.grouping = &GroupingStore{cfg: cfg}
 	if cfg.Enabled {
-		wait, err1 := time.ParseDuration(cfg.GroupWait)
-		interval, err2 := time.ParseDuration(cfg.GroupInterval)
-		if err1 != nil || err2 != nil {
-			slog.Warn("分组配置时间解析失败，使用默认", "groupWait", cfg.GroupWait, "groupInterval", cfg.GroupInterval)
-			wait, interval = 30*time.Second, 5*time.Minute
-		}
-		g := NewGrouper(cfg.GroupBy, wait, interval, nil)
-		g.flush = func(events []model.AlertEvent) { e.flushGroup(events) }
-		e.grouper = g
+		e.grouper = e.newGrouper(cfg)
 	}
-	slog.Info("分组配置已更新", "enabled", cfg.Enabled, "groupBy", cfg.GroupBy)
+	slog.Info("分组配置已更新", "enabled", cfg.Enabled, "groupBy", cfg.GroupBy,
+		"converge", cfg.Converge, "convergeBy", cfg.ConvergeBy, "headCount", cfg.HeadCount)
 }

@@ -323,6 +323,32 @@
           </div>
           <el-button type="primary" size="small" @click="saveGrouping">保存</el-button>
         </div>
+
+        <!-- D1 风暴收敛：解决「一条通知上百行明细」 -->
+        <div class="adv-row" v-if="grouping.enabled">
+          <el-switch v-model="grouping.converge" active-text="风暴收敛" inactive-text="风暴收敛" />
+          <span class="muted">同规则多节点同时告警时合并为「头部告警 + 摘要 + Top N」，避免通知正文被明细淹没</span>
+        </div>
+        <div class="adv-row" v-if="grouping.enabled && grouping.converge">
+          <div class="adv-item">
+            <span class="adv-label">收敛维度</span>
+            <el-select v-model="grouping.convergeBy" class="group-by-select" multiple collapse-tags tooltip-effect="dark" placeholder="选择收敛维度">
+              <el-option label="规则ID" value="rule" />
+              <el-option label="级别" value="severity" />
+              <el-option label="规则名" value="name" />
+              <el-option label="指标" value="metric" />
+            </el-select>
+          </div>
+          <div class="adv-item">
+            <span class="adv-label">收敛窗口</span>
+            <el-input v-model="grouping.convergeWindow" placeholder="10m" style="width: 110px" />
+          </div>
+          <div class="adv-item">
+            <span class="adv-label">明细条数</span>
+            <el-input-number v-model="grouping.headCount" :min="1" :max="20" size="small" controls-position="right" />
+          </div>
+          <span class="muted">开启后按收敛维度聚合，不再按分组标签细分</span>
+        </div>
       </div>
 
       <el-divider />
@@ -490,7 +516,17 @@ let maintenanceTimer = null
 // P4：统计看板 / 抑制规则 / 分组配置
 const stats = ref({ firing: 0, suppressed: 0, total: 0, bySeverity: { critical: 0, warning: 0, info: 0 } })
 const inhibits = ref([])
-const grouping = ref({ enabled: false, groupBy: ['name'], groupWait: '30s', groupInterval: '5m' })
+const grouping = ref({
+  enabled: false,
+  groupBy: ['name'],
+  groupWait: '30s',
+  groupInterval: '5m',
+  // D1 风暴收敛（默认关闭：通知内容属用户可见行为，升级不改变既有通知）
+  converge: false,
+  convergeBy: ['rule', 'severity'],
+  convergeWindow: '10m',
+  headCount: 5,
+})
 const inhibitDialog = ref(false)
 const inhibitEditIndex = ref(-1)
 const inhibitForm = ref(emptyInhibitForm())
@@ -938,6 +974,10 @@ async function saveGrouping() {
       groupBy: grouping.value.groupBy || ['name'],
       groupWait: grouping.value.groupWait || '30s',
       groupInterval: grouping.value.groupInterval || '5m',
+      converge: !!grouping.value.converge,
+      convergeBy: grouping.value.convergeBy?.length ? grouping.value.convergeBy : ['rule', 'severity'],
+      convergeWindow: grouping.value.convergeWindow || '10m',
+      headCount: Number(grouping.value.headCount) || 5,
     })
     ElMessage.success('分组配置已保存（热生效）')
   } catch (e) {
