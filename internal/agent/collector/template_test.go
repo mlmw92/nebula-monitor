@@ -361,7 +361,7 @@ func TestCollectAll_TemplateTasksAppended(t *testing.T) {
 	cfg := config.CollectorToggle{CPU: true, Memory: true, Disk: true}
 	c := New("test-node", "default", nil, cfg,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		config.SecurityConfig{}, 0, tpls, config.TemplateGuardsConfig{})
+		config.SecurityConfig{}, 0, tpls, config.TemplateGuardsConfig{}, nil, "")
 
 	tasks := c.tasks(&res, &mu)
 	if len(tasks) != baseCount+len(tpls) {

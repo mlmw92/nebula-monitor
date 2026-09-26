@@ -207,5 +207,14 @@ func (c *Collector) tasks(res *Result, mu *sync.Mutex) []collectTask {
 			}})
 		}
 	}
+
+	// 集中日志（C2）：单独一个任务（同样继承 per-task 超时与失败隔离）。
+	// 未配置 logSources 时 c.logs 为 nil，不追加任务——与改造前完全等价。
+	if c.logs != nil {
+		tasks = append(tasks, collectTask{name: "logs", run: func(ctx context.Context) error {
+			addMetrics(c.logs.CollectCtx(ctx))
+			return nil
+		}})
+	}
 	return tasks
 }

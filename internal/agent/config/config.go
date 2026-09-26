@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -53,7 +54,62 @@ type Config struct {
 	CryptoKey         string                         `yaml:"cryptoKey"`         // 中间件密码 AES-GCM 主密钥（留空用内置默认密钥；配置密文以 enc: 前缀标识）
 	// TemplateGuards 是模板「从本机 / 数据库取数」的本机护栏（C1 阶段三），**三类默认全部关闭**。
 	TemplateGuards TemplateGuardsConfig `yaml:"templateGuards"`
+
+	// LogSources 是集中日志的采集来源（C2），**默认为空 = 不采集任何日志**。
+	LogSources []LogSourceConfig `yaml:"logSources"`
+	// LogOffsetsFile 是日志读取偏移的落盘路径（重启不丢进度、不重复上传）。
+	LogOffsetsFile string `yaml:"logOffsetsFile"`
 }
+
+// LogSourceConfig 是一个日志来源。
+//
+// 隐私默认值很关键：**默认只上传匹配 patterns 的行**，要全量必须显式 all: true。
+// 日志内容会离开被监控机，把「上传范围」从「整个文件」收窄到「你明确关心的行」，
+// 是这项能力里最重要的一个默认值。
+type LogSourceConfig struct {
+	// ID 是来源唯一标识（同时作为指标前缀与检索时的来源过滤值）。
+	ID string `yaml:"id"`
+	// Paths 是日志文件路径（**绝对路径**，且不得含 ..）。
+	Paths []string `yaml:"paths"`
+	// Patterns 是「关心的行」：命中即上传，并按 name 计数（可配告警）。
+	Patterns []LogPattern `yaml:"patterns"`
+	// All 为 true 时忽略 Patterns、上传全部行（显式开启，默认 false）。
+	All bool `yaml:"all"`
+	// Multiline 描述「一条日志跨多行」的合并方式（堆栈/异常）。
+	Multiline LogMultiline `yaml:"multiline"`
+	// MaxLinesPerRound / MaxBytesPerRound 是单轮单文件的读取上限（超限丢弃并计数）。
+	MaxLinesPerRound int   `yaml:"maxLinesPerRound"`
+	MaxBytesPerRound int64 `yaml:"maxBytesPerRound"`
+}
+
+// LogPattern 是一条「关心的行」的模式。
+type LogPattern struct {
+	Name  string `yaml:"name"`
+	Regex string `yaml:"regex"`
+}
+
+// LogMultiline 描述多行日志的合并规则。
+type LogMultiline struct {
+	// StartPattern 匹配「新一条日志的行首」；不匹配的行视为上一条的续行。
+	StartPattern string `yaml:"startPattern"`
+	// MaxLines 是单条日志最多合并多少行（防止一个永不匹配的行首把整个文件吸进来）。
+	MaxLines int `yaml:"maxLines"`
+}
+
+// 日志采集的默认值。
+const (
+	// DefaultLogOffsetsFile 是偏移文件默认位置（可被 logOffsetsFile 覆盖）。
+	DefaultLogOffsetsFile = "/var/lib/monitor-agent/log_offsets.json"
+	// DefaultLogMaxLinesPerRound / DefaultLogMaxBytesPerRound 是单轮单文件的读取上限。
+	DefaultLogMaxLinesPerRound = 2000
+	DefaultLogMaxBytesPerRound = 4 << 20
+	// MaxLogLinesPerRound / MaxLogBytesPerRound 是上述上限的天花板（配置不得越过）。
+	MaxLogLinesPerRound = 20000
+	MaxLogBytesPerRound = 32 << 20
+	// DefaultLogMultilineMaxLines / MaxLogMultilineLines 是单条日志合并行数上限。
+	DefaultLogMultilineMaxLines = 50
+	MaxLogMultilineLines        = 500
+)
 
 // TemplateGuardsConfig 是模板三类「非网络取数」方式的本机护栏。
 //
@@ -310,6 +366,10 @@ func Load(path string) (*Config, error) {
 	if err := validateGuardedLocalTemplates(cfg); err != nil {
 		return nil, err
 	}
+	// 集中日志（C2）：校验来源配置并补齐默认值。
+	if err := normalizeAndValidateLogSources(cfg); err != nil {
+		return nil, err
+	}
 	// 解密中间件连接密码：以 enc: 前缀的密文经 AES-GCM 解密为明文供采集器使用；
 	// 旧明文配置直接保留（向后兼容）。解密失败仅告警并保留原值，避免 agent 启动失败。
 	cipher, err := crypto.NewCipher([]byte(cfg.CryptoKey))
@@ -371,6 +431,87 @@ func validateGuardedLocalTemplates(cfg *Config) error {
 		if template.IsGuardedKind(k) && !cfg.TemplateGuards.AllowsKind(k) {
 			return fmt.Errorf("模板 %s 使用 kind=%s，但 templateGuards.%s.enabled 未开启：本机未放行该取数方式（exec/file 会以 root 触碰本机、jdbc 会携带库凭据，故默认关闭）",
 				cfg.Templates[i].ID, k, k)
+		}
+	}
+	return nil
+}
+
+// logSourceIDPattern 限制来源 id：它同时是存储分片名（会成为文件路径的一段）与指标前缀。
+var logSourceIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{1,31}$`)
+
+// normalizeAndValidateLogSources 校验日志来源配置并补齐默认值。
+//
+// 启动期拒绝（而不是运行时跳过）的理由与模板一致：日志配置写错的运行期表现是
+// 「界面上什么都没有」，而原因（路径写错、正则不匹配、没权限读）不会自己冒出来。
+func normalizeAndValidateLogSources(cfg *Config) error {
+	if cfg.LogOffsetsFile == "" {
+		cfg.LogOffsetsFile = DefaultLogOffsetsFile
+	}
+	seen := make(map[string]bool, len(cfg.LogSources))
+	for i := range cfg.LogSources {
+		s := &cfg.LogSources[i]
+		switch {
+		case strings.TrimSpace(s.ID) == "":
+			return fmt.Errorf("logSources[%d]：id 不能为空", i)
+		case !logSourceIDPattern.MatchString(s.ID):
+			return fmt.Errorf("logSources[%d]：id %q 非法（小写字母开头，只含小写字母/数字/下划线）", i, s.ID)
+		case seen[s.ID]:
+			return fmt.Errorf("logSources[%d]：id %q 重复（它同时是存储分片名与指标前缀）", i, s.ID)
+		}
+		seen[s.ID] = true
+
+		if len(s.Paths) == 0 {
+			return fmt.Errorf("logSources[%d]（%s）：paths 不能为空", i, s.ID)
+		}
+		for j, p := range s.Paths {
+			if !template.IsAbsolutePath(p) {
+				return fmt.Errorf("logSources[%d]（%s）：paths[%d] %q 必须是绝对路径且不含 ..", i, s.ID, j, p)
+			}
+		}
+		if !s.All && len(s.Patterns) == 0 {
+			return fmt.Errorf("logSources[%d]（%s）：必须给出 patterns（只上传关心的行）；确需全量请显式设置 all: true", i, s.ID)
+		}
+		names := make(map[string]bool, len(s.Patterns))
+		for j, p := range s.Patterns {
+			if strings.TrimSpace(p.Name) == "" {
+				return fmt.Errorf("logSources[%d]（%s）：patterns[%d].name 不能为空", i, s.ID, j)
+			}
+			if names[p.Name] {
+				return fmt.Errorf("logSources[%d]（%s）：patterns[%d].name %q 重复", i, s.ID, j, p.Name)
+			}
+			names[p.Name] = true
+			if strings.TrimSpace(p.Regex) == "" {
+				return fmt.Errorf("logSources[%d]（%s）：patterns[%d].regex 不能为空", i, s.ID, j)
+			}
+			if _, err := regexp.Compile(p.Regex); err != nil {
+				return fmt.Errorf("logSources[%d]（%s）：patterns[%d].regex 非法：%v", i, s.ID, j, err)
+			}
+		}
+		if s.Multiline.StartPattern != "" {
+			if _, err := regexp.Compile(s.Multiline.StartPattern); err != nil {
+				return fmt.Errorf("logSources[%d]（%s）：multiline.startPattern 非法：%v", i, s.ID, err)
+			}
+			if s.Multiline.MaxLines == 0 {
+				s.Multiline.MaxLines = DefaultLogMultilineMaxLines
+			}
+			if s.Multiline.MaxLines < 0 || s.Multiline.MaxLines > MaxLogMultilineLines {
+				return fmt.Errorf("logSources[%d]（%s）：multiline.maxLines 越界（0 表示默认 %d；上限 %d）",
+					i, s.ID, DefaultLogMultilineMaxLines, MaxLogMultilineLines)
+			}
+		}
+		if s.MaxLinesPerRound == 0 {
+			s.MaxLinesPerRound = DefaultLogMaxLinesPerRound
+		}
+		if s.MaxLinesPerRound < 0 || s.MaxLinesPerRound > MaxLogLinesPerRound {
+			return fmt.Errorf("logSources[%d]（%s）：maxLinesPerRound 越界（0 表示默认 %d；上限 %d）",
+				i, s.ID, DefaultLogMaxLinesPerRound, MaxLogLinesPerRound)
+		}
+		if s.MaxBytesPerRound == 0 {
+			s.MaxBytesPerRound = DefaultLogMaxBytesPerRound
+		}
+		if s.MaxBytesPerRound < 0 || s.MaxBytesPerRound > MaxLogBytesPerRound {
+			return fmt.Errorf("logSources[%d]（%s）：maxBytesPerRound 越界（0 表示默认 %d；上限 %d）",
+				i, s.ID, DefaultLogMaxBytesPerRound, MaxLogBytesPerRound)
 		}
 	}
 	return nil

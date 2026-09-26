@@ -122,6 +122,7 @@ func main() {
 		cfg.PortChecks, cfg.Security,
 		time.Duration(cfg.CollectTimeout)*time.Second,
 		cfg.Templates, cfg.TemplateGuards,
+		cfg.LogSources, cfg.LogOffsetsFile,
 	)
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 

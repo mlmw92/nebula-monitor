@@ -16,7 +16,7 @@ func newGuardedCollector(t *testing.T, g config.TemplateGuardsConfig) *Collector
 	cfg := config.CollectorToggle{CPU: true}
 	return New("test-node", "default", nil, cfg,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		config.SecurityConfig{}, time.Second, nil, g)
+		config.SecurityConfig{}, time.Second, nil, g, nil, "")
 }
 
 func execTpl(id string, groups ...string) template.Config {

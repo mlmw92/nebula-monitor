@@ -51,6 +51,9 @@ type Collector struct {
 	// 零值 = 三类全部未放行，因此「忘记注入」的后果是「本机取数不可用」，
 	// 而不是「悄悄允许了 root 执行」——默认值必须站在安全的一侧。
 	guards config.TemplateGuardsConfig
+
+	// logs 是集中日志采集器（C2）。为 nil 表示未配置 logSources，与改造前完全等价。
+	logs *LogCollector
 }
 
 // New 创建 Collector。
@@ -70,6 +73,8 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	collectTimeout time.Duration,
 	templates []template.Config,
 	guards config.TemplateGuardsConfig,
+	logSources []config.LogSourceConfig,
+	logOffsetsPath string,
 ) *Collector {
 	c := &Collector{
 		node:    node,
@@ -81,6 +86,10 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 		cpu:     NewCPUCollector(),
 		disk:    NewDiskCollector(),
 		net:     NewNetworkCollector(),
+	}
+	// 集中日志（C2）：未配置来源时不构造采集器，tasks() 也就不追加任务（零行为变化）
+	if len(logSources) > 0 {
+		c.logs = NewLogCollector(node, logSources, logOffsetsPath)
 	}
 	if cfg.Redis {
 		c.redis = NewRedisCollector(node, redisInstances)
