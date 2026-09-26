@@ -34,7 +34,98 @@ const (
 	KindHTTPJSON Kind = "http-json"
 	// KindHTTPText 拉取纯文本，按正则抓取。
 	KindHTTPText Kind = "http-text"
+
+	// KindJDBC 连接数据库执行**只读**查询取值（复用已依赖的 mysql / postgres 驱动）。
+	//
+	// 与前三类的区别：前三类是「拉别人的端点」，它带着凭据访问数据库，
+	// 且一条模板会下发到分组内全部节点 —— 因此只允许读取类单语句（见 ValidateReadOnlyQuery）。
+	KindJDBC Kind = "jdbc"
+	// KindExec 在本机执行命令并解析其输出。
+	//
+	// **安全敏感**：Agent 以 root 运行，执行命令等于把 root 能力交给模板作者。
+	// 因此必须命中本机 templateGuards 白名单，且 argv 直传、不经 shell（见 docs/c1-phase3-kinds.md §3.3）。
+	KindExec Kind = "exec"
+	// KindFile 读取本机文件末尾并按正则取值（快照语义）。
+	//
+	// **安全敏感**：同 exec，需命中本机 templateGuards 路径白名单，且解析软链接后重新校验。
+	KindFile Kind = "file"
 )
+
+// AllKinds 是全部取数方式（前端下拉与校验提示共用一份，避免两处各写一遍）。
+var AllKinds = []Kind{KindPrometheusExporter, KindHTTPJSON, KindHTTPText, KindJDBC, KindExec, KindFile}
+
+// GuardedKinds 是需要**本机护栏放行**才能使用的取数方式：
+// 它们会以 root 触碰被监控机本身（访问本机文件 / 执行本机命令）或携带库凭据直连数据库。
+var GuardedKinds = []Kind{KindJDBC, KindExec, KindFile}
+
+// IsGuardedKind 判断该取数方式是否需要本机护栏放行。
+func IsGuardedKind(k Kind) bool {
+	for _, g := range GuardedKinds {
+		if g == k {
+			return true
+		}
+	}
+	return false
+}
+
+// IsKnownKind 判断是否为受支持的取数方式。
+func IsKnownKind(k Kind) bool {
+	for _, v := range AllKinds {
+		if v == k {
+			return true
+		}
+	}
+	return false
+}
+
+// IsAbsolutePath 判断是否为本机绝对路径。
+//
+// Agent 只运行在 Linux 上（不做 Windows 节点），故要求 POSIX 风格绝对路径；
+// 并直接拒绝含 `..` 的路径——本机白名单是「按规范化后的文本精确比对」，
+// 若允许 `..`，安全边界就落在规范化规则本身，而那是容易出错的地方。
+func IsAbsolutePath(p string) bool {
+	p = strings.TrimSpace(p)
+	return strings.HasPrefix(p, "/") && !strings.Contains(p, "..")
+}
+
+// readOnlyQueryPrefixes 是 jdbc 允许的语句前缀（大小写不敏感）。
+var readOnlyQueryPrefixes = []string{"select", "show", "explain"}
+
+// ValidateReadOnlyQuery 校验 SQL 为「只读单语句」。
+//
+// 这是防「批量数据损坏」的第一道防线（执行侧会再调用一次：模板也可能来自 Server 下发）。
+// 一条模板会下发到分组内全部节点，一句写操作就是整片的破坏——而模板配错的其它情形只是没数据，
+// 后果不对等，所以这里宁可从严格。
+//
+// 刻意从严：要求**直接**以只读关键字开头。以注释开头、以及 `WITH`(CTE) 写法一律不接受——
+// Postgres 允许 `WITH ... DELETE`，只看开头无法判断只读性，放宽它等于让判断变得可绕过。
+func ValidateReadOnlyQuery(q string) error {
+	s := strings.TrimSpace(q)
+	if s == "" {
+		return errors.New("query 不能为空")
+	}
+	// 去掉结尾分号后再查分号：多语句在部分驱动下会被执行，且只返回首个结果集——静默出错
+	body := strings.TrimRight(s, "; \t\r\n")
+	if strings.Contains(body, ";") {
+		return errors.New("query 只允许单条语句（不得用分号拼接多条）")
+	}
+	lower := strings.ToLower(body)
+	for _, p := range readOnlyQueryPrefixes {
+		if !strings.HasPrefix(lower, p) {
+			continue
+		}
+		// 关键字必须落在词边界：select_from_x 这类标识符不能算通过
+		if len(lower) == len(p) || !isIdentByte(lower[len(p)]) {
+			return nil
+		}
+	}
+	return fmt.Errorf("query 只允许只读语句（%s 开头）", strings.Join(readOnlyQueryPrefixes, " / "))
+}
+
+// isIdentByte 判断是否为标识符字符。
+func isIdentByte(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
 
 // 硬编码上限。刻意不做成配置项：上限被调大到失去保护的代价，高于「不可调」的不便。
 const (
@@ -54,6 +145,17 @@ const (
 	MaxMetricNameLen = 200
 	// MaxGroupNameLen 节点分组名长度上限。
 	MaxGroupNameLen = 64
+	// MaxExecTimeoutSec / DefaultExecTimeoutSec 是 exec 的命令超时上限与默认值（秒）。
+	// 上限刻意压到 30s：命令卡住会拖住该模板的采集任务，而进程被杀掉才是可预期的行为。
+	MaxExecTimeoutSec     = 30
+	DefaultExecTimeoutSec = 5
+	// MaxFileReadBytes / DefaultFileReadBytes 是 file 单次读取上限与默认值（快照语义：只读末尾）。
+	MaxFileReadBytes     = 8 << 20
+	DefaultFileReadBytes = 1 << 20
+	// MaxCommandArgs 是 exec 的命令参数个数上限。
+	MaxCommandArgs = 32
+	// MaxLocalPathLen 是 exec 命令路径与 file 文件路径的长度上限。
+	MaxLocalPathLen = 512
 	// UpMetricName 是每个 target 每轮必产出的存活指标名。
 	//
 	// 刻意不叫 `<id>_instance_up`：既有的 `*_instance_up` 有两种产出范式
@@ -79,6 +181,8 @@ var (
 	idPattern         = regexp.MustCompile(`^[a-z][a-z0-9_]{1,31}$`)
 	labelKeyPattern   = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,63}$`)
 	metricNamePattern = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
+	// columnNamePattern 是 jdbc 取值列的合法名（标识符，不含引号/分号等）。
+	columnNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
 // Config 是单个模板的配置。
@@ -103,23 +207,67 @@ type Config struct {
 	//     一台只跑某中间件的机器配一个模板，会让其余节点每轮各报一个 template_target_up=0，
 	//     序列与日志双噪声。
 	Groups []string `yaml:"groups" json:"groups"`
+	// Driver 数据库驱动（kind=jdbc 必填）：mysql / postgres —— 只使用已依赖的两个驱动，不引入新依赖。
+	Driver string `yaml:"driver" json:"driver"`
 	// Targets 拉取目标。
 	Targets []Target `yaml:"targets" json:"targets"`
 	// Rules 解析与映射规则。
 	Rules Rules `yaml:"rules" json:"rules"`
 }
 
-// Target 是单个拉取目标。
+// Target 是单个取数目标。
+//
+// 字段是**按 kind 划分的并集**：每个 kind 只使用其中几个，其余必须留空
+// （校验会拒绝跨 kind 的残留字段——它们几乎都是复制粘贴别的模板留下的，
+// 而它的后果是「配置看起来生效了、其实那条规则根本没被使用」）。
 type Target struct {
-	// Instance 实例标识（写入 instance 标签）；留空则取 addr 的 host:port。
+	// Instance 实例标识（写入 instance 标签）；留空则取 addr 的 host:port（本机取数类无 addr 时取模板 id）。
 	Instance string `yaml:"instance" json:"instance"`
-	// Addr 拉取地址，仅支持 http / https。
+	// Addr 拉取地址：http / https（前三类），或 host:port（jdbc）。
 	Addr string `yaml:"addr" json:"addr"`
-	// Headers 自定义请求头。
+	// Headers 自定义请求头（仅 http 类）。
 	Headers map[string]string `yaml:"headers" json:"headers"`
-	// Auth 认证方式（可选）。刻意不打 json tag：凭据永不进入上报体，
-	// 沿用 model.RedisInstanceConfig.Password 的既有做法。
+	// Auth 认证方式（http 类的 basic/bearer/header；jdbc 用 basic 作为库账号密码）。
+	// 刻意不打 json tag：凭据永不进入上报体，沿用 model.RedisInstanceConfig.Password 的既有做法。
 	Auth *Auth `yaml:"auth" json:"-"`
+
+	// Database 数据库名（jdbc）。
+	Database string `yaml:"database" json:"database"`
+	// Params 驱动特定连接参数（jdbc），按驱动透传（如 postgres 的 sslmode）。
+	Params map[string]string `yaml:"params" json:"params"`
+	// Command 要执行的程序**绝对路径**（exec）。argv 直传，不经 shell。
+	Command string `yaml:"command" json:"command"`
+	// Args 程序参数（exec），逐项传给程序，不做任何 shell 解释。
+	Args []string `yaml:"args" json:"args"`
+	// TimeoutSec 单次执行超时秒数（exec），默认 5、上限 30。
+	TimeoutSec int `yaml:"timeoutSec" json:"timeoutSec"`
+	// Path 要读取的文件**绝对路径**（file）。
+	Path string `yaml:"path" json:"path"`
+	// MaxBytes 只读文件末尾多少字节（file），默认 1 MiB、上限 8 MiB。
+	MaxBytes int64 `yaml:"maxBytes" json:"maxBytes"`
+}
+
+// EffectiveTimeoutSec 返回命令执行超时（秒）：未配置时用默认值。
+// 刻意不用 0 表示「不超时」——那与「未配置」在配置里无法区分，而命令不设超时是危险的默认值。
+func (t Target) EffectiveTimeoutSec() int {
+	if t.TimeoutSec <= 0 {
+		return DefaultExecTimeoutSec
+	}
+	if t.TimeoutSec > MaxExecTimeoutSec {
+		return MaxExecTimeoutSec
+	}
+	return t.TimeoutSec
+}
+
+// EffectiveMaxBytes 返回文件读取上限：未配置时用默认值。
+func (t Target) EffectiveMaxBytes() int64 {
+	if t.MaxBytes <= 0 {
+		return DefaultFileReadBytes
+	}
+	if t.MaxBytes > MaxFileReadBytes {
+		return MaxFileReadBytes
+	}
+	return t.MaxBytes
 }
 
 // Auth 是请求认证配置，三种方式至多启用一种。
@@ -216,11 +364,15 @@ type RenameRule struct {
 	To    string `yaml:"to" json:"to"`
 }
 
-// MetricRule 描述一个指标的取值方式：http-json 用 path，http-text 用 pattern。
+// MetricRule 描述一个指标的取值方式：http-json 用 path；http-text / exec / file 用 pattern；jdbc 用 query。
 type MetricRule struct {
 	Name    string `yaml:"name" json:"name"`
 	Path    string `yaml:"path" json:"path"`
 	Pattern string `yaml:"pattern" json:"pattern"`
+	// Query 只读 SQL（jdbc）：每个指标一次查询，只允许 SELECT / SHOW / EXPLAIN 单条语句。
+	Query string `yaml:"query" json:"query"`
+	// Column 取值列名（jdbc），留空取第一列；结果只取首行（标量语义）。
+	Column string `yaml:"column" json:"column"`
 	// Type 仅作声明记录（counter / gauge），阶段一不做计算，故不影响取值。
 	Type string `yaml:"type" json:"type"`
 	// Label / Unit 只影响展示（中间件卡片摘要、报告表头），不参与采集。
@@ -393,11 +545,17 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	switch c.Kind {
-	case KindPrometheusExporter, KindHTTPJSON, KindHTTPText:
-	default:
-		errs = append(errs, fmt.Errorf("kind 必须是 %s / %s / %s 之一（当前 %q）",
-			KindPrometheusExporter, KindHTTPJSON, KindHTTPText, c.Kind))
+	if !IsKnownKind(c.Kind) {
+		errs = append(errs, fmt.Errorf("kind 必须是 %v 之一（当前 %q）", AllKinds, c.Kind))
+	}
+	// driver 在模板级：一个模板只连一种库（同一模板的目标应当同构）
+	switch {
+	case c.Kind == KindJDBC && c.Driver == "":
+		errs = append(errs, errors.New("kind=jdbc 必须配置 driver（mysql / postgres）"))
+	case c.Kind == KindJDBC && c.Driver != "mysql" && c.Driver != "postgres":
+		errs = append(errs, fmt.Errorf("driver %q 不被支持（可选 mysql / postgres；只用已依赖的驱动，不引入新依赖）", c.Driver))
+	case c.Kind != KindJDBC && c.Driver != "":
+		errs = append(errs, fmt.Errorf("kind=%s 不使用 driver 字段", c.Kind))
 	}
 
 	if len(c.Targets) == 0 {
@@ -407,30 +565,66 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("targets 数量 %d 超过上限 %d", len(c.Targets), MaxTargetsPerTemplate))
 	}
 	for i, t := range c.Targets {
-		errs = append(errs, t.validate(fmt.Sprintf("targets[%d]", i))...)
+		errs = append(errs, t.validate(c.Kind, fmt.Sprintf("targets[%d]", i))...)
 	}
 
 	errs = append(errs, c.Rules.validate(c.Kind, c.ID)...)
 	return errors.Join(errs...)
 }
 
-// validate 校验单个 target。
-func (t Target) validate(where string) []error {
+// fieldUsage 是「可选字段 → 是否被赋值」的一项。
+type fieldUsage struct {
+	name string
+	used bool
+}
+
+// optionalFields 返回 target 上全部可选字段的赋值情况，用于统一判定「该字段是否属于这个 kind」。
+func (t Target) optionalFields() []fieldUsage {
+	return []fieldUsage{
+		{"addr", t.Addr != ""},
+		{"headers", len(t.Headers) > 0},
+		{"auth", t.Auth != nil},
+		{"database", t.Database != ""},
+		{"params", len(t.Params) > 0},
+		{"command", t.Command != ""},
+		{"args", len(t.Args) > 0},
+		{"timeoutSec", t.TimeoutSec != 0},
+		{"path", t.Path != ""},
+		{"maxBytes", t.MaxBytes != 0},
+	}
+}
+
+// allowedFields 是每类 kind 允许出现的字段集合。
+//
+// 用一张表判定字段归属，而不是逐个 kind 写「残留字段检查」：后者漏一个就少一道防线，
+// 而残留字段的后果恰恰最难发现——配置看起来生效了，实际那条规则根本没被使用。
+var allowedFields = map[Kind]map[string]bool{
+	KindPrometheusExporter: {"addr": true, "headers": true, "auth": true},
+	KindHTTPJSON:           {"addr": true, "headers": true, "auth": true},
+	KindHTTPText:           {"addr": true, "headers": true, "auth": true},
+	KindJDBC:               {"addr": true, "database": true, "params": true, "auth": true},
+	KindExec:               {"command": true, "args": true, "timeoutSec": true},
+	KindFile:               {"path": true, "maxBytes": true},
+}
+
+// rejectForeignFields 拒绝不属于该 kind 的字段。
+func (t Target) rejectForeignFields(kind Kind, where string) []error {
 	var errs []error
-	if t.Addr == "" {
-		return append(errs, fmt.Errorf("%s：addr 不能为空", where))
+	allowed := allowedFields[kind]
+	for _, f := range t.optionalFields() {
+		if !f.used || allowed[f.name] {
+			continue
+		}
+		errs = append(errs, fmt.Errorf("%s：kind=%s 不使用 %s 字段（多为从其它模板复制粘贴的残留，会让配置看起来生效、实际未被使用）", where, kind, f.name))
 	}
-	u, err := url.Parse(t.Addr)
-	switch {
-	case err != nil:
-		errs = append(errs, fmt.Errorf("%s：addr %q 无法解析：%v", where, t.Addr, err))
-	case u.Scheme != "http" && u.Scheme != "https":
-		errs = append(errs, fmt.Errorf("%s：addr %q 的协议 %q 不被允许（仅 http / https）", where, t.Addr, u.Scheme))
-	case u.Host == "":
-		errs = append(errs, fmt.Errorf("%s：addr %q 缺少主机", where, t.Addr))
-	}
+	return errs
+}
+
+// validateAuth 校验认证配置：至多启用一种，header 需给出名称。
+func (t Target) validateAuth(where string) []error {
+	var errs []error
 	if t.Auth == nil {
-		return errs
+		return nil
 	}
 	enabled := 0
 	if t.Auth.Basic != nil {
@@ -448,6 +642,91 @@ func (t Target) validate(where string) []error {
 	if enabled > 1 {
 		errs = append(errs, fmt.Errorf("%s：auth 只能启用 basic / bearer / header 之一", where))
 	}
+	return errs
+}
+
+// validate 校验单个 target；kind 决定它该有哪几个字段。
+func (t Target) validate(kind Kind, where string) []error {
+	if IsGuardedKind(kind) {
+		return t.validateLocal(kind, where)
+	}
+	var errs []error
+	if t.Addr == "" {
+		return append(errs, fmt.Errorf("%s：addr 不能为空", where))
+	}
+	u, err := url.Parse(t.Addr)
+	switch {
+	case err != nil:
+		errs = append(errs, fmt.Errorf("%s：addr %q 无法解析：%v", where, t.Addr, err))
+	case u.Scheme != "http" && u.Scheme != "https":
+		errs = append(errs, fmt.Errorf("%s：addr %q 的协议 %q 不被允许（仅 http / https）", where, t.Addr, u.Scheme))
+	case u.Host == "":
+		errs = append(errs, fmt.Errorf("%s：addr %q 缺少主机", where, t.Addr))
+	}
+	errs = append(errs, t.rejectForeignFields(kind, where)...)
+	errs = append(errs, t.validateAuth(where)...)
+	return errs
+}
+
+// validateLocal 校验「数据库直连 / 本机取数」类 target：只认自己那几个字段。
+func (t Target) validateLocal(kind Kind, where string) []error {
+	var errs []error
+
+	switch kind {
+	case KindJDBC:
+		// addr 是 host:port（不是 URL），故不按 http 解析
+		if strings.TrimSpace(t.Addr) == "" {
+			errs = append(errs, fmt.Errorf("%s：jdbc 需要 addr（格式 host:port）", where))
+		}
+		if strings.TrimSpace(t.Database) == "" {
+			errs = append(errs, fmt.Errorf("%s：jdbc 需要 database", where))
+		}
+		if t.Auth == nil || t.Auth.Basic == nil || strings.TrimSpace(t.Auth.Basic.User) == "" {
+			errs = append(errs, fmt.Errorf("%s：jdbc 需要 auth.basic.user（库账号）", where))
+		}
+		// 直连数据库只认账号密码：bearer / 自定义头在这里没有语义
+		if t.Auth != nil && (t.Auth.Bearer != nil || t.Auth.Header != nil) {
+			errs = append(errs, fmt.Errorf("%s：jdbc 只支持 auth.basic（bearer / header 无意义）", where))
+		}
+	case KindExec:
+		switch {
+		case strings.TrimSpace(t.Command) == "":
+			errs = append(errs, fmt.Errorf("%s：exec 需要 command", where))
+		case !IsAbsolutePath(t.Command):
+			errs = append(errs, fmt.Errorf("%s：command %q 必须是绝对路径且不含 ..（白名单按规范化后的路径精确比对）", where, t.Command))
+		case len(t.Command) > MaxLocalPathLen:
+			errs = append(errs, fmt.Errorf("%s：command 长度 %d 超过上限 %d", where, len(t.Command), MaxLocalPathLen))
+		}
+		if len(t.Args) > MaxCommandArgs {
+			errs = append(errs, fmt.Errorf("%s：args 参数个数 %d 超过上限 %d", where, len(t.Args), MaxCommandArgs))
+		}
+		for i, a := range t.Args {
+			if strings.ContainsRune(a, 0) {
+				errs = append(errs, fmt.Errorf("%s：args[%d] 含 NUL 字节", where, i))
+			}
+			if len(a) > MaxLocalPathLen {
+				errs = append(errs, fmt.Errorf("%s：args[%d] 长度 %d 超过上限 %d", where, i, len(a), MaxLocalPathLen))
+			}
+		}
+		if t.TimeoutSec < 0 || t.TimeoutSec > MaxExecTimeoutSec {
+			errs = append(errs, fmt.Errorf("%s：timeoutSec %d 越界（0 表示用默认 %d；上限 %d）", where, t.TimeoutSec, DefaultExecTimeoutSec, MaxExecTimeoutSec))
+		}
+	case KindFile:
+		switch {
+		case strings.TrimSpace(t.Path) == "":
+			errs = append(errs, fmt.Errorf("%s：file 需要 path", where))
+		case !IsAbsolutePath(t.Path):
+			errs = append(errs, fmt.Errorf("%s：path %q 必须是绝对路径且不含 ..（白名单按规范化后的路径精确比对）", where, t.Path))
+		case len(t.Path) > MaxLocalPathLen:
+			errs = append(errs, fmt.Errorf("%s：path 长度 %d 超过上限 %d", where, len(t.Path), MaxLocalPathLen))
+		}
+		if t.MaxBytes < 0 || t.MaxBytes > MaxFileReadBytes {
+			errs = append(errs, fmt.Errorf("%s：maxBytes %d 越界（0 表示用默认 %d；上限 %d）", where, t.MaxBytes, DefaultFileReadBytes, MaxFileReadBytes))
+		}
+	}
+
+	errs = append(errs, t.rejectForeignFields(kind, where)...)
+	errs = append(errs, t.validateAuth(where)...)
 	return errs
 }
 
@@ -543,18 +822,37 @@ func (r *Rules) validate(kind Kind, id string) []error {
 		if len(r.Metrics) > 0 {
 			errs = append(errs, fmt.Errorf("kind=%s 不需要 rules.metrics（指标名直接来自响应）", KindPrometheusExporter))
 		}
-	case KindHTTPJSON, KindHTTPText:
+	default:
+		// 其余 kind 都是「声明式取值」：指标名与标签全部来自 rules.metrics，
+		// 响应里没有「一堆指标名 / 一堆维度标签」可供改名、删除、塌缩、提升。
 		if len(r.Metrics) == 0 {
 			errs = append(errs, fmt.Errorf("kind=%s 必须配置 rules.metrics", kind))
 		}
-		// 这两类每个规则只产出一条序列（无维度标签可塌缩），聚合无从谈起：
+		// 每规则只产出一条序列（无维度标签可塌缩），聚合无从谈起：
 		// 静默忽略会让用户以为聚合生效了，故直接拒绝。
 		if len(r.Aggregate) > 0 {
 			errs = append(errs, fmt.Errorf("kind=%s 不支持 rules.aggregate（每规则只产出一条序列，无同名序列可合并）", kind))
 		}
-		// 同理：这两类的响应标签一概不参与（只有静态标签），没有可提升的标签
 		if len(r.PromoteLabel) > 0 {
 			errs = append(errs, fmt.Errorf("kind=%s 不支持 rules.promoteLabel（响应标签不参与映射，没有可提升的标签）", kind))
+		}
+	}
+
+	// 本机取数 / 数据库直连类连「响应里有一堆指标名」这件事都不存在，
+	// 因此 keep / drop / rename / unlabel 同样是「写了却不生效」的配置，一律拒绝。
+	if IsGuardedKind(kind) {
+		for _, it := range []struct {
+			name  string
+			inUse bool
+		}{
+			{"keep", r.Keep != ""},
+			{"drop", r.Drop != ""},
+			{"rename", len(r.Rename) > 0},
+			{"unlabel", len(r.Unlabel) > 0},
+		} {
+			if it.inUse {
+				errs = append(errs, fmt.Errorf("kind=%s 不支持 rules.%s（指标名与标签来自 rules.metrics，没有响应可供其作用）", kind, it.name))
+			}
 		}
 	}
 	if len(r.Metrics) > MaxMetricsPerTemplate {
@@ -588,14 +886,31 @@ func (r *Rules) validate(kind Kind, id string) []error {
 			if strings.TrimSpace(m.Path) == "" {
 				errs = append(errs, fmt.Errorf("rules.metrics[%d]（%s）：http-json 必须配置 path", i, m.Name))
 			}
-		case KindHTTPText:
+			if m.Pattern != "" || m.Query != "" {
+				errs = append(errs, fmt.Errorf("rules.metrics[%d]（%s）：http-json 只使用 path", i, m.Name))
+			}
+		case KindHTTPText, KindExec, KindFile:
+			// 三者语义完全一致：拿到一段文本 → 按正则抓取第 1 个捕获组
 			switch {
 			case strings.TrimSpace(m.Pattern) == "":
-				errs = append(errs, fmt.Errorf("rules.metrics[%d]（%s）：http-text 必须配置 pattern", i, m.Name))
+				errs = append(errs, fmt.Errorf("rules.metrics[%d]（%s）：%s 必须配置 pattern", i, m.Name, kind))
 			default:
 				if _, err := regexp.Compile(m.Pattern); err != nil {
 					errs = append(errs, fmt.Errorf("rules.metrics[%d]（%s）：pattern 正则非法：%v", i, m.Name, err))
 				}
+			}
+			if m.Path != "" || m.Query != "" {
+				errs = append(errs, fmt.Errorf("rules.metrics[%d]（%s）：%s 只使用 pattern", i, m.Name, kind))
+			}
+		case KindJDBC:
+			if err := ValidateReadOnlyQuery(m.Query); err != nil {
+				errs = append(errs, fmt.Errorf("rules.metrics[%d]（%s）：%v", i, m.Name, err))
+			}
+			if m.Column != "" && !columnNamePattern.MatchString(m.Column) {
+				errs = append(errs, fmt.Errorf("rules.metrics[%d]（%s）：column %q 非法（需匹配 %s）", i, m.Name, m.Column, columnNamePattern.String()))
+			}
+			if m.Path != "" || m.Pattern != "" {
+				errs = append(errs, fmt.Errorf("rules.metrics[%d]（%s）：jdbc 只使用 query / column", i, m.Name))
 			}
 		}
 		switch m.Type {
