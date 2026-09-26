@@ -333,7 +333,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | E1 | | 10. `main.go` 接线到 `CollectAll` | ✅ | — | `collectAndReport` 改为消费 `Result`，上报体字段逐项对照迁移 |
 | E1 | | 11. TDD 测试 | ✅ | — | 15 个用例：内核 7 + redis 3 + CollectAll 5，全部通过 |
 | E1 | | 12. `-race`（Linux/CI） | ✅ | — | 已在 Ubuntu 24.04 + Go 1.27.1 实机执行：`CGO_ENABLED=1 go test -race -count=1 ./internal/agent/...` 全部通过（collector 2.46s），无竞态报告 |
-| E1 | | 13. 实机回归比对（指标名/label 与旧版一致） | ✅ | — | 新旧 Agent 在同一节点各跑一轮真实采集，结构比对 **IDENTICAL**：78 条指标 / 66 个指标签名、43 条监听、93 条安全事件、9 类中间件实例结构、firewallStatus、hostInfo 全部一致；仅进程 Top-N 条数随实时状态浮动（153 vs 152） |
+| E1 | | 13. 实机回归比对（指标名/label 与旧版一致） | ✅ | — | 新旧 Agent 在同一节点各跑一轮真实采集，结构比对 **IDENTICAL**：78 条指标 / 66 个指标签名、43 条监听、93 条安全事件、9 类中间件实例结构、firewallStatus、hostInfo 全部一致；仅进程 Top-N 条数随实时状态浮动（153 vs 152）。已固化为 `build/verify-agent-parity.sh` |
 | D2 | 告警事件管道 + 前端编辑 | 1. `pipeline.go` + `PipelineStore` 热加载 | ⬜ | — | 仿 inhibit/grouping |
 | D2 | | 2. engine 接入 pipeline 阶段 | ⬜ | — | notify 前，浅拷贝 |
 | D2 | | 3. 通知模板可加载 + 兜底 | ⬜ | — | 不丢告警 |
@@ -371,6 +371,7 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | 2026-09-26 | E1 实施：完成主机采集器入口门控（collector/cpu/disk/network）；不可取消的本机只读采集不添加空转 ctx（设计决策）。提交 `21cc0cb` |
 | 2026-09-26 | E1 主体完成：`Result` + `CollectAll`（16 任务并发）接线到 `main.go`；删除 11 个会绕过 ctx 的中间件包装；防火墙规则+状态合并单任务。新增 5 个 CollectAll 测试（共 15 个用例全绿） |
 | 2026-09-26 | **E1 收尾验证完成**（Ubuntu 24.04 / Go 1.27.1 / 2C2G 实机）：① `CGO_ENABLED=1 go test -race -count=1 ./internal/agent/...` 全绿无竞态；② 新旧 Agent 同节点各跑一轮真实采集，结构比对 IDENTICAL（78 指标/66 签名、43 监听、93 安全事件、9 类实例结构全一致）。**E1 完成，可发布 1.23.8** |
+| 2026-09-26 | 新增 `build/verify-agent-parity.sh`：把上述对照验证环境固化为可复用脚本（远端辅助文件由脚本自身生成，含假 exporter / 假 Redis / 上报捕获 / 结构比对），任何 Agent 采集改动均可一键回归。用法 `bash build/verify-agent-parity.sh --baseline <ref> [--race] [--install-go] [--keep]`。实测通过 |
 
 ---
 
