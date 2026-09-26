@@ -96,6 +96,13 @@ func TestPresets_RealWorldPayloads(t *testing.T) {
 			notWant:   []string{"process_cpu_seconds_total"},
 		},
 		{
+			id:   "nacos",
+			body: nacosSample, // 与 promoteLabel 测试共用同一份真实形态样本
+			// nacos_monitor 的多种含义被提升为各自独立的指标名（Nacos 的形态就是「一族多含义」）
+			wantNames: []string{"nacos_monitor_configCount", "nacos_monitor_getConfig", "nacos_monitor_longPolling", "nacos_jvm_memory_used_bytes"},
+			notWant:   []string{"nacos_monitor_created", "jvm_gc_pause_seconds_sum"},
+		},
+		{
 			id:        "zk",
 			body:      zookeeperSample,
 			wantNames: []string{"zk_server_state", "zk_num_alive_connections", "zk_avg_latency", "zk_znode_count"},

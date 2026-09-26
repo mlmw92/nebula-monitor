@@ -140,8 +140,12 @@
   "drop": "_bucket$|_sum$|_count$",
   "rename": [{ "match": "^rabbitmq_queue_messages$", "to": "rabbitmq_queue_depth" }],
   "labels": { "cluster": "prod" },
-  "unlabel": ["job"]
+  "unlabel": ["job"],
+  "aggregate": [{ "match": "^rabbitmq_queue_messages$", "op": "sum" }],
+  "promoteLabel": [{ "match": "^rabbitmq_queue_messages$", "label": "queue" }]
 }
+aggregate：丢掉维度标签后按 sum/max/min/avg 合并同名序列（不声明聚合却出现重复序列时，只保留第一条并告警）
+promoteLabel：把标签取值提升为指标名的一部分（Nacos 的 nacos_monitor{name="..."} 就靠它拆成独立指标名）
 http-json / http-text 需给出 metrics（path 或 pattern，可带 label/unit 供展示）'
           />
           <div class="hint-inline">规则较丰富，这里用 JSON 直接写；保存前点「校验」可拿到与保存一致的精确原因</div>

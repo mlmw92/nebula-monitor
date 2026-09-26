@@ -203,6 +203,17 @@ func (r *TemplateRunner) mapPrometheus(tpl template.Config, t template.Target, b
 		}
 		renames = append(renames, renameMatcher{re: re, to: rn.To})
 	}
+	promotes := make([]promoteMatcher, 0, len(tpl.Rules.PromoteLabel))
+	for _, p := range tpl.Rules.PromoteLabel {
+		re, err := r.regexp(p.Match)
+		if err != nil {
+			return nil, err
+		}
+		if re == nil {
+			continue
+		}
+		promotes = append(promotes, promoteMatcher{re: re, label: p.Label})
+	}
 
 	// 前缀传空串：prometheus-exporter 模板不过滤指标族，由 keep/drop 决定保留范围
 	parsed := parsePrometheusTextWithPrefix(string(body), r.node, t.EffectiveInstance(), "", now)
@@ -214,6 +225,21 @@ func (r *TemplateRunner) mapPrometheus(tpl template.Config, t template.Target, b
 		}
 		if drop != nil && drop.MatchString(name) {
 			continue
+		}
+		// promoteLabel：把标签取值提升为指标名的一部分（先于 rename，故 match 对响应原名）。
+		// 命中但样本没有该标签、或取值无法净化时保持原样：宁可留一个未拆分的样本，也不丢数据。
+		// m.Labels 是解析时为每条样本新建的 map（见 parsePromLine/parsePromLabels），可安全原地删除。
+		for _, pr := range promotes {
+			if !pr.re.MatchString(name) {
+				continue
+			}
+			segment := template.SanitizeMetricSegment(m.Labels[pr.label])
+			if segment == "" {
+				break
+			}
+			name += "_" + segment
+			delete(m.Labels, pr.label)
+			break
 		}
 		for _, rn := range renames {
 			if rn.re.MatchString(name) {
@@ -342,6 +368,12 @@ func (r *TemplateRunner) buildLabels(tpl template.Config, t template.Target, in 
 type renameMatcher struct {
 	re *regexp.Regexp
 	to string
+}
+
+// promoteMatcher 是预编译后的「标签值提升为指标名」规则。
+type promoteMatcher struct {
+	re    *regexp.Regexp
+	label string
 }
 
 // regexp 返回编译后的正则；pattern 为空表示「不启用该规则」，返回 nil。

@@ -95,6 +95,22 @@ func Presets() []Preset {
 			}),
 		},
 		{
+			ID:    "nacos",
+			Title: "Nacos",
+			Desc:  "配置与服务治理指标（配置数、读写统计、长轮询、注册实例数）",
+			Note: "需开启 metrics：Nacos 2.x 内置 /nacos/actuator/prometheus（默认端口 8848），" +
+				"1.x 的暴露路径随版本与插件不同，请以现场为准。" +
+				"该 exporter 把多种含义塞进同一个指标族、用 name 标签区分（nacos_monitor{module=\"config\",name=\"longPolling\"}），" +
+				"预设用 rules.promoteLabel 把它提升为独立指标名（nacos_monitor_longPolling）——" +
+				"否则所有含义都挤在 nacos_monitor 一个名字下，既无法分别看趋势，也无法按含义配告警。",
+			Config: tpl("nacos", "Nacos", nil, "http://127.0.0.1:8848/nacos/actuator/prometheus", Rules{
+				Keep: "^nacos_",
+				Drop: "_created$",
+				// name 标签是该族「含义标识」，提升为指标名后同样从标签集中移除
+				PromoteLabel: []PromoteLabelRule{{Match: "^nacos_monitor$", Label: "name"}},
+			}),
+		},
+		{
 			// id 取 zk 而不是 zookeeper：模板 id 会作为指标前缀加到响应中的名字上，
 			// 而 exporter 暴露的指标族本身就是 zk_*，用 zookeeper 会得到 zookeeper_zk_xxx 这种叠词。
 			ID:    "zk",

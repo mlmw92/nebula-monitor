@@ -149,6 +149,8 @@ templates:
 | `rules.rename[]` | | `{match, to}` |
 | `rules.labels` | | 追加静态标签（白名单，见 3.5） |
 | `rules.unlabel[]` | | 删除响应自带标签 |
+| `rules.aggregate[]` | | `{match, op}`：丢标签后按 `sum`/`max`/`min`/`avg` 合并同名序列。**`match` 匹配最终指标名**（含模板前缀）——与 keep/drop/rename 的「响应原名」刻意不同，理由见 14.2。仅 `prometheus-exporter` |
+| `rules.promoteLabel[]` | | `{match, label}`：把标签取值提升为指标名的一部分，并从标签集中删除该标签。**`match` 匹配响应原名**（与 keep/drop/rename 一致，先于 `rename` 生效）。仅 `prometheus-exporter`；`label` 不得是保留标签、也不得同时出现在 `unlabel` 中。见 14.4 |
 | `rules.metrics[]` | `http-json`/`http-text` 必填 | `{name, path}` 或 `{name, pattern}` |
 
 **上限（硬编码默认，不做成配置项以免运维调错）**
@@ -203,6 +205,8 @@ template_target_up{template="rabbitmq", instance="mq-01:15692"} = 1 | 0
 - `kind` 合法；`targets` 非空、`addr` 为 http/https 且可解析
 - 正则编译通过；`rename.match` 合法
 - `labels` 白名单校验；`unlabel` 不含保留名
+- `aggregate`：`op` 为 `sum`/`max`/`min`/`avg` 之一；`match` 非空、正则合法、不重复（首条匹配生效，重复声明只会让人误以为后一条也生效）；仅 `prometheus-exporter` 可用
+- `promoteLabel`：`label` 非空、合法标签键、**不得是保留标签**（否则等于允许伪造来源）、**不得同时出现在 `unlabel`**（提升后又被删除 = 规则静默失效）；`match` 非空、正则合法、不重复；仅 `prometheus-exporter` 可用
 - 模板数 ≤ `maxTemplates`
 
 ## 4. 执行模型
@@ -263,6 +267,8 @@ Collector.CollectAll(ctx)
 | 模板校验：非法 id / 保留前缀 / 重复 id / 前缀互相包含 | 启动校验返回错误且错误信息含具体原因 |
 | 模板校验：非法 kind / 非法 addr / 正则不合法 / labels 保留名 | 同上 |
 | `prometheus-exporter` 映射：keep/drop/rename/unlabel/labels | 产出指标名与标签集精确匹配预期 |
+| `promoteLabel` 提升（14.4） | 按标签取值拆出独立指标名并删除该标签；取值净化；样本缺标签/取值无法表示时保持原名与原标签（不丢数据）；首条规则生效；净化撞名时由重复序列护栏兜住 |
+| `aggregate` 聚合（14.2） | 四种 op 取值正确；未声明聚合却出现重复序列时只保留第一条并告警 |
 | `http-json` 路径取值（含数组下标、缺失路径） | 缺失路径不 panic、不产出该指标 |
 | `http-text` 正则抓取 | 命中产出、未命中不产出 |
 | 失败语义：目标不可达 / 非 200 / 解析失败 | 仅产出 `template_target_up=0` |
@@ -523,7 +529,7 @@ Collector.CollectAll(ctx)
 | `components/screen/*` | 大屏的类型清单本就来自总览接口（注册表一生效即自动出现）；补上模板类型的实例列表与参数趋势指标（用模板声明的摘要指标） |
 | `Sidebar.vue` / `router` / `MainLayout.vue` | 新增「采集项模板」菜单与路由（读 `middleware:read`，写按钮另受 `middleware:write` 门控） |
 
-**写操作的表单取舍**：`rules` 规则较丰富（keep/drop/rename/labels/unlabel/metrics/aggregate），弹窗里用 **JSON 文本域** + 服务端校验，
+**写操作的表单取舍**：`rules` 规则较丰富（keep/drop/rename/labels/unlabel/metrics/aggregate/promoteLabel），弹窗里用 **JSON 文本域** + 服务端校验，
 而不是为每种规则做一套表单控件——结构化字段（id/title/kind/groups/targets）照常用表单，规则区保留完整表达力。
 
 **已知小项**：`/api/v1/groups` 需 `groups:read`，仅有 `middleware:read` 的用户打开模板页时分组下拉为空
@@ -533,10 +539,10 @@ Collector.CollectAll(ctx)
 
 阶段二收口后立刻做了 E2 第一批——**目的不是「多接几个中间件」，而是验证模板表达力在真实场景是否够用**。
 
-### 14.1 交付：5 个开箱预设
+### 14.1 交付：6 个开箱预设
 
 `internal/template/presets.go`（放在共享包：Server 用它提供「从预设创建」，Agent 侧测试直接引用同一份规则）
-覆盖 **RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper**，规则按各 exporter 的真实输出形态逐条核对：
+覆盖 **RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper / Nacos**（Nacos 于 14.4 补入），规则按各 exporter 的真实输出形态逐条核对：
 
 - 一律 `keep` 收窄到该中间件的指标族：exporter 普遍同时暴露 `go_*` / `process_*` / `promhttp_*`，
   全量透传会把基数浪费在与被监控对象无关的序列上；
@@ -566,13 +572,41 @@ RabbitMQ 按队列暴露 `rabbitmq_queue_messages{queue="a"}`、`{queue="b"}`…
 
 | # | 边界 | 影响 | 当下对策 |
 |---|---|---|---|
-| 1 | `http-json` 的路径语法不支持遍历「按 id 分组的 map」 | Elasticsearch 未启用 prometheus 模块时只有 `_nodes/stats`（`nodes: {nodeId: {...}}`），模板无法表达 | 预设要求启用 `/ _prometheus/metrics`；否则需专用采集器 |
-| 2 | 无法把「标签值提升为指标名」 | Nacos 这类 `nacos_monitor{name="configCount"}` 形态：数据能采到（保留 `name` 标签，正确），但指标名不直观、卡片展示不友好 | 暂记为边界；真要做需在 DSL 增加 label→name 的映射规则 |
+| 1 | `http-json` 的路径语法不支持遍历「按 id 分组的 map」 | Elasticsearch 未启用 prometheus 模块时只有 `_nodes/stats`（`nodes: {nodeId: {...}}`），模板无法表达 | 预设要求启用 `/_prometheus/metrics`；否则需专用采集器 |
+| 2 | ~~无法把「标签值提升为指标名」~~ | Nacos 这类 `nacos_monitor{name="configCount"}` 形态：数据能采到（保留 `name` 标签，正确），但指标名不直观、卡片展示不友好 | **已解决（2026-09-26）**：新增 `rules.promoteLabel` 并交付 Nacos 预设，见 14.4 |
 | 3 | 无分位数/直方图聚合口径 | 只能看 `_sum`/`_count`，不能按 `le` 标签算 P95/P99 | 属查询侧能力，非模板问题 |
 
-### 14.4 验证方式与限度
+### 14.4 边界 2 的修复：把标签取值提升为指标名（`rules.promoteLabel`）
 
-- 单测 9 例：预设合法性/可共存/元信息完备、**5 个预设各用「按真实 exporter 输出形态构造的样本」核对
+Nacos 把多种含义塞进同一个指标族、用 `name` 标签区分：`nacos_monitor{module="config",name="longPolling"}`。
+不拆时它们在「指标浏览」里全挤在 `nacos_monitor` 一个名字下——**无法分别看趋势，也无法按含义配告警**。
+新增 `rules.promoteLabel` 解决：
+
+```yaml
+rules:
+  promoteLabel:
+    - { match: "^nacos_monitor$", label: "name" }   # match 匹配响应原名（与 keep/drop 一致，先于 rename）
+```
+
+产出 `nacos_monitor_longPolling{module="config"}`（被提升的标签从标签集中移除）。
+
+设计取舍（每条都对应一个具体的坑）：
+
+| 取舍 | 理由 |
+|---|---|
+| 提升后**删除**该标签 | 它已经进了指标名，留着会让同一含义出现两处，也让「同名同标签」的判断变复杂 |
+| 取值**净化**（非法字符→`_`）；净化后为空则**不提升、保持原样本** | 标签值来自外部系统。空值、中文取值净化后只剩一串下划线——既无信息又极易与别的取值撞名。宁可留一个未拆分的样本，也不产出含义不明的指标名或丢数据 |
+| 净化撞名（`a/b` 与 `a.b` 都变成 `a_b`）交给**重复序列护栏** | 「哪些取值会撞」静态查不出来，运行期兜底（只保留第一条并告警）比事后排查错乱数据便宜 |
+| `label` 不得是保留标签、不得与 `unlabel` 冲突（**启动期拒绝**） | 前者等于允许伪造 `node`/`instance` 来源；后者会让规则静默失效——都属于「写了却不按预期工作」，必须在启动期报出来 |
+| 仅 `prometheus-exporter` 可用 | 另两类 kind 的响应标签不参与映射，没有可提升的标签；静默忽略会让人以为生效了 |
+
+交付：Nacos 开箱预设（`internal/template/presets.go`，端点 `/nacos/actuator/prometheus`，2.x 需开启 metrics）
++ 8 个新测试（校验 3 + 行为 5：按取值拆名、取值净化、缺标签保持原样、首条规则生效、净化撞名被护栏兜住）。
+样本形态取自 Nacos 官方监控手册与社区实例：2.x 为 `nacos_monitor{module="config",name="longPolling"}`，1.x 为只有 `name` 标签的形态。
+
+### 14.5 验证方式与限度
+
+- 单测 10 例：预设合法性/可共存/元信息完备、**6 个预设各用「按真实 exporter 输出形态构造的样本」核对
   该留的留下、该挡的挡住**（样本含 HELP/TYPE 注释、`*_created`、直方图 bucket、维度标签、exporter 自身指标）、
   保留队列维度、未声明聚合只留一条、四种聚合取值正确。
 - **限度**：样本是依据官方文档与常见输出形态构造的，不是从真实集群抓取；

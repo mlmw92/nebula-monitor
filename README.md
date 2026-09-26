@@ -746,8 +746,10 @@ redisInstances:
 
 需要监控的中间件/自研服务如果已经暴露了 **Prometheus 指标端点、JSON 接口或纯文本页面**，
 就不必等新版本支持——在 `agent.yaml` 里写一个模板即可采集上报。适用对象举例：
-RabbitMQ（`:15692/metrics`）、ClickHouse（`:9363/metrics`）、Etcd（`:2379/metrics`）、
-ZooKeeper（exporter）、Elasticsearch（`_nodes/stats`）、Nacos（`/metrics`）等。
+RabbitMQ（`:15692/metrics`，需 `rabbitmq_prometheus` 插件）、ClickHouse（`:9363/metrics`）、Etcd（`:2379/metrics`）、
+Nacos（`/nacos/actuator/prometheus`，2.x 需开启 metrics）、ZooKeeper（需第三方 exporter）、
+Elasticsearch（需启用 prometheus 模块，端点 `/_prometheus/metrics`）等。
+其中 RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper / Nacos 已有**开箱预设**（见下文）。
 
 三种取数方式：
 
@@ -777,6 +779,10 @@ templates:
         - { match: "^rabbitmq_queue_messages$", to: "rabbitmq_queue_depth" }
       labels: { cluster: prod }      # 追加静态标签
       unlabel: ["job", "namespace"]  # 删除响应自带的标签
+      # aggregate:                   # 丢标签后按 sum/max/min/avg 合并同名序列（想汇总维度时用它，而不是只删标签）
+      #   - { match: "^rabbitmq_queue_messages$", op: sum }
+      # promoteLabel:                # 把标签取值提升为指标名的一部分（Nacos 那类「一族多含义」用它拆名）
+      #   - { match: "^rabbitmq_queue_messages$", label: "queue" }
 
   - id: ownapp                       # JSON 端点
     kind: http-json
@@ -835,10 +841,11 @@ templates:
 - 下发内容校验不通过时，Agent **保留现有模板**并记一次告警（绝不因模板把采集打断）；
   该告警按版本号去重，不会刷屏；Server 会持续重发，配置修好后自动恢复。
 
-**内置预设**：Web 端「采集项模板 → 新建」里可直接选 **RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper**
+**内置预设**：Web 端「采集项模板 → 新建」里可直接选 **RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper / Nacos**
 （接口 `GET /api/v1/middleware/templates/presets`）。取数与映射规则已按各 exporter 的真实输出形态写好
-（含 `keep` 收窄到该中间件指标族、丢掉 `*_created` 与直方图 `_bucket`），只需再选生效分组、改成本环境地址。
-每个预设都带**前置条件说明**（如 Elasticsearch 需启用 prometheus 模块），避免「建了却没数据」时无处排查。
+（含 `keep` 收窄到该中间件指标族、丢掉 `*_created` 与直方图 `_bucket`，Nacos 用 `promoteLabel` 把 `name` 标签拆成独立指标名），
+只需再选生效分组、改成本环境地址。每个预设都带**前置条件说明**
+（如 Elasticsearch 需启用 prometheus 模块、Nacos 2.x 走 `/nacos/actuator/prometheus`），避免「建了却没数据」时无处排查。
 
 **汇总维度指标（`rules.aggregate`）**：像 RabbitMQ 这样按队列暴露指标的中间件，
 若用 `unlabel` 丢掉 `queue` 想「汇总所有队列」，会产出多条「同名 + 同标签」的序列，
@@ -854,6 +861,21 @@ rules:
 `aggregate.match` 匹配**最终指标名**（含模板前缀，即「指标浏览」里看到的名字）；
 未声明聚合却出现重复序列时，Agent 只保留第一条并告警（同一模板同一指标只告警一次），
 不会把互相覆盖的多条写入时序库。
+
+**一族的多种含义拆成独立指标（`rules.promoteLabel`）**：另有一类 exporter 把多种含义塞进同一个指标名、用标签区分，
+最典型的是 Nacos：`nacos_monitor{module="config",name="longPolling"}`。不拆的话它们在「指标浏览」里全挤在
+`nacos_monitor` 一个名字下，**无法分别看趋势，也无法按含义配告警**：
+
+```yaml
+rules:
+  promoteLabel:
+    - { match: "^nacos_monitor$", label: "name" }
+```
+
+拆完得到 `nacos_monitor_longPolling{module="config"}`——被提升的标签会从标签集中移除（它已进了指标名，留着会让同一含义出现两处）。
+标签取值会**净化**（指标名不允许的字符替换为下划线）；样本没有该标签、或取值净化后为空（如中文取值）时**保持原名与原标签**——
+宁可留一个未拆分的样本，也不产出含义不明的指标名或丢数据。不同取值净化后撞名（`a/b` 与 `a.b` 都变成 `a_b`）时，
+由上面那道重复序列护栏兜住（只保留第一条并告警）。
 
 **约束与安全边界**
 
@@ -1590,7 +1612,7 @@ journalctl -u monitor-proxy-hub -f
 | POST | `/api/v1/middleware/templates/validate` | 校验模板配置（保存前预检，一次报出全部原因） |
 | PUT | `/api/v1/middleware/templates/{id}` | 更新采集项模板（id 不可改，它决定指标名前缀） |
 | DELETE | `/api/v1/middleware/templates/{id}` | 删除采集项模板 |
-| GET | `/api/v1/middleware/templates/presets` | 内置模板预设（RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper） |
+| GET | `/api/v1/middleware/templates/presets` | 内置模板预设（RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper / Nacos） |
 
 ### 智能分析
 

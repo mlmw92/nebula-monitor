@@ -158,6 +158,17 @@ type Rules struct {
 	Labels map[string]string `yaml:"labels" json:"labels"`
 	// Unlabel 需要删除的响应自带标签。
 	Unlabel []string `yaml:"unlabel" json:"unlabel"`
+	// PromoteLabel 把标签取值提升为指标名的一部分（作用于响应中的原名，先于 rename）。
+	//
+	// 为什么需要它：有一类 exporter 把「同一族的多种含义」全塞进一个指标名、靠标签区分。
+	// 例如 Nacos 的 nacos_monitor{module="config",name="configCount"} / {name="getConfig"} / {name="longPolling"}，
+	// 不提升时它们在「指标浏览」里全挤在 nacos_monitor 一个名字下：**无法分别看趋势，也无法按含义配告警**。
+	//
+	// 取值会被净化（指标名不允许的字符替换为下划线）；样本没有该标签、或取值净化后为空时，
+	// 该样本不做提升、保持原名与原标签——宁可留一个未拆分的样本，也不产出非法名或丢数据。
+	// 注意：不同取值净化后可能撞成同一个名字（`a/b` 与 `a.b` 都变成 `a_b`），
+	// 此时由运行期的「重复序列护栏」兜住（只保留第一条并告警），不会静默互相覆盖。
+	PromoteLabel []PromoteLabelRule `yaml:"promoteLabel" json:"promoteLabel"`
 	// Aggregate 声明「丢弃标签后如何合并同名序列」，match 作用于**最终指标名**（含模板前缀，
 	// 即「指标浏览」里看到的名字）。
 	//
@@ -189,6 +200,15 @@ const (
 
 // AggregateOps 是全部允许的聚合方式（校验与前端提示共用一份）。
 var AggregateOps = []string{AggSum, AggMax, AggMin, AggAvg}
+
+// PromoteLabelRule 是单条「标签值提升为指标名」规则。
+type PromoteLabelRule struct {
+	// Match 匹配响应中的指标名（与 keep / drop / rename 一致，不是加前缀后的最终名）。
+	Match string `yaml:"match" json:"match"`
+	// Label 要提升的标签名。提升后该标签会从标签集中移除——它已经进了指标名，
+	// 留着只会让同一含义出现两处。
+	Label string `yaml:"label" json:"label"`
+}
 
 // RenameRule 是单条改名规则：match 匹配原名，to 为改写后的名字（支持 $1 反向引用）。
 type RenameRule struct {
@@ -241,9 +261,50 @@ func isAggregateOp(op string) bool {
 	return false
 }
 
+// containsLabel 判断标签名清单是否包含目标项。
+func containsLabel(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
 // MaxStaticLabels 是模板可追加的静态标签数上限：总标签上限需为引擎注入的保留标签留位置，
 // 否则「静态标签写满 16 个」会把 node/instance/template 挤掉（那会破坏来源可辨识性）。
 func MaxStaticLabels() int { return MaxLabelsPerMetric - len(ReservedLabelNames) }
+
+// SanitizeMetricSegment 把标签取值净化成可拼进指标名的片段：
+// 不属于 [A-Za-z0-9_] 的字符替换为下划线。
+//
+// 返回空串表示**无法表示**（空值，或整段没有任何字母数字——例如中文标签值会只剩一串下划线，
+// 既无信息又极易与别的取值撞名）。调用方遇到空串时应放弃提升、保持样本原样，
+// 这样既不产出非法指标名，也不丢数据。
+func SanitizeMetricSegment(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	out := make([]byte, 0, len(v))
+	hasIdent := false
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+			out = append(out, c)
+			hasIdent = true
+		case c == '_':
+			out = append(out, c)
+		default:
+			out = append(out, '_')
+		}
+	}
+	if !hasIdent {
+		return ""
+	}
+	return string(out)
+}
 
 // IsReservedLabel 判断标签名是否为引擎保留名。
 func IsReservedLabel(name string) bool {
@@ -435,6 +496,32 @@ func (r *Rules) validate(kind Kind, id string) []error {
 		}
 	}
 
+	seenPromote := make(map[string]bool, len(r.PromoteLabel))
+	for i, p := range r.PromoteLabel {
+		if strings.TrimSpace(p.Match) == "" {
+			errs = append(errs, fmt.Errorf("rules.promoteLabel[%d]：match 不能为空", i))
+		} else if _, err := regexp.Compile(p.Match); err != nil {
+			errs = append(errs, fmt.Errorf("rules.promoteLabel[%d]：match 正则非法：%v", i, err))
+		}
+		if seenPromote[p.Match] {
+			errs = append(errs, fmt.Errorf("rules.promoteLabel[%d]：match %q 重复（首条匹配生效，重复声明只会让人误以为后一条也生效）", i, p.Match))
+		}
+		seenPromote[p.Match] = true
+
+		switch {
+		case strings.TrimSpace(p.Label) == "":
+			errs = append(errs, fmt.Errorf("rules.promoteLabel[%d]：label 不能为空", i))
+		case !labelKeyPattern.MatchString(p.Label):
+			errs = append(errs, fmt.Errorf("rules.promoteLabel[%d]：label %q 非法（需匹配 %s）", i, p.Label, labelKeyPattern.String()))
+		case IsReservedLabel(p.Label):
+			// 保留标签会被引擎注入，提升它等于允许伪造来源（同 rules.labels 的约束）
+			errs = append(errs, fmt.Errorf("rules.promoteLabel[%d]：不得提升保留标签 %q", i, p.Label))
+		case containsLabel(r.Unlabel, p.Label):
+			// 提升后又被 unlabel 删掉 = 规则静默失效，这种自相矛盾要在启动期挡掉
+			errs = append(errs, fmt.Errorf("rules.promoteLabel[%d]：label %q 同时出现在 rules.unlabel 中——提升后又被删除，规则会静默失效", i, p.Label))
+		}
+	}
+
 	seenAgg := make(map[string]bool, len(r.Aggregate))
 	for i, a := range r.Aggregate {
 		if strings.TrimSpace(a.Match) == "" {
@@ -464,6 +551,10 @@ func (r *Rules) validate(kind Kind, id string) []error {
 		// 静默忽略会让用户以为聚合生效了，故直接拒绝。
 		if len(r.Aggregate) > 0 {
 			errs = append(errs, fmt.Errorf("kind=%s 不支持 rules.aggregate（每规则只产出一条序列，无同名序列可合并）", kind))
+		}
+		// 同理：这两类的响应标签一概不参与（只有静态标签），没有可提升的标签
+		if len(r.PromoteLabel) > 0 {
+			errs = append(errs, fmt.Errorf("kind=%s 不支持 rules.promoteLabel（响应标签不参与映射，没有可提升的标签）", kind))
 		}
 	}
 	if len(r.Metrics) > MaxMetricsPerTemplate {
