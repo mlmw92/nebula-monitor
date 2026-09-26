@@ -3,7 +3,8 @@
     <header class="head">
       <div class="brand">{{ brand.name || '服务状态' }}</div>
       <div class="sub">
-        <span class="pill" :class="overallClass">{{ overallText }}</span>
+        <!-- 没有任何已发布的服务时不显示结论徽标：「状态未知」对访客没有信息量 -->
+        <span v-if="items.length" class="pill" :class="overallClass">{{ overallText }}</span>
         <span class="muted">更新于 {{ fmt(updatedAt) }} · 每 30 秒自动刷新</span>
       </div>
     </header>
@@ -24,11 +25,12 @@
       </div>
     </div>
     <p v-else-if="!loading" class="empty">
-      暂无对外发布的服务状态。
+      暂无公开的服务状态信息。
     </p>
 
+    <!-- 文案按「外部访客」写：这是对外页面，不该出现「对外发布 / 内部地址」这类内部术语 -->
     <footer class="foot muted">
-      本页仅展示服务的可用性概览（不含任何内部地址与细节）；数据来自主动拨测。
+      本页展示服务的可用性概览，数据来自主动拨测。
     </footer>
   </div>
 </template>
