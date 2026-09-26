@@ -1,7 +1,7 @@
 # 权限矩阵设计（路由 → 权限点 → 资源范围）
 
 > 本文为 B1 改造的设计件，用于评审后进入实施。
-> 事实基线：VERSION 1.24.0；路由清点自 `internal/server/api/query.go` 的 `RegisterRoutes`（122 条）加 `ws.go`（1）、`spa.go`（1）、`cmd/server/main.go`（1）、`internal/server/agentdist/agentdist.go`（2），合计 **127 条**（批次 E 新增 `GET /api/v1/audit/export` 前为 126 条）；F3 新增 3 条（`GET /healthz`、`GET /readyz` 公开，`GET /api/v1/self/status` 需 `dashboard:read`）；D4 新增 3 条（`POST /api/v1/alerts/close|reopen|comment`，均 `alerts:write`）；A3 新增 3 条（`/api/v1/system/retention` 及 `/cleanup`，均 `system:config`），当前共 **136 条**。
+> 事实基线：VERSION 1.25.0；路由清点自 `internal/server/api/query.go` 的 `RegisterRoutes`（122 条）加 `ws.go`（1）、`spa.go`（1）、`cmd/server/main.go`（1）、`internal/server/agentdist/agentdist.go`（2），合计 **127 条**（批次 E 新增 `GET /api/v1/audit/export` 前为 126 条）；F3 新增 3 条（`GET /healthz`、`GET /readyz` 公开，`GET /api/v1/self/status` 需 `dashboard:read`）；D4 新增 3 条（`POST /api/v1/alerts/close|reopen|comment`，均 `alerts:write`）；A3 新增 3 条（`/api/v1/system/retention` 及 `/cleanup`，均 `system:config`），当前共 **136 条**。
 
 ## 实施状态
 
