@@ -597,7 +597,13 @@ func (e *Engine) evalNodeOffline(r model.AlertRule, nodes []model.Node, now int6
 	}
 }
 
-// serviceMetric 将 Service 类型映射为对应 *_instance_up 指标名。
+// serviceMetric 将 Service 类型映射为其「存活指标」名。
+//
+// 命名并不统一，必须逐类对齐真实产出的名字：多数中间件是 `<mw>_instance_up`，
+// MongoDB / FastDFS 是 `<mw>_up`，K8s 是 `k8s_cluster_up`，Docker 是 `docker_container_up`。
+// 若某类缺失，会落到 default 而用 redis 的存活指标去判断——即「监控错了对象」，
+// 表现为该服务的离线告警永不触发（或随 redis 状态误触发）。
+// 该映射与指标目录的一致性由 TestServiceMetricNamesAreRegistered 守住。
 func serviceMetric(svc string) string {
 	switch svc {
 	case "mysql":
@@ -616,6 +622,10 @@ func serviceMetric(svc string) string {
 		return "docker_container_up"
 	case "k8s":
 		return "k8s_cluster_up"
+	case "mongodb":
+		return "mongodb_up"
+	case "fastdfs":
+		return "fastdfs_up"
 	default:
 		// 未知服务：退化为 redis_instance_up（前端限制了可选值，这里兜底）
 		return "redis_instance_up"

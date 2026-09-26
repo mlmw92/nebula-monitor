@@ -372,10 +372,21 @@ Collector.CollectAll(ctx)
 `deploy/agent-install.sh:510-522 / 849-860`｜`build/verify-agent-parity.sh:242-245`｜
 大屏 5 个组件（`screen/*`）
 
-## 附录 B：探索中发现的三处**现存缺陷**（与本设计独立，建议各自单独修）
+## 附录 B：探索中发现的指标名不一致缺陷（**已修复**，本设计不依赖它）
 
-| # | 缺陷 | 证据 | 影响 |
-|---|---|---|---|
-| B1 | 指标目录注册的指标名与采集器实际产出的名字不符（**7 处，已逐一核对**） | `redis_up`(`middleware_catalog.go:8`) vs `redis_instance_up`(`redis.go:348`)；`mysql_up`(16) vs `mysql_instance_up`(`mysql.go:136`)；`postgres_connections`(24) vs `postgres_numbackends`(`postgres.go:113`)；`kafka_brokers`(34) vs `kafka_broker_count`(`kafka.go:106`)；`kafka_under_replicated`(35) vs `kafka_under_replicated_partitions`(`kafka.go:130`)；`docker_container_count`(38) vs `docker_containers_total`(`docker.go:159`)；`rocketmq_produce_tps`(49) vs `rocketmq_producer_tps`(`rocketmq.go:130`)。同类的还有 `rocketmq_up`(48) vs `rocketmq_instance_up` | 「指标浏览」按目录查询这些指标永远无数据；`/metrics/active` 会把它们标为未上线 |
-| B2 | `alert/engine.go` 的 `serviceMetric()` 有 **8 个 case**（mysql/postgres/redis/nginx/kafka/rocketmq/docker/k8s），mongodb / fastdfs **落 `default` 回退为 `redis_instance_up`** | 已核对完整函数体 | 「服务离线」规则对 MongoDB / FastDFS 判断的是错误指标 → 离线告警可能永不触发或误触发 |
-| B3 | 首页概览 `overview/middlewareConfig.js:12-117` 只有 8 类，缺 mongodb / fastdfs | 同左 | 首页中间件概览与实际支持的 10 类不一致 |
+> 口径更正：设计件初稿根据抽样核对写成「目录 7 处不符」。评审前做了**全量审计**
+> （产出方 = `internal/agent/collector/*.go` + `internal/server/receiver/*.go` 的指标名字面量；
+> 消费方 = api / report / metrics / analysis 与前端源码），真实范围是
+> **目录 30 条里 17 条无产出方，消费侧共 27 处引用了不存在的名字**。
+
+| # | 缺陷 | 真实范围（全量审计） | 影响 | 状态 |
+|---|---|---|---|---|
+| B1 | 指标目录登记名与产出方不符 | **17 条**：`redis_up`/`mysql_up`/`postgres_up`/`nginx_up`/`kafka_up`/`rocketmq_up` 应为 `<mw>_instance_up`；`postgres_connections`→`postgres_numbackends`；`kafka_brokers`→`kafka_broker_count`；`kafka_under_replicated`→`kafka_under_replicated_partitions`；`docker_container_count`→`docker_containers_total`；`nginx_active`→`nginx_active_connections`；`nginx_requests_per_sec`→`nginx_requests`；`redis_used_memory_bytes`→`redis_used_memory`；`redis_qps`→`redis_ops_per_sec`；`mongodb_connections`→`mongodb_connections_current`；`rocketmq_produce_tps`→`rocketmq_producer_tps`；`k8s_node_mem_used_bytes`→`k8s_node_mem_usage_bytes`；另 FastDFS **整类无目录条目**（连 `CatFastDFS` 常量都缺）、`k8s_cluster_up` 与 `docker_container_up` 未登记 | 「指标浏览」按目录查询永远无数据；`/metrics/active` 标为未上线，排查时易误判为「采集没开」 | ✅ 已修 |
+| B2 | `serviceMetric()` 漏 mongodb / fastdfs，落 `default` 回退为 `redis_instance_up` | 8 个 case + default | 「服务离线」规则对这两类判断错误对象 → 离线告警永不触发或随 redis 误触发 | ✅ 已修 |
+| B3 | 首页概览 `middlewareConfig.js` 只有 8 类，缺 mongodb / fastdfs | 同左 | 首页概览与「中间件监控」Tab 不一致 | ✅ 已修 |
+| B4 | 巡检报告引用了不存在的名字，字段恒为空 | `report.go`：`redis_max_clients`、`redis_used_memory_bytes`、`redis_replication_lag_seconds`、`mysql_buffer_pool_hit_rate`、`nginx_5xx`；中间件总览摘要：`nginx_5xx_rate`、`fastdfs_storage_total` | 报告里 Redis 连接上限 / 内存占用 / 主从延迟、MySQL 缓冲池命中率、Nginx 5xx 恒为空或 0 | ✅ 已修（其中 `redis_maxclients` 属**产出方缺失**，已在采集器补齐） |
+
+**防止复发的守卫**（已进 `go test` 门禁，无需新增 CI 脚本）：
+`internal/server/metrics/catalog_guard_test.go` 扫描产出方源码，校验「目录登记的每个中间件指标名都有产出方」
+与「每个中间件的存活指标都已登记」；`internal/server/alert/service_metric_test.go` 校验
+「服务映射 ↔ 指标目录」一致。守卫已做过**注入验证**：把 `mysql_instance_up` 改回 `mysql_up` 后测试立即失败并报出该名字。

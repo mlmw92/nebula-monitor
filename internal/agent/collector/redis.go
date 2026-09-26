@@ -242,10 +242,10 @@ func (c *RedisCollector) collectCluster(ctx context.Context, cfg model.RedisInst
 			metrics = append(metrics, model.Metric{
 				Node: c.node,
 				Name: "redis_cluster_slot_range",
-			Labels: map[string]string{
-				"node":     c.node,
-				"instance": normalizeRemoteAddr(masterAddr, ""),
-				"topology": "cluster",
+				Labels: map[string]string{
+					"node":     c.node,
+					"instance": normalizeRemoteAddr(masterAddr, ""),
+					"topology": "cluster",
 					"group":    cfg.Name,
 					"role":     "master",
 					"range":    rng,
@@ -385,6 +385,8 @@ func mapInfoToMetrics(info map[string]string, labels map[string]string, now int6
 	out = append(out, mk("redis_used_memory_rss", parseFloat(info["used_memory_rss"])))
 	out = append(out, mk("redis_used_memory_peak", parseFloat(info["used_memory_peak"])))
 	out = append(out, mk("redis_maxmemory", parseFloat(info["maxmemory"])))
+	// 连接数上限：巡检报告用它判断连接数是否接近上限（此前报告读的是不存在的指标名，恒为 0）
+	out = append(out, mk("redis_maxclients", parseFloat(info["maxclients"])))
 	if maxmem := parseFloat(info["maxmemory"]); maxmem > 0 {
 		out = append(out, mk("redis_used_memory_percent", round2(parseFloat(info["used_memory"])/maxmem*100)))
 	}

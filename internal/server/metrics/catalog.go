@@ -49,6 +49,8 @@ const (
 	CatRocketMQ Category = "rocketmq"
 	// CatK8s 中间件：Kubernetes。
 	CatK8s Category = "kubernetes"
+	// CatFastDFS 中间件：FastDFS。
+	CatFastDFS Category = "fastdfs"
 )
 
 // ChartType 推荐图表类型。

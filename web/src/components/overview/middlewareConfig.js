@@ -1,4 +1,4 @@
-// 首页中间件概览区块配置：8 种中间件类型
+// 首页中间件概览区块配置：10 种中间件类型（与「中间件监控」的 Tab 一一对应）
 // 每种类型定义：key、展示名、图标、跳转 tab、TopN 主指标、辅助指标、聚合接口
 import redisIcon from '../../assets/img/redis.svg'
 import mysqlIcon from '../../assets/img/mysql.svg'
@@ -8,6 +8,8 @@ import kafkaIcon from '../../assets/img/Kafka.svg'
 import dockerIcon from '../../assets/img/docker.svg'
 import rocketmqIcon from '../../assets/img/rocketMQ.svg'
 import k8sIcon from '../../assets/img/kubernetes.svg'
+import mongodbIcon from '../../assets/img/mongoDB.svg'
+import fastdfsIcon from '../../assets/img/fastdfs.svg'
 
 export const middlewareTypes = [
   {
@@ -112,6 +114,32 @@ export const middlewareTypes = [
     fmt: 'pctNodes',
     subKey: 'podsRunning',
     subLabel: '运行Pod',
+    subFmt: 'num0',
+  },
+  {
+    key: 'mongodb',
+    label: 'MongoDB',
+    icon: mongodbIcon,
+    tab: 'mongodb',
+    endpoint: '/api/v1/middleware/mongodb/instances',
+    topKey: 'memResidentMB',
+    topLabel: '常驻内存(MB)',
+    fmt: 'num0',
+    subKey: 'connectionsCurrent',
+    subLabel: '连接数',
+    subFmt: 'num0',
+  },
+  {
+    key: 'fastdfs',
+    label: 'FastDFS',
+    icon: fastdfsIcon,
+    tab: 'fastdfs',
+    endpoint: '/api/v1/middleware/fastdfs/instances',
+    topKey: 'usedSpaceMB',
+    topLabel: '已用空间(MB)',
+    fmt: 'num0',
+    subKey: 'storageOnline',
+    subLabel: '在线Storage',
     subFmt: 'num0',
   },
 ]

@@ -900,12 +900,12 @@ func (g *Generator) buildComparison(start, end time.Time, nodes []nodeStat, summ
 // mwDefs 报告所需的中间件指标定义（类型、实例存活指标、负载指标、关键指标、展示名与图标）。
 var mwDefs = []mwDef{
 	{"redis", "redis_instance_up", "redis_connected_clients", []string{
-		"redis_connected_clients", "redis_max_clients", "redis_used_memory_percent",
-		"redis_used_memory_bytes", "redis_hit_rate", "redis_cmd_latency_ms", "redis_ops_per_sec",
-		"redis_replication_lag_seconds", "redis_evicted_keys", "redis_rejected_connections",
+		"redis_connected_clients", "redis_maxclients", "redis_used_memory_percent",
+		"redis_used_memory", "redis_hit_rate", "redis_cmd_latency_ms", "redis_ops_per_sec",
+		"redis_replication_lag", "redis_evicted_keys", "redis_rejected_connections",
 	}, "Redis", "🗄️"},
 	{"mysql", "mysql_instance_up", "mysql_threads_connected", []string{
-		"mysql_threads_connected", "mysql_max_connections", "mysql_buffer_pool_hit_rate",
+		"mysql_threads_connected", "mysql_max_connections", "mysql_innodb_buffer_pool_hit_rate",
 		"mysql_queries_per_sec", "mysql_seconds_behind_master", "mysql_slow_queries",
 		"mysql_query_latency_ms",
 	}, "MySQL", "🛢️"},
@@ -914,7 +914,8 @@ var mwDefs = []mwDef{
 		"postgres_replication_lag_bytes", "postgres_query_latency_ms",
 	}, "PostgreSQL", "🐘"},
 	{"nginx", "nginx_instance_up", "nginx_active_connections", []string{
-		"nginx_active_connections", "nginx_5xx",
+		// 5xx 只能按 status 标签从访问日志指标取，此处改用同样来自访问日志的请求速率
+		"nginx_active_connections", "nginx_access_requests_rate",
 	}, "Nginx", "🌐"},
 	{"kafka", "kafka_instance_up", "", []string{
 		"kafka_broker_count", "kafka_offline_partitions", "kafka_under_replicated_partitions",
@@ -997,17 +998,17 @@ func (g *Generator) collectMiddleware(startMs, endMs, step int64) []mwInstance {
 			}
 			switch d.typ {
 			case "redis":
-				mi.ConnMax = lv("redis_max_clients")
+				mi.ConnMax = lv("redis_maxclients")
 				mi.MemPct = lv("redis_used_memory_percent")
-				mi.MemUsedMB = lv("redis_used_memory_bytes") / 1e6
+				mi.MemUsedMB = lv("redis_used_memory") / 1e6
 				mi.HitRate = lv("redis_hit_rate")
 				mi.RespTime = lv("redis_cmd_latency_ms")
-				if lag := lv("redis_replication_lag_seconds"); lag > 0 {
+				if lag := lv("redis_replication_lag"); lag > 0 {
 					mi.Extra = fmt.Sprintf("主从复制延迟 %.1fs", lag)
 				}
 			case "mysql":
 				mi.ConnMax = lv("mysql_max_connections")
-				mi.HitRate = lv("mysql_buffer_pool_hit_rate")
+				mi.HitRate = lv("mysql_innodb_buffer_pool_hit_rate")
 				mi.RespTime = lv("mysql_query_latency_ms")
 				slaveLag := lv("mysql_seconds_behind_master")
 				slow := lv("mysql_slow_queries")
@@ -1028,8 +1029,8 @@ func (g *Generator) collectMiddleware(startMs, endMs, step int64) []mwInstance {
 				}
 			case "nginx":
 				mi.ConnUsed = lv("nginx_active_connections")
-				if c5 := lv("nginx_5xx"); c5 > 0 {
-					mi.Extra = fmt.Sprintf("5xx 响应 %d", int(c5))
+				if rate := lv("nginx_access_requests_rate"); rate > 0 {
+					mi.Extra = fmt.Sprintf("请求速率 %.1f 次/s", rate)
 				}
 			case "kafka":
 				brokers := lv("kafka_broker_count")

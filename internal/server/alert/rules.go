@@ -406,13 +406,19 @@ func validOperator(op string) bool {
 	}
 }
 
+// KnownServices 是「服务离线」规则允许监控的服务类型全量清单。
+// validService 与测试共用一份：新增类型时只需在此加一项，映射与目录的一致性测试会自动覆盖。
+var KnownServices = []string{
+	"mysql", "postgres", "redis", "nginx", "kafka", "rocketmq", "docker", "k8s", "mongodb", "fastdfs",
+}
+
 func validService(s string) bool {
-	switch s {
-	case "mysql", "postgres", "redis", "nginx", "kafka", "rocketmq", "docker", "k8s":
-		return true
-	default:
-		return false
+	for _, svc := range KnownServices {
+		if svc == s {
+			return true
+		}
 	}
+	return false
 }
 
 func validSecurityCategory(category string) bool {

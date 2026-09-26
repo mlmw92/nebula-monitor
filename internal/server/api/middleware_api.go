@@ -672,7 +672,9 @@ var mwSummarySpecs = map[string][]mwSummarySpec{
 	"nginx": {
 		{"nginx_active_connections", "活动连接", "max", "", 0},
 		{"nginx_requests", "请求量", "sum", "", 0},
-		{"nginx_5xx_rate", "5xx率", "avg", "%", 1},
+		// 5xx 率需按 nginx_access_requests_by_status 的 status 标签取值，
+		// 而该口径不支持按标签过滤，故改报请求速率（同样来自访问日志分析）。
+		{"nginx_access_requests_rate", "请求速率", "avg", "次/s", 0},
 	},
 	"kafka": {
 		{"kafka_consumer_lag", "消费积压", "sum", "", 0},
@@ -702,11 +704,12 @@ var mwSummarySpecs = map[string][]mwSummarySpec{
 		{"mongodb_db_dataSize_bytes", "数据大小", "avg", "MB", 0},
 	},
 	"fastdfs": {
-		{"fastdfs_storage_total", "Storage节点", "sum", "", 0},
+		{"fastdfs_storage_count", "Storage节点", "sum", "", 0},
 		{"fastdfs_storage_online_count", "在线Storage", "sum", "", 0},
-		{"fastdfs_total_space", "总空间", "sum", "MB", 0},
-		{"fastdfs_free_space", "空闲空间", "sum", "MB", 0},
-		{"fastdfs_used_space", "已用空间", "sum", "MB", 0},
+		// 空间类指标实际单位为字节（此前卡片标成 MB，数值却是字节）
+		{"fastdfs_total_space", "总空间", "sum", "B", 0},
+		{"fastdfs_free_space", "空闲空间", "sum", "B", 0},
+		{"fastdfs_used_space", "已用空间", "sum", "B", 0},
 	},
 }
 
