@@ -1,0 +1,9 @@
+# 统一换行符策略。
+#
+# shell 脚本必须使用 LF：在 Windows 检出（core.autocrlf=true）时若被转成 CRLF，
+# bash 在 Git Bash / MSYS 及部分 Linux 环境下会报 `$'\r': command not found` 而无法执行，
+# 使 build/*.sh 与 deploy/*.sh 在本地不可用（打包/安装脚本尤其致命）。
+*.sh text eol=lf
+
+# 版本号由 build/version.sh 读取、并与前端产物内嵌版本比对，固定 LF 避免解析出多余字符。
+VERSION text eol=lf

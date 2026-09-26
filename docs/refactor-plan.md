@@ -411,15 +411,18 @@ Nebula Monitor 是「Agent 采集 → Server 接收 → 时序库持久化 → W
 | `VERSION` 文件 | ✅ **已递增为 `1.25.0`**（2026-09-26；批次二合并为一次递增） |
 | 前端版本号 | ✅ 已同步：`npm run version:sync` 生成 `WEB_VERSION = "1.25.0"`（`web/src/version.js` 为构建产物，不入库） |
 | 已提交 | 批次一（E1 / D2 / F2 / B1 设计件，1.24.0）+ 批次二（B1 实施 A~E / F1 / D1 / F3 / D4 / E3 / A3），工作区干净 |
-| 尚未执行 | 编译（`build/cross-compile.sh`）与打包（`build/release.sh` 组装 `full` / `upgrade`） |
+| 编译与打包 | ✅ **已执行**（2026-09-26）：`build/release.sh` 交叉编译 linux/amd64·arm64·arm 并组装 `nebula-monitor-v1.25.0-full.tar.gz`（138M）/ `-upgrade.tar.gz`（66M）；脚本自带的 manifest 自校验通过，另做独立校验：解包后 `sha256sum -c` 全通过（upgrade 94/94、full 101/101） |
+| 产物校验 | full `sha256 b7f75a69…a2290`；upgrade `sha256 bea3c08d…c654d`；包内二进制内嵌 `1.25.0` 与构建时间 `2026-09-26T05:04:00Z`，前端 `web/assets/version-*.js` 内嵌 `1.25.0`（三者一致） |
+| 打包环境 | 本机（Windows）经 Git Bash 运行官方脚本，**未上传任何源码**；服务器仅用于 Linux 侧验证。打包前修正 `.gitattributes`（见下条），否则 `build/release.sh` 在 Windows 检出下为 CRLF、无法执行 |
 | 仓库约定 | `VERSION` 是版本号唯一来源；编译走 `build/cross-compile.sh`；打包走 `build/release.sh` |
 | 递增依据 | 次版本号递增：批次二含三项**运行时行为变更**（B1 业务接口按权限点与资源范围强制校验、D1 风暴收敛默认开启、D4 告警处置改为三态状态机），并新增 14 条路由（audit/export ×1、健康探针 ×2、self/status ×1、告警处置 ×3、数据保留 ×3、其余为 B1 实施期间拆分）与 2 个权限点 |
-| 待你决定 | 是否现在打包；**打包与升级只在你明确指示后执行，且不代替你做 server 端升级** |
+| 待你决定 | 是否分发 / 升级；**升级动作不代替你执行**（`deploy/install-server.sh` 由你在目标机运行） |
 
 ### 变更记录
 
 | 日期 | 变更 |
 |---|---|
+| 2026-09-26 | **打包 1.25.0**：本机经 Git Bash 运行 `build/release.sh`（**未上传源码**），交叉编译 linux/amd64·arm64·arm 并组装 `nebula-monitor-v1.25.0-full.tar.gz`（138M）与 `-upgrade.tar.gz`（66M）。脚本自带 manifest 自校验 + 解包后独立 `sha256sum -c` 全通过（upgrade 94/94、full 101/101）；包内二进制与前端产物内嵌版本均为 `1.25.0`。打包前发现并修正一个**部署级缺陷**：`.gitattributes` 为空且该克隆 `core.autocrlf=true`，使 `build/release.sh` 被检出为 CRLF（同目录其它脚本为 LF），在 Git Bash / Linux 下执行会报 `$'\r': command not found`；`deploy/*.sh` 同理——**安装脚本本身可能完全跑不起来**。已在 `.gitattributes` 为 `*.sh` 与 `VERSION` 固定 `eol=lf` |
 | 2026-09-26 | **批次二收口 + 版本递增 `1.24.0` → `1.25.0`**：批次二完成 B1 实施（子批次 A~E）、F1 测试体系、D1 告警风暴收敛、F3 自监控与健康检查、D4 告警协作处置、E3 容量预测扩展（主机侧）、A3 数据保留策略；**E2 按决策推迟到 C1 之后**（现架构下每加一个中间件需改 6 处联动，C1 模板化后退化为写模板）。`VERSION` 与前端 `WEB_VERSION` 同步为 `1.25.0`。编译与打包尚未执行 |
 | 2026-09-26 | 初稿：候选改造点、优先级矩阵、批次一计划 |
 | 2026-09-26 | 落定 4 项决策（E1 一次到位、不加并发上限、D2 含前端、B1 落 docs/ + F2 全量补齐）；新增第 8 节进度追踪表与附录 C I/O 清点 |
