@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nebula/monitor/internal/agent/template"
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/template"
 )
 
 // templateFetchTimeout 是模板单次 HTTP 拉取的上界，与既有 exporter 拉取保持一致

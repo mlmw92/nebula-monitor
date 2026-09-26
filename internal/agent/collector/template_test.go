@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/nebula/monitor/internal/agent/config"
-	"github.com/nebula/monitor/internal/agent/template"
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/template"
 )
 
 // promServer 启动一个返回固定响应的假端点，测试结束自动关闭。

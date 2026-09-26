@@ -8,8 +8,8 @@ import (
 	"github.com/shirou/gopsutil/v4/host"
 
 	"github.com/nebula/monitor/internal/agent/config"
-	"github.com/nebula/monitor/internal/agent/template"
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/template"
 )
 
 // Collector 聚合各子采集器，按配置开关产出一批指标。

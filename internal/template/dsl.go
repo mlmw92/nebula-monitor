@@ -6,9 +6,14 @@
 //   - 能力边界 = 拉取 + 解析 + 改名 + 打标签 + 过滤，超出即「该写专用采集器」；
 //   - 默认安全：默认只读、默认不发凭据、默认有上限。
 //
-// 为什么单独成包（而不是放在 collector 内）：collector 已依赖 agent/config，
-// 若 DSL 定义在 collector，则 config 无法持有 Templates 字段（会形成 import 环）。
-// 本包零依赖（仅标准库），config 与 collector 各自引用，DSL 校验逻辑与其测试集中于此。
+// 为什么是共享包（而不是放在 collector 或 server 内）：
+//   - 放在 collector 不行：collector 已依赖 agent/config，而 config 必须持有 Templates 字段，
+//     会形成 import 环；
+//   - 放在 server 不行：Agent 侧要执行模板；
+//   - 两端必须用**同一份校验器**：Server 在 Web 端保存模板时要校验，Agent 在校验通过后才执行，
+//     两处各写一份必然漂移（曾有过「同一语义两处实现」导致的静默不一致）。
+//
+// 本包零依赖（仅标准库），因此 Agent 与 Server 都能引用。
 package template
 
 import (

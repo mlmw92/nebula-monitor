@@ -342,10 +342,11 @@ Collector.CollectAll(ctx)
 
 ### 12.1 与设计件的三处偏离（均因实现约束，非取舍）
 
-1. **DSL 落在新包 `internal/agent/template`，而非 `collector/template_dsl.go`。**
-   原因：`collector` 已 import `agent/config`（用 `config.CollectorToggle`），而 `config.Config` 必须持有
-   `Templates` 字段——若 DSL 定义在 `collector` 内即成 import 环。新包零依赖（仅标准库），
-   `config` 与 `collector` 各自引用，DSL 校验逻辑与其测试反而更集中。
+1. **DSL 放在共享包 `internal/template`，而非 `collector/template_dsl.go`。**
+   阶段一先落在 `internal/agent/template`：`collector` 已 import `agent/config`，而 `config.Config` 必须持有
+   `Templates` 字段——若 DSL 定义在 `collector` 内即成 import 环。阶段二该包**上移到 `internal/template`**：
+   Server 侧保存模板时要用**同一份校验器**（两处各写一份必然漂移），而让 `server/` 去 import `agent/` 下的包
+   在语义上不成立。本包零依赖（仅标准库），两端都能引用。
 2. **响应体上限只加在模板拉取路径，未改共享的 `fetchMetrics`。**
    设计件 §2 写的是"复用 `fetchMetrics` 的 `io.LimitReader`"，但共享 helper 实际**没有**上限；
    直接给它加 8 MiB 截断会让既有 exporter 路径（尤其 kube-state-metrics 在大集群）静默少解析若干行，

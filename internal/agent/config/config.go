@@ -9,8 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/nebula/monitor/internal/agent/crypto"
-	"github.com/nebula/monitor/internal/agent/template"
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/template"
 )
 
 // Agent 运行模式。
