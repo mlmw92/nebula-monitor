@@ -33,19 +33,34 @@ func (a *API) handleSecuritySummary(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAuditEvents 返回管理操作审计记录，支持 limit/user/path/category 筛选和 CSV 导出。
+// handleAuditEvents 返回管理操作审计记录（JSON），支持 limit/user/path/category 筛选。
+// 需 audit:read。兼容历史调用方：带 ?format=csv 时按导出处理并额外要求 audit:export；
+// 新调用方请直接使用 GET /api/v1/audit/export。
 func (a *API) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
-	if AuthenticatedUser(r) == "" && a.auth.Enabled {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未认证"})
+	if r.URL.Query().Get("format") == "csv" {
+		if !a.checkPerm(w, r, "audit:export") {
+			return
+		}
+		a.auditExportCSV(w, r)
 		return
 	}
 	if a.audit == nil {
-		if r.URL.Query().Get("format") == "csv" {
-			writeAuditCSV(w, nil)
-			return
-		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"events": []interface{}{}})
 		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"events": a.auditEvents(r)})
+}
+
+// handleAuditExport 导出管理操作审计记录为 CSV（需 audit:export，属高危权限点）。
+// GET /api/v1/audit/export?limit=&user=&path=&category=
+func (a *API) handleAuditExport(w http.ResponseWriter, r *http.Request) {
+	a.auditExportCSV(w, r)
+}
+
+// auditEvents 按查询参数读取审计事件并补全来源 IP 属地。
+func (a *API) auditEvents(r *http.Request) []audit.Event {
+	if a.audit == nil {
+		return nil
 	}
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
@@ -56,11 +71,12 @@ func (a *API) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 			events[i].SourceLocation = geoLocation(events[i].RemoteIP)
 		}
 	}
-	if q.Get("format") == "csv" {
-		writeAuditCSV(w, events)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"events": events})
+	return events
+}
+
+// auditExportCSV 以 CSV 形式写出审计事件（/audit/export 与 /audit/events?format=csv 共用）。
+func (a *API) auditExportCSV(w http.ResponseWriter, r *http.Request) {
+	writeAuditCSV(w, a.auditEvents(r))
 }
 
 func writeAuditCSV(w http.ResponseWriter, events []audit.Event) {
@@ -101,6 +117,8 @@ func (a *API) handleSecurityEvents(w http.ResponseWriter, r *http.Request) {
 	if events == nil {
 		events = []model.SecurityEvent{}
 	}
+	// 资源范围：受限用户只能看到范围内节点的安全事件。
+	events = filterByNodeScope(a, Principal(r), events, func(e model.SecurityEvent) string { return e.Node })
 	for i := range events {
 		if events[i].NodeIP == "" && events[i].Node != "" {
 			events[i].NodeIP = a.nodeIP(events[i].Node)
@@ -125,6 +143,8 @@ func (a *API) handleSecurityBaselines(w http.ResponseWriter, r *http.Request) {
 	if baselines == nil {
 		baselines = []model.SecurityBaseline{}
 	}
+	// 资源范围：受限用户只能看到范围内节点的基线。
+	baselines = filterByNodeScope(a, Principal(r), baselines, func(b model.SecurityBaseline) string { return b.Node })
 	for i := range baselines {
 		if baselines[i].NodeIP == "" && baselines[i].Node != "" {
 			baselines[i].NodeIP = a.nodeIP(baselines[i].Node)

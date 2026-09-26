@@ -1493,6 +1493,7 @@ journalctl -u monitor-proxy-hub -f
 | GET | `/api/v1/security/defense/tasks` | 防护任务列表 |
 | GET | `/api/v1/security/defense/tasks/{node}` | 按节点查询防护任务 |
 | GET | `/api/v1/audit/events` | 管理操作审计记录 |
+| GET | `/api/v1/audit/export` | 导出审计记录（CSV） |
 
 ### 拨测与巡检报告
 

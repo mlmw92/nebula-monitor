@@ -180,36 +180,40 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/rules/{id}/toggle-silence", a.permit(a.handleRuleToggleSilence, "silence:write"))
 	mux.HandleFunc("DELETE /api/v1/rules/{id}", a.permit(a.handleRuleDelete, "alerts:write"))
 
-	// 管理操作审计
-	mux.HandleFunc("GET /api/v1/audit/events", a.handleAuditEvents)
+	// 管理操作审计：查看 audit:read；导出已拆为独立路由（audit:export，高危）
+	mux.HandleFunc("GET /api/v1/audit/events", a.permit(a.handleAuditEvents, "audit:read"))
+	mux.HandleFunc("GET /api/v1/audit/export", a.permit(a.handleAuditExport, "audit:export"))
 
-	mux.HandleFunc("GET /api/v1/security/summary", a.handleSecuritySummary)
-	mux.HandleFunc("GET /api/v1/security/events", a.handleSecurityEvents)
-	mux.HandleFunc("GET /api/v1/security/baselines", a.handleSecurityBaselines)
+	// 安全中心：查看 security:read；入侵防御指令下发 security:write（高危）+ 节点资源范围
+	mux.HandleFunc("GET /api/v1/security/summary", a.permit(a.handleSecuritySummary, "security:read"))
+	mux.HandleFunc("GET /api/v1/security/events", a.permit(a.handleSecurityEvents, "security:read"))
+	mux.HandleFunc("GET /api/v1/security/baselines", a.permit(a.handleSecurityBaselines, "security:read"))
 
 	// 受控 fail2ban 入侵防御（仅管理 nebula 专属 SSH jail）
-	mux.HandleFunc("GET /api/v1/security/defense/status", a.handleDefenseStatusList)
-	mux.HandleFunc("GET /api/v1/security/defense/status/{node}", a.handleDefenseStatus)
-	mux.HandleFunc("POST /api/v1/security/defense/{node}/{action}", a.handleDefenseAction)
-	mux.HandleFunc("GET /api/v1/security/defense/tasks", a.handleDefenseTasks)
-	mux.HandleFunc("GET /api/v1/security/defense/tasks/{node}", a.handleDefenseTasks)
+	mux.HandleFunc("GET /api/v1/security/defense/status", a.permit(a.handleDefenseStatusList, "security:read"))
+	mux.HandleFunc("GET /api/v1/security/defense/status/{node}", a.permitNode(a.handleDefenseStatus, "security:read"))
+	mux.HandleFunc("POST /api/v1/security/defense/{node}/{action}", a.permitNode(a.handleDefenseAction, "security:write"))
+	mux.HandleFunc("GET /api/v1/security/defense/tasks", a.permit(a.handleDefenseTasks, "security:read"))
+	mux.HandleFunc("GET /api/v1/security/defense/tasks/{node}", a.permitNode(a.handleDefenseTasks, "security:read"))
 
-	mux.HandleFunc("GET /api/v1/install-info", a.handleInstallInfo)
+	// 安装信息含 Agent 长期密钥 → agent:secret:read（高危）；version 登录即可；agent/check 走 X-Agent-Secret（公开）
+	mux.HandleFunc("GET /api/v1/install-info", a.permit(a.handleInstallInfo, "agent:secret:read"))
 	mux.HandleFunc("GET /api/v1/version", a.handleVersion)
 	mux.HandleFunc("GET /api/v1/agent/check", a.handleAgentCheck)
 
-	mux.HandleFunc("POST /api/v1/system/upgrade/upload", a.handleSystemUpgradeUpload)
-	mux.HandleFunc("GET /api/v1/system/upgrade/current", a.handleSystemUpgradeCurrent)
-	mux.HandleFunc("POST /api/v1/system/upgrade/apply", a.handleSystemUpgradeApply)
-	mux.HandleFunc("GET /api/v1/system/upgrade/history", a.handleSystemUpgradeHistory)
-	mux.HandleFunc("GET /api/v1/system/upgrade/archive", a.handleSystemUpgradeArchive)
-	mux.HandleFunc("POST /api/v1/system/upgrade/rollback-to", a.handleSystemUpgradeRollbackTo)
+	// 系统升级：system:upgrade（高危权限点）
+	mux.HandleFunc("POST /api/v1/system/upgrade/upload", a.permit(a.handleSystemUpgradeUpload, "system:upgrade"))
+	mux.HandleFunc("GET /api/v1/system/upgrade/current", a.permit(a.handleSystemUpgradeCurrent, "system:upgrade"))
+	mux.HandleFunc("POST /api/v1/system/upgrade/apply", a.permit(a.handleSystemUpgradeApply, "system:upgrade"))
+	mux.HandleFunc("GET /api/v1/system/upgrade/history", a.permit(a.handleSystemUpgradeHistory, "system:upgrade"))
+	mux.HandleFunc("GET /api/v1/system/upgrade/archive", a.permit(a.handleSystemUpgradeArchive, "system:upgrade"))
+	mux.HandleFunc("POST /api/v1/system/upgrade/rollback-to", a.permit(a.handleSystemUpgradeRollbackTo, "system:upgrade"))
 
-	// IP 地理库更新（独立于系统升级：只替换 ip2region 库文件并热加载，不重启服务）
-	mux.HandleFunc("GET /api/v1/system/geoip", a.handleGeoIPStatus)
-	mux.HandleFunc("POST /api/v1/system/geoip/upload", a.handleGeoIPUpload)
-	mux.HandleFunc("POST /api/v1/system/geoip/reset", a.handleGeoIPReset)
-	mux.HandleFunc("GET /api/v1/system/geoip/test", a.handleGeoIPTest)
+	// IP 地理库更新（独立于系统升级：只替换 ip2region 库文件并热加载，不重启服务）→ system:config
+	mux.HandleFunc("GET /api/v1/system/geoip", a.permit(a.handleGeoIPStatus, "system:config"))
+	mux.HandleFunc("POST /api/v1/system/geoip/upload", a.permit(a.handleGeoIPUpload, "system:config"))
+	mux.HandleFunc("POST /api/v1/system/geoip/reset", a.permit(a.handleGeoIPReset, "system:config"))
+	mux.HandleFunc("GET /api/v1/system/geoip/test", a.permit(a.handleGeoIPTest, "system:config"))
 
 	mux.HandleFunc("POST /api/v1/login", a.handleLogin)
 	mux.HandleFunc("POST /api/v1/logout", a.handleLogout)
@@ -243,12 +247,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/notify", a.permit(a.handleNotifyPut, "notify:write"))
 	mux.HandleFunc("POST /api/v1/notify/test", a.permit(a.handleNotifyTest, "notify:write"))
 
-	mux.HandleFunc("GET /api/v1/screen/config", a.handleScreenGet)
-	mux.HandleFunc("PUT /api/v1/screen/config", a.handleScreenPut)
+	// 大屏与品牌配置：system:config（GET /ui/settings 为公开匿名只读，见 AuthMiddleware）
+	mux.HandleFunc("GET /api/v1/screen/config", a.permit(a.handleScreenGet, "system:config"))
+	mux.HandleFunc("PUT /api/v1/screen/config", a.permit(a.handleScreenPut, "system:config"))
 
 	// 系统 UI 品牌配置（系统名称/Logo）
 	mux.HandleFunc("GET /api/v1/ui/settings", a.handleUIGet)
-	mux.HandleFunc("PUT /api/v1/ui/settings", a.handleUIPut)
+	mux.HandleFunc("PUT /api/v1/ui/settings", a.permit(a.handleUIPut, "system:config"))
 
 	mux.HandleFunc("POST /api/v1/alerts/test", a.handleAlertTest)
 
@@ -272,30 +277,32 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// 告警统计看板（P4）
 	mux.HandleFunc("GET /api/v1/alerts/stats", a.permit(a.handleAlertStats, "alerts:read"))
 
-	mux.HandleFunc("GET /api/v1/dialtest/tasks", a.handleDialtestList)
-	mux.HandleFunc("POST /api/v1/dialtest/tasks", a.handleDialtestCreate)
-	mux.HandleFunc("PUT /api/v1/dialtest/tasks/{id}", a.handleDialtestUpdate)
-	mux.HandleFunc("DELETE /api/v1/dialtest/tasks/{id}", a.handleDialtestDelete)
-	mux.HandleFunc("GET /api/v1/dialtest/latest", a.handleDialtestLatest)
+	// 拨测：probe:read / probe:write
+	mux.HandleFunc("GET /api/v1/dialtest/tasks", a.permit(a.handleDialtestList, "probe:read"))
+	mux.HandleFunc("POST /api/v1/dialtest/tasks", a.permit(a.handleDialtestCreate, "probe:write"))
+	mux.HandleFunc("PUT /api/v1/dialtest/tasks/{id}", a.permit(a.handleDialtestUpdate, "probe:write"))
+	mux.HandleFunc("DELETE /api/v1/dialtest/tasks/{id}", a.permit(a.handleDialtestDelete, "probe:write"))
+	mux.HandleFunc("GET /api/v1/dialtest/latest", a.permit(a.handleDialtestLatest, "probe:read"))
 
-	mux.HandleFunc("POST /api/v1/report/generate", a.handleReportGenerate)
-	mux.HandleFunc("GET /api/v1/report/download", a.handleReportDownload)
-	mux.HandleFunc("GET /api/v1/report/history", a.handleReportHistory)
+	// 巡检报告：生成与下载为导出语义（report:export），历史列表 report:read
+	mux.HandleFunc("POST /api/v1/report/generate", a.permit(a.handleReportGenerate, "report:export"))
+	mux.HandleFunc("GET /api/v1/report/download", a.permit(a.handleReportDownload, "report:export"))
+	mux.HandleFunc("GET /api/v1/report/history", a.permit(a.handleReportHistory, "report:read"))
 
 	// 代理模式状态查询（网闸场景 Edge/Hub 代理连接状态）
-	mux.HandleFunc("GET /api/v1/proxy/status", a.handleProxyStatus)
+	mux.HandleFunc("GET /api/v1/proxy/status", a.permit(a.handleProxyStatus, "agent:read"))
 
 	// 可观测性增强：指标目录（自动发现）+ 历史数据导出
 	mux.HandleFunc("GET /api/v1/metrics/catalog", a.permit(a.handleMetricsCatalog, "nodes:read"))
 	mux.HandleFunc("GET /api/v1/metrics/active", a.permitNode(a.handleMetricsActive, "nodes:read"))
 	mux.HandleFunc("GET /api/v1/metrics/export", a.permitNode(a.handleMetricsExport, "metrics:export"))
 
-	// 可观测性增强：自定义仪表盘
-	mux.HandleFunc("GET /api/v1/dashboards", a.handleDashboardsList)
-	mux.HandleFunc("POST /api/v1/dashboards", a.handleDashboardCreate)
-	mux.HandleFunc("GET /api/v1/dashboards/{id}", a.handleDashboardGet)
-	mux.HandleFunc("PUT /api/v1/dashboards/{id}", a.handleDashboardUpdate)
-	mux.HandleFunc("DELETE /api/v1/dashboards/{id}", a.handleDashboardDelete)
+	// 可观测性增强：自定义仪表盘（读 dashboard:read，增删改 dashboard:write）
+	mux.HandleFunc("GET /api/v1/dashboards", a.permit(a.handleDashboardsList, "dashboard:read"))
+	mux.HandleFunc("POST /api/v1/dashboards", a.permit(a.handleDashboardCreate, "dashboard:write"))
+	mux.HandleFunc("GET /api/v1/dashboards/{id}", a.permit(a.handleDashboardGet, "dashboard:read"))
+	mux.HandleFunc("PUT /api/v1/dashboards/{id}", a.permit(a.handleDashboardUpdate, "dashboard:write"))
+	mux.HandleFunc("DELETE /api/v1/dashboards/{id}", a.permit(a.handleDashboardDelete, "dashboard:write"))
 }
 
 // handleInstallInfo 返回 Agent 一行安装命令（server 地址取自请求 Host，secret 取自配置）。

@@ -4,20 +4,34 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/nebula/monitor/internal/server/audit"
+	"github.com/nebula/monitor/internal/server/auth"
 	"github.com/nebula/monitor/internal/server/config"
 )
 
+// 未认证不得读取审计记录。该约束现已由路由级 permit 包装承担（见 RegisterRoutes），
+// 而非 handler 内部自检；authStore 未注入（认证未启用）时按兼容策略 1 放行。
 func TestHandleAuditEventsRequiresAuthentication(t *testing.T) {
 	a := &API{auth: config.AuthConfig{Enabled: true}, audit: audit.New("")}
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit/events", nil)
 	rec := httptest.NewRecorder()
-	a.handleAuditEvents(rec, req)
+	a.permit(a.handleAuditEvents, "audit:read")(rec, httptest.NewRequest(http.MethodGet, "/api/v1/audit/events", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("认证未启用（authStore 未注入）应放行，status = %d", rec.Code)
+	}
+
+	store, err := auth.NewStore(filepath.Join(t.TempDir(), "users.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withStore := &API{auth: config.AuthConfig{Enabled: true}, audit: audit.New(""), authStore: store}
+	rec = httptest.NewRecorder()
+	withStore.permit(withStore.handleAuditEvents, "audit:read")(rec, httptest.NewRequest(http.MethodGet, "/api/v1/audit/events", nil))
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+		t.Fatalf("已启用认证且无身份时应 401，status = %d", rec.Code)
 	}
 }
 

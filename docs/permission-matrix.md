@@ -14,7 +14,7 @@
 | **B｜主机与指标（含 `/ws`）** | ✅ 已完成 | 23 条路由挂载 `permit` / `permitNode`：`nodes/*`（8）、`groups/*`（3）、`query/*`+`processes`+`listeners`+`firewall`（6）、`metrics/*`（3）、`analysis/*`（2，范围过滤本已存在）、`/ws`（1）。列表类按范围过滤（`handleNodes` / `handleNodesLatest` / `handleGroups`），单节点类由 `permitNode` 统一校验（路径 `{name}` 或查询 `node`），批量升级用 `CheckBatchGroups` 整体校验；**`/ws` 补齐 topic 级授权**（`metrics`→`nodes:read`+节点范围、`alerts`→`alerts:read`、未知 topic 拒绝）。告警管理员补齐 `nodes:read`/`groups:read`（告警页面分组筛选与规则目标选择依赖）；前端 `hosts` / `node/:name` / `metrics/explore` 补 `meta.perm` 与菜单 `perm`。14 个新测试 |
 | **C｜中间件** | ✅ 已完成 | 13 条路由挂载 `middleware:read`；实例列表按「实例 → 所属节点 → 分组」过滤（Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / K8s / MongoDB / FastDFS 及 Nginx 访问汇总的实例列表）；`overview` 的实例计数与告警计数改为**过滤后重算**；K8s 工作节点/Pod 无 Agent 节点标签，按可见集群的 instance 归属过滤；前端中间件菜单与路由补 `perm`。8 个新测试 |
 | **D｜告警与通知** | ✅ 已完成 | 26 条路由挂载权限点：告警事件（`alerts:read` / 确认 `alerts:write`）、规则 CRUD（`alerts:read` / `alerts:write`，临时静默为 `silence:write`）、抑制 / 分组 / 事件管道（`alerts:read` / `alerts:write`，`preview` 按语义只需 `alerts:read`）、维护窗口（`silence:read` / `silence:write`）、通知（`notify:read` / `notify:write` 高危）。范围过滤：告警列表、确认记录列表、统计看板均按节点范围过滤/重算，确认接口对范围外节点返回 403；规则、抑制、分组、管道、维护、通知为**全局配置**，不设范围。前端告警中心 / 智能分析 / 通知配置菜单与路由补 `perm`。7 个新测试 |
-| E｜安全、系统与其余 | ⬜ 待实施 | — |
+| **E｜安全、系统与其余** | ✅ 已完成 | 37 条路由 + **新增 1 条**（`GET /api/v1/audit/export`）挂载权限点：安全中心（`security:read` / 下指令 `security:write`）、审计（`audit:read` / 导出 `audit:export`）、系统升级（`system:upgrade`）、地理库与大屏品牌（`system:config`）、仪表盘（`dashboard:read` / `dashboard:write`）、安装信息（`agent:secret:read`）、代理状态（`agent:read`）、拨测（`probe:read`/`probe:write`）、报告（`report:read`/`report:export`）。范围过滤：安全事件、安全基线、防护状态列表、防护任务列表按节点范围过滤；`permitNode` 扩展支持 `{node}` 路径参数。**审计导出已按 8.3 拆为独立路由**（旧 `?format=csv` 保留兼容并额外判权）。前端审计导出改调新路由，8 个菜单与 6 条路由补 `perm`。4 个新测试（含 5 个审计拆分用例与 12 个权限点区分用例） |
 
 ---
 
@@ -192,7 +192,8 @@
 | POST | `/api/v1/security/defense/{node}/{action}` | `security:write`（高风险） | 节点 |
 | GET | `/api/v1/security/defense/tasks` | `security:read` | 分组 |
 | GET | `/api/v1/security/defense/tasks/{node}` | `security:read` | 节点 |
-| GET | `/api/v1/audit/events` | `audit:read`（携带导出参数时 `audit:export`，高风险） | — |
+| GET | `/api/v1/audit/events` | `audit:read`（兼容：携带 `format=csv` 时额外要求 `audit:export`） | — |
+| GET | `/api/v1/audit/export` | `audit:export`（高风险，批次 E 新增路由） | — |
 
 ### 4.8 拨测与巡检报告（8 条）
 
@@ -297,7 +298,7 @@
 | **B｜主机与指标** | `nodes/*`、`groups/*`、`query/*`、`processes`、`metrics/*`、`analysis/*` + **`/ws` topic 授权与范围校验** | 23 | A |
 | **C｜中间件** | `middleware/*` 全部 13 条 + 概览聚合口径修正 | 13 | A |
 | **D｜告警与通知** | `alerts/*`、`rules/*`、`inhibit`、`grouping`、`alert-pipeline`、`maintenance`、`notify` | 26 | A |
-| **E｜安全、系统与其余** | `security/*`、`audit/*`、`system/*`、`ui/*`、`screen/*`、`dashboards/*`、`install-info`、`proxy/status`、`dialtest/*`、`report/*` | 37 | A |
+| **E｜安全、系统与其余** | `security/*`、`audit/*`（含新增的 `audit/export`）、`system/*`、`ui/*`、`screen/*`、`dashboards/*`、`install-info`、`proxy/status`、`dialtest/*`、`report/*` | 38 | A |
 
 每批交付物：
 1. 路由挂载 `requirePerm`（已有 `authz` 的 16 条保持不动）；
@@ -316,7 +317,7 @@
 `/ws` 的**认证**原本已由 Cookie 兜底完成，但缺少 topic 级授权与范围校验：任何已登录用户都能 `GET /ws?topic=metrics&node=<任意节点>` 订阅任意节点实时指标，绕过节点分组资源范围。
 批次 B 已改为由 `API.RegisterWS` 注册、经 `wsAuthorize` 在握手前完成「topic 合法性 + 权限点 + 节点归属分组」三重校验（未知 topic 直接 400，不再存在「登录即可订阅任意数据」的面）。
 
-### 8.3 同一路由承载「查看」与「导出」
+### 8.3 同一路由承载「查看」与「导出」 —— 已在批次 E 解决
 - `GET /api/v1/audit/events`：带导出参数时语义为导出（`audit:export`，高风险）。
 - `GET /api/v1/report/download`、`GET /api/v1/metrics/export`：GET 但语义为导出。
 需在批次 A 明确约定：**按参数在 handler 内二次判断权限**，或**拆分为独立路由**。倾向于后者（路由即契约，便于审计与测试），但会改变 API 面，需你确认。
@@ -358,12 +359,20 @@
 
 | 项 | 数量 |
 |---|---|
-| 路由总数 | 126 |
+| 路由总数 | **127**（批次 E 新增 `GET /api/v1/audit/export`） |
 | 公开接口 | 7（`login`、`report`、`agent/check`、`install/*`、`bin/*`、`/`、`GET ui/settings`） |
 | 无需权限点（登录即可 / 自身资源） | 6（`version`、`auth-info`、`logout`、`auth/me` ×2、`change-password`） |
 | 已生效（现状 `authz`） | 14（`users:manage` 8 + `roles:manage` 3 + `roles:read` 3） |
-| **本次需新增校验** | **99** = 126 − 7 − 6 − 14 |
+| **本次新增校验** | **100** = 127 − 7 − 6 − 14 |
 | 新增权限点 | 2（`dashboard:write`、`system:config`） |
 | 高风险权限点 | 8（现状） |
 
-分批校验：23（B）+ 13（C）+ 26（D）+ 37（E）= 99 ✓
+分批校验：23（B）+ 13（C）+ 26（D）+ 38（E，含新增的 audit/export）= 100 ✓
+
+**五个子批次已全部完成**（A 基础设施、B 主机与指标、C 中间件、D 告警与通知、E 安全系统与其余），即路线图 `docs/refactor-plan.md` 第 4 节「批次二 → B1（实施）」已交付。
+
+### 残留事项
+
+- 8.6（前端守卫）与 8.8（聚合口径）为**已知限制**，非阻塞；
+- 8.5 大屏与品牌配置的权限归属（`system:config`）如与预期不符可单独调整；
+- 后续新增路由必须同步挂 `permit` / `permitNode`，并在本表登记。

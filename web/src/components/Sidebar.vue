@@ -114,9 +114,9 @@ const groups = [
     items: [
       { key: 'hosts', to: '/hosts', label: '主机列表', icon: Monitor, perm: 'nodes:read' },
       { key: 'middleware', to: '/middleware', label: '中间件监控', icon: Connection, perm: 'middleware:read' },
-      { key: 'dialtest', to: '/dialtest', label: '服务拨测', icon: Aim },
+      { key: 'dialtest', to: '/dialtest', label: '服务拨测', icon: Aim, perm: 'probe:read' },
       { key: 'metrics-explore', to: '/metrics/explore', label: '指标浏览', icon: DataLine, perm: 'nodes:read' },
-      { key: 'dashboards', to: '/system/dashboards', label: '自定义仪表盘', icon: Grid },
+      { key: 'dashboards', to: '/system/dashboards', label: '自定义仪表盘', icon: Grid, perm: 'dashboard:read' },
     ],
   },
   {
@@ -127,7 +127,7 @@ const groups = [
       { key: 'alerts', to: '/alerts', label: '告警中心', icon: Bell, perm: 'alerts:read' },
       { key: 'intelligence', to: '/intelligence', label: '智能分析', icon: Histogram, perm: 'nodes:read' },
       { key: 'notify', to: '/notify', label: '通知配置', icon: Message, perm: 'notify:read' },
-      { key: 'report', to: '/report', label: '巡检报告', icon: Document },
+      { key: 'report', to: '/report', label: '巡检报告', icon: Document, perm: 'report:read' },
     ],
   },
   {
@@ -135,8 +135,8 @@ const groups = [
     label: '安全治理',
     icon: Lock,
     items: [
-      { key: 'security', to: '/security', label: '安全中心', icon: Lock },
-      { key: 'audit', to: '/audit', label: '操作审计', icon: List },
+      { key: 'security', to: '/security', label: '安全中心', icon: Lock, perm: 'security:read' },
+      { key: 'audit', to: '/audit', label: '操作审计', icon: List, perm: 'audit:read' },
     ],
   },
   {
@@ -146,7 +146,7 @@ const groups = [
     items: [
       { key: 'settings', to: '/system/settings', label: '站点与品牌' },
       { key: 'profile', to: '/system/profile', label: '个人中心' },
-      { key: 'upgrade', to: '/system/upgrade', label: '系统升级' },
+      { key: 'upgrade', to: '/system/upgrade', label: '系统升级', perm: 'system:upgrade' },
       { key: 'users', to: '/system/users', label: '用户管理', perm: 'users:manage' },
       { key: 'roles', to: '/system/roles', label: '角色与权限', perm: 'roles:read' },
     ],

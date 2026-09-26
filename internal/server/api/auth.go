@@ -289,6 +289,10 @@ func (a *API) permitNode(next http.HandlerFunc, perm string) http.HandlerFunc {
 		}
 		name := param(r, "name")
 		if name == "" {
+			// 部分路由用 {node} 作为路径参数（如 /security/defense/tasks/{node}）
+			name = param(r, "node")
+		}
+		if name == "" {
 			name = r.URL.Query().Get("node")
 		}
 		if !a.checkNodeScope(w, r, perm, name) {

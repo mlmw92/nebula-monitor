@@ -10,6 +10,7 @@ import (
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/audit"
+	"github.com/nebula/monitor/internal/server/security"
 )
 
 // DefenseStatusView 在节点防护状态基础上附带 Agent 是否支持结构化防御指令的判断，
@@ -17,7 +18,7 @@ import (
 type DefenseStatusView struct {
 	*model.DefenseStatus
 	AgentSupported bool   `json:"agentSupported"`
-	NodeIP         string `json:"nodeIp,omitempty"`     // 节点 IP（服务器 IP）
+	NodeIP         string `json:"nodeIp,omitempty"`      // 节点 IP（服务器 IP）
 	DisplayName    string `json:"displayName,omitempty"` // 节点别名
 }
 
@@ -59,6 +60,8 @@ func (a *API) handleDefenseStatusList(w http.ResponseWriter, r *http.Request) {
 			out = append(out, a.enrichDefenseView(&model.DefenseStatus{Node: n, Supported: false, Installed: false, Running: false, ManagedJail: false}, caps))
 		}
 	}
+	// 资源范围：受限用户只能看到范围内节点的防护状态。
+	out = filterByNodeScope(a, Principal(r), out, func(v DefenseStatusView) string { return v.Node })
 	writeJSON(w, http.StatusOK, map[string]interface{}{"statuses": out})
 }
 
@@ -175,6 +178,8 @@ func (a *API) handleDefenseTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	nodeName := param(r, "node")
 	tasks := a.defenseStore.List(nodeName)
+	// 资源范围：受限用户只能看到范围内节点的防护任务。
+	tasks = filterByNodeScope(a, Principal(r), tasks, func(t *security.DefenseTask) string { return t.Node })
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tasks": tasks})
 }
 

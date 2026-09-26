@@ -156,7 +156,8 @@ async function loadEvents() {
 async function exportCSV() {
   exporting.value = true
   try {
-    const response = await fetch(`/api/v1/audit/events?${queryString('csv')}`, { credentials: 'include' })
+    // 导出走独立路由（需 audit:export 权限点），查看与导出在服务端权限点不同
+    const response = await fetch(`/api/v1/audit/export?${queryString()}`, { credentials: 'include' })
     if (!response.ok) throw new Error('导出失败')
     const blob = await response.blob()
     const url = URL.createObjectURL(blob)
