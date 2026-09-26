@@ -1,7 +1,7 @@
 # 权限矩阵设计（路由 → 权限点 → 资源范围）
 
 > 本文为 B1 改造的设计件，用于评审后进入实施。
-> 事实基线：VERSION 1.23.7；路由清点自 `internal/server/api/query.go` 的 `RegisterRoutes`（121 条）加 `ws.go`（1）、`spa.go`（1）、`cmd/server/main.go`（1）、`internal/server/agentdist/agentdist.go`（2），合计 **126 条**。
+> 事实基线：VERSION 1.24.0；路由清点自 `internal/server/api/query.go` 的 `RegisterRoutes`（122 条）加 `ws.go`（1）、`spa.go`（1）、`cmd/server/main.go`（1）、`internal/server/agentdist/agentdist.go`（2），合计 **127 条**（批次 E 新增 `GET /api/v1/audit/export` 前为 126 条）。
 
 ## 实施状态
 
