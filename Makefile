@@ -11,7 +11,7 @@ LDFLAGS := -X $(PKG)/internal/version.Version=$(VERSION) -X $(PKG)/internal/vers
 
 all: build
 
-## 完整构建：先构建前端（embed 所需），再构建 agent/server 二进制
+## 完整构建：构建 agent / server 二进制（bin/），并构建前端产物到 dist/artifacts/web/
 build: build-agent build-web build-server
 
 build-agent:
@@ -20,17 +20,14 @@ build-agent:
 build-server:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY_DIR)/server ./cmd/server
 
-## 前端构建：在 web/ 下 npm install + vite build，产物平铺拷贝到 dist/artifacts/web/
+## 前端构建：统一委托 build/build-web.sh（唯一实现，避免与脚本漂移）
 build-web:
-	cd web && npm install --no-audit --no-fund && npm run build
-	rm -rf dist/artifacts/web
-	mkdir -p dist/artifacts/web
-	cp -a web/dist/. dist/artifacts/web/
+	bash build/build-web.sh
 
 tidy:
 	$(GO) mod tidy
 
-## 交叉编译三个架构到 dist/artifacts/bin/（依赖 build-web 准备前端）
+## 交叉编译三个架构到 dist/artifacts/bin/（先构建前端，使产物与 build-web.sh 的输出布局一致）
 cross: build-web
 	GOOS=linux GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o dist/artifacts/bin/server/linux/amd64/server ./cmd/server
 	GOOS=linux GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o dist/artifacts/bin/agent/linux/amd64/agent ./cmd/agent

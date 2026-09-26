@@ -35,8 +35,8 @@ die()    { printf '\033[31m[错误]\033[0m %s\n' "$*"; exit 1; }
 # 注：NTFS 不一定保留 unix +x 位，所以用"存在+非空"判即可；chmod 会在拷贝后补上。
 # 设计目标：release.sh 单命令即可完成发布物组装，无需人工先跑 build-web.sh / cross-compile.sh。
 #   - 仅在产物缺失、或源比产物更新时才自动重建（幂等；CI 中已存在且最新则跳过，不重复耗时）。
-#   - Server 二进制通过 embed 内嵌前端，因此前端比现有二进制更新时必须重编译，否则打进包的
-#     bin 与 web/ 会不一致（这是此前“升级包前端是旧版”的根因）。
+#   - 前端由 Server 从磁盘目录托管（不内嵌进二进制）；此处仍按「前端更新即重建二进制」处理，
+#     属历史 embed 方案遗留的保守策略（无副作用，代价是多一次交叉编译）。
 BIN_DIR="dist/artifacts/bin"
 WEB_DIR="dist/artifacts/web"
 PKG_DIR="dist/artifacts/packages"
@@ -59,14 +59,14 @@ if [[ ! -s "$WEB_OUT" ]] || [[ -n "$fresh_web" ]] || (( ver_mismatch )); then
 fi
 [[ -s "$WEB_OUT" ]] || die "缺少 ${WEB_OUT}，请先运行 build/build-web.sh"
 
-# 2) 二进制：缺失、或前端产物(web/dist，被 embed)比现有二进制更新时，自动重编译
+# 2) 二进制：缺失、或前端产物比现有二进制更新时，自动重编译（保守策略，见上）
 SERVER_BIN="${BIN_DIR}/server/linux/amd64/server"
 AGENT_BIN="${BIN_DIR}/agent/linux/amd64/agent"
 need_bin=0
 if [[ ! -s "$SERVER_BIN" ]] || [[ ! -s "$AGENT_BIN" ]]; then
   need_bin=1
 elif [[ -e web/dist ]] && [[ web/dist -nt "$SERVER_BIN" ]]; then
-  # 前端已重建（web/dist 比二进制新）→ 重编译以把最新前端 embed 进 server
+  # 前端已重建（web/dist 比二进制新）→ 保守重建二进制（历史 embed 方案遗留，见前置检查说明）
   need_bin=1
 fi
 if (( need_bin )); then

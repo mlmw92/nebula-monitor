@@ -86,7 +86,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 
 - 登录、总览、主机列表（Agent 版本低于服务端时显示红点）、主机详情（含端口状态区块）、告警列表、规则新增/编辑（含静默设置）、分组管理
 - **中间件监控**：独立一级菜单，Tab 布局（一种中间件一个 Tab）。已实现 Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes / MongoDB / FastDFS 十个 Tab：统计概览卡片 + 实例列表表格 + 实例详情抽屉（多趋势图）。
-- **数据大屏**：`/screen` 全屏自适应数据分析视图，三大板块 Tab 切换：主机监控（CPU/内存/磁盘/网络实时仪表盘 + 集群趋势 + 主机健康列表）、中间件监控（8 类组件健康度总览 + 关键参数趋势 + 实例下钻）、Nginx 分析（访问量/流量趋势、状态码分布、Top URI/Top IP 排行、请求来源地理分布中国/世界地图热力散点与动线）；顶部 KPI 指标卡、底部实时告警滚动区，模块显隐可配置并持久化。主机 Tab 已支持离线主机整行高亮标识、磁盘集群均值（仅统计在线主机）与磁盘读写 IOPS、load1/5/15、网络丢包率、TCP 重传率展示；上述新增指标（磁盘 IOPS、网络丢包率、TCP 重传率、load5/load15）需先将各节点 Agent 升级到相同版本并重分发二进制后方可采集，未升级前对应字段显示为空或 0。
+- **数据大屏**：`/screen` 全屏自适应数据分析视图，三大板块 Tab 切换：主机监控（CPU/内存/磁盘/网络实时仪表盘 + 集群趋势 + 主机健康列表）、中间件监控（十类组件健康度总览 + 关键参数趋势 + 实例下钻）、Nginx 分析（访问量/流量趋势、状态码分布、Top URI/Top IP 排行、请求来源地理分布中国/世界地图热力散点与动线）；顶部 KPI 指标卡、底部实时告警滚动区，模块显隐可配置并持久化。主机 Tab 已支持离线主机整行高亮标识、磁盘集群均值（仅统计在线主机）与磁盘读写 IOPS、load1/5/15、网络丢包率、TCP 重传率展示；上述新增指标（磁盘 IOPS、网络丢包率、TCP 重传率、load5/load15）需先将各节点 Agent 升级到相同版本并重分发二进制后方可采集，未升级前对应字段显示为空或 0。
 - **服务拨测**：拨测任务管理页面（新增/编辑/删除/启用切换），实时展示拨测结果（在线状态/延迟/证书到期）。
 - **巡检报告**：报告生成页面（日报/周报/月报选择 + 即时生成 + 下载 + 历史记录）。
 - **系统升级**：Web 上传 upgrade 包 → 解析版本 → 立即升级（备份+替换+重启）/ 切换到指定版本 + 升级历史；Agent 不主动推送，由管理员在主机列表手动触发。页面另设独立的「IP 地理库」入口，可单独上传 ip2region 库文件即时生效，不重启服务、不影响其他组件
@@ -348,8 +348,7 @@ securityStoreFile: /var/lib/monitor-server/security_store.json
 
 **平台高可用与治理**
 
-- **前端「用户与权限」管理页（P0）**：后端 RBAC 已就绪（见[角色权限管理](#角色权限管理)），待实现可视化用户 / 角色 / 权限点 / 资源范围管理界面（原型见 `docs/permission-console-mock.html`）。
-- **业务接口权限点与资源范围服务端校验（P0）**：当前仅权限管理接口受 authz 保护，节点升级、Agent 密钥、入侵防御、通知、系统升级等业务接口需逐项接入服务端鉴权。
+- **业务接口权限点与资源范围服务端校验（P0）**：当前仅权限管理接口受服务端 `authz` 保护，节点升级、Agent 密钥、入侵防御、通知、系统升级等业务接口需逐项接入。
 - **Server 高可用（P1）**：多实例部署与告警 / 配置状态共享，消除单点。
 - **代理增强（P1）**：磁盘缓冲（长时间断网容灾）、请求批量合并（Server 减负）、主备双实例故障切换。
 - **SSO / LDAP / OIDC（P2）**：对接企业统一身份源。
@@ -1135,6 +1134,12 @@ fastdfsInstances:
 
 可基于内置角色复制为「自定义角色」，按需调整权限点与资源范围。
 
+### 权限管理界面
+
+- **用户管理**：`系统设置 → 用户管理`（`/system/users`），需要 `users:manage` 权限。
+- **角色与权限**：`系统设置 → 角色与权限`（`/system/roles`），查看需 `roles:read`，新建 / 修改 / 删除需 `roles:manage`。
+- 菜单隐藏与按钮禁用仅为前端使用体验；是否放行以服务端校验为准。
+
 ### 资源范围（按节点分组）
 
 - 每个用户可配置资源范围：全部资源，或限定到若干节点分组。
@@ -1144,6 +1149,8 @@ fastdfsInstances:
 ### 高风险操作
 
 以下操作除对应权限外，需二次确认并记入审计：系统升级、查看 Agent 安装密钥、Agent 升级、fail2ban 启停、通知密钥修改、用户与角色变更、审计导出。
+
+服务端强制权限校验当前覆盖权限管理接口（用户 / 角色 / 权限点目录）；其余业务接口的权限点与资源范围校验见[路线图](#路线图未实现)。
 
 ### 会话与密码
 
@@ -1372,52 +1379,191 @@ journalctl -u monitor-proxy-hub -f
 
 ## API
 
+接口统一以 `/api/v1` 为前缀（WebSocket、前端静态资源与 Agent 下发路径除外）。除下表标注「公开」的接口外均需登录会话，请求头携带 `Authorization: Bearer <token>`；标注权限点的接口在服务端额外校验权限，资源范围（节点分组）过滤同样在服务端执行。
+
+**公开白名单**：`POST /api/v1/login`、`POST /api/v1/report`（Agent 上报，走 `X-Agent-Secret`）、`GET /api/v1/agent/check`、`GET /api/v1/ui/settings`（匿名只读）、`/install/*`、`/bin/*`、前端静态资源。
+
+### 公开接口
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/v1/nodes` | 节点列表 |
+| POST | `/api/v1/login` | 登录换取访问令牌 |
+| POST | `/api/v1/report` | Agent 指标上报（`X-Agent-Secret` 校验，不受登录令牌影响） |
+| GET | `/api/v1/agent/check` | Agent 接入鉴权预检 |
+| GET | `/install/agent-install.sh` | 下发 Agent 安装脚本 |
+| GET | `/bin/` | 下发各架构 Agent 二进制 |
+| GET | `/` | 前端静态资源（SPA 回退 index.html） |
+
+### 主机与节点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/nodes` | 节点列表与在线状态 |
+| GET | `/api/v1/nodes/latest` | 全节点关键指标聚合 |
 | GET | `/api/v1/nodes/{name}` | 节点详情 |
-| PUT | `/api/v1/nodes/{name}/group` | 修改分组 |
 | DELETE | `/api/v1/nodes/{name}` | 移除节点 |
-| GET/POST/DELETE | `/api/v1/groups` | 分组管理 |
+| PUT | `/api/v1/nodes/{name}/group` | 修改节点分组 |
+| PUT | `/api/v1/nodes/{name}/display-name` | 设置节点别名 |
+| POST | `/api/v1/nodes/{name}/upgrade` | 升级指定节点的 Agent |
+| POST | `/api/v1/nodes/upgrade` | 批量升级 Agent |
+| GET | `/api/v1/groups` | 节点分组列表 |
+| POST | `/api/v1/groups` | 创建节点分组 |
+| DELETE | `/api/v1/groups/{name}` | 删除节点分组 |
+
+### 指标查询与浏览
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
 | GET | `/api/v1/query/range?node=&metric=&start=&end=&step=` | 历史范围查询 |
 | GET | `/api/v1/query/latest?node=&metric=` | 最新点 |
 | GET | `/api/v1/processes?node=` | 进程 TOP |
-| GET | `/api/v1/middleware/redis/instances` | Redis 实例列表（聚合最新状态与指标） |
-| GET | `/api/v1/middleware/mysql/instances` | MySQL 实例列表（聚合最新状态与指标） |
-| GET | `/api/v1/middleware/postgres/instances` | PostgreSQL 实例列表 |
+| GET | `/api/v1/query/listeners?node=` | 端口监听列表 |
+| GET | `/api/v1/query/firewall?node=` | 防火墙规则 |
+| GET | `/api/v1/query/firewall/status?node=` | 防火墙运行状态 |
+| GET | `/api/v1/metrics/catalog` | 指标目录（可采集指标定义） |
+| GET | `/api/v1/metrics/active` | 最近有数据上报的指标 |
+| GET | `/api/v1/metrics/export?node=&metric=&start=&end=` | 导出指标 CSV |
+
+### 中间件监控
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/middleware/overview` | 健康度总览（十类组件实例数 / 在线数 / 告警数聚合） |
+| GET | `/api/v1/middleware/redis/instances` | Redis 实例列表（含拓扑角色识别） |
+| GET | `/api/v1/middleware/mysql/instances` | MySQL 实例列表（含 Group Replication 角色） |
+| GET | `/api/v1/middleware/postgres/instances` | PostgreSQL 实例列表（含复制角色与延迟） |
 | GET | `/api/v1/middleware/nginx/instances` | Nginx 实例列表 |
 | GET | `/api/v1/middleware/kafka/instances` | Kafka 实例列表 |
-| GET | `/api/v1/middleware/docker/instances` | Docker 实例列表 |
+| GET | `/api/v1/middleware/docker/containers` | Docker 容器列表 |
 | GET | `/api/v1/middleware/rocketmq/instances` | RocketMQ 实例列表 |
-| GET | `/api/v1/middleware/k8s/instances` | Kubernetes 集群列表（集群聚合 + Node/异常 Pod 明细） |
-| GET | `/api/v1/middleware/mongodb/instances` | MongoDB 实例列表（聚合最新状态与指标） |
-| GET | `/api/v1/middleware/fastdfs/instances` | FastDFS 实例列表（聚合最新状态与指标） |
-| GET | `/api/v1/middleware/overview` | 中间件健康度总览（10 类组件实例数 / 在线数 / 告警数聚合） |
+| GET | `/api/v1/middleware/k8s/instances` | Kubernetes 集群列表（集群聚合 + Node / 异常 Pod 明细） |
+| GET | `/api/v1/middleware/mongodb/instances` | MongoDB 实例列表（含副本集角色） |
+| GET | `/api/v1/middleware/fastdfs/instances` | FastDFS 实例列表 |
 | GET | `/api/v1/middleware/nginx/access/summary` | Nginx 访问日志汇总（总请求 / 速率 / 状态码分布 / Top URI / Top IP） |
-| GET | `/api/v1/middleware/nginx/access/geo?scope=cn\|world` | 请求来源地理分布（来源热力点 / 部署点 / 动线） |
+| GET | `/api/v1/middleware/nginx/access/geo?scope=cn\|world` | 请求来源地理分布（热力点 / 部署点 / 动线） |
+
+### 智能分析
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/analysis/summary?windowHours=24\|168\|720&refresh=true\|false` | 分析摘要与按风险排序的主机结论（动态基线、容量预测、风险证据、根因关联线索） |
+| GET | `/api/v1/analysis/hosts/{name}?windowHours=24\|168\|720&refresh=true\|false` | 指定主机的分析详情；受节点分组访问范围限制 |
+
+### 告警
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
 | GET | `/api/v1/alerts?state=active` | 告警事件（含 `suppressed` / `suppressedBy` 抑制状态） |
-| GET | `/api/v1/analysis/summary?windowHours=24\|168\|720&refresh=true\|false` | 智能分析摘要与按风险排序的主机结论；包含动态基线、容量预测、风险证据及根因关联线索 |
-| GET | `/api/v1/analysis/hosts/{name}?windowHours=24\|168\|720&refresh=true\|false` | 指定主机的智能分析详情；受节点分组访问范围限制 |
-| GET/POST/PUT/DELETE | `/api/v1/rules` | 告警规则 CRUD |
-| GET/PUT | `/api/v1/inhibit` | 告警抑制规则查询 / 全量更新（热生效） |
-| GET/PUT | `/api/v1/grouping` | 告警分组配置查询 / 更新（热生效） |
-| GET | `/ws?topic=metrics&node=` | 实时指标（WebSocket） |
-| GET | `/ws?topic=alerts` | 告警广播（WebSocket） |
-| POST | `/api/v1/system/upgrade/upload` | 上传升级包（multipart） |
-| GET | `/api/v1/system/upgrade/current` | 当前待应用升级包 |
-| POST | `/api/v1/system/upgrade/apply` | 立即应用 |
-| GET | `/api/v1/system/upgrade/archive` | 已归档（可切换）版本列表 |
-| POST | `/api/v1/system/upgrade/rollback-to` | 切换到指定归档版本 |
-| GET | `/api/v1/system/upgrade/history` | 升级历史 |
-| GET/POST/PUT/DELETE | `/api/v1/dialtest/tasks` | 拨测任务 CRUD |
+| GET | `/api/v1/alerts/stats` | 告警统计看板 |
+| GET | `/api/v1/alerts/acks` | 告警确认记录 |
+| POST | `/api/v1/alerts/ack` | 确认（认领）告警 |
+| POST | `/api/v1/alerts/test` | 触发一条测试告警 |
+| GET | `/api/v1/rules` | 规则列表 |
+| POST | `/api/v1/rules` | 新建规则 |
+| PUT | `/api/v1/rules/{id}` | 更新规则 |
+| DELETE | `/api/v1/rules/{id}` | 删除规则 |
+| POST | `/api/v1/rules/{id}/toggle` | 启用 / 停用规则 |
+| POST | `/api/v1/rules/{id}/toggle-silence` | 静音 / 取消静音规则 |
+| GET | `/api/v1/rules/export` | 导出规则 |
+| POST | `/api/v1/rules/import` | 导入规则 |
+| GET | `/api/v1/rules/templates` | 规则模板列表 |
+| GET | `/api/v1/inhibit` | 抑制规则查询 |
+| PUT | `/api/v1/inhibit` | 抑制规则全量更新（热生效） |
+| GET | `/api/v1/grouping` | 告警分组配置查询 |
+| PUT | `/api/v1/grouping` | 告警分组配置更新（热生效） |
+| GET | `/api/v1/alert-pipeline` | 事件管道配置查询 |
+| PUT | `/api/v1/alert-pipeline` | 事件管道配置保存（热生效） |
+| POST | `/api/v1/alert-pipeline/preview` | 按指定配置试算管道效果（不落盘） |
+| GET | `/api/v1/maintenance` | 维护窗口查询 |
+| PUT | `/api/v1/maintenance` | 维护窗口设置 |
+| GET | `/api/v1/notify` | 通知配置查询 |
+| PUT | `/api/v1/notify` | 通知配置保存（热生效） |
+| POST | `/api/v1/notify/test` | 发送测试通知 |
+
+### 安全中心与审计
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/security/summary` | 安全态势概览 |
+| GET | `/api/v1/security/events` | 安全事件列表 |
+| GET | `/api/v1/security/baselines` | 安全基线评分 |
+| GET | `/api/v1/security/defense/status` | 全节点入侵防护状态 |
+| GET | `/api/v1/security/defense/status/{node}` | 单节点入侵防护状态 |
+| POST | `/api/v1/security/defense/{node}/{action}` | 下发防护指令（`enable` / `disable` / `status`） |
+| GET | `/api/v1/security/defense/tasks` | 防护任务列表 |
+| GET | `/api/v1/security/defense/tasks/{node}` | 按节点查询防护任务 |
+| GET | `/api/v1/audit/events` | 管理操作审计记录 |
+
+### 拨测与巡检报告
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/dialtest/tasks` | 拨测任务列表 |
+| POST | `/api/v1/dialtest/tasks` | 创建拨测任务 |
+| PUT | `/api/v1/dialtest/tasks/{id}` | 更新拨测任务 |
+| DELETE | `/api/v1/dialtest/tasks/{id}` | 删除拨测任务 |
 | GET | `/api/v1/dialtest/latest` | 最近拨测结果 |
 | POST | `/api/v1/report/generate` | 生成巡检报告 |
 | GET | `/api/v1/report/download` | 下载报告 HTML |
 | GET | `/api/v1/report/history` | 报告历史列表 |
-| GET/PUT | `/api/v1/maintenance` | 维护窗口查看/设置 |
+
+### 升级、配置与展示
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/version` | Server 版本信息 |
 | GET | `/api/v1/install-info` | Agent 安装信息（serverURL + 一行命令 + 代理配置模板） |
-| GET | `/api/v1/agent/check` | Agent 接入鉴权预检（走 X-Agent-Secret，不受登录 token 影响） |
-| GET | `/api/v1/proxy/status` | 代理节点状态（Edge/Hub 自监控指标聚合） |
+| GET | `/api/v1/proxy/status` | 代理节点状态（Edge / Hub 自监控指标聚合） |
+| POST | `/api/v1/system/upgrade/upload` | 上传升级包（multipart） |
+| GET | `/api/v1/system/upgrade/current` | 当前待应用升级包 |
+| POST | `/api/v1/system/upgrade/apply` | 立即应用升级并重启 |
+| GET | `/api/v1/system/upgrade/history` | 升级历史 |
+| GET | `/api/v1/system/upgrade/archive` | 已归档（可切换）版本列表 |
+| POST | `/api/v1/system/upgrade/rollback-to` | 切换到指定归档版本 |
+| GET | `/api/v1/system/geoip` | IP 地理库状态 |
+| POST | `/api/v1/system/geoip/upload` | 上传 IP 地理库 |
+| POST | `/api/v1/system/geoip/reset` | 重置 IP 地理库 |
+| GET | `/api/v1/system/geoip/test?ip=` | 查询指定 IP 的归属地 |
+| GET | `/api/v1/ui/settings` | 品牌配置查询（GET 允许匿名只读） |
+| PUT | `/api/v1/ui/settings` | 品牌配置保存 |
+| GET | `/api/v1/screen/config` | 数据大屏配置查询 |
+| PUT | `/api/v1/screen/config` | 数据大屏配置保存 |
+| GET | `/api/v1/dashboards` | 自定义仪表盘列表 |
+| POST | `/api/v1/dashboards` | 创建仪表盘 |
+| GET | `/api/v1/dashboards/{id}` | 仪表盘详情 |
+| PUT | `/api/v1/dashboards/{id}` | 更新仪表盘 |
+| DELETE | `/api/v1/dashboards/{id}` | 删除仪表盘 |
+
+### 认证与权限（RBAC）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/logout` | 注销当前会话 |
+| GET | `/api/v1/auth-info` | 查询是否启用登录认证 |
+| POST | `/api/v1/auth/change-password` | 修改当前用户密码 |
+| GET | `/api/v1/auth/me` | 当前用户信息（含权限点与资源范围） |
+| PUT | `/api/v1/auth/me` | 更新当前用户资料 |
+| GET | `/api/v1/users` | 用户列表（`users:manage`） |
+| POST | `/api/v1/users` | 创建用户（`users:manage`） |
+| GET | `/api/v1/users/{username}` | 用户详情（`users:manage`） |
+| PUT | `/api/v1/users/{username}` | 更新用户（`users:manage`） |
+| DELETE | `/api/v1/users/{username}` | 删除用户（`users:manage`） |
+| POST | `/api/v1/users/{username}/reset-password` | 重置用户密码（`users:manage`） |
+| POST | `/api/v1/users/{username}/disable` | 禁用用户（`users:manage`） |
+| POST | `/api/v1/users/{username}/enable` | 启用用户（`users:manage`） |
+| GET | `/api/v1/roles` | 角色列表（`roles:read`） |
+| POST | `/api/v1/roles` | 创建角色（`roles:manage`） |
+| GET | `/api/v1/roles/{name}` | 角色详情（`roles:read`） |
+| PUT | `/api/v1/roles/{name}` | 更新角色（`roles:manage`） |
+| DELETE | `/api/v1/roles/{name}` | 删除角色（`roles:manage`） |
+| GET | `/api/v1/permissions/catalog` | 权限点目录（`roles:read`） |
+
+### WebSocket
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/ws?topic=metrics&node=` | 实时指标推送 |
+| GET | `/ws?topic=alerts` | 告警广播 |
 
 ---
 
