@@ -479,6 +479,11 @@ func normalizeAndValidateLogSources(cfg *Config) error {
 			if names[p.Name] {
 				return fmt.Errorf("logSources[%d]（%s）：patterns[%d].name %q 重复", i, s.ID, j, p.Name)
 			}
+			// name 会拼进指标名（<来源>_log_<name>_total），因此必须是合法的指标名片段
+			if !model.IsValidLogPatternName(p.Name) {
+				return fmt.Errorf("logSources[%d]（%s）：patterns[%d].name %q 非法（会拼进指标名，需匹配 %s）",
+					i, s.ID, j, p.Name, model.LogPatternNamePattern.String())
+			}
 			names[p.Name] = true
 			if strings.TrimSpace(p.Regex) == "" {
 				return fmt.Errorf("logSources[%d]（%s）：patterns[%d].regex 不能为空", i, s.ID, j)

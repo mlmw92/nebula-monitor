@@ -125,7 +125,10 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import http from '../api/http'
+
+const route = useRoute()
 
 // 时间范围默认最近 1 小时：日志量远大于指标，默认范围必须收窄（与服务端默认一致）。
 function defaultRange() {
@@ -266,7 +269,25 @@ async function loadMeta() {
   }
 }
 
+// 深链：/logs?node=<节点>&from=<ms>&to=<ms>&q=<关键词>（如从告警详情「查看日志」跳来）。
+// 只覆盖显式传入的项，其余保持默认，避免「跳过来却看不到东西」。
+function applyDeepLink() {
+  const q = route.query
+  if (q.node) nodes.value = String(q.node).split(',').map((s) => s.trim()).filter(Boolean)
+  const from = Number(q.from)
+  const to = Number(q.to)
+  if (from > 0 && to > from) range.value = [new Date(from), new Date(to)]
+  if (q.regex) {
+    keyword.value = String(q.regex)
+    mode.value = 're'
+  } else if (q.q) {
+    keyword.value = String(q.q)
+    mode.value = 'kw'
+  }
+}
+
 onMounted(async () => {
+  applyDeepLink()
   await loadMeta()
   await search()
 })

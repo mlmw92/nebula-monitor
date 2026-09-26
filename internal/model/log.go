@@ -55,6 +55,17 @@ func IsValidLogSourceName(s string) bool {
 	return LogSourceNamePattern.MatchString(s)
 }
 
+// LogPatternNamePattern 是日志模式名的合法形态。
+//
+// 为什么必须限制字符集：模式名会**拼进指标名**（`<来源>_log_<模式>_total`，见下面的说明），
+// 非法字符会产出无法查询的指标名——而「指标名写错」的症状是静默无数据，不是报错。
+var LogPatternNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,31}$`)
+
+// IsValidLogPatternName 判断模式名是否合法（见 LogPatternNamePattern）。
+func IsValidLogPatternName(s string) bool {
+	return LogPatternNamePattern.MatchString(s)
+}
+
 // LogQuery 是检索请求（Server 侧解析查询参数后传入存储层）。
 type LogQuery struct {
 	From    int64    // 起始时间（毫秒，含）

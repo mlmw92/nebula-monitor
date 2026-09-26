@@ -153,8 +153,10 @@ func TestLogCollector_PatternFilterAndMetrics(t *testing.T) {
 	if len(f.lines) != 2 {
 		t.Fatalf("应只上传 2 条命中行，got %+v", f.lines)
 	}
-	if m, ok := logMetric(ms, "applog_log_match_total", map[string]string{"pattern": "err"}); !ok || m.Value != 2 {
-		t.Fatalf("应产出匹配计数 applog_log_match_total{pattern=err}=2，got %+v", ms)
+	// 模式进指标名（而不是 pattern 标签）：阈值规则按指标名取样本，不支持标签筛选，
+	// 只有进名字才能配出「某个模式激增」的精确告警。
+	if m, ok := logMetric(ms, "applog_log_err_total", nil); !ok || m.Value != 2 {
+		t.Fatalf("应产出匹配计数 applog_log_err_total=2，got %+v", ms)
 	}
 	if m, ok := logMetric(ms, "applog_log_lines_total", nil); !ok || m.Value != 2 {
 		t.Fatalf("应产出上传行数 applog_log_lines_total=2，got %+v", ms)

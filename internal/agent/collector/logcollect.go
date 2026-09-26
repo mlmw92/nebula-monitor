@@ -131,8 +131,17 @@ func (c *LogCollector) buildLogMetrics(src config.LogSourceConfig, res collectRe
 		mk("log_up", boolToFloat(res.ok), nil),
 		mk("log_lines_total", float64(res.total), nil),
 	}
+	// 每个模式一个**独立指标名**（<来源>_log_<模式>_total），而不是同名 + pattern 标签。
+	//
+	// 为什么：告警引擎的阈值规则是**按指标名取样本**的（固定不做标签筛选）。若把模式放进标签，
+	// 规则只能写在共用的 log_match_total 上——任一模式超标都会触发，而告警消息里看不到是哪个模式，
+	// 运维还得回日志页自己猜。模式进指标名后，规则可以直接写 `applog_log_err_total > 5`，
+	// 告警文案自带模式名。代价是「每模式一个指标名」，数量由配置决定（个位数），基数可控。
 	for name, n := range res.matched {
-		out = append(out, mk("log_match_total", float64(n), map[string]string{"pattern": name}))
+		if name == "" {
+			continue // 全量模式（all: true）没有模式名；这些行已由 log_lines_total 计入
+		}
+		out = append(out, mk("log_"+name+"_total", float64(n), nil))
 	}
 	for reason, n := range res.dropped {
 		out = append(out, mk("log_dropped_total", float64(n), map[string]string{"reason": reason}))

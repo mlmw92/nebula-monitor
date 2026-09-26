@@ -564,8 +564,10 @@ $( [[ -n "$LABELS_YAML" ]] && printf 'labels:\n%s' "$LABELS_YAML" )
 #           巡检报告与「服务离线」告警中（那属于后续版本要做的「模板 → 中间件类型」注册）。
 # ==================== 集中日志示例（C2：把关心的日志行送到 Server 检索/告警）====================
 # 默认**只上传命中 patterns 的行**（日志内容会离开被监控机，全量上传须显式 all: true）。
-# 启用后同时产出指标：<id>_log_up / <id>_log_lines_total / <id>_log_match_total{pattern} / <id>_log_dropped_total{reason}，
+# 启用后同时产出指标：<id>_log_up / <id>_log_lines_total / <id>_log_<模式>_total / <id>_log_dropped_total{reason}，
 # 因此「错误日志激增」可直接用既有阈值规则告警（无需另配日志告警）。
+# 注意：这些是**每轮采集的增量**（不是累计计数器），阈值规则直接对原始值设阈值，不要套 rate/increase。
+# 模式名会拼进指标名（applog + err → applog_log_err_total），因此只允许 [A-Za-z0-9_] 且不以数字开头。
 # 读取进度落盘（logOffsetsFile），重启不丢、不重复上传。未配置 logSources 时零行为变化。
 # logSources:
 #   - id: applog                       # 小写字母开头；同时是存储分片名与指标前缀

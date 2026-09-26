@@ -14,6 +14,7 @@
 | A | `2c18d13` | 采集侧：`logSources` 配置与校验（隐私默认值：不给 `patterns` 又没显式 `all: true` 直接拒绝启动）、增量读取 + **偏移落盘**、多行合并、单轮上限「跳过并计数」，产出 `_log_up` / `_log_lines_total` / `_log_match_total{pattern}` / `_log_dropped_total{reason}` |
 | B | 见提交记录 | 上行通道与服务端存储：`POST /api/v1/logs`（复用 `X-Agent-Secret` + 请求体上限 4 MiB + 按节点令牌桶限速 429）、`internal/server/logstore`（按 来源/日期/节点 分片、每日 1 GiB/来源上限、超长行截断留标记、异常时间戳校正、节点名净化）、Agent 侧 `internal/agent/logship`、能力声明 `capabilities.logSources`（节点声明清单后，清单外来源被拒） |
 
+| D | 见提交记录 | 告警联动：**模式名进指标名**（阈值规则按指标名取样本、不支持标签筛选 → 模式放标签就无法按模式精确告警）、模式名字符集校验（它会拼进指标名）、README 的告警配置指引（含「每轮增量、别套 rate」这条关键语义）、告警详情「查看日志」跳转到「该节点、该告警前后 5 分钟」+ 日志页深链参数 |
 | C | 见提交记录 | 检索接口与前端页面：`GET /api/v1/logs`（有界扫描 + 游标 + `truncated` + 扫描诊断）、权限点 `logs:read` + 节点分组范围（**扫描前**收窄节点）、Web 端「集中日志」页（时间范围 / 关键词·正则 / 节点·来源 / 加载更多 / 截断提示 / 排障型空状态） |
 
 ### 13.1 实施中的三个关键发现
@@ -60,6 +61,24 @@
   随 D 一起做——那时告警与日志才真正串起来）。
 
 ---
+
+### 13.4 实施期修正：模式名必须进指标名（子批次 D）
+
+设计件 §7 原本把模式放在标签里（`<id>_log_match_total{pattern="err"}`）。实施 D 时核对告警引擎发现：
+**阈值规则是按指标名取样本的**（`evalThreshold` → `latestMetricSamples(node, metric, nil)`，固定不传标签过滤）：
+
+- 模式留在标签里 → 规则只能写在共用的 `log_match_total` 上 → **任一模式超标都会触发**，
+  且告警文案里只有指标名与数值，运维看不出是哪个模式，还得回日志页自己猜；
+- 模式进指标名（`<来源>_log_<模式>_total`）→ 规则可直接写 `applog_log_err_total > 5`，告警文案自带模式名。
+
+代价是「每模式一个指标名」，数量由配置决定（个位数量级），基数可控。
+
+连带一项**必须补的校验**：模式名会拼进指标名，因此 `patterns[].name` 增加了字符集约束
+（`^[A-Za-z_][A-Za-z0-9_]{0,31}$`）——此前只校验非空与唯一，`name: "err count"` 会产出查不到的指标名，
+而「指标名写错」的症状是**静默无数据**，不是报错。
+
+**保留的边界**：阈值规则目前不支持标签筛选，因此「按标签维度的告警」一律要靠命名（如本处的模式名）。
+若将来需要 `metric{label="v"}` 形式的规则，属告警引擎的能力扩展（本次未做）。
 
 ## 1. 目标与非目标
 
@@ -203,16 +222,23 @@ GET /api/v1/logs?from=<ms>&to=<ms>&q=<substr>&regex=<re>&nodes=&sources=&limit=2
 **做法**：Agent 在采集日志的同时，对每条 `patterns[].name` 计数；每个采集周期把**增量**产出为指标：
 
 ```
-<id>_log_match_total{source="applog", pattern="err", node="...", group="..."}   # counter（周期增量）
-<id>_log_lines_total{source="applog", node="..."}                               # 本周期上传行数
-<id>_log_dropped_total{source="applog", reason="rate|size|unreachable"}         # 丢弃可见性
+<id>_log_<模式>_total{source="applog", node="..."}                       # 每模式一个指标名；值＝本轮命中行数
+<id>_log_lines_total{source="applog", node="..."}                        # 本轮成功上传行数
+<id>_log_up{source="applog", node="..."}                                 # 本轮文件是否都读得到
+<id>_log_dropped_total{source="applog", reason="rate|size|dailyCap|unreachable"}  # 丢弃可见性
 ```
+
+**语义要点（配告警必须知道）**：这些值都是**每轮采集的增量**，不是累计计数器——阈值规则直接对原始值设阈值，
+**不要套 `rate()`/`increase()`**（那会把「每轮几条」算成无意义的增长率）。
 
 **为什么这么选**：
 
 - 规则的输入本就是「指标名 + 阈值」，因此**前端零改动**即可配告警（选指标、设阈值、设持续时间），
   并且自动获得静默 / 抑制 / 收敛 / 通知 / 处置三态的全部既有能力；
-- 指标是**跨节点可聚合**的：`sum(log_match_total{pattern="err"})` 这类判断天然成立，而事件式通道不擅长这个；
+- 指标是**跨节点可聚合**的：`sum(applog_log_err_total)` 这类判断天然成立，而事件式通道不擅长这个；
+- **模式名进指标名而不是标签**（实施期修正，见 §13.4）：告警引擎的阈值规则**按指标名取样本、不支持标签筛选**。
+  若把模式放在标签里，规则只能写在共用的名字上——任一模式超标都会触发，且告警文案里看不出是哪个模式。进名字后
+  `applog_log_err_total > 5` 这类规则才真正可写；代价是「每模式一个指标名」（数量由配置决定，个位数量级）。
 - 与 C1 的产物形态一致（都是「模板/采集器产出指标」），不引入第二套告警语义。
 
 **保留的选项（阶段二）**：把「高危匹配」额外上报为**事件**（复用既有安全事件通道：`payload.SecurityEvents`

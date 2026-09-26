@@ -60,6 +60,18 @@ func TestLogSources_Rejects(t *testing.T) {
 			s.Patterns = append(s.Patterns, LogPattern{Name: "err", Regex: "x"})
 			return s
 		}(), "重复"},
+		// pattern 名会拼进指标名（<来源>_log_<模式>_total），非法字符会产出查不到的指标名——
+		// 而「指标名写错」的症状是静默无数据，所以必须在启动期拦下
+		{"pattern 名含空格", func() LogSourceConfig {
+			s := validLogSource()
+			s.Patterns = []LogPattern{{Name: "err count", Regex: "x"}}
+			return s
+		}(), "会拼进指标名"},
+		{"pattern 名含连字符", func() LogSourceConfig {
+			s := validLogSource()
+			s.Patterns = []LogPattern{{Name: "err-count", Regex: "x"}}
+			return s
+		}(), "会拼进指标名"},
 		{"pattern 正则非法", func() LogSourceConfig {
 			s := validLogSource()
 			s.Patterns = []LogPattern{{Name: "err", Regex: "["}}

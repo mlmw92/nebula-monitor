@@ -493,6 +493,14 @@
             关闭告警
           </el-button>
           <el-button v-if="ackStatus(detail) === 'closed'" size="small" @click="reopenEvent(detail)">重新打开</el-button>
+          <el-button
+            size="small"
+            :disabled="!detail.node"
+            title="查看该节点在告警前后 5 分钟内的集中日志"
+            @click="gotoLogs(detail)"
+          >
+            查看日志
+          </el-button>
           <el-button size="small" :loading="commenting" @click="commentEvent(detail)">评论</el-button>
           <el-button size="small" @click="drawer = false">返回</el-button>
         </div>
@@ -973,6 +981,16 @@ function openDetail(row) {
 }
 function gotoNode(row) {
   router.push({ path: '/hosts', query: { node: row.node } })
+}
+// gotoLogs 跳到「该节点该时间段」的集中日志（C2）：把告警与原始日志串起来。
+// 时间窗以告警开始时间为锚点、前后各留 5 分钟——这是「触发前后到底发生了什么」最常用的一段；
+//   - 已恢复：窗口 = [开始-5m, 恢复+5m]
+//   - 仍在告警：窗口 = [开始-5m, 现在]（想看更早/更晚可在日志页改时间范围）
+function gotoLogs(row) {
+  const start = row.startsAt || Date.now()
+  const from = start - 5 * 60 * 1000
+  const to = row.state === 'resolved' && row.endsAt ? row.endsAt + 5 * 60 * 1000 : Date.now()
+  router.push({ path: '/logs', query: { node: row.node, from: String(from), to: String(to) } })
 }
 // ---- D4 告警协作处置：认领 / 指派 / 关闭 / 重新打开 / 评论 ----
 // 处置只影响「谁在处理」，不改变监控条件的真实 firing 状态。
