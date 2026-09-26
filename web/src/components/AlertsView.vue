@@ -327,7 +327,7 @@
         <!-- D1 风暴收敛：解决「一条通知上百行明细」 -->
         <div class="adv-row" v-if="grouping.enabled">
           <el-switch v-model="grouping.converge" active-text="风暴收敛" inactive-text="风暴收敛" />
-          <span class="muted">同规则多节点同时告警时合并为「头部告警 + 摘要 + Top N」，避免通知正文被明细淹没</span>
+          <span class="muted">默认开启：同规则多节点同时告警时合并为「头部告警 + 摘要 + Top N」，避免通知正文被明细淹没</span>
         </div>
         <div class="adv-row" v-if="grouping.enabled && grouping.converge">
           <div class="adv-item">
@@ -521,8 +521,8 @@ const grouping = ref({
   groupBy: ['name'],
   groupWait: '30s',
   groupInterval: '5m',
-  // D1 风暴收敛（默认关闭：通知内容属用户可见行为，升级不改变既有通知）
-  converge: false,
+  // D1 风暴收敛（默认开启：开启分组即默认收敛；关掉开关即显式写入 converge:false）
+  converge: true,
   convergeBy: ['rule', 'severity'],
   convergeWindow: '10m',
   headCount: 5,

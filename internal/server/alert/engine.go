@@ -1979,7 +1979,7 @@ func (e *Engine) flushGroup(events []model.AlertEvent) {
 		conv = e.grouping.Get()
 	}
 	var notes []string
-	if conv.Converge {
+	if conv.ConvergeEnabled() {
 		notes = e.correlationNotes(events)
 	}
 
@@ -1990,7 +1990,7 @@ func (e *Engine) flushGroup(events []model.AlertEvent) {
 			}
 			// 消息模板按渠道渲染（未配置模板时直接复用原切片）
 			rendered := e.renderForChannel(grouped, n.Channel())
-			if conv.Converge {
+			if conv.ConvergeEnabled() {
 				// 收敛必须在模板渲染之后：摘要以追加方式写入头部 Message，
 				// 若先收敛再渲染，渠道模板会把摘要覆盖掉。
 				rendered = convergeEvents(rendered, conv.HeadCount, notes)
@@ -2018,5 +2018,5 @@ func (e *Engine) SetGrouping(cfg GroupingConfig) {
 		e.grouper = e.newGrouper(cfg)
 	}
 	slog.Info("分组配置已更新", "enabled", cfg.Enabled, "groupBy", cfg.GroupBy,
-		"converge", cfg.Converge, "convergeBy", cfg.ConvergeBy, "headCount", cfg.HeadCount)
+		"converge", cfg.ConvergeEnabled(), "convergeBy", cfg.ConvergeBy, "headCount", cfg.HeadCount)
 }

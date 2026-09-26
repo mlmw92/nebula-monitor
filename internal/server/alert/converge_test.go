@@ -1,6 +1,7 @@
 package alert
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"sync"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
+	"gopkg.in/yaml.v3"
 )
 
 // captureNotifier 记录 NotifyGroup / Notify 收到的内容，用于验证收敛在派发层的效果。
@@ -310,8 +312,12 @@ func TestGroupingConfigNormalize_Defaults(t *testing.T) {
 	if cfg.ConvergeWindow != "10m" || cfg.HeadCount != 5 {
 		t.Fatalf("收敛窗口/明细数默认值缺失: %q / %d", cfg.ConvergeWindow, cfg.HeadCount)
 	}
-	if cfg.Converge {
-		t.Fatal("收敛默认必须为关闭（通知内容属用户可见行为，升级不得改变既有通知）")
+	// 三态语义：未配置 → 默认开启；显式 false → 关闭（见 TestGroupingConfig_ConvergeTriState）
+	if !cfg.ConvergeEnabled() {
+		t.Fatal("收敛默认必须为开启（开启分组即默认收敛）")
+	}
+	if cfg.Converge == nil {
+		t.Fatal("normalize 后应收敛开关物化为显式值，供接口返回与落盘使用")
 	}
 
 	cfg = GroupingConfig{HeadCount: 999}
@@ -330,7 +336,7 @@ func TestSetGrouping_NormalizesAndRebuilds(t *testing.T) {
 	}
 
 	// 只提交两个字段，其余应被补齐（否则会出现「保存成功但参数回落默认」的隐性偏差）
-	e.SetGrouping(GroupingConfig{Enabled: true, Converge: true})
+	e.SetGrouping(GroupingConfig{Enabled: true, Converge: boolPtr(true)})
 	if e.grouper == nil {
 		t.Fatal("启用后应重建分组器")
 	}
@@ -357,7 +363,7 @@ func TestFlushGroup_ConvergeOffIsPassthrough(t *testing.T) {
 	e := &Engine{
 		rules:     &RulesStore{rules: map[string]model.AlertRule{}},
 		notifiers: []Notifier{n},
-		grouping:  &GroupingStore{cfg: GroupingConfig{Converge: false}},
+		grouping:  &GroupingStore{cfg: GroupingConfig{Converge: boolPtr(false)}},
 	}
 	e.flushGroup(stormEvents(5))
 
@@ -379,7 +385,7 @@ func TestFlushGroup_ConvergePerChannel(t *testing.T) {
 		rules:     &RulesStore{rules: map[string]model.AlertRule{}},
 		notifiers: []Notifier{ding, mail},
 		grouping: &GroupingStore{cfg: GroupingConfig{
-			Converge: true, HeadCount: 2, ConvergeWindow: "10m",
+			Converge: boolPtr(true), HeadCount: 2, ConvergeWindow: "10m",
 		}},
 	}
 
@@ -412,7 +418,7 @@ func TestFlushGroup_ConvergeAttachesCorrelationNotes(t *testing.T) {
 	e := &Engine{
 		rules:     &RulesStore{rules: map[string]model.AlertRule{}},
 		notifiers: []Notifier{n},
-		grouping:  &GroupingStore{cfg: GroupingConfig{Converge: true, HeadCount: 5}},
+		grouping:  &GroupingStore{cfg: GroupingConfig{Converge: boolPtr(true), HeadCount: 5}},
 	}
 	e.SetCorrelationProvider(fakeCorrelator{notes: map[string][]string{
 		"node-0": {"磁盘将满，关联 2 个中间件实例不可用"},
@@ -467,6 +473,58 @@ func TestCorrelationNotes_LimitsAndDedup(t *testing.T) {
 		t.Fatalf("未注入提供者应返回空，got %v", got)
 	}
 }
+
+// TestGroupingConfig_ConvergeTriState 收敛开关的三态语义：
+// 字段缺失 = 默认开启；显式 false = 关闭，且不得被默认值翻回。
+func TestGroupingConfig_ConvergeTriState(t *testing.T) {
+	// YAML：未写 converge → 默认开启
+	var missing GroupingConfig
+	if err := yaml.Unmarshal([]byte("enabled: true\n"), &missing); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	missing.normalize()
+	if !missing.ConvergeEnabled() {
+		t.Fatal("YAML 未写 converge 字段时必须默认开启")
+	}
+
+	// YAML：显式 false → 保持关闭
+	var fromYAML GroupingConfig
+	if err := yaml.Unmarshal([]byte("enabled: true\nconverge: false\n"), &fromYAML); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	fromYAML.normalize()
+	if fromYAML.ConvergeEnabled() {
+		t.Fatal("YAML 中显式 converge: false 必须保持关闭")
+	}
+
+	// 接口路径：JSON 未带字段 → 默认开启；显式 false → 关闭
+	var fromJSON GroupingConfig
+	if err := json.Unmarshal([]byte(`{"enabled":true}`), &fromJSON); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if !fromJSON.ConvergeEnabled() {
+		t.Fatal("接口未提交 converge 时必须默认开启")
+	}
+	var jsonOff GroupingConfig
+	if err := json.Unmarshal([]byte(`{"enabled":true,"converge":false}`), &jsonOff); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if jsonOff.ConvergeEnabled() {
+		t.Fatal("接口显式提交 converge:false 必须保持关闭")
+	}
+
+	// 默认配置字段齐全（前端据此渲染表单），但分组本身仍需显式开启
+	def := DefaultGroupingConfig()
+	if def.Converge == nil || !def.ConvergeEnabled() || def.HeadCount != defaultHeadCount || len(def.ConvergeBy) != 2 {
+		t.Fatalf("默认配置不完整：%+v", def)
+	}
+	if def.Enabled {
+		t.Fatal("默认配置不应启用分组")
+	}
+}
+
+// boolPtr 便于在用例中构造三态开关。
+func boolPtr(b bool) *bool { return &b }
 
 // fakeCorrelator 是 CorrelationProvider 的测试替身。
 type fakeCorrelator struct {

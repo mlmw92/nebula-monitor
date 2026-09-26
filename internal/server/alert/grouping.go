@@ -24,8 +24,11 @@ type GroupingConfig struct {
 	GroupWait     string   `yaml:"groupWait" json:"groupWait"`
 	GroupInterval string   `yaml:"groupInterval" json:"groupInterval"`
 
-	// Converge 开启风暴收敛。默认关闭：通知内容属用户可见行为，升级不改变既有通知。
-	Converge bool `yaml:"converge" json:"converge"`
+	// Converge 开启风暴收敛。**默认开启**（开启分组即默认收敛）。
+	//
+	// 用指针而非 bool 表达三态：字段缺失（nil）= 默认开启，显式写 `converge: false` 才关闭。
+	// 普通 bool 无法区分「未配置」与「显式关闭」，会把用户写下的 false 悄悄翻回默认值。
+	Converge *bool `yaml:"converge" json:"converge"`
 	// ConvergeBy 收敛维度，默认 ["rule","severity"]——刻意不含 node/instance，
 	// 这正是「同规则多节点风暴」能合并成一条的原因。
 	ConvergeBy []string `yaml:"convergeBy" json:"convergeBy"`
@@ -45,6 +48,19 @@ const (
 // defaultConvergeBy 收敛维度默认值（同规则 + 同级别）。
 var defaultConvergeBy = []string{"rule", "severity"}
 
+// ConvergeEnabled 返回收敛是否生效：未配置视为开启（开启分组即默认收敛）。
+// 调用方一律使用本方法，不要直接读指针，以免把 nil 当成关闭。
+func (c GroupingConfig) ConvergeEnabled() bool {
+	return c.Converge == nil || *c.Converge
+}
+
+// DefaultGroupingConfig 返回规整后的默认分组配置（分组本身默认关闭，但字段齐全）。
+func DefaultGroupingConfig() GroupingConfig {
+	var cfg GroupingConfig
+	cfg.normalize()
+	return cfg
+}
+
 // normalize 补齐默认值并收敛到合法区间。load 与 Save 共用，
 // 保证「热更新生效的配置」与「落盘内容」始终一致。
 func (c *GroupingConfig) normalize() {
@@ -56,6 +72,11 @@ func (c *GroupingConfig) normalize() {
 	}
 	if c.GroupInterval == "" {
 		c.GroupInterval = "5m"
+	}
+	if c.Converge == nil {
+		// 物化为显式值：接口返回与落盘文件都能看到真实生效的开关
+		v := true
+		c.Converge = &v
 	}
 	if len(c.ConvergeBy) == 0 {
 		c.ConvergeBy = append([]string(nil), defaultConvergeBy...)
@@ -133,7 +154,7 @@ func (e *Engine) newGrouper(cfg GroupingConfig) *Grouper {
 		wait, interval = 30*time.Second, 5*time.Minute
 	}
 	g := NewGrouper(cfg.GroupBy, wait, interval, nil)
-	g.SetConverge(cfg.Converge, cfg.ConvergeBy, parseConvergeWindow(cfg.ConvergeWindow))
+	g.SetConverge(cfg.ConvergeEnabled(), cfg.ConvergeBy, parseConvergeWindow(cfg.ConvergeWindow))
 	g.flush = func(events []model.AlertEvent) { e.flushGroup(events) }
 	return g
 }

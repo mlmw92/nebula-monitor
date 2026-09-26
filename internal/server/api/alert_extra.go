@@ -39,7 +39,8 @@ func (a *API) handleInhibitPut(w http.ResponseWriter, r *http.Request) {
 // handleGroupingGet 返回分组配置。
 func (a *API) handleGroupingGet(w http.ResponseWriter, r *http.Request) {
 	if a.grouping == nil {
-		writeJSON(w, 200, map[string]any{"enabled": false})
+		// 未注入存储时也返回完整默认值，避免前端拿不到收敛等字段而显示成「关闭」
+		writeJSON(w, 200, alert.DefaultGroupingConfig())
 		return
 	}
 	writeJSON(w, 200, a.grouping.Get())
