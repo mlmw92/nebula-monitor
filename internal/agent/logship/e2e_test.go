@@ -49,9 +49,30 @@ func TestEndToEnd_CollectShipStore(t *testing.T) {
 	c := collector.NewLogCollector("n1", []config.LogSourceConfig{src}, filepath.Join(root, "offsets.json"))
 	c.SetSink(logship.New(srv.URL, "s3cret", "n1", "default").Sink())
 
+	// 第一轮：**首次见到该文件 → 从文件尾开始，不回溯历史**（上线时的默认行为）。
+	// 这里刻意按真实生命周期走「先起采集、后写日志」，而不是先写日志再采集：
+	// 后者会把「首次不回溯」这条决策绕过去，而这正是实机验证抓出来过的缺口。
+	first := c.CollectCtx(context.Background())
+	if m, ok := metricBy(first, "applog_log_lines_total"); !ok || m.Value != 0 {
+		t.Fatalf("首次采集不应上传历史行（从文件尾开始），got %+v", first)
+	}
+	if m, ok := metricBy(first, "applog_log_up"); !ok || m.Value != 1 {
+		t.Fatalf("文件可读时 up 应为 1（否则会被误判成路径/权限问题），got %+v", first)
+	}
+
+	// 业务继续写日志 → 第二轮应只上传命中模式的那一条
+	fh, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fh.WriteString("error: boom\nINFO still fine\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = fh.Close()
+
 	ms := c.CollectCtx(context.Background())
 	if m, ok := metricBy(ms, "applog_log_lines_total"); !ok || m.Value != 1 {
-		t.Fatalf("采集侧应成功上传 1 条（2 行中只有 1 行命中模式），got %+v", ms)
+		t.Fatalf("采集侧应成功上传 1 条（追加的 2 行中只有 1 行命中模式），got %+v", ms)
 	}
 	if _, ok := metricBy(ms, "applog_log_dropped_total"); ok {
 		t.Fatalf("这条链路上不应有任何丢弃，got %+v", ms)
@@ -66,11 +87,14 @@ func TestEndToEnd_CollectShipStore(t *testing.T) {
 	if !strings.Contains(string(data), "error: boom") {
 		t.Fatalf("落盘内容不符：%q", string(data))
 	}
-	if strings.Contains(string(data), "INFO all good") {
+	if strings.Contains(string(data), "INFO still fine") {
 		t.Fatalf("未命中模式的行不该上传：%q", string(data))
 	}
+	if strings.Contains(string(data), "INFO all good") {
+		t.Fatalf("启动前已存在的历史行不该上传（首次从文件尾开始）：%q", string(data))
+	}
 
-	// 第二轮：没有新行时不应重复上传（偏移已推进）
+	// 第三轮：没有新行时不应重复上传（偏移已推进）
 	ms2 := c.CollectCtx(context.Background())
 	if m, ok := metricBy(ms2, "applog_log_lines_total"); !ok || m.Value != 0 {
 		t.Fatalf("无新行时不应重复上传，got %+v", ms2)
