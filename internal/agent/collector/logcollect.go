@@ -35,7 +35,10 @@ type LogCollector struct {
 	// Sink 接收本轮读到的行（由子批次 B 接上「上传到 Server」；为 nil 时只做计数）。
 	// 上传失败不清空偏移：本轮的行会随偏移推进而过去，因此上传实现内部必须自行决定
 	// 「失败即丢弃并计数」还是「重试」——见 design 文档 §4.3（当前实现选前者）。
-	sink func(ctx context.Context, source string, lines []model.LogLine) error
+	//
+	// 返回值区分两类「没上传成功」：限额丢弃（Dropped > 0，正常结果、计入 reason 标签）
+	// 与真正失败（error，计入 reason=unreachable）。
+	sink func(ctx context.Context, source string, lines []model.LogLine) (model.LogSinkResult, error)
 }
 
 // NewLogCollector 创建日志采集器并加载已落盘的偏移。
@@ -51,7 +54,7 @@ func NewLogCollector(node string, sources []config.LogSourceConfig, offsetsPath 
 }
 
 // SetSink 设置日志行接收方（上传实现）。
-func (c *LogCollector) SetSink(f func(ctx context.Context, source string, lines []model.LogLine) error) {
+func (c *LogCollector) SetSink(f func(ctx context.Context, source string, lines []model.LogLine) (model.LogSinkResult, error)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sink = f
@@ -206,18 +209,30 @@ func (c *LogCollector) collectFile(ctx context.Context, src config.LogSourceConf
 		if !hit && !src.All {
 			continue // 默认只上传关心的行（见 config.LogSourceConfig 的隐私默认值说明）
 		}
-		res.total++
 		if hit {
 			res.matched[name]++
 		}
 		lines = append(lines, model.LogLine{Ts: now, Pattern: name, Text: text})
 	}
 
+	// log_lines_total 的语义是「**成功上传**的行数」：限额丢弃与上传失败都不计入，
+	// 它们分别由 log_dropped_total{reason=...} 体现——两个数字相加才是本轮读到的行数。
 	if c.sink != nil && len(lines) > 0 {
-		if err := c.sink(ctx, src.ID, lines); err != nil {
+		out, err := c.sink(ctx, src.ID, lines)
+		switch {
+		case err != nil:
 			// 上传失败：本轮丢弃并计数（日志是尽力而为的数据；积压会变成永不收敛的问题）
 			res.dropped["unreachable"] += int64(len(lines))
 			slog.Warn("日志上传失败，本轮丢弃", "source", src.ID, "lines", len(lines), "err", err)
+		default:
+			res.total += int64(len(lines) - out.Dropped)
+			if out.Dropped > 0 {
+				reason := out.Reason
+				if reason == "" {
+					reason = "server"
+				}
+				res.dropped[reason] += int64(out.Dropped)
+			}
 		}
 	}
 

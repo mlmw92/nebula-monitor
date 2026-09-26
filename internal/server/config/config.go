@@ -43,6 +43,10 @@ type Config struct {
 	DashboardsFile    string          `yaml:"dashboardsFile"`    // 自定义仪表盘配置文件（Web 端增删改写入）
 	RetentionFile     string          `yaml:"retentionFile"`     // 数据保留策略配置文件（Web 端可改，保存即热生效）
 	SecurityStoreFile string          `yaml:"securityStoreFile"` // 安全事件/基线持久化文件
+	LogDir            string          `yaml:"logDir"`            // 集中日志存储目录（按 来源/日期/节点 分片）；留空取 <DataDir>/logs
+	LogMaxBytesPerDay int64           `yaml:"logMaxBytesPerDay"` // 单来源每日写入上限（字节），超出丢弃并计数
+	LogUploadRateBps  int64           `yaml:"logUploadRateBps"`  // 单节点日志上行速率上限（字节/秒）
+	LogMaxBodyBytes   int64           `yaml:"logMaxBodyBytes"`   // 单次日志上行请求体上限（字节）
 }
 
 // ScreenConfig 数据大屏模块显隐配置（全局单份，与 notify 一致）。
@@ -340,6 +344,12 @@ func Default() *Config {
 		DashboardsFile:    "/etc/monitor-server/dashboards.yaml",
 		RetentionFile:     "/etc/monitor-server/retention.yaml",
 		SecurityStoreFile: "/var/lib/monitor-server/security_store.json",
+		// 集中日志（C2）：目录留空时由启动逻辑取 <DataDir>/logs；三个上限都必须有值，
+		// 否则「开了日志把盘写满」只是时间问题。
+		LogDir:            "/var/lib/monitor-server/logs",
+		LogMaxBytesPerDay: 1 << 30, // 1 GiB/来源/天
+		LogUploadRateBps:  1 << 20, // 1 MiB/s/节点
+		LogMaxBodyBytes:   4 << 20, // 4 MiB/请求
 		GeoIPFile:         "/var/lib/monitor-server/geoip/ip2region_v4.xdb",
 		Auth:              AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: "", UsersFile: "/var/lib/monitor-server/users.yaml", MigrateSingleAdmin: true},
 		Upgrade: UpgradeConfig{

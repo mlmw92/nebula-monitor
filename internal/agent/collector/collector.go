@@ -138,6 +138,16 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	return c
 }
 
+// NodeName 返回采集器使用的节点名（经配置解析后的最终值）。
+func (c *Collector) NodeName() string { return c.node }
+
+// SetLogSink 设置日志上行接收方（未配置日志来源时是空操作）。
+func (c *Collector) SetLogSink(f func(ctx context.Context, source string, lines []model.LogLine) (model.LogSinkResult, error)) {
+	if c.logs != nil {
+		c.logs.SetSink(f)
+	}
+}
+
 // SetTemplates 原子替换模板集（Server 下发路径使用）。
 //
 // 为什么不需要重启、也不需要 SIGHUP：CollectAll 每轮都重建任务表（tasks()），

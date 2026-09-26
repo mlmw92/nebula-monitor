@@ -562,6 +562,23 @@ $( [[ -n "$LABELS_YAML" ]] && printf 'labels:\n%s' "$LABELS_YAML" )
 # 生效方式：改完重启 Agent；配置非法会拒绝启动并打印全部原因（不做静默跳过）。
 # 可见范围：模板指标可在「指标浏览」与自定义仪表盘查询；但不会出现在中间件 Tab、首页概览、
 #           巡检报告与「服务离线」告警中（那属于后续版本要做的「模板 → 中间件类型」注册）。
+# ==================== 集中日志示例（C2：把关心的日志行送到 Server 检索/告警）====================
+# 默认**只上传命中 patterns 的行**（日志内容会离开被监控机，全量上传须显式 all: true）。
+# 启用后同时产出指标：<id>_log_up / <id>_log_lines_total / <id>_log_match_total{pattern} / <id>_log_dropped_total{reason}，
+# 因此「错误日志激增」可直接用既有阈值规则告警（无需另配日志告警）。
+# 读取进度落盘（logOffsetsFile），重启不丢、不重复上传。未配置 logSources 时零行为变化。
+# logSources:
+#   - id: applog                       # 小写字母开头；同时是存储分片名与指标前缀
+#     paths: ["/var/log/myapp/app.log"] # 绝对路径且不含 ..
+#     patterns:                        # 关心的行（命中即上传，并按 name 计数）
+#       - { name: err, regex: "(?i)\\b(error|exception|fatal)\\b" }
+#     # all: true                      # 显式全量上传（默认 false）
+#     # multiline:                     # 一条日志跨多行时（堆栈/异常）按行首模式合并
+#     #   { startPattern: "^\\d{4}-\\d\\d-\\d\\d", maxLines: 50 }
+#     # maxLinesPerRound: 2000         # 单轮单文件上限（超限跳过剩余部分并计数，不做「悄悄落后」的延迟读取）
+#     # maxBytesPerRound: 4194304
+# logOffsetsFile: /var/lib/monitor-agent/log_offsets.json   # 读取进度落盘位置（默认即此值）
+
 # templates:
 #   - id: rabbitmq                     # 唯一标识，同时作为指标名前缀与 template 标签；不得与既有指标族前缀冲突
 #     title: RabbitMQ                  # 展示名（当前仅用于日志）

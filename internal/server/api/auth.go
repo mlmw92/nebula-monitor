@@ -142,8 +142,12 @@ func isPublicPath(path string) bool {
 	if path == "/" || strings.HasPrefix(path, "/assets/") {
 		return true
 	}
-	// 登录、Agent 上报（Agent 走 X-Agent-Secret 校验，不走登录 token）
-	if strings.HasPrefix(path, "/api/v1/login") || strings.HasPrefix(path, "/api/v1/report") {
+	// 登录、Agent 上报与 Agent 日志上行（Agent 走 X-Agent-Secret 校验，不走登录 token）。
+	// 新增任何 Agent→Server 的上行接口都必须加到这里：漏掉的后果是「启用登录认证后该接口 401」，
+	// 而本机直连测试通常没开登录认证，因此只在生产才暴露。
+	if strings.HasPrefix(path, "/api/v1/login") ||
+		strings.HasPrefix(path, "/api/v1/report") ||
+		strings.HasPrefix(path, "/api/v1/logs") {
 		return true
 	}
 	// Agent 安装脚本的接入鉴权预检（同样走 X-Agent-Secret，不受登录 token 影响）

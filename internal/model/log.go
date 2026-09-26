@@ -1,5 +1,7 @@
 package model
 
+import "regexp"
+
 // C2 集中日志的共享数据类型（Agent 采集侧与 Server 存储/检索侧共用）。
 //
 // 设计取舍：日志行里**不携带**「来源路径」这类只有被监控机才知道的细节，
@@ -23,6 +25,34 @@ type LogBatch struct {
 	Group  string    `json:"group,omitempty"` // 节点分组（便于按范围检索）
 	Source string    `json:"source"`          // 来源 id（对应 agent.yaml 里的 logSources[].id）
 	Lines  []LogLine `json:"lines"`           // 本批日志行
+}
+
+// LogAppendResult 是一次落盘的结果（Server 回给 Agent，Agent 据此把丢弃记进指标）。
+type LogAppendResult struct {
+	Accepted int    `json:"accepted"`
+	Dropped  int    `json:"dropped"`
+	Reason   string `json:"reason,omitempty"` // 丢弃原因，写入 log_dropped_total 的 reason 标签
+}
+
+// LogSinkResult 是 Agent 侧「交给上传实现」的结果。
+//
+// 与 LogAppendResult 分开的原因：这里多一种「服务端都没收到」的情形（网络失败），
+// 由实现返回 error 表达；而限额丢弃（每日上限、限速）是**正常的**结果，必须计数但不算故障——
+// 否则限速一旦触发，日志里会每次刷一条「上传失败」，把真正的问题淹掉。
+type LogSinkResult struct {
+	Dropped int
+	Reason  string
+}
+
+// LogSourceNamePattern 是日志来源名的合法形态：小写字母开头，只含小写字母/数字/下划线。
+//
+// 它同时是存储分片名（会成为文件路径的一段）与指标前缀，因此 Server 与 Agent 必须用同一条规则：
+// 两边不一致就会出现「Agent 认为合法、Server 拒绝」这种只在现场才暴露的问题。
+var LogSourceNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{1,31}$`)
+
+// IsValidLogSourceName 判断来源名是否合法（见 LogSourceNamePattern）。
+func IsValidLogSourceName(s string) bool {
+	return LogSourceNamePattern.MatchString(s)
 }
 
 // LogQuery 是检索请求（Server 侧解析查询参数后传入存储层）。

@@ -18,6 +18,7 @@ import (
 	"github.com/nebula/monitor/internal/agent/collector"
 	"github.com/nebula/monitor/internal/agent/config"
 	"github.com/nebula/monitor/internal/agent/defense"
+	"github.com/nebula/monitor/internal/agent/logship"
 	"github.com/nebula/monitor/internal/agent/proxy"
 	"github.com/nebula/monitor/internal/agent/reporter"
 	"github.com/nebula/monitor/internal/agent/upgrader"
@@ -49,6 +50,18 @@ var (
 var agentBinSHA = binSHA256()
 
 // binSHA256 计算当前 agent 二进制的 SHA256（十六进制小写）。
+// logSourceIDs 取日志来源 id 清单（上报给 Server，用于校验上行日志的来源是否属于本节点）。
+func logSourceIDs(srcs []config.LogSourceConfig) []string {
+	if len(srcs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(srcs))
+	for _, s := range srcs {
+		out = append(out, s.ID)
+	}
+	return out
+}
+
 func binSHA256() string {
 	path, err := os.Executable()
 	if err != nil {
@@ -124,6 +137,11 @@ func main() {
 		cfg.Templates, cfg.TemplateGuards,
 		cfg.LogSources, cfg.LogOffsetsFile,
 	)
+	// 集中日志（C2）：配置了 logSources 才构造上行器并接上采集器。
+	// 未配置时既不构造也不注入，与改造前完全等价。
+	if len(cfg.LogSources) > 0 {
+		coll.SetLogSink(logship.New(cfg.ServerURL, cfg.Secret, coll.NodeName(), cfg.Group).Sink())
+	}
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
 	// 构建已开启的采集器列表
@@ -345,6 +363,8 @@ func collectAndReport(ctx context.Context, coll *collector.Collector, rep *repor
 			// 声明本机已放行的取数方式（阶段三）：Server 只把 exec/file/jdbc 模板下发给声明过的节点，
 			// 未启用的节点不会收到，因而不会每轮各报一个 up=0
 			TemplateKinds: cfg.TemplateGuards.EnabledKinds(),
+			// 声明本机已配置的日志来源（C2）：Server 据此校验上行日志的来源是否属于本节点
+			LogSources: logSourceIDs(cfg.LogSources),
 		},
 		// 上报当前 nebula 托管 SSH 防护状态
 		DefenseStatus: defenseExec.Status(),

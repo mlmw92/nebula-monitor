@@ -436,8 +436,8 @@ func validateGuardedLocalTemplates(cfg *Config) error {
 	return nil
 }
 
-// logSourceIDPattern 限制来源 id：它同时是存储分片名（会成为文件路径的一段）与指标前缀。
-var logSourceIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{1,31}$`)
+// 来源 id 的合法性由 model 统一给出：Server 与 Agent 必须用同一条规则，
+// 否则会出现「Agent 认为合法、Server 拒绝」这种只在现场才暴露的问题。
 
 // normalizeAndValidateLogSources 校验日志来源配置并补齐默认值。
 //
@@ -453,7 +453,7 @@ func normalizeAndValidateLogSources(cfg *Config) error {
 		switch {
 		case strings.TrimSpace(s.ID) == "":
 			return fmt.Errorf("logSources[%d]：id 不能为空", i)
-		case !logSourceIDPattern.MatchString(s.ID):
+		case !model.IsValidLogSourceName(s.ID):
 			return fmt.Errorf("logSources[%d]：id %q 非法（小写字母开头，只含小写字母/数字/下划线）", i, s.ID)
 		case seen[s.ID]:
 			return fmt.Errorf("logSources[%d]：id %q 重复（它同时是存储分片名与指标前缀）", i, s.ID)

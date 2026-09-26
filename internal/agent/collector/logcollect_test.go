@@ -52,9 +52,9 @@ func (f *logFixture) source(t *testing.T, mut func(*config.LogSourceConfig)) con
 // collector 新建采集器（offsetPath 传空字符串可模拟「未落盘」）。
 func (f *logFixture) collector(src config.LogSourceConfig, offsetsPath string) *LogCollector {
 	c := NewLogCollector("n1", []config.LogSourceConfig{src}, offsetsPath)
-	c.SetSink(func(_ context.Context, _ string, lines []model.LogLine) error {
+	c.SetSink(func(_ context.Context, _ string, lines []model.LogLine) (model.LogSinkResult, error) {
 		f.lines = append(f.lines, lines...)
-		return nil
+		return model.LogSinkResult{}, nil
 	})
 	return c
 }
@@ -236,12 +236,43 @@ func TestLogCollector_MissingPathMarksDown(t *testing.T) {
 func TestLogCollector_NoSourcesIsNoop(t *testing.T) {
 	c := NewLogCollector("n1", nil, "")
 	called := false
-	c.SetSink(func(context.Context, string, []model.LogLine) error { called = true; return nil })
+	c.SetSink(func(context.Context, string, []model.LogLine) (model.LogSinkResult, error) {
+		called = true
+		return model.LogSinkResult{}, nil
+	})
 	if ms := c.CollectCtx(context.Background()); len(ms) != 0 {
 		t.Fatalf("未配置来源不应产出任何指标，got %+v", ms)
 	}
 	if called {
 		t.Fatal("未配置来源不应调用 sink")
+	}
+}
+
+// TestLogCollector_SinkDropCountsAsReason 限额丢弃（每日上限、限速）是**正常结果**：
+// 必须计数可见、但不能算作上传失败——否则限速一触发就每次刷「上传失败」，把真正的问题淹掉。
+func TestLogCollector_SinkDropCountsAsReason(t *testing.T) {
+	f := newLogFixture(t, "error: 1\nerror: 2\nerror: 3\n")
+	src := f.source(t, nil)
+	c := NewLogCollector("n1", []config.LogSourceConfig{src}, f.offsetsPath)
+	c.SetSink(func(context.Context, string, []model.LogLine) (model.LogSinkResult, error) {
+		return model.LogSinkResult{Dropped: 1, Reason: "rate"}, nil
+	})
+	ms := c.CollectCtx(context.Background())
+
+	// 成功上传 2 条（3 条中被打回 1 条）
+	if m, ok := logMetric(ms, "applog_log_lines_total", nil); !ok || m.Value != 2 {
+		t.Fatalf("log_lines_total 应只计成功上传数（2），got %+v", ms)
+	}
+	if m, ok := logMetric(ms, "applog_log_dropped_total", map[string]string{"reason": "rate"}); !ok || m.Value != 1 {
+		t.Fatalf("应产出 log_dropped_total{reason=rate}=1，got %+v", ms)
+	}
+	// 不该出现 unreachable（那是上传失败，与限额丢弃是两回事）
+	if _, ok := logMetric(ms, "applog_log_dropped_total", map[string]string{"reason": "unreachable"}); ok {
+		t.Fatalf("限额丢弃不应记为 unreachable，got %+v", ms)
+	}
+	// up 仍为 1：采集本身是成功的
+	if m, ok := logMetric(ms, "applog_log_up", nil); !ok || m.Value != 1 {
+		t.Fatalf("限额丢弃不影响采集可用性（up 应仍为 1），got %+v", ms)
 	}
 }
 

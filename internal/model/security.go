@@ -179,6 +179,11 @@ type ClientCapability struct {
 	// 未启用的节点收到也用不了，只会多出 up=0 噪音与「模板存在却无数据」的误判。
 	// 旧 Agent 不报此字段，因此护栏类模板对它们一律不下发。
 	TemplateKinds []string `json:"templateKinds,omitempty"`
+	// LogSources 是 Agent **本机已配置**的日志来源 id 清单（C2 集中日志）。
+	//
+	// Server 用它判断上行的日志来源是否属于该节点：节点声明过清单之后，
+	// 清单之外的来源会被拒（避免悄悄往新的目录里写）。
+	LogSources []string `json:"logSources,omitempty"`
 }
 
 // ReportPayload 扩展：新增 Capabilities 与 DefenseResult 字段（不影响既有字段）。

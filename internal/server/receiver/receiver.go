@@ -2,8 +2,8 @@
 package receiver
 
 import (
-	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -15,6 +15,7 @@ import (
 	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/instancereg"
+	"github.com/nebula/monitor/internal/server/logstore"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/security"
@@ -111,6 +112,11 @@ type Receiver struct {
 	alerts    *alert.Engine          // 告警引擎（安全事件注入告警中心，可空）
 	defense   *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空）
 	templates TemplateProvider       // 采集项模板下发数据源（可空：不注入则不下发）
+
+	// 集中日志（C2）：logs 为 nil 表示该能力关闭（接口回 503，与不配置 logSources 的 Agent 恰好对称）
+	logs       *logstore.Store
+	logMaxBody int64
+	logLimiter *logRateLimiter
 }
 
 // TemplateProvider 提供下发给 Agent 的采集项模板（由 templates 包实现）。
@@ -138,17 +144,22 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// 接入授权校验：启用后，必须携带与配置一致的 X-Agent-Secret 头（常量时间比较，防时序侧信道）
-	if r.auth.Enabled {
-		got := req.Header.Get("X-Agent-Secret")
-		want := r.auth.Secret
-		if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+	// 接入授权校验：与日志上行共用一份实现（两条路径的凭据必须永远一致）
+	if !r.agentAuthorized(req) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	// 上报体也加上限：原先直接 json.Decode(req.Body) 无任何限制，
+	// 一个坏 Agent（或误配）就能把 Server 的内存吃满。上限取日志上限的 4 倍：
+	// 上报体正常只有几十 KB，但含防护结果/安全事件时可能到 MB 级。
+	body := http.MaxBytesReader(w, req.Body, 4*r.logBodyLimit())
+	var payload model.ReportPayload
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
 			return
 		}
-	}
-	var payload model.ReportPayload
-	if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
 		http.Error(w, "invalid payload", http.StatusBadRequest)
 		return
 	}

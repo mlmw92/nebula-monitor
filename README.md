@@ -950,6 +950,20 @@ templateGuards:
 - 配置错误不会被静默忽略：护栏没放行、命令/路径不在白名单、写操作 SQL 等都在启动期或首次采集时
   给出明确原因（护栏类问题按「模板 + 原因」去重告警，不按采集周期刷屏）。
 
+**集中日志（采集 → 上行 → 落盘已就绪）**：`agent.yaml` 的 `logSources` 按「来源 + 路径 + 关心的模式」采集日志并送到
+Server（`POST /api/v1/logs`，与上报共用 `X-Agent-Secret` 接入凭据）。三条默认值值得先知道：
+
+- **默认只上传命中 `patterns` 的行**：日志内容会离开被监控机，把上传范围从「整个文件」收窄到「你明确关心的行」；
+  确需全量必须显式 `all: true`。
+- **读取进度落盘**（`logOffsetsFile`）：重启不丢进度、也不重复上传——既有 nginx/SSH 日志读取的偏移只在内存里。
+- **单轮有字节/行数上限，超限「跳过剩余并计数」**：不做「悄悄落后」的延迟读取（那会变成永不收敛的积压，
+  而运维只看得到「日志越来越旧」）。
+
+启用后同时产出 `<id>_log_up`（读不到即 0）、`<id>_log_lines_total`、`<id>_log_match_total{pattern}`、
+`<id>_log_dropped_total{reason}` 四个指标，因此**「错误日志激增」可以直接用既有阈值规则配出告警**。
+Server 侧按 `来源/日期/节点` 分片落盘，并有「每来源每日上限 + 单节点上行限速」两个天花板。
+**检索页面与日志保留策略属后续批次**（当前通过指标观察日志态势）。未配置 `logSources` 时零行为变化。
+
 **约束与安全边界**
 
 | 项 | 说明 |
@@ -1686,6 +1700,7 @@ journalctl -u monitor-proxy-hub -f
 | PUT | `/api/v1/middleware/templates/{id}` | 更新采集项模板（id 不可改，它决定指标名前缀） |
 | DELETE | `/api/v1/middleware/templates/{id}` | 删除采集项模板 |
 | GET | `/api/v1/middleware/templates/presets` | 内置模板预设（RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper / Nacos） |
+| POST | `/api/v1/logs` | 集中日志上行（Agent → Server，走 `X-Agent-Secret`，非浏览器接口） |
 
 ### 智能分析
 

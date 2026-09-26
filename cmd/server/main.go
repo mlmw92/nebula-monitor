@@ -24,6 +24,7 @@ import (
 	"github.com/nebula/monitor/internal/server/dashboard"
 	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/instancereg"
+	"github.com/nebula/monitor/internal/server/logstore"
 	"github.com/nebula/monitor/internal/server/mwreg"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
@@ -176,6 +177,13 @@ func main() {
 	// 采集项模板（C1 阶段二）：Web 端统一 CRUD，并作为下发给 Agent 的数据源
 	templateStore := templates.NewStore(cfg.TemplatesFile)
 	recv.SetTemplateStore(templateStore)
+	// 集中日志（C2）：目录留空时取 <DataDir>/logs；未配置时该能力关闭（接口回 503）。
+	// 三个上限都必须有值——「开了日志把盘写满」不是会不会的问题，只是时间问题。
+	logDir := cfg.LogDir
+	if logDir == "" {
+		logDir = filepath.Join(cfg.DataDir, "logs")
+	}
+	recv.SetLogStore(logstore.New(logDir, cfg.LogMaxBytesPerDay), cfg.LogMaxBodyBytes, cfg.LogUploadRateBps)
 	// 中间件类型注册表：内置 10 类 + 由模板派生的类型，是「有哪些中间件类型」的唯一来源
 	//（api 的类型清单、报告分节、告警的服务类型校验都读它）。
 	mwRegistry := mwreg.New(templateStore)
@@ -341,6 +349,8 @@ func genSecret() string {
 
 func (m *receiverMux) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/report", m.recv.HandleReport)
+	// 集中日志上行（C2）：与上报分开，避免日志洪峰拖垮指标上报的延迟与成功率
+	mux.HandleFunc("POST /api/v1/logs", m.recv.HandleLogs)
 }
 
 // offlineChecker 周期性标记离线节点。

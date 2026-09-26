@@ -105,6 +105,7 @@ func (m *Manager) Register(p *model.ReportPayload) {
 	// 避免一次旧版心跳把已放行的信息抹掉。
 	if p.Capabilities != nil {
 		n.TemplateKinds = p.Capabilities.TemplateKinds
+		n.LogSources = p.Capabilities.LogSources
 	}
 	n.Status = "online"
 	n.LastSeen = now

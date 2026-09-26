@@ -54,6 +54,27 @@ func healthTestAPI(t *testing.T, store *healthTestStore, mon *selfmon.Monitor) *
 	return a
 }
 
+// TestPublicPaths_AgentUpstreams 所有 Agent→Server 的上行接口都必须免登录放行。
+//
+// 它们走 X-Agent-Secret（在各自 handler 里常量时间比较），而 Agent 没有登录会话——
+// 一旦漏进白名单，启用登录认证后这些接口会直接 401，而本机直连测试通常没开登录认证，
+// 于是只在生产环境暴露。这条断言就是为了让「漏加」在 CI 里就失败。
+func TestPublicPaths_AgentUpstreams(t *testing.T) {
+	for _, p := range []string{
+		"/api/v1/report", // 指标上报
+		"/api/v1/logs",   // 集中日志上行（C2）
+		"/api/v1/agent/check",
+	} {
+		if !isPublicPath(p) {
+			t.Fatalf("%s 必须在公开白名单内（Agent 无登录令牌，走 X-Agent-Secret）", p)
+		}
+	}
+	// 反例：业务读接口绝不能因为「名字像」而被放行
+	if isPublicPath("/api/v1/middleware/templates") {
+		t.Fatal("业务接口不应出现在公开白名单里")
+	}
+}
+
 // TestRoutes_HealthzOKAndPublic /healthz 永远 200，且无需登录（探针无法携带令牌）。
 func TestRoutes_HealthzOKAndPublic(t *testing.T) {
 	if !isPublicPath("/healthz") || !isPublicPath("/readyz") {

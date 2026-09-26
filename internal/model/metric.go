@@ -482,6 +482,9 @@ type Node struct {
 	// 「模板建好了却没有数据」，而原因（各机器需自行放行）藏在 Agent 日志里。
 	// 旧 Agent 不报该字段 → 视为一个都没放行。
 	TemplateKinds []string `json:"templateKinds,omitempty"`
+	// LogSources 是该节点**本机已配置**的日志来源 id 清单（C2 集中日志）。
+	// Server 用它校验上行日志的来源是否属于该节点；旧 Agent 不报 → 视为未声明（此时不做过严的拒绝）。
+	LogSources []string `json:"logSources,omitempty"`
 }
 
 // Group 表示节点分组。
