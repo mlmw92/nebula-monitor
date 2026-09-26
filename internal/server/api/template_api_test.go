@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/templates"
 )
 
@@ -222,6 +223,124 @@ func TestTemplatesAPI_Presets(t *testing.T) {
 		if p.Config.Rules.Keep == "" {
 			t.Errorf("预设 %s 应给出 keep 收窄到该中间件指标族（否则会带入 exporter 自身的 go_*/process_*）", p.ID)
 		}
+	}
+}
+
+// execTemplateJSON 生成一个护栏类（exec）模板请求体。
+func execTemplateJSON(id string) string {
+	return `{"id":"` + id + `","kind":"exec","groups":["default"],` +
+		`"targets":[{"instance":"local","command":"/bin/echo","args":["1"]}],` +
+		`"rules":{"metrics":[{"name":"v","pattern":"(\\d+)"}]}}`
+}
+
+// jdbcTemplateJSON 生成 jdbc 模板请求体；withAuth=false 时不给凭据（模拟「读视图回填后保存」）。
+func jdbcTemplateJSON(addr string, withAuth bool) string {
+	auth := ""
+	if withAuth {
+		auth = `,"auth":{"basic":{"user":"monitor","password":"secret"}}`
+	}
+	return `{"id":"bizdb","kind":"jdbc","driver":"mysql","groups":["default"],` +
+		`"targets":[{"instance":"db1","addr":"` + addr + `","database":"appdb"` + auth + `}],` +
+		`"rules":{"metrics":[{"name":"rows","query":"SELECT 1"}]}}`
+}
+
+// TestTemplatesAPI_IneffectiveNodes 护栏类模板必须告诉用户「有多少节点没放行」：
+// 未放行的节点**收不到**这个模板，不提示的话用户只能看到「配了却没数据」。
+func TestTemplatesAPI_IneffectiveNodes(t *testing.T) {
+	a := newTemplateTestAPI(t)
+	// 两个采集节点：一个放行 exec，一个没放行；另有一个代理节点（不执行模板，不应计入）
+	a.nodeMgr.Register(&model.ReportPayload{Node: "n1", Group: "default",
+		Capabilities: &model.ClientCapability{Templates: true, TemplateKinds: []string{"exec"}}})
+	a.nodeMgr.Register(&model.ReportPayload{Node: "n2", Group: "default",
+		Capabilities: &model.ClientCapability{Templates: true}})
+	a.nodeMgr.Register(&model.ReportPayload{Node: "hub1", Group: "default", Mode: model.ModeHub})
+
+	if rec := do(a, http.MethodPost, "/api/v1/middleware/templates", execTemplateJSON("job")); rec.Code != http.StatusOK {
+		t.Fatalf("新建 exec 模板失败：%d %s", rec.Code, rec.Body.String())
+	}
+
+	rec := do(a, http.MethodGet, "/api/v1/middleware/templates", "")
+	var resp struct {
+		Templates []struct {
+			ID               string `json:"id"`
+			Kind             string `json:"kind"`
+			IneffectiveNodes int    `json:"ineffectiveNodes"`
+		} `json:"templates"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析失败：%v", err)
+	}
+	if len(resp.Templates) != 1 {
+		t.Fatalf("应有 1 个模板，got %+v", resp.Templates)
+	}
+	if got := resp.Templates[0].IneffectiveNodes; got != 1 {
+		t.Fatalf("应统计出 1 个节点未放行（n2；代理节点不计），got %d", got)
+	}
+
+	// 网络取数类任何节点都能执行 → 恒为 0
+	if rec := do(a, http.MethodPost, "/api/v1/middleware/templates", templateJSON("mq")); rec.Code != http.StatusOK {
+		t.Fatalf("新建 prometheus 模板失败：%d", rec.Code)
+	}
+	rec = do(a, http.MethodGet, "/api/v1/middleware/templates", "")
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	for _, tpl := range resp.Templates {
+		if tpl.ID == "mq" && tpl.IneffectiveNodes != 0 {
+			t.Fatalf("网络取数类不应有未放行节点，got %d", tpl.IneffectiveNodes)
+		}
+	}
+}
+
+// TestTemplatesAPI_UpdatePreservesAuth 凭据永不回显，因此编辑保存时入参里没有 auth。
+// 服务端必须按目标身份把原凭据补回——否则「编辑一次就把库密码静默清空」，
+// 而下轮采集的失败原因看起来像连不上库，比直接报错难查得多。
+func TestTemplatesAPI_UpdatePreservesAuth(t *testing.T) {
+	a := newTemplateTestAPI(t)
+	if rec := do(a, http.MethodPost, "/api/v1/middleware/templates", jdbcTemplateJSON("10.0.0.5:3306", true)); rec.Code != http.StatusOK {
+		t.Fatalf("新建失败：%d %s", rec.Code, rec.Body.String())
+	}
+
+	// 读视图只暴露 hasAuth（凭据本身不回显）
+	rec := do(a, http.MethodGet, "/api/v1/middleware/templates", "")
+	var resp struct {
+		Templates []struct {
+			Targets []struct {
+				Addr    string `json:"addr"`
+				HasAuth bool   `json:"hasAuth"`
+			} `json:"targets"`
+		} `json:"templates"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析失败：%v", err)
+	}
+	if len(resp.Templates) != 1 || len(resp.Templates[0].Targets) != 1 || !resp.Templates[0].Targets[0].HasAuth {
+		t.Fatalf("读视图应给出 hasAuth=true（但不含凭据本身）：%s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "secret") {
+		t.Fatal("读视图绝不能回显凭据")
+	}
+
+	// 编辑：入参不带 auth（模拟前端回填后保存）
+	if rec := do(a, http.MethodPut, "/api/v1/middleware/templates/bizdb", jdbcTemplateJSON("10.0.0.5:3306", false)); rec.Code != http.StatusOK {
+		t.Fatalf("更新失败：%d %s", rec.Code, rec.Body.String())
+	}
+	got, ok := a.templates.Get("bizdb")
+	if !ok || got.Targets[0].Auth == nil || got.Targets[0].Auth.Basic == nil {
+		t.Fatalf("原凭据应被保留，got %+v", got.Targets[0].Auth)
+	}
+	if got.Targets[0].Auth.Basic.Password != "secret" {
+		t.Fatalf("凭据内容应原样保留，got %q", got.Targets[0].Auth.Basic.Password)
+	}
+
+	// 目标身份变了就不搬凭据：把 A 的密码悄悄用到 B 上，比丢掉它更糟。
+	// 结果不是「保存后没有凭据」，而是**保存被拒**并要求重新给凭据——
+	// 用户当场就知道：要么补凭据，要么确认自己确实换了目标。
+	rec = do(a, http.MethodPut, "/api/v1/middleware/templates/bizdb", jdbcTemplateJSON("10.0.0.9:3306", false))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "auth.basic.user") {
+		t.Fatalf("换了目标（addr 变了）又没给凭据，应被拒绝并说明缺什么，got %d %s", rec.Code, rec.Body.String())
+	}
+	kept, _ := a.templates.Get("bizdb")
+	if kept.Targets[0].Addr != "10.0.0.5:3306" || kept.Targets[0].Auth == nil {
+		t.Fatalf("被拒的更新不应改动已存配置，got %+v", kept.Targets[0])
 	}
 }
 

@@ -254,8 +254,14 @@ type Target struct {
 	// Headers 自定义请求头（仅 http 类）。
 	Headers map[string]string `yaml:"headers" json:"headers"`
 	// Auth 认证方式（http 类的 basic/bearer/header；jdbc 用 basic 作为库账号密码）。
-	// 刻意不打 json tag：凭据永不进入上报体，沿用 model.RedisInstanceConfig.Password 的既有做法。
-	Auth *Auth `yaml:"auth" json:"-"`
+	//
+	// 凭据是**只写不读**字段，三个方向的行为都不同，改这个 tag 前请先读完：
+	//   - 写入（API 请求）：接受 —— 否则经 Server 建的 jdbc 模板永远拿不到库密码；
+	//   - 下发给 Agent：**必须携带** —— Agent 要拿它去连库/发请求（`enc:` 密文由 Agent 侧解密）；
+	//   - 面向界面的响应：**永不回显** —— 出参一律走 api 层的读视图（toView），那里会把 Auth 抹掉，
+	//     否则密码会出现在浏览器、日志与截图里。
+	// 备注：模板上报体（Agent → Server）不含模板本身，因此「进入上报体」这条约束不受影响。
+	Auth *Auth `yaml:"auth" json:"auth,omitempty"`
 
 	// Database 数据库名（jdbc）。
 	Database string `yaml:"database" json:"database"`
@@ -297,27 +303,30 @@ func (t Target) EffectiveMaxBytes() int64 {
 }
 
 // Auth 是请求认证配置，三种方式至多启用一种。
+//
+// 各字段的 json tag 都是「只写不读」语义的一部分（详见 Target.Auth 的注释）：
+// 需要能写入与下发，但面向界面的响应必须先经过 api 层的读视图抹掉凭据。
 type Auth struct {
-	Basic  *BasicAuth  `yaml:"basic" json:"-"`
-	Bearer *BearerAuth `yaml:"bearer" json:"-"`
-	Header *HeaderAuth `yaml:"header" json:"-"`
+	Basic  *BasicAuth  `yaml:"basic" json:"basic,omitempty"`
+	Bearer *BearerAuth `yaml:"bearer" json:"bearer,omitempty"`
+	Header *HeaderAuth `yaml:"header" json:"header,omitempty"`
 }
 
 // BasicAuth 是 HTTP Basic 认证配置。
 type BasicAuth struct {
-	User     string `yaml:"user" json:"-"`
-	Password string `yaml:"password" json:"-"`
+	User     string `yaml:"user" json:"user"`
+	Password string `yaml:"password" json:"password"`
 }
 
 // BearerAuth 是 Authorization: Bearer 认证配置。
 type BearerAuth struct {
-	Token string `yaml:"token" json:"-"`
+	Token string `yaml:"token" json:"token"`
 }
 
 // HeaderAuth 是自定义认证头配置。
 type HeaderAuth struct {
-	Name  string `yaml:"name" json:"-"`
-	Value string `yaml:"value" json:"-"`
+	Name  string `yaml:"name" json:"name"`
+	Value string `yaml:"value" json:"value"`
 }
 
 // Rules 描述「响应 → 指标」的映射规则。

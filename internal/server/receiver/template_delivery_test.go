@@ -94,6 +94,39 @@ func TestAttachDeliveredTemplates_FiltersByDeclaredKinds(t *testing.T) {
 	}
 }
 
+// TestAttachDeliveredTemplates_KeepsCredentials 下发给 Agent 的那份**必须携带凭据**：
+// Agent 要拿它去连库/发请求（`enc:` 密文由 Agent 侧解密）。
+//
+// 与「界面永不回显凭据」并不矛盾——凭据是只写不读字段：写入接受、下发携带、界面回显一律抹掉
+// （见 api 层的 toView）。这条测试守住的是其中「下发必须带」这一半，缺了它经 Server 建的
+// jdbc/带认证模板会连不上库，而失败现象看起来像目标不可达。
+func TestAttachDeliveredTemplates_KeepsCredentials(t *testing.T) {
+	withAuth := tpl("bizdb", "mq")
+	withAuth.Kind = template.KindJDBC
+	withAuth.Driver = "mysql"
+	withAuth.Targets = []template.Target{{
+		Addr: "10.0.0.5:3306", Database: "appdb",
+		Auth: &template.Auth{Basic: &template.BasicAuth{User: "monitor", Password: "secret"}},
+	}}
+	withAuth.Rules = template.Rules{Metrics: []template.MetricRule{{Name: "rows", Query: "SELECT 1"}}}
+
+	provider := &fakeTemplates{rev: 1, list: []template.Config{withAuth}}
+	caps := capsWith(0)
+	caps.TemplateKinds = []string{string(template.KindJDBC)}
+
+	resp := map[string]interface{}{}
+	attachDeliveredTemplates(resp, caps, "mq", provider)
+
+	got, _ := resp["templates"].([]template.Config)
+	if len(got) != 1 {
+		t.Fatalf("应下发 1 个模板，got %+v", idsOf(got))
+	}
+	auth := got[0].Targets[0].Auth
+	if auth == nil || auth.Basic == nil || auth.Basic.Password != "secret" || auth.Basic.User != "monitor" {
+		t.Fatalf("下发必须携带凭据（Agent 需要它连库），got %+v", auth)
+	}
+}
+
 // idsOf 便于断言失败时看清实际下发了哪些模板。
 func idsOf(list []template.Config) []string {
 	out := make([]string, 0, len(list))

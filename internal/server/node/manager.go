@@ -33,7 +33,7 @@ type Manager struct {
 	groups         map[string]*model.Group
 	metaPath       string
 	offlineTimeout time.Duration
-	upgradeQueue   map[string]*upgradeTask // 待升级节点集合（内存态，重启丢失）
+	upgradeQueue   map[string]*upgradeTask         // 待升级节点集合（内存态，重启丢失）
 	lastPayloads   map[string]*model.ReportPayload // 各节点最近一次上报快照（含 Top 进程）
 }
 
@@ -100,6 +100,11 @@ func (m *Manager) Register(p *model.ReportPayload) {
 	}
 	if hasHostInfo(p.HostInfo) {
 		n.HostInfo = p.HostInfo
+	}
+	// 记录本机已放行的模板取数方式（阶段三）。旧 Agent 不报 capabilities → 保持原值不动，
+	// 避免一次旧版心跳把已放行的信息抹掉。
+	if p.Capabilities != nil {
+		n.TemplateKinds = p.Capabilities.TemplateKinds
 	}
 	n.Status = "online"
 	n.LastSeen = now

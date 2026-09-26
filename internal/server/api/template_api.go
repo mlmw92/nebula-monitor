@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 
 	dsl "github.com/nebula/monitor/internal/template"
@@ -25,13 +26,79 @@ type TemplatesProvider interface {
 // 版本号一并返回：前端可据此判断「是否有变更待下发」，也便于排查「改了没生效」。
 func (a *API) handleTemplatesList(w http.ResponseWriter, r *http.Request) {
 	if a.templates == nil {
-		writeJSON(w, 200, map[string]interface{}{"templates": []dsl.Config{}, "revision": 0})
+		writeJSON(w, 200, map[string]interface{}{"templates": []templateView{}, "revision": 0})
 		return
 	}
+	list := a.templates.List()
+	out := make([]templateView, 0, len(list))
+	for _, cfg := range list {
+		out = append(out, a.toView(cfg))
+	}
 	writeJSON(w, 200, map[string]interface{}{
-		"templates": a.templates.List(),
+		"templates": out,
 		"revision":  a.templates.Revision(),
 	})
+}
+
+// templateView 是模板的读视图：在配置之上附带「对多少个节点无效」的统计。
+type templateView struct {
+	dsl.Config
+	// Targets 覆盖嵌入的同名字段，附上「该目标是否已配置凭据」的提示。
+	Targets []targetView `json:"targets"`
+	// IneffectiveNodes 是「配置了这个模板、但本机未放行该取数方式」的采集节点数。
+	//
+	// 为什么必须给出这个数字：护栏类取数方式（jdbc/exec/file）要在各机器自己的 agent.yaml 里放行，
+	// 未放行的节点**根本收不到**该模板。不提示的话，用户看到的就是「模板建好了却没有数据」，
+	// 而原因（要逐台机器放行）只写在 Agent 日志里。非护栏类恒为 0（任何节点都能执行）。
+	IneffectiveNodes int `json:"ineffectiveNodes,omitempty"`
+}
+
+// targetView 是目标的读视图。
+//
+// auth 不带 json tag（凭据永不回显），因此这里额外给出 HasAuth：
+// 否则用户在编辑界面上看不到任何凭据痕迹，会以为「凭据丢了」甚至重新手填一遍——
+// 而重填时只要有一个字段没对上，服务端就不会自动保留原凭据。
+type targetView struct {
+	dsl.Target
+	HasAuth bool `json:"hasAuth,omitempty"`
+}
+
+// toView 生成模板读视图：**抹掉凭据**再序列化，并附上「未放行节点数」。
+//
+// 所有面向界面的响应都必须走这里。凭据是只写不读字段（见 template.Target.Auth 的注释）：
+// 下发路径需要它、写入需要它，但界面回显会把密码暴露在浏览器、日志与截图里。
+func (a *API) toView(cfg dsl.Config) templateView {
+	// 复制一份再抹掉凭据：直接改 cfg.Targets[i] 会污染调用方手上的配置（存储里的那一份）
+	safe := cfg
+	safe.Targets = make([]dsl.Target, 0, len(cfg.Targets))
+	targets := make([]targetView, 0, len(cfg.Targets))
+	for _, t := range cfg.Targets {
+		hasAuth := t.Auth != nil
+		t.Auth = nil // t 是循环副本，改它不影响 cfg
+		safe.Targets = append(safe.Targets, t)
+		targets = append(targets, targetView{Target: t, HasAuth: hasAuth})
+	}
+	return templateView{Config: safe, Targets: targets, IneffectiveNodes: a.ineffectiveNodes(cfg)}
+}
+
+// ineffectiveNodes 统计该模板覆盖范围内「本机未放行其取数方式」的采集节点数。
+//
+// 只统计采集节点（ListHostNodes）：edge/hub 是网闸代理，不执行模板；
+// 把「本机是否放行」当成配置问题而不是故障——它不会自愈，必须由人来改 agent.yaml。
+func (a *API) ineffectiveNodes(cfg dsl.Config) int {
+	if a.nodeMgr == nil || !dsl.IsGuardedKind(cfg.Kind) || len(cfg.Groups) == 0 {
+		return 0
+	}
+	count := 0
+	for _, n := range a.nodeMgr.ListHostNodes() {
+		if !slices.Contains(cfg.Groups, n.Group) {
+			continue
+		}
+		if !dsl.KindEnabledOnNode(cfg.Kind, n.TemplateKinds) {
+			count++
+		}
+	}
+	return count
 }
 
 // handleTemplateCreate 新建模板。
@@ -55,7 +122,8 @@ func (a *API) handleTemplateCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errBody(err.Error()))
 		return
 	}
-	writeJSON(w, 200, cfg)
+	// 回读视图而不是 cfg：凭据只写不读，响应里不得回显（见 toView）
+	writeJSON(w, 200, a.toView(cfg))
 }
 
 // handleTemplateUpdate 更新模板。
@@ -77,15 +145,47 @@ func (a *API) handleTemplateUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg.ID = id
-	if _, exists := a.templates.Get(id); !exists {
+	old, exists := a.templates.Get(id)
+	if !exists {
 		writeJSON(w, http.StatusNotFound, errBody("模板 "+id+" 不存在"))
 		return
 	}
+	// 凭据永不回显（target.auth 不打 json tag），因此编辑保存时入参里没有 auth。
+	// 这里按「目标身份」把原有凭据补回：不做这一步的后果是「编辑一次就把库密码静默清空」——
+	// 下轮采集才开始失败，而失败原因看起来像连不上库，比直接报错难查得多。
+	cfg.Targets = preserveTargetAuth(cfg.Targets, old.Targets)
 	if err := a.templates.Upsert(cfg); err != nil {
 		writeJSON(w, http.StatusBadRequest, errBody(err.Error()))
 		return
 	}
-	writeJSON(w, 200, cfg)
+	// 回读视图而不是 cfg：凭据只写不读，响应里不得回显（见 toView）
+	writeJSON(w, 200, a.toView(cfg))
+}
+
+// preserveTargetAuth 把入参中缺失的凭据按目标身份从旧配置里补回。
+//
+// 规则刻意保守：只在**目标身份完全一致**（instance/addr/command/path 全同）且旧配置确有凭据时补回；
+// 身份变了（例如换了库地址）就不搬凭据——把 A 的密码悄悄用到 B 上比丢掉它更糟。
+// 入参显式给出 auth 时以入参为准（支持换密码）——只是当前没有任何接口会把旧凭据回显给用户。
+func preserveTargetAuth(in, old []dsl.Target) []dsl.Target {
+	for i := range in {
+		if in[i].Auth != nil {
+			continue
+		}
+		for j := range old {
+			if old[j].Auth != nil && sameTargetIdentity(in[i], old[j]) {
+				in[i].Auth = old[j].Auth
+				break
+			}
+		}
+	}
+	return in
+}
+
+// sameTargetIdentity 判断两个目标是否为同一个（凭据之外的定位字段全部相同）。
+func sameTargetIdentity(a, b dsl.Target) bool {
+	return a.Instance == b.Instance && a.Addr == b.Addr &&
+		a.Command == b.Command && a.Path == b.Path
 }
 
 // handleTemplateDelete 删除模板。

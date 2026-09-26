@@ -475,6 +475,13 @@ type Node struct {
 	Status      string            `json:"status"`                // online/offline
 	LastSeen    int64             `json:"lastSeen"`              // 最近心跳（毫秒）
 	CreatedAt   int64             `json:"createdAt"`             // 注册时间（毫秒）
+	// TemplateKinds 是该节点**本机已放行**的模板取数方式（C1 阶段三：jdbc / exec / file）。
+	//
+	// 由 Agent 在能力上报里声明。Server 据此只下发对应模板（未放行的节点收不到），
+	// 并在采集项模板页提示「该模板对 N 个节点无效」——否则用户看到的就是
+	// 「模板建好了却没有数据」，而原因（各机器需自行放行）藏在 Agent 日志里。
+	// 旧 Agent 不报该字段 → 视为一个都没放行。
+	TemplateKinds []string `json:"templateKinds,omitempty"`
 }
 
 // Group 表示节点分组。

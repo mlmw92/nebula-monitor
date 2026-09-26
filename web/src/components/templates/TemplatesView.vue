@@ -40,7 +40,7 @@
         <el-table-column label="目标数" width="90" align="center">
           <template #default="{ row }">{{ (row.targets || []).length }}</template>
         </el-table-column>
-        <el-table-column label="采集情况" min-width="170">
+        <el-table-column label="采集情况" min-width="220">
           <template #default="{ row }">
             <template v-if="row.stat && row.stat.total > 0">
               <span class="metric-good">{{ row.stat.up }} 在线</span>
@@ -49,6 +49,13 @@
             <el-tag v-else size="small" type="warning" effect="plain">
               已配置但无数据
             </el-tag>
+            <!-- 护栏类取数方式要在各机器自己的 agent.yaml 里放行；未放行的节点收不到该模板。
+                 不把「有多少节点没放行」摆出来，用户只能看到「配了却没数据」 -->
+            <el-tooltip v-if="row.ineffectiveNodes" placement="top" content="这些节点没有在 agent.yaml 的 templateGuards 里放行该取数方式，因此收不到此模板（各机器需自行放行）">
+              <el-tag size="small" type="danger" effect="plain" class="ch-tag">
+                {{ row.ineffectiveNodes }} 个节点未放行
+              </el-tag>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column v-if="canWrite" label="操作" width="150" fixed="right">
@@ -122,7 +129,17 @@
         </el-form-item>
 
         <el-form-item label="采集目标">
-          <div class="targets">
+          <!-- 本机/数据库取数类（jdbc/exec/file）的目标字段较多（command/args/path/database/auth…），
+               与规则区同样的取舍：能结构化的用表单，表达力强的用 JSON + 服务端校验 -->
+          <template v-if="isLocalKind">
+            <el-input v-model="targetsText" type="textarea" :rows="6" spellcheck="false" :placeholder="targetsPlaceholder" />
+            <div v-if="authNote" class="hint-inline">{{ authNote }}</div>
+            <div class="hint-inline">
+              凭据（auth）不会回显：留空即保留原凭据；要换密码就整段重写。
+              改了 instance / addr / command / path 会被视为换了一个目标，原凭据不再沿用。
+            </div>
+          </template>
+          <div v-else class="targets">
             <div v-for="(t, i) in form.targets" :key="i" class="target-row">
               <el-input v-model="t.instance" placeholder="实例标识（留空取地址 host:port）" style="width: 220px" />
               <el-input v-model="t.addr" placeholder="http://host:port/path" style="flex: 1" />
@@ -209,6 +226,52 @@ const KIND_HINTS = {
 }
 const kindHint = computed(() => KIND_HINTS[form.value.kind] || '')
 
+// 本机/数据库取数类：目标字段较多，表单换成 JSON 编辑（见模板里对应的 v-if）
+const isLocalKind = computed(() => ['jdbc', 'exec', 'file'].includes(form.value.kind))
+const targetsText = ref('')
+const authNote = ref('')
+
+const TARGETS_PLACEHOLDER = {
+  jdbc:
+    '[\n  { "instance": "biz-db-01", "addr": "10.0.0.5:3306", "database": "appdb",\n' +
+    '    "auth": { "basic": { "user": "monitor", "password": "enc:xxxx" } } }\n]',
+  exec:
+    '[\n  { "instance": "cache-01", "command": "/usr/local/bin/redis-cli",\n' +
+    '    "args": ["-h", "127.0.0.1", "INFO"], "timeoutSec": 5 }\n]',
+  file: '[\n  { "instance": "app-01", "path": "/var/lib/myapp/metrics.txt" }\n]',
+}
+const targetsPlaceholder = computed(() => TARGETS_PLACEHOLDER[form.value.kind] || '[]')
+
+// stripAuthFlag 去掉读视图里的 hasAuth 提示位：它是展示用的，不该被回传（服务端也不认这个字段）
+function stripAuthFlag(list) {
+  return (list || []).map((t) => {
+    const copy = { ...t }
+    delete copy.hasAuth
+    return copy
+  })
+}
+
+// collectTargets 返回提交用的目标列表：本机取数类从 JSON 文本解析，其余取表单值。
+// 解析失败返回 null（调用方提示并中止），绝不把半截数据发出去。
+function collectTargets() {
+  if (!isLocalKind.value) {
+    return form.value.targets
+      .filter((t) => (t.addr || '').trim() !== '')
+      .map((t) => ({ instance: t.instance.trim(), addr: t.addr.trim() }))
+  }
+  try {
+    const parsed = JSON.parse(targetsText.value.trim() || '[]')
+    if (!Array.isArray(parsed)) {
+      ElMessage.error('采集目标必须是 JSON 数组')
+      return null
+    }
+    return parsed
+  } catch (e) {
+    ElMessage.error('采集目标不是合法 JSON：' + e.message)
+    return null
+  }
+}
+
 // applyPreset 用预设填好表单：不覆盖生效分组（分组取决于用户环境，预设刻意留空）。
 function applyPreset(id) {
   const p = presets.value.find((x) => x.id === id)
@@ -222,6 +285,8 @@ function applyPreset(id) {
   form.value.kind = c.kind || 'prometheus-exporter'
   form.value.targets = (c.targets || []).map((t) => ({ instance: t.instance || '', addr: t.addr || '' }))
   if (form.value.targets.length === 0) form.value.targets.push({ instance: '', addr: '' })
+  // 预设目前都是网络取数类；若将来加了本机取数类的预设，这里要同步 JSON 文本
+  targetsText.value = isLocalKind.value ? JSON.stringify(c.targets || [], null, 2) : ''
   form.value.rules = c.rules || {}
   rulesText.value = JSON.stringify(c.rules || {}, null, 2)
   presetNote.value = p.note || ''
@@ -281,6 +346,8 @@ function openCreate() {
   editing.value = false
   form.value = emptyForm()
   rulesText.value = ''
+  targetsText.value = ''
+  authNote.value = ''
   presetId.value = ''
   presetNote.value = ''
   validationErrors.value = []
@@ -289,15 +356,20 @@ function openCreate() {
 
 function openEdit(row) {
   editing.value = true
+  const targets = stripAuthFlag(row.targets)
   form.value = {
     id: row.id,
     title: row.title || '',
     kind: row.kind,
     groups: [...(row.groups || [])],
-    targets: (row.targets || []).map((t) => ({ instance: t.instance || '', addr: t.addr || '' })),
+    targets,
     rules: row.rules || {},
   }
   rulesText.value = JSON.stringify(row.rules || {}, null, 2)
+  // 凭据不回显：明说一句，否则用户会以为凭据丢了、甚至重新手填一遍
+  const withAuth = (row.targets || []).filter((t) => t.hasAuth).length
+  authNote.value = withAuth > 0 ? `已有 ${withAuth} 个目标配置了凭据（服务端不回显；留空即保留原凭据）` : ''
+  targetsText.value = isLocalKind.value ? JSON.stringify(targets, null, 2) : ''
   validationErrors.value = []
   showDialog.value = true
 }
@@ -313,14 +385,14 @@ function buildPayload() {
       return null
     }
   }
+  const targets = collectTargets()
+  if (!targets) return null
   return {
     id: form.value.id.trim(),
     title: form.value.title.trim(),
     kind: form.value.kind,
     groups: form.value.groups,
-    targets: form.value.targets
-      .filter((t) => (t.addr || '').trim() !== '')
-      .map((t) => ({ instance: t.instance.trim(), addr: t.addr.trim() })),
+    targets,
     rules,
   }
 }
