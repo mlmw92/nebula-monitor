@@ -339,10 +339,10 @@ async function loadArchive() {
   archiveLoading.value = false
 }
 
-// 切换/升级会重启当前 Server，HTTP 请求可能在响应返回前被主动断开。
-// 断连不等于失败：等待服务恢复并确认实际运行版本后，再自动刷新进入新版本，
-// 避免「固定 8 秒强制刷新」在服务未就绪时刷新到不可用页面。
-async function waitForServerVersion(targetVersion, timeout = 40000) {
+// 切换/升级会重启当前 Server，HTTP 请求可能在响应返回前被主动断开，
+// 代理也可能因上游断开返回 502。不能只凭请求结果判断升级失败：等待服务恢复并确认
+// 实际运行版本后再刷新页面，避免服务未就绪时刷新到不可用页面。
+async function waitForServerVersion(targetVersion, timeout = 40000, warnOnTimeout = true) {
   const deadline = Date.now() + timeout
   await new Promise((resolve) => setTimeout(resolve, 1200))
   while (Date.now() < deadline) {
@@ -358,12 +358,36 @@ async function waitForServerVersion(targetVersion, timeout = 40000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 1000))
   }
-  ElMessage.warning('服务恢复较慢，请稍后手动刷新页面查看新版本。')
+  if (warnOnTimeout) ElMessage.warning('服务恢复较慢，请稍后手动刷新页面查看新版本。')
   return false
 }
 
+async function confirmUpgradeAfterRestart(targetVersion, taskId) {
+  if (await waitForServerVersion(targetVersion, 40000, false)) return
+
+  try {
+    const r = await http.get('/api/v1/system/upgrade/history')
+    history.value = r.history || []
+    const failed = history.value.find((entry) => entry.id === taskId && entry.action === 'apply')
+    if (failed?.result === 'failed') {
+      applyError.value = failed.detail || '升级未完成，请查看升级历史。'
+      ElMessage.error('升级失败：' + applyError.value)
+      return
+    }
+    const current = await http.get('/api/v1/system/upgrade/current')
+    if (current.current?.id === taskId && current.current.status === 'failed') {
+      applyError.value = current.current.error || '升级未完成，请查看升级历史。'
+      ElMessage.error('升级失败：' + applyError.value)
+      return
+    }
+  } catch (e) {
+    // 服务尚未恢复，无法读取升级结果；不能仅凭 502 判断失败。
+  }
+  ElMessage.warning('暂时无法确认升级结果，请稍后刷新页面并查看当前版本和升级历史。')
+}
+
 function isRestartDisconnect(error) {
-  return /Failed to fetch|网络错误|NetworkError|fetch/i.test(error?.message || '')
+  return /Failed to fetch|网络错误|NetworkError|fetch|HTTP 502/i.test(error?.message || '')
 }
 
 // 该版本是否可回退：必须是已归档版本、且不是当前运行版本。
@@ -446,6 +470,7 @@ async function doApply() {
   applying.value = true
   applyError.value = ''
   const targetVersion = pending.value?.version || ''
+  const taskId = pending.value?.id
   try {
     await http.post('/api/v1/system/upgrade/apply?operator=web', {})
     ElMessage.success('升级已提交，server 即将重启（约 5-15 秒）…')
@@ -454,7 +479,7 @@ async function doApply() {
   } catch (e) {
     if (isRestartDisconnect(e)) {
       startCooldown(15)
-      await waitForServerVersion(targetVersion)
+      await confirmUpgradeAfterRestart(targetVersion, taskId)
       return
     }
     applyError.value = e.message
