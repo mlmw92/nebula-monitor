@@ -136,6 +136,10 @@ type PromStorage struct {
 	queryURL      string
 	queryRangeURL string
 	httpClient    *http.Client
+	// writeClient 仅用于 remote_write：写入只受写超时约束（不能与查询共用
+	// max(写超时,查询超时) 的客户端，否则 TSDB 故障时单次写会被拖到查询超时）。
+	writeClient   *http.Client
+	writeTimeout  time.Duration
 }
 
 // defaultWritePath 返回各后端默认的 remote_write 写入路径。
@@ -206,6 +210,8 @@ func NewStorage(cfg config.TSDBConfig) (Storage, error) {
 		queryURL:      queryBase + queryPath,
 		queryRangeURL: queryBase + queryRangePath,
 		httpClient:    &http.Client{Timeout: maxDuration(wt, qt)},
+		writeClient:   &http.Client{Timeout: wt},
+		writeTimeout:  wt,
 	}, nil
 }
 
@@ -221,6 +227,8 @@ func New(addr string, writeTimeout, queryTimeout int) Storage {
 			queryURL:      addr + "/api/v1/query",
 			queryRangeURL: addr + "/api/v1/query_range",
 			httpClient:    &http.Client{Timeout: maxDuration(time.Duration(writeTimeout)*time.Second, time.Duration(queryTimeout)*time.Second)},
+			writeClient:   &http.Client{Timeout: time.Duration(writeTimeout) * time.Second},
+			writeTimeout:  time.Duration(writeTimeout) * time.Second,
 		}
 	}
 	return s

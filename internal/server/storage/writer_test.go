@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/golang/snappy"
 
@@ -132,7 +133,7 @@ func TestWrite_GroupsByLabelSetAndPostsSnappy(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := &PromStorage{writeURL: srv.URL, httpClient: srv.Client()}
+	s := &PromStorage{writeURL: srv.URL, httpClient: srv.Client(), writeClient: srv.Client(), writeTimeout: 5 * time.Second}
 	err := s.Write([]model.Metric{
 		{Name: "cpu_usage", Node: "web-01", Timestamp: 1000, Value: 1},
 		{Name: "cpu_usage", Node: "web-01", Timestamp: 2000, Value: 2},                                        // 同标签集 → 合并
@@ -176,7 +177,7 @@ func TestWrite_EmptyMetricsIsNoop(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := &PromStorage{writeURL: srv.URL, httpClient: srv.Client()}
+	s := &PromStorage{writeURL: srv.URL, httpClient: srv.Client(), writeClient: srv.Client(), writeTimeout: 5 * time.Second}
 	if err := s.Write(nil); err != nil {
 		t.Fatalf("Write(nil): %v", err)
 	}
@@ -194,7 +195,7 @@ func TestWrite_DoesNotRetryOn4xx(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := &PromStorage{writeURL: srv.URL, httpClient: srv.Client()}
+	s := &PromStorage{writeURL: srv.URL, httpClient: srv.Client(), writeClient: srv.Client(), writeTimeout: 5 * time.Second}
 	err := s.Write([]model.Metric{{Name: "cpu_usage", Node: "web-01", Timestamp: 1000, Value: 1}})
 	if err == nil {
 		t.Fatal("4xx 应返回错误")
@@ -204,12 +205,12 @@ func TestWrite_DoesNotRetryOn4xx(t *testing.T) {
 	}
 }
 
-// TestWrite_RetriesOn5xx 5xx 应重试，成功后返回 nil（退避 200ms/400ms）。
+// TestWrite_RetriesOn5xx 5xx 应重试一次，第二次成功后返回 nil（退避 200ms）。
 func TestWrite_RetriesOn5xx(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		if calls < 3 {
+		if calls < 2 {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -217,11 +218,11 @@ func TestWrite_RetriesOn5xx(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := &PromStorage{writeURL: srv.URL, httpClient: srv.Client()}
+	s := &PromStorage{writeURL: srv.URL, httpClient: srv.Client(), writeClient: srv.Client(), writeTimeout: 5 * time.Second}
 	if err := s.Write([]model.Metric{{Name: "cpu_usage", Node: "web-01", Timestamp: 1000, Value: 1}}); err != nil {
-		t.Fatalf("第三次应成功: %v", err)
+		t.Fatalf("第二次应成功: %v", err)
 	}
-	if calls != 3 {
-		t.Fatalf("请求次数 = %d，want 3", calls)
+	if calls != 2 {
+		t.Fatalf("请求次数 = %d，want 2", calls)
 	}
 }

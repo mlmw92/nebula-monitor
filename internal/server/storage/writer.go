@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -154,31 +155,52 @@ func (s *PromStorage) Write(metrics []model.Metric) error {
 	}
 
 	compressed := snappy.Encode(nil, body.Bytes())
-	const maxAttempts = 3
+	// 写入总预算 = 2×写超时：TSDB 不可达时单次 Write 最多阻塞预算时长即返回，
+	// 而不是「重试 3 次 × max(写超时,查询超时)」把上报请求拖住 30s（自陷 DoS）。
+	// 上报 handler 同步调用 Write（失败回 500，Agent 视为可重试），快速失败即快速恢复。
+	budget := 2 * s.writeTimeout
+	if budget <= 0 {
+		budget = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	const maxAttempts = 2
 	backoff := 200 * time.Millisecond
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			time.Sleep(backoff)
-			backoff *= 2
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("remote_write 失败(重试预算耗尽): %w", lastErr)
+			case <-time.After(backoff):
+			}
 		}
-		req, err := http.NewRequest(http.MethodPost, s.writeURL, bytes.NewReader(compressed))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.writeURL, bytes.NewReader(compressed))
 		if err != nil {
 			return fmt.Errorf("构造 remote_write 请求失败: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/x-protobuf")
 		req.Header.Set("Content-Encoding", "snappy")
 
-		resp, err := s.httpClient.Do(req)
+		resp, err := s.writeClient.Do(req)
 		if err != nil {
+			// Do 出错时 resp 也可能非 nil，必须关闭避免连接泄漏
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
 			lastErr = err // 网络错误，重试
+			if ctx.Err() != nil {
+				break
+			}
 			continue
 		}
 		if resp.StatusCode/100 == 2 {
+			// 排空响应体以复用连接
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			return nil
 		}
-		msg, _ := io.ReadAll(resp.Body)
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		resp.Body.Close()
 		// 4xx 为请求格式错误，不重试
 		if resp.StatusCode/100 == 4 {
@@ -187,7 +209,7 @@ func (s *PromStorage) Write(metrics []model.Metric) error {
 		// 5xx（含 VM 短暂不可用）重试
 		lastErr = fmt.Errorf("remote_write 返回 %d: %s", resp.StatusCode, string(msg))
 	}
-	return fmt.Errorf("remote_write 失败(已重试 %d 次): %w", maxAttempts, lastErr)
+	return fmt.Errorf("remote_write 失败(已重试 %d 次): %w", maxAttempts-1, lastErr)
 }
 
 // labelSetKey 为标签集生成稳定 key。
