@@ -4,12 +4,19 @@ package proxy
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"os"
 )
 
 // buildClientTLSConfig 构建 Edge 作为 TLS 客户端的配置（双向校验）。
 // cert/key 是 Edge 自身证书，ca 用于校验 Hub 证书。
+//
+// 注意 Go 的语义：InsecureSkipVerify=true 会让 crypto/tls 完全跳过证书校验，
+// RootCAs 不再参与——等价于接受任何证书（此前的实现正是踩了这个坑）。
+// 网闸场景按 IP 直连、证书 CN 不含 IP，无法做主机名校验；因此这里保留
+// InsecureSkipVerify 只为跳过主机名，证书链校验在 VerifyPeerCertificate 中
+// 手动按配置的 CA 完成。
 func buildClientTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
@@ -21,13 +28,30 @@ func buildClientTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error)
 	}
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		RootCAs:      caPool,
-		ClientCAs:    caPool,
 		MinVersion:   tls.VersionTLS13,
-		// 同时校验 Hub 证书（ServerName 留空时，TLS1.3 仍校验证书链是否由配置的 CA 签发）
-		// 网闸场景两端 IP 固定且由同一 CA 签发，InsecureSkipVerify=true 仅跳过主机名校验，
-		// 仍会校验证书链合法性（RootCAs），兼顾 IP 直连与安全。
+		//nolint:gosec // 仅跳过主机名校验；证书链校验见 VerifyPeerCertificate
 		InsecureSkipVerify: true,
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return errors.New("对端未出示证书")
+			}
+			certs := make([]*x509.Certificate, len(rawCerts))
+			for i, raw := range rawCerts {
+				c, err := x509.ParseCertificate(raw)
+				if err != nil {
+					return fmt.Errorf("解析对端证书失败: %w", err)
+				}
+				certs[i] = c
+			}
+			opts := x509.VerifyOptions{Roots: caPool, Intermediates: x509.NewCertPool()}
+			for _, c := range certs[1:] {
+				opts.Intermediates.AddCert(c)
+			}
+			if _, err := certs[0].Verify(opts); err != nil {
+				return fmt.Errorf("对端证书链校验失败: %w", err)
+			}
+			return nil
+		},
 	}, nil
 }
 

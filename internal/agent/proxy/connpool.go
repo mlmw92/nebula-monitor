@@ -15,8 +15,9 @@ import (
 
 // tunConn 封装一条隧道连接及其读写控制。
 type tunConn struct {
-	conn   net.Conn          // 底层 TLS 连接
-	write  chan *Frame        // 待发送帧写入通道（写入侧 goroutine 串行化）
+	conn   net.Conn           // 底层 TLS 连接
+	write  chan *Frame        // 待发送帧写入通道（写入侧 goroutine 串行化）；**永不 close**
+	done   chan struct{}      // 关闭广播（close 一次，由 closed 守卫）；send/writeLoop 用它感知关闭
 	closed bool
 	mu     sync.Mutex
 }
@@ -27,6 +28,7 @@ type connPool struct {
 	tlsCfg  interface{}       // *tls.Config（用 interface 避免 import 循环，实际由调用方传入）
 	size    int
 	conns   []*tunConn
+	cursor  int               // Acquire 轮询游标
 	mu      sync.Mutex
 	metrics *Metrics
 	stopCh  chan struct{}
@@ -59,6 +61,7 @@ func (p *connPool) dial(dialFn func() (net.Conn, error)) (*tunConn, error) {
 	tc := &tunConn{
 		conn:  conn,
 		write: make(chan *Frame, 256),
+		done:  make(chan struct{}),
 	}
 	// 启动写入 goroutine：串行化单连接上的帧写入，避免并发写冲突
 	go tc.writeLoop()
@@ -71,10 +74,9 @@ func (p *connPool) dial(dialFn func() (net.Conn, error)) (*tunConn, error) {
 func (tc *tunConn) writeLoop() {
 	for {
 		select {
-		case f, ok := <-tc.write:
-			if !ok {
-				return
-			}
+		case <-tc.done:
+			return
+		case f := <-tc.write:
 			if err := EncodeFrame(tc.conn, f); err != nil {
 				slog.Warn("隧道写帧失败，连接将关闭", "err", err)
 				tc.close()
@@ -85,16 +87,20 @@ func (tc *tunConn) writeLoop() {
 }
 
 // send 向连接发送一帧。连接已关闭时返回错误。
+//
+// 数据 channel 永不 close——「检查 closed 再发送」与「close(channel)」无法原子化，
+// 之前向已关闭 channel 发送会 panic 崩溃进程；关闭态改由 done channel 广播。
 func (tc *tunConn) send(f *Frame) error {
-	tc.mu.Lock()
-	if tc.closed {
-		tc.mu.Unlock()
+	select {
+	case <-tc.done:
 		return errors.New("连接已关闭")
+	default:
 	}
-	tc.mu.Unlock()
 	select {
 	case tc.write <- f:
 		return nil
+	case <-tc.done:
+		return errors.New("连接已关闭")
 	default:
 		return errors.New("连接写队列满")
 	}
@@ -108,8 +114,8 @@ func (tc *tunConn) close() {
 		return
 	}
 	tc.closed = true
+	close(tc.done) // 唯一的 close 点，幂等性由上面的 closed 守卫保证
 	tc.mu.Unlock()
-	close(tc.write)
 	_ = tc.conn.Close()
 }
 
@@ -120,13 +126,17 @@ func (tc *tunConn) isClosed() bool {
 	return tc.closed
 }
 
-// Acquire 获取一条可用连接（轮询）。无可用连接时返回 ErrPoolEmpty。
+// Acquire 获取一条可用连接（轮询：原子游标在多条连接间轮流选取，
+// 避免流量集中在首条连接上）。无可用连接时返回 ErrPoolEmpty。
 func (p *connPool) Acquire() (*tunConn, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, c := range p.conns {
-		if !c.isClosed() {
-			return c, nil
+	n := len(p.conns)
+	for i := 0; i < n; i++ {
+		idx := (p.cursor + i) % n
+		if !p.conns[idx].isClosed() {
+			p.cursor = (idx + 1) % n
+			return p.conns[idx], nil
 		}
 	}
 	return nil, ErrPoolEmpty
@@ -142,15 +152,21 @@ func (p *connPool) Add(c *tunConn) {
 // Remove 移除并关闭指定连接。
 func (p *connPool) Remove(target *tunConn) {
 	p.mu.Lock()
+	removed := false
 	for i, c := range p.conns {
 		if c == target {
 			p.conns = append(p.conns[:i], p.conns[i+1:]...)
+			removed = true
 			break
 		}
 	}
 	p.mu.Unlock()
 	target.close()
-	p.metrics.ConnActive.Add(-1)
+	// 只有真正从池中移除才递减：forward 写失败与 readLoop onClose 会先后对
+	// 同一条连接各调一次 Remove，无条件递减会让 ConnActive 变负。
+	if removed {
+		p.metrics.ConnActive.Add(-1)
+	}
 }
 
 // ActiveCount 返回活跃连接数。
