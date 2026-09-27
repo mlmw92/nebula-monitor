@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # nebula-monitor 卸载脚本
-#   - 默认完全卸载：停服务 + 删二进制 + 删配置 + 删数据目录（彻底清理）
-#   - --keep-data 保留数据目录（不删 /var/lib/*，便于备份/恢复）
+#   - 默认卸载：停服务 + 删二进制 + 删配置（**保留**数据目录）
+#   - --purge 额外删除数据目录（不可逆，删前逐项确认）
 #   - --yes 跳过所有交互确认
 #   - --all 卸载 server + agent + tsdb（默认根据探测到的服务决定）
 #   - --server / --agent / --tsdb 限制范围
@@ -31,17 +31,17 @@ usage() {
   --server           仅卸载 server
   --agent            仅卸载 agent
   --tsdb             仅卸载时序库 (victoriametrics / mimir / cortex / thanos)
-  --purge            完全清理数据目录（默认即如此，保留以兼容旧用法）
-  --keep-data        保留数据目录（不删 /var/lib/*，便于备份/恢复）
+  --purge            额外删除数据目录 /var/lib/*（不可逆，谨慎使用）
+  --keep-data        保留数据目录（默认行为，等价于不传该参数）
   --yes              跳过所有交互确认
   -h | --help        显示本帮助
 
 典型场景:
-  # 完全清理（默认即停服务+删二进制+删配置+删数据目录）
+  # 默认卸载（停服务+删二进制+删配置，保留数据目录，便于备份/恢复）
   sudo ./uninstall.sh
 
-  # 仅保留数据目录卸载（备份用）
-  sudo ./uninstall.sh --keep-data
+  # 彻底清理（连数据目录一起删除，不可逆）
+  sudo ./uninstall.sh --purge
 
   # 只卸 server（agent 和 tsdb 保留）
   sudo ./uninstall.sh --server
@@ -50,7 +50,7 @@ USAGE
 }
 
 # ---------------------------- 参数解析 ----------------------------
-PURGE=1                 # 默认完全删除数据目录
+PURGE=0                 # 默认保留数据目录（与 README/install.sh 帮助承诺一致；--purge 才删）
 ASSUME_YES=0
 DO_SERVER=0
 DO_AGENT=0
@@ -184,7 +184,7 @@ if (( DOCKER_TSDB_PRESENT )); then
 fi
 echo "================================================"
 if (( ! PURGE )); then
-  c_dim "数据目录将保留（默认会删除，使用 --keep-data 时才保留）"
+  c_dim "数据目录将保留（加 --purge 才会删除）"
 fi
 echo
 
