@@ -172,15 +172,15 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/groups", a.permit(a.handleGroupCreate, "groups:write"))
 	mux.HandleFunc("DELETE /api/v1/groups/{name}", a.permit(a.handleGroupDelete, "groups:write"))
 
-	// 指标查询与智能分析：nodes:read + 资源范围（单节点接口由 permitNode 校验归属）
-	mux.HandleFunc("GET /api/v1/query/range", a.permitNode(a.handleQueryRange, "nodes:read"))
-	mux.HandleFunc("GET /api/v1/query/latest", a.permitNode(a.handleQueryLatest, "nodes:read"))
+	// 指标跨节点查询在 handler 内统一解析 node / labels.node 并裁剪结果。
+	mux.HandleFunc("GET /api/v1/query/range", a.permit(a.handleQueryRange, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/query/latest", a.permit(a.handleQueryLatest, "nodes:read"))
 	mux.HandleFunc("GET /api/v1/analysis/summary", a.permit(a.handleAnalysisSummary, "nodes:read"))
 	mux.HandleFunc("GET /api/v1/analysis/hosts/{name}", a.permitNode(a.handleAnalysisHost, "nodes:read"))
-	mux.HandleFunc("GET /api/v1/processes", a.permitNode(a.handleProcesses, "nodes:read"))
-	mux.HandleFunc("GET /api/v1/query/listeners", a.permitNode(a.handleListeners, "nodes:read"))
-	mux.HandleFunc("GET /api/v1/query/firewall", a.permitNode(a.handleFirewall, "nodes:read"))
-	mux.HandleFunc("GET /api/v1/query/firewall/status", a.permitNode(a.handleFirewallStatus, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/processes", a.permitHostname(a.handleProcesses, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/query/listeners", a.permitHostname(a.handleListeners, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/query/firewall", a.permitHostname(a.handleFirewall, "nodes:read"))
+	mux.HandleFunc("GET /api/v1/query/firewall/status", a.permitHostname(a.handleFirewallStatus, "nodes:read"))
 
 	// 中间件监控：middleware:read + 资源范围（实例列表按所属节点分组过滤）
 	mux.HandleFunc("GET /api/v1/middleware/redis/instances", a.permit(a.handleRedisInstances, "middleware:read"))
@@ -319,7 +319,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/ui/settings", a.handleUIGet)
 	mux.HandleFunc("PUT /api/v1/ui/settings", a.permit(a.handleUIPut, "system:config"))
 
-	mux.HandleFunc("POST /api/v1/alerts/test", a.handleAlertTest)
+	// 测试告警会写事件并向通知渠道发消息，故复用 notify:write（避免「能管规则就能发通知」）。
+	mux.HandleFunc("POST /api/v1/alerts/test", a.permit(a.handleAlertTest, "notify:write"))
 
 	mux.HandleFunc("GET /api/v1/maintenance", a.permit(a.handleMaintenanceGet, "silence:read"))
 	mux.HandleFunc("PUT /api/v1/maintenance", a.permit(a.handleMaintenanceSet, "silence:write"))
@@ -358,7 +359,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// 可观测性增强：指标目录（自动发现）+ 历史数据导出
 	mux.HandleFunc("GET /api/v1/metrics/catalog", a.permit(a.handleMetricsCatalog, "nodes:read"))
-	mux.HandleFunc("GET /api/v1/metrics/active", a.permitNode(a.handleMetricsActive, "nodes:read"))
+	// metricTarget 内部已完成节点冲突判定与资源范围校验（含未注册节点拒绝），
+	// 这里改用 permit 避免 permitNode 对未注册节点的静默放行掩盖真正的授权判定。
+	mux.HandleFunc("GET /api/v1/metrics/active", a.permit(a.handleMetricsActive, "nodes:read"))
 	mux.HandleFunc("GET /api/v1/metrics/export", a.permitNode(a.handleMetricsExport, "metrics:export"))
 
 	// 可观测性增强：自定义仪表盘（读 dashboard:read，增删改 dashboard:write）
@@ -517,6 +520,13 @@ func (a *API) deniedGroups(r *http.Request, names []string) []string {
 // handleNodesLatest 一次性聚合所有节点的关键指标，供主机列表展示。
 // 返回结构：metrics[node] = { cpu, mem, disk, load1, netIn, netOut, diskRead, diskWrite }。
 func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
+	// 受限用户在没有任何可见节点时，结果必然被下方范围过滤全部剔除，
+	// 因此与 catalog.go 的 skipStorage 一致，直接跳过全部 TSDB 聚合查询。
+	if !a.visibleMetricNodes(Principal(r)) {
+		writeJSON(w, 200, map[string]interface{}{"metrics": map[string]any{}})
+		return
+	}
+
 	type nodeMetric struct {
 		CPU        float64 `json:"cpu"`
 		Mem        float64 `json:"mem"`
@@ -630,10 +640,13 @@ func (a *API) handleNodesLatest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 资源范围：受限用户只应看到范围内节点的指标。
-	if p := Principal(r); p != nil && !p.Scope.IsGlobal() && a.nodeMgr != nil {
+	// 资源范围：受限用户既不该看到范围外已注册节点，也不该看到无法归属的未注册节点
+	// （原实现只用 GetNode+group 比对剔除已注册的范围外节点，未注册节点会被 ok==false
+	// 静默放过，泄露 ghost 之类未归属节点的聚合指标）。与 visibleMetricSeries 保持同一判定：
+	// 显式要求 group 非空，未注册节点（group 为空）一律剔除，不依赖 CanAccessGroup("") 恰好为假。
+	if p := Principal(r); p != nil && !p.Scope.IsGlobal() {
 		for name := range out {
-			if nd, ok := a.nodeMgr.GetNode(name); ok && !p.CanAccessGroup(nd.Group) {
+			if g := a.nodeGroup(name); g == "" || !p.CanAccessGroup(g) {
 				delete(out, name)
 			}
 		}
@@ -880,7 +893,6 @@ func sumLatestByNode(series []model.Series) map[string]float64 {
 
 func (a *API) handleQueryRange(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	node := q.Get("node")
 	name := q.Get("metric")
 	if name == "" {
 		http.Error(w, "metric required", http.StatusBadRequest)
@@ -916,28 +928,42 @@ func (a *API) handleQueryRange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	labels := parseLabelQuery(q)
+	node, ok := a.metricTarget(w, r, "nodes:read", labels)
+	if !ok {
+		return
+	}
+	if node == "" && !a.visibleMetricNodes(Principal(r)) {
+		writeJSON(w, 200, map[string]interface{}{"series": []model.Series{}})
+		return
+	}
 	series, err := a.store.QueryRange(node, name, labels, start, end, step)
 	if err != nil {
 		slog.Error("查询失败", "err", err)
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return
 	}
+	series = a.visibleMetricSeries(Principal(r), node, series)
 	writeJSON(w, 200, map[string]interface{}{"series": series})
 }
 
 func (a *API) handleQueryLatest(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	node := q.Get("node")
 	name := q.Get("metric")
+	labels := parseLabelQuery(q)
+	node, ok := a.metricTarget(w, r, "nodes:read", labels)
+	if !ok {
+		return
+	}
 	if node == "" || name == "" {
 		http.Error(w, "node and metric required", http.StatusBadRequest)
 		return
 	}
-	series, err := a.store.QueryInstant(node, name, parseLabelQuery(q))
+	series, err := a.store.QueryInstant(node, name, labels)
 	if err != nil {
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return
 	}
+	series = a.visibleMetricSeries(Principal(r), node, series)
 	var point *model.Point
 	if len(series) > 0 && len(series[0].Points) > 0 {
 		p := series[0].Points[len(series[0].Points)-1]

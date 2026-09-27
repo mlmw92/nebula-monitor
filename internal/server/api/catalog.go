@@ -31,7 +31,13 @@ func (a *API) handleMetricsActive(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	cat := q.Get("category")
-	node := q.Get("node")
+	node, ok := a.metricTarget(w, r, "nodes:read", map[string]string{})
+	if !ok {
+		return
+	}
+	p := Principal(r)
+	// 受限用户在未指定节点时若没有任何可见节点，直接跳过存储查询，全部标记 inactive。
+	skipStorage := node == "" && !a.visibleMetricNodes(p)
 
 	type item struct {
 		Name   string `json:"name"`
@@ -43,11 +49,11 @@ func (a *API) handleMetricsActive(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		active := false
-		if a.store != nil {
+		if a.store != nil && !skipStorage {
 			// node 已作为 QueryInstant 的独立参数传入，不能再次放进 labels，
 			// 否则会生成重复的 node matcher，部分 PromQL 后端会拒绝该查询。
-			if s, err := a.store.QueryInstant(node, m.Name, nil); err == nil && len(s) > 0 {
-				active = true
+			if s, err := a.store.QueryInstant(node, m.Name, nil); err == nil {
+				active = len(a.visibleMetricSeries(p, node, s)) > 0
 			}
 		}
 		items = append(items, item{Name: m.Name, Active: active})

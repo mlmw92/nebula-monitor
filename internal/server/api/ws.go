@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -58,18 +59,43 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: checkWSLSameOrigin,
 }
 
+// defaultWSWriteWait 是单次 WebSocket 写的默认截止时间。客户端「只连不读」时 TCP
+// 接收窗口会归零，阻塞的写会让 writePump 永远挂住，于是收敛链（写错误 → 关闭连接
+// → readPump 退出 → Unregister → pushNodeMetrics 退出）永不触发，连接与推送协程
+// 双双泄漏。每次写前设置连接级 deadline，把「无限阻塞」变成「有界错误」。
+// 注意：这是连接级 deadline，不是 http.Server.WriteTimeout——后者会对所有长连接生效。
+// 值按连接存放在 Client.writeWait（此后不再变更），避免共享可变全局被并发读写。
+const defaultWSWriteWait = 10 * time.Second
+
 // Hub 管理 WebSocket 客户端连接，并广播告警事件。
+//
+// 停机安全约定：
+//   - 所有会向 client.send 写入的路径（Run 广播、pushNodeMetrics）都必须在 h.mu 内
+//     确认客户端仍在 clients 中，再写入；关闭 channel 也在 h.mu 内完成，
+//     因此不会出现「向已关闭 channel 发送」的 panic。
+//   - CloseClients 幂等，只关闭各客户端的 send 与底层连接，不关闭 alertCh——
+//     告警引擎仍可能短暂调用 BroadcastAlert。
 type Hub struct {
 	mu      sync.Mutex
 	clients map[*Client]bool
 	alertCh chan model.AlertEvent
+
+	// done 在 CloseClients 首次调用时关闭，通知推送/广播协程停止。
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // Client 表示一个 WS 客户端。
 type Client struct {
 	hub  *Hub
 	conn *websocket.Conn
+	// send 是唯一发送队列：仅写 send，由 writePump 消费。
 	send chan []byte
+	// done 与 send 在同一临界区内恰好关闭一次，通知 pushNodeMetrics 退出，
+	// 避免客户端断线后 ticker 仍按秒查询 TSDB。
+	done chan struct{}
+	// writeWait 是单次写的截止时间（构造时确定，之后只读）。
+	writeWait time.Duration
 }
 
 // NewHub 创建 Hub。
@@ -77,42 +103,130 @@ func NewHub() *Hub {
 	return &Hub{
 		clients: map[*Client]bool{},
 		alertCh: make(chan model.AlertEvent, 64),
+		done:    make(chan struct{}),
 	}
 }
 
-// Run 启动 Hub 事件循环（广播告警）。
-func (h *Hub) Run() {
-	for e := range h.alertCh {
-		b, err := json.Marshal(map[string]interface{}{"type": "alert", "data": e})
-		if err != nil {
-			continue
-		}
-		h.mu.Lock()
-		for c := range h.clients {
-			select {
-			case c.send <- b:
-			default:
+// newWSClient 构造已就绪的客户端（send / done 必须都在 Unregister 前建立）。
+func newWSClient(h *Hub, conn *websocket.Conn) *Client {
+	return &Client{
+		hub:       h,
+		conn:      conn,
+		send:      make(chan []byte, 16),
+		done:      make(chan struct{}),
+		writeWait: defaultWSWriteWait,
+	}
+}
+
+// Run 启动 Hub 事件循环（广播告警），随 ctx 取消或 Hub 关闭而返回。
+func (h *Hub) Run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.done:
+			return
+		case e := <-h.alertCh:
+			b, err := json.Marshal(map[string]interface{}{"type": "alert", "data": e})
+			if err != nil {
+				continue
 			}
+			h.broadcast(b)
 		}
-		h.mu.Unlock()
 	}
 }
 
-// Register 注册客户端。
-func (h *Hub) Register(c *Client) {
+// broadcast 向所有已注册客户端非阻塞投递。整个遍历在 h.mu 内完成，
+// 与 CloseClients / Unregister 的「删除 + close(send)」互斥。
+func (h *Hub) broadcast(b []byte) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
+	for c := range h.clients {
+		select {
+		case c.send <- b:
+		default:
+		}
+	}
+}
+
+// enqueue 在 h.mu 内确认客户端仍注册后，向 send 非阻塞投递一条消息。
+// 关闭 send（Unregister / CloseClients）也在同一临界区内完成，
+// 因此这里绝不会向已关闭的 channel 发送。
+func (h *Hub) enqueue(c *Client, b []byte) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, ok := h.clients[c]; !ok {
+		return
+	}
+	select {
+	case c.send <- b:
+	default:
+	}
+}
+
+// Register 注册客户端，返回是否注册成功。
+// Hub 已关闭时拒绝注册并主动关闭传入连接，避免停机过程中出现
+// 「已升级但无人管理」的 WebSocket 连接。
+func (h *Hub) Register(c *Client) bool {
+	h.mu.Lock()
+	select {
+	case <-h.done:
+		h.mu.Unlock()
+		if c.conn != nil {
+			_ = c.conn.Close()
+		}
+		return false
+	default:
+	}
 	h.clients[c] = true
 	h.mu.Unlock()
+	return true
 }
 
-// Unregister 注销客户端。
+// Unregister 注销客户端；幂等：已注销（或已被 CloseClients 关闭）时不重复关闭 channel。
 func (h *Hub) Unregister(c *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if _, ok := h.clients[c]; ok {
-		delete(h.clients, c)
+	if _, ok := h.clients[c]; !ok {
+		return
+	}
+	delete(h.clients, c)
+	if c.send != nil {
 		close(c.send)
 	}
+	if c.done != nil {
+		close(c.done)
+	}
+}
+
+// CloseClients 幂等关闭 Hub：停止指标推送、注销并断开所有已升级的 WS 连接。
+// 由服务器优雅退出流程在**停机开始时**调用（信号上下文取消之后、Shutdown 排空
+// 在途请求之前），使 WS 推送与每秒一次的 TSDB 查询在排空窗口内即停止，不必让
+// Shutdown 去等待长连接；不关闭 alertCh（告警引擎仍可能短暂广播）。
+func (h *Hub) CloseClients() {
+	h.stopOnce.Do(func() {
+		close(h.done)
+		h.mu.Lock()
+		conns := make([]*websocket.Conn, 0, len(h.clients))
+		for c := range h.clients {
+			delete(h.clients, c)
+			if c.send != nil {
+				close(c.send)
+			}
+			if c.done != nil {
+				close(c.done)
+			}
+			if c.conn != nil {
+				conns = append(conns, c.conn)
+			}
+		}
+		h.mu.Unlock()
+		// 锁外关闭底层连接，唤醒阻塞在 ReadMessage 的 readPump（其 defer Unregister
+		// 会因 map 中已无该客户端而直接返回，不会二次关闭 channel）。
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
+	})
 }
 
 // ClientCount 返回当前已注册的 WebSocket 客户端数量（自监控用）。
@@ -123,7 +237,14 @@ func (h *Hub) ClientCount() int {
 }
 
 // BroadcastAlert 广播告警事件给所有 WS 客户端。
+// Hub 已关闭（停机窗口）时静默丢弃：Run 可能已退出，继续入队只会刷
+// 「告警广播队列已满」的日志噪声，且不会有任何客户端收到。
 func (h *Hub) BroadcastAlert(e model.AlertEvent) {
+	select {
+	case <-h.done:
+		return
+	default:
+	}
 	select {
 	case h.alertCh <- e:
 	default:
@@ -167,7 +288,11 @@ func (a *API) wsAuthorize(next http.HandlerFunc) http.HandlerFunc {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "topic=metrics 需要 node 参数"})
 				return
 			}
-			if !a.checkNodeScope(w, r, perm, node) {
+			// node 是**查询参数**目标：必须 fail-closed（checkNodeTarget）。若用 checkNodeScope，
+			// 受限用户传未注册 node 会握手成功（101），随后 pushNodeMetrics 会把 TSDB 中该标签的
+			// 实时指标推送出去——正是要堵的「未注册节点数据 / 判别 oracle」。此处握手尚未 Upgrade，
+			// 直接写 403 是安全可行的。
+			if !a.checkNodeTarget(w, r, perm, node) {
 				return
 			}
 		}
@@ -192,13 +317,16 @@ func (h *Hub) handleWS(store storage.Storage, w http.ResponseWriter, r *http.Req
 			"err", err.Error())
 		return
 	}
-	client := &Client{hub: h, conn: conn, send: make(chan []byte, 16)}
-	h.Register(client)
+	client := newWSClient(h, conn)
+	if !h.Register(client) {
+		// Hub 已关闭（服务器正在退出）：Register 已关闭该连接，不再启动协程。
+		return
+	}
 
 	topic := r.URL.Query().Get("topic")
 	node := r.URL.Query().Get("node")
 
-	go client.writePump()
+	go func() { _ = client.writePump() }()
 	go client.readPump()
 
 	if topic == "metrics" && node != "" {
@@ -207,6 +335,7 @@ func (h *Hub) handleWS(store storage.Storage, w http.ResponseWriter, r *http.Req
 }
 
 // pushNodeMetrics 每 1s 查询 VM 最新指标并推送给客户端。
+// Hub 关闭或该客户端注销/断线后立即退出，不再继续查询 TSDB。
 func (h *Hub) pushNodeMetrics(client *Client, store storage.Storage, node string) {
 	metrics := []string{"cpu_usage", "mem_used_percent", "disk_used_percent",
 		"swap_used_percent", "network_recv_rate", "network_sent_rate",
@@ -216,11 +345,11 @@ func (h *Hub) pushNodeMetrics(client *Client, store storage.Storage, node string
 	defer ticker.Stop()
 	for {
 		select {
-		case _, ok := <-client.send:
-			// writePump 在连接关闭时已关闭 send，读到关闭值即退出
-			if !ok {
-				return
-			}
+		case <-h.done:
+			return
+		case <-client.done:
+			// 客户端已注销（readPump 断线或 CloseClients）：停止查询与推送。
+			return
 		case <-ticker.C:
 			var payload []map[string]interface{}
 			for _, name := range metrics {
@@ -255,27 +384,43 @@ func (h *Hub) pushNodeMetrics(client *Client, store storage.Storage, node string
 			}
 			if len(payload) > 0 {
 				b, _ := json.Marshal(map[string]interface{}{"type": "metrics", "node": node, "data": payload})
-				select {
-				case client.send <- b:
-				default:
-				}
+				// 经 enqueue 写入：写 send 前在 h.mu 内确认客户端仍在 clients 中，
+				// 避免与 CloseClients / Unregister 的 close(send) 竞态 panic。
+				h.enqueue(client, b)
 			}
 		}
 	}
 }
 
-// writePump 发送循环。
-func (c *Client) writePump() {
+// writePump 发送循环，返回导致其退出的写错误（send 被关闭时返回 nil）。
+// 写失败或 send 被关闭时一并关闭底层连接，促使阻塞在 ReadMessage 的 readPump
+// 退出并注销，避免断线客户端残留。
+func (c *Client) writePump() error {
+	if c.conn == nil {
+		// 防御：无底层连接的客户端（测试构造）不得 panic。
+		return nil
+	}
+	defer c.conn.Close()
 	for msg := range c.send {
+		// 每次写前刷新写截止时间：客户端停止读取（零窗口）时阻塞写会在
+		// writeWait 后变成错误（os.ErrDeadlineExceeded），从而走
+		// return → conn.Close() → readPump 退出 → Unregister 的收敛链，
+		// 不会无限挂住。
+		_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
 		if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			return
+			return err
 		}
 	}
+	return nil
 }
 
-// readPump 读循环，检测断开后注销（关闭 send 以通知 pushNodeMetrics 退出）。
+// readPump 读循环，检测断开后注销（关闭 send 与 done 以通知 pushNodeMetrics 退出）。
 func (c *Client) readPump() {
 	defer c.hub.Unregister(c)
+	if c.conn == nil {
+		// 防御：无底层连接的客户端（测试构造）不得 panic；与 writePump 守卫对称。
+		return
+	}
 	for {
 		if _, _, err := c.conn.ReadMessage(); err != nil {
 			return

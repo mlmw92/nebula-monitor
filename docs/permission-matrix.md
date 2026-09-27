@@ -177,7 +177,7 @@
 | POST | `/api/v1/alerts/close` | `alerts:write`（D4） | 分组 |
 | POST | `/api/v1/alerts/reopen` | `alerts:write`（D4） | 分组 |
 | POST | `/api/v1/alerts/comment` | `alerts:write`（D4） | 分组 |
-| POST | `/api/v1/alerts/test` | `alerts:write` | — |
+| POST | `/api/v1/alerts/test` | `notify:write`（本次变更） | — |
 | GET | `/api/v1/rules` | `alerts:read` | — |
 | POST | `/api/v1/rules` | `alerts:write` | — |
 | PUT | `/api/v1/rules/{id}` | `alerts:write` | — |
@@ -199,6 +199,8 @@
 | GET | `/api/v1/notify` | `notify:read` | — |
 | PUT | `/api/v1/notify` | `notify:write`（高风险） | — |
 | POST | `/api/v1/notify/test` | `notify:write` | — |
+
+> **变更标注**：上表 `POST /api/v1/alerts/test` 一行非 1.25.0 基线——该路由在基线时**没有权限点**（任何登录用户可调用），本次（2026-09 资源范围与权限边界修复）改为 `notify:write`；表中其余行仍为 1.25.0 基线快照。
 
 ### 4.7 安全中心与审计（9 条）
 

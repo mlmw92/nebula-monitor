@@ -8,9 +8,12 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/nebula/monitor/internal/server/agentdist"
@@ -62,8 +65,13 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// signalCtx 只负责通知「该退出了」；后台任务用独立的 runCtx，
+	// 这样信号一到不会立刻掐断仍由 Shutdown 宽限期服务的在途请求。
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
 
 	// 存储层
 	store, err := storage.NewStorage(cfg.TSDB)
@@ -197,7 +205,7 @@ func main() {
 	if cfg.Alert.Enabled {
 		dialtestSched.SetSink(engine)
 	}
-	dialtestSched.Start(ctx)
+	dialtestSched.Start(runCtx)
 
 	// 智能分析模块：仅查询既有时序数据，不影响上报与告警评估链路。
 	analyzer := analysis.New(store, nodeMgr)
@@ -301,17 +309,17 @@ func main() {
 	// Agent 分发（自带 CDN：安装脚本 + 各架构二进制）
 	agentdist.New(cfg.AgentBinDir, cfg.AgentScriptPath, cfg.AgentAuth).Register(mux)
 
-	// 启动后台任务
-	go hub.Run()
+	// 启动后台任务：全部挂在 runCtx 下，由退出流程在请求排空后统一取消。
+	go hub.Run(runCtx)
 	if cfg.Alert.Enabled {
-		engine.Start(ctx)
+		engine.Start(runCtx)
 	}
-	go offlineChecker(ctx, nodeMgr, 10*time.Second)
+	go offlineChecker(runCtx, nodeMgr, 10*time.Second)
 	// 自监控指标周期写入时序库（走未包装的原始存储）：self_* 指标因此可查询、可画趋势，
 	// 也能直接复用现有告警规则来监控 Server 自身。
-	go selfmon.NewReporter(rawStore, mon, selfmon.DefaultReportInterval).Run(ctx)
+	go selfmon.NewReporter(rawStore, mon, selfmon.DefaultReportInterval).Run(runCtx)
 	// 数据保留：按周期清理超期数据（策略可在「系统设置 → 数据保留」调整，保存即热生效）
-	go retentionMgr.Run(ctx)
+	go retentionMgr.Run(runCtx)
 
 	// 认证中间件（启用 auth 时保护 /api/v1/* 业务接口）。
 	// authStore 显式传入（非包级单例），避免多实例部署与测试之间的状态污染。
@@ -326,16 +334,43 @@ func main() {
 	// 否则「大量 401」这种最该被看见的信号反而看不到。
 	handler = api.MetricsMiddleware(handler, mon)
 
-	srv := &http.Server{
-		Addr:    cfg.Listen,
-		Handler: handler,
+	srv := newHTTPServer(cfg.Listen, handler)
+
+	// 自行 Listen：地址不可用时立即失败，并让监听句柄可注入（便于测试）。
+	ln, err := net.Listen("tcp", cfg.Listen)
+	if err != nil {
+		slog.Error("HTTP 监听失败", "addr", cfg.Listen, "err", err)
+		cancelRun()
+		_ = store.Close()
+		os.Exit(1)
 	}
 
 	slog.Info("Server 启动", "mode", cfg.Mode, "listen", cfg.Listen, "tsdb", cfg.TSDB.Backend, "addr", cfg.TSDB.Addr, "version", version.Version)
-	if err := srv.ListenAndServe(); err != nil {
-		slog.Error("HTTP 服务异常", "err", err)
+
+	// 退出顺序：断开 WS 客户端 → 有界 Shutdown（超时则 Close）→ 取消后台任务 → 关闭存储。
+	// os.Exit 会跳过 defer，故各清理动作必须在调用前显式执行。
+	//
+	// 首次 SIGINT/SIGTERM 后停止监听信号：恢复到系统默认处理，运维「再按一次 Ctrl+C」
+	// 可立即终止，不必干等宽限期。首个信号已让 signalCtx 取消，故不影响优雅退出语义。
+	stopSignalsOnExit := make(chan struct{})
+	defer close(stopSignalsOnExit)
+	go func() {
+		select {
+		case <-signalCtx.Done():
+			stopSignals()
+		case <-stopSignalsOnExit:
+		}
+	}()
+
+	if err := serveUntilStopped(signalCtx, srv, ln, hub.CloseClients); err != nil {
+		slog.Error("HTTP 服务异常退出", "err", err)
+		cancelRun()
+		_ = store.Close()
 		os.Exit(1)
 	}
+	cancelRun()
+	_ = store.Close()
+	slog.Info("Server 已停止")
 }
 
 // receiverMux 包装 receiver 的路由注册。

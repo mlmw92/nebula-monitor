@@ -89,7 +89,7 @@
           </el-radio-group>
           <el-button size="small" :disabled="!selected.length" @click="batchAck">批量确认 ({{ selected.length }})</el-button>
           <span class="muted event-toolbar-hint">确认后将从活跃列表移除，仍可在“全部”中查看</span>
-          <el-button size="small" :loading="testing" @click="testAlert">测试事件</el-button>
+          <el-button v-if="can('notify:write')" size="small" :loading="testing" @click="testAlert">测试事件</el-button>
         </div>
       </div>
       <el-table
@@ -517,9 +517,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import http, { getToken } from '../api/http'
 import RuleModal from './RuleModal.vue'
+import useAuth from '../composables/useAuth'
 
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 const router = useRouter()
+// 「测试事件」会真实写事件并触发通知，可见性复用 notify:write（服务端独立审计拒绝）。
+const { can } = useAuth()
 const rules = ref([])
 // 告警规则前端分页
 const currentPage = ref(1)

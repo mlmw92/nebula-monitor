@@ -284,8 +284,38 @@ func (a *API) denyScope(w http.ResponseWriter, r *http.Request, perm, group stri
 	return false
 }
 
+// checkNodeTarget 校验「查询参数」形式的节点目标（?node=、?hostname=、query/range 等的
+// labels.node），fail-closed：受限身份下未注册节点（nodeGroup 为空）与已注册但范围外节点
+// 一律 403（denyScope，写审计）。
+//
+// 与 checkNodeScope 的边界必须分清楚：checkNodeScope 服务于**路径参数**目标（{name}/{node}，
+// 如 /nodes/{name}、/security/defense/status/{node}），这类路由在节点不存在时应交给 handler
+// 返回 404，用 403 拦截反而会向受限用户泄露「资源是否存在」；而查询参数目标的 handler
+// 通常没有 404 分支（不带 node 时是列表/跨节点语义，带了未注册 node 只会静默返回空结果），
+// 必须在授权层就 fail-closed，否则「200 空结果 vs 403」本身就成了一个判别节点是否已注册的
+// oracle。调用方按参数来源选择：路径参数用 checkNodeScope，查询参数用 checkNodeTarget。
+func (a *API) checkNodeTarget(w http.ResponseWriter, r *http.Request, perm, name string) bool {
+	if name == "" {
+		return true
+	}
+	p := Principal(r)
+	if p == nil || p.Scope.IsGlobal() {
+		return true
+	}
+	group := a.nodeGroup(name)
+	if group == "" || !p.CanAccessGroup(group) {
+		return a.denyScope(w, r, perm, group)
+	}
+	return true
+}
+
 // checkNodeScope 校验单个节点是否落在当前用户的资源范围内；返回 false 表示已写出响应。
-// 节点不存在时不在此处拦截（交由 handler 返回 404），避免用 403 泄露资源存在性。
+// 节点不存在时不在此处拦截，但「交由 handler 返回 404」的前提只对**确有 404 分支**的路径
+// 参数路由成立（如 /nodes/{name}、/analysis/hosts/{name}）：这些路由未注册节点会被 handler
+// 判定为 404，用 403 拦截反而泄露资源存在性。而 DELETE /nodes/{name}、
+// /security/defense/status|tasks/{node} 三条路径参数路由对未注册节点返回 200，因此
+// 「200 vs 403」仍构成一个节点名存在性探测面（无数据泄露，属后续跟进项）。
+// 仅用于**路径参数**形式的节点目标；查询参数目标见 checkNodeTarget。
 func (a *API) checkNodeScope(w http.ResponseWriter, r *http.Request, perm, nodeName string) bool {
 	p := Principal(r)
 	if p == nil || p.Scope.IsGlobal() || nodeName == "" || a.nodeMgr == nil {
@@ -302,22 +332,84 @@ func (a *API) checkNodeScope(w http.ResponseWriter, r *http.Request, perm, nodeN
 }
 
 // permitNode 在 permit 之上追加节点资源范围校验。
-// 节点名优先取路径参数 {name}，其次取查询参数 node（如 /query/range?node=）；
-// 两者都没有时视为列表类接口，范围过滤由 handler 用 auth.FilterByGroup 完成。
+//
+// 节点目标可能同时来自路径参数 {name} / {node} 与查询参数 node / hostname：
+//   - 设计 §3 要求「带多个节点候选参数而值矛盾时拒绝请求，不用优先级选择绕过检查」，
+//     因此先对所有候选做一致性判定——任意两个非空候选值不一致即 400（同值不算冲突），
+//     这一步在路径参数分派之前完成，`/nodes/web-01?node=db-01` 之类不会被路径参数静默吞掉；
+//   - 路径参数命中时是「单节点详情」语义，未注册节点对**确有 404 分支**的路由
+//     （如 /nodes/{name}、/analysis/hosts/{name}）交给 handler 返回 404（checkNodeScope）；
+//     但 DELETE /nodes/{name}、/security/defense/status|tasks/{node} 这三条路径参数路由
+//     对未注册节点返回 200，存在 200 vs 403 的节点名存在性探测面（无数据泄露，属后续跟进项）；
+//   - 只有查询参数目标时（如 /alerts?node=/?hostname=），handler 没有 404 分支，必须
+//     fail-closed（checkNodeTarget），否则「200 空结果 vs 403」会泄露节点是否已注册；
+//   - 无法解析出任何目标（如列表类接口）时范围过滤交给 handler 完成。
+//
+// 查询参数 node / hostname 互为别名，Get 只取首个值，与 handler 读取方式一致
+// （多值重复参数不在此单独判定冲突，由 handler 侧同样取首个值，目标必然一致）。
 func (a *API) permitNode(next http.HandlerFunc, perm string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !a.checkPerm(w, r, perm) {
 			return
 		}
-		name := param(r, "name")
-		if name == "" {
-			// 部分路由用 {node} 作为路径参数（如 /security/defense/tasks/{node}）
-			name = param(r, "node")
+		// 路径参数候选：{name} 优先于 {node}（同一路由不会两者都有）。
+		pathName := param(r, "name")
+		if pathName == "" {
+			pathName = param(r, "node")
 		}
-		if name == "" {
-			name = r.URL.Query().Get("node")
+		// 查询参数候选：node / hostname 互为别名。
+		q := r.URL.Query()
+		queryName := q.Get("node")
+		if hostname := q.Get("hostname"); hostname != "" {
+			if queryName != "" && queryName != hostname {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "节点参数冲突"})
+				return
+			}
+			queryName = hostname
 		}
-		if !a.checkNodeScope(w, r, perm, name) {
+		// 路径参数与查询参数之间同样不得矛盾。
+		if pathName != "" && queryName != "" && pathName != queryName {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "节点参数冲突"})
+			return
+		}
+		if pathName != "" {
+			if !a.checkNodeScope(w, r, perm, pathName) {
+				return
+			}
+			next(w, r)
+			return
+		}
+		if !a.checkNodeTarget(w, r, perm, queryName) {
+			return
+		}
+		next(w, r)
+	}
+}
+
+// permitHostname 是以 hostname 为唯一查询目标的业务接口（进程/监听端口/防火墙等）的权限包装器。
+//
+// 这些接口的实际查询目标就是 hostname，且没有可退化的「列表类接口」语义——因此必须要求
+// hostname 非空，并交给 checkNodeTarget 做 fail-closed 校验（受限身份访问未注册节点直接拒绝，
+// 不能像路径参数路由那样把「节点不存在」交给 handler 返回 404，那会让受限用户绕过资源范围
+// 探测到未注册节点数据）。全局身份与未启用认证维持原有放行行为。
+func (a *API) permitHostname(next http.HandlerFunc, perm string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !a.checkPerm(w, r, perm) {
+			return
+		}
+		q := r.URL.Query()
+		// Get 只取首个值：包装器与 handler 同用 Query().Get，重复参数时两者取到的目标必然一致，
+		// 无需为 ?hostname=a&hostname=b 这类情况单独判定冲突。
+		hostname := q.Get("hostname")
+		if node := q.Get("node"); node != "" && node != hostname {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "节点参数冲突"})
+			return
+		}
+		if hostname == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hostname 不能为空"})
+			return
+		}
+		if !a.checkNodeTarget(w, r, perm, hostname) {
 			return
 		}
 		next(w, r)

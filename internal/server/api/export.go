@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nebula/monitor/internal/model"
 )
 
 // handleMetricsExport 导出历史指标数据为 CSV。
@@ -46,11 +48,9 @@ func (a *API) handleMetricsExport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	node := q.Get("node")
+	// labels 先只承接 instance 与 `labels=k=v,...` 中的附加筛选；node 交给 metricTarget
+	// 统一判定，避免此处的 labels.node 直接覆盖 node 造成越权。
 	labels := map[string]string{}
-	if node != "" {
-		labels["node"] = node
-	}
 	if inst := q.Get("instance"); inst != "" {
 		labels["instance"] = inst
 	}
@@ -64,13 +64,29 @@ func (a *API) handleMetricsExport(w http.ResponseWriter, r *http.Request) {
 			labels[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
 		}
 	}
+	node, ok := a.metricTarget(w, r, "metrics:export", labels)
+	if !ok {
+		return
+	}
+
+	p := Principal(r)
+	if node == "" && !a.visibleMetricNodes(p) {
+		// 受限用户没有任何可见节点：不查询存储，只返回标题行。
+		writeMetricsCSV(w, metric, start, end, nil)
+		return
+	}
 
 	series, err := a.store.QueryRange(node, metric, labels, start, end, step)
 	if err != nil {
 		http.Error(w, "查询失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	series = a.visibleMetricSeries(p, node, series)
+	writeMetricsCSV(w, metric, start, end, series)
+}
 
+// writeMetricsCSV 按序列数量选择单序列/多序列表头并写出 CSV 响应。
+func writeMetricsCSV(w http.ResponseWriter, metric string, start, end int64, series []model.Series) {
 	var sb strings.Builder
 	if len(series) <= 1 {
 		sb.WriteString("timestamp,value\n")

@@ -39,6 +39,12 @@ jobs:
       - name: go test -race（Agent 采集并发关键路径）
         run: go test -race -count=1 ./internal/agent/...
 
+      # Server 侧 WS/Hub 并发路径（Run 广播与 CloseClients/Unregister 的 send 关闭竞态、
+      # pushNodeMetrics 停机退出）同样需要竞态覆盖；本机 Windows 无 cgo 无法运行 -race，
+      # 故在此 Linux 步骤中一并跑 internal/server/api（需与 cmd/server 生命周期改动一起在 CI 通过）。
+      - name: go test -race（Server WS/Hub 并发关键路径）
+        run: go test -race -count=1 ./internal/server/api/...
+
   web:
     name: Web build
     runs-on: ubuntu-latest

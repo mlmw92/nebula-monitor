@@ -102,6 +102,44 @@ func TestRoutes_DefenseNodePathParam_ScopeEnforced(t *testing.T) {
 	}
 }
 
+// TestRoutes_AlertTestNeedsNotifyWrite 测试告警会写事件并向通知渠道发消息，因此路由复用 notify:write：
+// 只有 alerts:write 不足以触发，避免「能管规则就能发通知」；未启用认证仍沿用兼容放行。
+func TestRoutes_AlertTestNeedsNotifyWrite(t *testing.T) {
+	// 持 alerts:write 但无 notify:write → 403，且恰好 1 条授权拒绝审计。
+	a := scopeTestAPI(t)
+	mux := newRoutesMux(a)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, reqWith(globalPrincipal("alerts:write"), http.MethodPost, "/api/v1/alerts/test", ""))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("未授权不应触发通知: %d", rec.Code)
+	}
+	if events := a.audit.List(1, "", ""); len(events) != 1 {
+		t.Fatalf("应恰好记录 1 条授权拒绝审计，实际 %d", len(events))
+	}
+
+	// 持 notify:write → 进入 handler（scopeTestAPI 的 engine 为 nil，期望 500）。
+	a2 := scopeTestAPI(t)
+	mux2 := newRoutesMux(a2)
+	rec = httptest.NewRecorder()
+	mux2.ServeHTTP(rec, reqWith(globalPrincipal("notify:write"), http.MethodPost, "/api/v1/alerts/test", ""))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("有权应进入 handler（engine=nil 返回 500），code = %d，body = %s", rec.Code, rec.Body.String())
+	}
+	if events := a2.audit.List(1, "", ""); len(events) != 0 {
+		t.Fatalf("有权调用不应写授权拒绝审计，实际 %d", len(events))
+	}
+
+	// 未启用认证（authStore=nil）→ 兼容放行至 handler（engine=nil 返回 500）。
+	base := scopeTestAPI(t)
+	a3 := &API{nodeMgr: base.nodeMgr} // authStore 为 nil = 未启用登录认证
+	mux3 := newRoutesMux(a3)
+	rec = httptest.NewRecorder()
+	mux3.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/alerts/test", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("未启用认证应放行至 handler（engine=nil 返回 500），code = %d，body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestRoutes_VersionStaysOpenForLoggedInUsers 版本接口不设权限点（侧栏展示依赖），任何登录用户可读。
 func TestRoutes_VersionStaysOpenForLoggedInUsers(t *testing.T) {
 	a := scopeTestAPI(t)
