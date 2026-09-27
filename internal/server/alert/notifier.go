@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/smtp"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -550,7 +551,10 @@ func groupEmailHTML(events []model.AlertEvent) string {
 </body></html>`, len(events), groupTopSeverity(events), rows.String())
 }
 
-// postJSON 向指定 URL POST JSON，并校验响应状态。
+// postJSON 向指定 URL POST JSON，并校验响应状态与业务码。
+// 钉钉/企业微信成功为 {"errcode":0}，飞书为 {"code":0}——三家机器人在签名错误、
+// 关键词不匹配、限流时都会返回 HTTP 200 + 非 0 业务码，只看状态码会把失败当成功
+// （告警静默丢失）。两者都缺省（如自定义 webhook 网关返回非 JSON）时按成功处理。
 func postJSON(rawURL string, body interface{}) error {
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -567,6 +571,22 @@ func postJSON(rawURL string, body interface{}) error {
 		b, _ := io.ReadAll(resp.Body)
 		slog.Error("通知渠道返回非成功状态", "status", resp.StatusCode, "body", string(b))
 		return fmt.Errorf("通知渠道返回 %d", resp.StatusCode)
+	}
+	var biz struct {
+		Errcode int    `json:"errcode"`
+		Code    int    `json:"code"`
+		Errmsg  string `json:"errmsg"`
+		Msg     string `json:"msg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&biz); err != nil {
+		slog.Warn("通知渠道响应体非 JSON（按成功处理）", "err", err)
+		return nil
+	}
+	if biz.Errcode != 0 {
+		return fmt.Errorf("通知渠道业务错误 errcode=%d errmsg=%s", biz.Errcode, biz.Errmsg)
+	}
+	if biz.Code != 0 {
+		return fmt.Errorf("通知渠道业务错误 code=%d msg=%s", biz.Code, biz.Msg)
 	}
 	return nil
 }
@@ -701,7 +721,9 @@ func (n *FeishuNotifier) Notify(e model.AlertEvent) error {
 			"content":  map[string]string{"text": alertText(e)},
 		}
 		if n.cfg.Secret != "" {
-			body["timestamp"] = ts
+			// 飞书要求 timestamp 为字符串（官方 SDK 按 str(timestamp) 拼接签名），
+			// 以 JSON number 发送会导致加签校验失败且（修复 postJSON 前）被静默吞掉。
+			body["timestamp"] = strconv.FormatInt(ts, 10)
 			body["sign"] = sign
 		}
 		if err := postJSON(u, body); err != nil {
@@ -727,7 +749,9 @@ func (n *FeishuNotifier) NotifyGroup(events []model.AlertEvent) error {
 			"content":  map[string]string{"text": groupText(events)},
 		}
 		if n.cfg.Secret != "" {
-			body["timestamp"] = ts
+			// 飞书要求 timestamp 为字符串（官方 SDK 按 str(timestamp) 拼接签名），
+			// 以 JSON number 发送会导致加签校验失败且（修复 postJSON 前）被静默吞掉。
+			body["timestamp"] = strconv.FormatInt(ts, 10)
 			body["sign"] = sign
 		}
 		if err := postJSON(u, body); err != nil {

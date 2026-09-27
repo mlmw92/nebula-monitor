@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
@@ -47,7 +48,10 @@ type Engine struct {
 	nodeMgr            *node.Manager
 	rules              *RulesStore
 	alerts             *VMAlertStore
-	notifiers          []Notifier
+	// notifiers 通知器列表，copy-on-write：SetNotifiers 热更新时整体替换快照，
+	// 读方（notify/notifyEscalation 等）无锁加载。不能用 e.mu 保护——notify 的
+	// 部分调用方（fire/resolve）已在 e.mu 锁内，补锁会死锁。
+	notifiers          atomic.Pointer[[]Notifier]
 	broadcaster        Broadcaster
 	maintenance        *MaintenanceStore
 	evalInterval       int
@@ -96,12 +100,13 @@ func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
 	if evalInterval <= 0 {
 		evalInterval = 15
 	}
+	nsCopy := make([]Notifier, len(notifiers))
+	copy(nsCopy, notifiers)
 	e := &Engine{
 		store:              store,
 		nodeMgr:            mgr,
 		rules:              rules,
 		alerts:             alerts,
-		notifiers:          notifiers,
 		broadcaster:        broadcaster,
 		maintenance:        maintenance,
 		evalInterval:       evalInterval,
@@ -116,6 +121,7 @@ func NewEngine(store storage.Storage, mgr *node.Manager, rules *RulesStore,
 		grouping:           grouping,
 		pipeline:           pipeline,
 	}
+	e.notifiers.Store(&nsCopy)
 	e.restoreActiveState()
 	// 分组启用时构建分组器：相同 groupBy 的告警合并为一组，按 groupWait/groupInterval 汇总发送。
 	if grouping != nil && grouping.Get().Enabled {
@@ -901,7 +907,7 @@ func (e *Engine) notifyEscalation(ev model.AlertEvent, esc *model.Escalation) {
 		slog.Info("升级未配置通知渠道，仅平台展示", "rule", ev.RuleName, "event", ev.ID)
 		return
 	}
-	ns := append([]Notifier(nil), e.notifiers...)
+	ns := e.notifiersSnapshot()
 	go func() {
 		for _, n := range ns {
 			if !contains(chs, n.Channel()) {
@@ -1285,9 +1291,7 @@ func (e *Engine) notifyDialtest(task dialtest.Task, ev model.AlertEvent) {
 		slog.Info("拨测未配置通知渠道，仅平台展示", "task", task.Name, "event", ev.ID)
 		return
 	}
-	e.mu.Lock()
-	ns := append([]Notifier(nil), e.notifiers...)
-	e.mu.Unlock()
+	ns := e.notifiersSnapshot()
 	chs := append([]string(nil), task.Notify...)
 	go func() {
 		for _, n := range ns {
@@ -1582,9 +1586,7 @@ func (e *Engine) TestAlert(channel string) (model.AlertEvent, error) {
 		Test:      true,
 	}
 	e.alerts.Add(ev)
-	e.mu.Lock()
-	ns := append([]Notifier(nil), e.notifiers...)
-	e.mu.Unlock()
+	ns := e.notifiersSnapshot()
 	for _, n := range ns {
 		if channel != "" && n.Channel() != channel {
 			continue
@@ -1619,9 +1621,7 @@ func (e *Engine) TestEmail() error {
 		Message:   "这是一封由用户手动触发的测试邮件，用于验证 SMTP 配置与链路",
 		StartsAt:  now,
 	}
-	e.mu.Lock()
-	ns := append([]Notifier(nil), e.notifiers...)
-	e.mu.Unlock()
+	ns := e.notifiersSnapshot()
 	for _, n := range ns {
 		if n.Channel() == "email" {
 			return n.Notify(ev)
@@ -1647,7 +1647,7 @@ func (e *Engine) notify(ev model.AlertEvent) {
 	// 未配置管道/模板时为零开销直通，行为与改造前完全一致。
 	ev = e.applyPipeline(ev)
 	perChannel := e.pipeline != nil && e.pipeline.HasMessageTemplate()
-	ns := append([]Notifier(nil), e.notifiers...)
+	ns := e.notifiersSnapshot()
 	go func() {
 		for _, n := range ns {
 			if !contains(chs, n.Channel()) {
@@ -1686,12 +1686,21 @@ func (e *Engine) renderForChannel(events []model.AlertEvent, channel string) []m
 	return out
 }
 
-// SetNotifiers 热加载通知器列表。在 e.mu 锁内替换，与 evaluate/notify 共用同一把锁，
-// 避免并发读写 notifiers 切片导致竞态；保存配置后调用，无需重启 Server。
+// SetNotifiers 热加载通知器列表。copy-on-write 整体替换快照，读方无锁加载，
+// 无需与 e.mu 互斥（notify 的部分调用方在 e.mu 锁内，补锁会死锁）；
+// 保存配置后调用，无需重启 Server。
 func (e *Engine) SetNotifiers(ns []Notifier) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.notifiers = ns
+	cp := make([]Notifier, len(ns))
+	copy(cp, ns)
+	e.notifiers.Store(&cp)
+}
+
+// notifiersSnapshot 返回当前通知器列表快照（无锁，copy-on-write）。
+func (e *Engine) notifiersSnapshot() []Notifier {
+	if ns := e.notifiers.Load(); ns != nil {
+		return *ns
+	}
+	return nil
 }
 
 // ruleNotifyChannels 返回规则指定的通知渠道；空表示不发送任何通知。
@@ -1950,9 +1959,7 @@ func (e *Engine) flushGroup(events []model.AlertEvent) {
 		slog.Info("维护窗口活跃，跳过分组告警通知", "count", len(events))
 		return
 	}
-	e.mu.Lock()
-	ns := append([]Notifier(nil), e.notifiers...)
-	e.mu.Unlock()
+	ns := e.notifiersSnapshot()
 	groups := map[string][]model.AlertEvent{}
 	groupChannels := map[string][]string{}
 	for _, ev := range events {
