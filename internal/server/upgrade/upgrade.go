@@ -117,6 +117,7 @@ type Manager struct {
 	archive    []ArchiveEntry
 	archiveDir string
 	archivePth string
+	applying   bool // 升级/回退进行中互斥（Apply 与 RollbackTo 共用，防止并发替换二进制）
 }
 
 // New 创建升级管理器并确保工作子目录存在。
@@ -321,6 +322,22 @@ func (m *Manager) Apply(operator string) (*Task, error) {
 // applyCore 是升级/回退的公共核心：备份当前 server/web/agent → 替换组件 → 重启 → 记录历史。
 // id/version 用于历史与响应；components 为待应用的组件清单；unpackRoot 为解压后的根目录。
 func (m *Manager) applyCore(id, version string, components []Component, unpackRoot, operator, action string) (*Task, error) {
+	// 互斥：Apply 与 RollbackTo（或两次 RollbackTo）并发替换二进制会互相踩踏，
+	// 失败回滚逻辑也会同时读写同一份备份，可能留下混合版本的二进制。
+	m.mu.Lock()
+	if m.applying {
+		m.mu.Unlock()
+		t := &Task{ID: id, Version: version, Status: "failed", Components: components, Error: "另一场升级/回退正在进行中"}
+		return t, errors.New("另一场升级/回退正在进行中，请稍后重试")
+	}
+	m.applying = true
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.applying = false
+		m.mu.Unlock()
+	}()
+
 	t := &Task{
 		ID:         id,
 		Version:    version,
@@ -763,7 +780,9 @@ func (m *Manager) backupConfigs(dir, version string, applyErrors *[]string) erro
 			continue
 		}
 		base := filepath.Base(p)
-		dst := filepath.Join(dir, fmt.Sprintf("%s-v%s-%s", base, version, ts))
+		// version 来自 manifest，可能被构造含 ../ 或绝对路径——落盘前必须 sanitize
+		//（与归档路径的处理一致），否则路径可逃逸出备份目录。
+		dst := filepath.Join(dir, fmt.Sprintf("%s-v%s-%s", base, sanitizeVersion(version), ts))
 		if err := copyFile(p, dst); err != nil {
 			*applyErrors = append(*applyErrors, fmt.Sprintf("备份配置文件 %s 失败: %s", p, err.Error()))
 			continue
