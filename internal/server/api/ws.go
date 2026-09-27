@@ -94,6 +94,9 @@ type Client struct {
 	// done 与 send 在同一临界区内恰好关闭一次，通知 pushNodeMetrics 退出，
 	// 避免客户端断线后 ticker 仍按秒查询 TSDB。
 	done chan struct{}
+	// writeDone 由 writePump 退出时关闭，供测试等待「唯一写者已退出」后再探测
+	// 连接状态（gorilla 的 Conn 只允许一个并发写者）。
+	writeDone chan struct{}
 	// writeWait 是单次写的截止时间（构造时确定，之后只读）。
 	writeWait time.Duration
 }
@@ -114,6 +117,7 @@ func newWSClient(h *Hub, conn *websocket.Conn) *Client {
 		conn:      conn,
 		send:      make(chan []byte, 16),
 		done:      make(chan struct{}),
+		writeDone: make(chan struct{}),
 		writeWait: defaultWSWriteWait,
 	}
 }
@@ -395,7 +399,13 @@ func (h *Hub) pushNodeMetrics(client *Client, store storage.Storage, node string
 // writePump 发送循环，返回导致其退出的写错误（send 被关闭时返回 nil）。
 // 写失败或 send 被关闭时一并关闭底层连接，促使阻塞在 ReadMessage 的 readPump
 // 退出并注销，避免断线客户端残留。
+//
+// 每个客户端恰好启动一个 writePump（唯一写者）；退出时关闭 writeDone，
+// 便于测试在该写者消失后再探测连接状态。
 func (c *Client) writePump() error {
+	// 注册顺序保证 LIFO 执行时 conn.Close() 先于 close(writeDone)：
+	// 观察到 writeDone 关闭即意味着底层连接已关闭。
+	defer close(c.writeDone)
 	if c.conn == nil {
 		// 防御：无底层连接的客户端（测试构造）不得 panic。
 		return nil

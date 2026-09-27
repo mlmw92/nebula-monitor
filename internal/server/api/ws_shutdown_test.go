@@ -126,6 +126,30 @@ func drainConn(conn *websocket.Conn) {
 	}
 }
 
+// waitWritePumpDone 等待该客户端的 writePump 真正退出（writeDone 关闭）。
+// gorilla 的 *websocket.Conn 只允许一个并发写者（生产里唯一写者就是 writePump，
+// 见 beginMessage/flushFrame 均只读写侧状态）；测试若要探测服务端连接状态，必须先
+// 确认写者已消失，否则会与其收尾写入竞态（CI 的 -race 曾报 beginMessage 与
+// flushFrame 数据竞争）。等到 writeDone 关闭，同时也意味着 writePump 的
+// defer c.conn.Close() 已执行完毕。
+func waitWritePumpDone(t *testing.T, c *Client) {
+	t.Helper()
+	select {
+	case <-c.writeDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("writePump 未退出，无法在唯一写者消失后再探测连接状态")
+	}
+}
+
+// probeServerConnClosed 在「唯一写者已退出」的前提下探测服务端底层连接是否已关闭，
+// 返回该次写的错误（nil 表示仍可写，即未关闭）。
+// 直接写原始 net.Conn：既绕开 gorilla 的 writeErr 缓存（结论只取决于连接本身是否
+// 被关闭），也不触碰 gorilla Conn 的读侧状态，故与可能仍在收尾的 readPump 无交互。
+func probeServerConnClosed(c *Client) error {
+	_, err := c.conn.UnderlyingConn().Write([]byte("after-close"))
+	return err
+}
+
 // TestHubCloseClients 覆盖：真实连接、幂等重复关闭、ClientCount 归零、
 // 关闭后 Unregister 不 panic、关闭前后 BroadcastAlert 均不 panic。
 func TestHubCloseClients(t *testing.T) {
@@ -144,7 +168,9 @@ func TestHubCloseClients(t *testing.T) {
 		t.Fatalf("残留 WS 客户端: %d", n)
 	}
 	// 服务端状态断言（确定性强）：CloseClients 必须真正关闭底层连接，而非仅从 map 移除。
-	if err := clients[0].conn.WriteMessage(websocket.TextMessage, []byte("after-close")); err == nil {
+	// 唯一写者：先等 writePump 退出（writeDone），此后再无任何 goroutine 会写这个连接。
+	waitWritePumpDone(t, clients[0])
+	if err := probeServerConnClosed(clients[0]); err == nil {
 		t.Fatal("CloseClients 后服务端底层连接仍可写，连接未被关闭")
 	}
 	waitClosed(t, conn, "CloseClients 后")
@@ -344,9 +370,11 @@ func TestWS_PushNodeMetricsStopsAfterClose(t *testing.T) {
 	}
 
 	h.CloseClients()
-	// 服务端状态断言（确定性强）：连接必须被真正关闭。客户端侧能否及时读到
-	// 关闭受平台 FIN 延迟影响（见 drainConn 注释），故不作硬断言。
-	if err := clients[0].conn.WriteMessage(websocket.TextMessage, []byte("after-close")); err == nil {
+	// 服务端状态断言（确定性强）：连接必须被真正关闭。唯一写者：先等 writePump 退出
+	// 后再探测，避免与它的收尾写竞态；客户端侧能否及时读到关闭受平台 FIN 延迟影响
+	// （见 drainConn 注释），故不作硬断言。
+	waitWritePumpDone(t, clients[0])
+	if err := probeServerConnClosed(clients[0]); err == nil {
 		t.Fatal("CloseClients 后服务端底层连接仍可写，连接未被关闭")
 	}
 	// 自适应基准：先等注销生效（ClientCount 归零），再等一个 tick 周期让在途查询
