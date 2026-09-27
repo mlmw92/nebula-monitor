@@ -476,6 +476,7 @@ acquire_binary() {
 generate_config() {
   c_info "生成配置文件"
   mkdir -p "$CONFIG_DIR"
+  chmod 700 "$CONFIG_DIR"
 
   cat > "$CONFIG_DIR/agent.yaml" <<EOF
 # nebula-monitor Agent 配置（由 agent-install.sh 生成）
@@ -657,6 +658,8 @@ $( [[ -n "$LABELS_YAML" ]] && printf 'labels:\n%s' "$LABELS_YAML" )
 # 注意：若改用 Web 端「采集项模板」由 Server 统一下发，本段应保持为空——下发的模板会替换本机配置
 # （下发模板需在 Server 侧声明生效的节点分组 groups，本机模板不需要填 groups）。
 EOF
+  # agent.yaml 含接入密钥 secret 与本地中间件凭据，禁止全局可读
+  chmod 600 "$CONFIG_DIR/agent.yaml"
   c_ok "配置已写入: $CONFIG_DIR/agent.yaml"
 }
 
@@ -1432,6 +1435,8 @@ EOF
   else
     TLS_CERT="$hub_crt"; TLS_KEY="$hub_key"; TLS_CA="$ca_crt"
   fi
+  # 私钥仅属主可读（目录已 700，此处对 scp 到宽权限目标机的情况兜底）
+  chmod 600 "$ca_key" "$hub_key" "$edge_key"
   c_ok "证书已就绪: $cert_dir（ca.crt 需与对端一致）"
   c_warn "部署对端前请将整个目录复制过去: scp -r $cert_dir <对端>:$cert_dir"
 }
@@ -1537,6 +1542,7 @@ proxy_install() {
 generate_proxy_config() {
   c_info "生成代理模式配置文件"
   mkdir -p "$CONFIG_DIR"
+  chmod 700 "$CONFIG_DIR"
 
   local cfg="$CONFIG_DIR/agent.yaml"
   cat > "$cfg" <<EOF
@@ -1568,6 +1574,8 @@ EOF
 EOF
   fi
 
+  # 代理配置含接入密钥与 TLS 私钥路径，禁止全局可读
+  chmod 600 "$cfg"
   c_ok "配置已写入: $cfg"
 }
 

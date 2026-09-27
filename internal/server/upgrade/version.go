@@ -35,6 +35,18 @@ func parseSemanticVersion(raw string) (semanticVersion, error) {
 	if len(parts) == 2 && parts[1] == "" {
 		return semanticVersion{}, fmt.Errorf("版本号 %q 不是合法 SemVer", raw)
 	}
+	// 预发布段按 SemVer 规范只允许字母/数字/连字符，点号仅作标识符分隔：
+	// 该字符串会进入文件路径与展示文案，放行路径元字符（../、绝对路径）会造成穿越。
+	if len(parts) == 2 {
+		pre := parts[1]
+		for _, seg := range strings.Split(pre, ".") {
+			if seg == "" || strings.ContainsFunc(seg, func(r rune) bool {
+				return !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r == '-')
+			}) {
+				return semanticVersion{}, fmt.Errorf("版本号 %q 的预发布段含非法字符", raw)
+			}
+		}
+	}
 	return semanticVersion{major: vals[0], minor: vals[1], patch: vals[2], pre: func() string {
 		if len(parts) == 2 {
 			return parts[1]

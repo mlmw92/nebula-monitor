@@ -361,10 +361,10 @@ func TestSetGrouping_NormalizesAndRebuilds(t *testing.T) {
 func TestFlushGroup_ConvergeOffIsPassthrough(t *testing.T) {
 	n := &captureNotifier{channel: "dingtalk"}
 	e := &Engine{
-		rules:     &RulesStore{rules: map[string]model.AlertRule{}},
-		notifiers: []Notifier{n},
-		grouping:  &GroupingStore{cfg: GroupingConfig{Converge: boolPtr(false)}},
+		rules:    &RulesStore{rules: map[string]model.AlertRule{}},
+		grouping: &GroupingStore{cfg: GroupingConfig{Converge: boolPtr(false)}},
 	}
+	e.SetNotifiers([]Notifier{n})
 	e.flushGroup(stormEvents(5))
 
 	batches := n.batches()
@@ -382,12 +382,12 @@ func TestFlushGroup_ConvergePerChannel(t *testing.T) {
 	ding := &captureNotifier{channel: "dingtalk"}
 	mail := &captureNotifier{channel: "email"}
 	e := &Engine{
-		rules:     &RulesStore{rules: map[string]model.AlertRule{}},
-		notifiers: []Notifier{ding, mail},
+		rules: &RulesStore{rules: map[string]model.AlertRule{}},
 		grouping: &GroupingStore{cfg: GroupingConfig{
 			Converge: boolPtr(true), HeadCount: 2, ConvergeWindow: "10m",
 		}},
 	}
+	e.SetNotifiers([]Notifier{ding, mail})
 
 	events := stormEvents(4)
 	events[3].Notify = []string{"email"} // 一条走邮件
@@ -416,10 +416,10 @@ func TestFlushGroup_ConvergePerChannel(t *testing.T) {
 func TestFlushGroup_ConvergeAttachesCorrelationNotes(t *testing.T) {
 	n := &captureNotifier{channel: "dingtalk"}
 	e := &Engine{
-		rules:     &RulesStore{rules: map[string]model.AlertRule{}},
-		notifiers: []Notifier{n},
-		grouping:  &GroupingStore{cfg: GroupingConfig{Converge: boolPtr(true), HeadCount: 5}},
+		rules:    &RulesStore{rules: map[string]model.AlertRule{}},
+		grouping: &GroupingStore{cfg: GroupingConfig{Converge: boolPtr(true), HeadCount: 5}},
 	}
+	e.SetNotifiers([]Notifier{n})
 	e.SetCorrelationProvider(fakeCorrelator{notes: map[string][]string{
 		"node-0": {"磁盘将满，关联 2 个中间件实例不可用"},
 	}})

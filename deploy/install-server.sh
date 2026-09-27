@@ -698,6 +698,9 @@ acquire_binary() {
 generate_config() {
   c_info "生成配置文件"
   mkdir -p "$CONFIG_DIR" "$DATA_DIR" "$DATA_DIR/geoip"
+  # 配置与数据目录含密钥/审计数据，收紧权限（默认 umask 下 mkdir 是 0755）
+  chmod 700 "$CONFIG_DIR"
+  chmod 750 "$DATA_DIR" "$DATA_DIR/geoip"
 
   # 升级模式：已有配置则备份保留，不覆盖（避免丢失用户改动）
   if (( UPGRADE )) && [[ -f "$CONFIG_DIR/server.yaml" ]]; then
@@ -806,6 +809,8 @@ auth:
   password: "$AUTH_PASSWORD"
   secret: "$AUTH_SECRET"
 EOF
+  # server.yaml 含 Agent 接入密钥、登录口令与通知渠道密钥，禁止全局可读
+  chmod 600 "$CONFIG_DIR/server.yaml"
 
   # 生成默认告警规则（来自示例）
   if [[ ! -f "$CONFIG_DIR/rules.yaml" ]]; then

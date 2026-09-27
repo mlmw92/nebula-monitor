@@ -699,7 +699,7 @@ function connectWS(name) {
         else if (byteKeys.includes(key)) rt[key] = fmtBytes(val)
         else rt[key] = round1(val)
         if (buffers[key]) {
-          buffers[key].push([d.timestamp / 1e6, val])
+          buffers[key].push([d.timestamp, val])
           if (buffers[key].length > 60) buffers[key].shift()
         }
       })
@@ -959,12 +959,12 @@ function rangeBounds(mode) {
   return [now - 86400000, now]
 }
 
-// 抓取单指标原始序列（时间戳由纳秒转为毫秒）
+// 抓取单指标原始序列（时间戳为毫秒，与后端 querier 一致）
 async function fetchRaw(name, metric, start, end, step) {
   const d = await http.get(`/api/v1/query/range?node=${encodeURIComponent(name)}&metric=${encodeURIComponent(metric)}&start=${start}&end=${end}&step=${step}`)
   return (d.series || []).map((s) => ({
     labels: s.labels || {},
-    points: (s.points || []).map((pt) => [pt.timestamp / 1e6, Number(pt.value)]),
+    points: (s.points || []).map((pt) => [pt.timestamp, Number(pt.value)]),
   }))
 }
 
@@ -998,7 +998,7 @@ async function loadDiskOccupancy(name, start, end, step) {
   const sumByTs = (series) => {
     const m = new Map()
     for (const s of series || []) for (const p of s.points || []) {
-      const ts = p.timestamp / 1e6
+      const ts = p.timestamp
       m.set(ts, (m.get(ts) || 0) + Number(p.value))
     }
     return m
@@ -1019,7 +1019,7 @@ async function loadNetSeries(name, start, end, step) {
     ;(d.series || []).forEach((s) => raw.push({
       name: m,
       labels: s.labels || {},
-      points: (s.points || []).map((pt) => [pt.timestamp / 1e6, Number(pt.value)]),
+      points: (s.points || []).map((pt) => [pt.timestamp, Number(pt.value)]),
     }))
   }
   const ifaces = new Set()
