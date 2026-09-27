@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +31,10 @@ const (
 	securityMaxBytes = 4 << 20
 	// securityFIMDefaultBaseline 默认 FIM 基线文件名（部署目录下）。
 	securityFIMDefaultBaseline = "fim_baseline.json"
+	// bruteForceAggregateKey 聚合事件的节流键：不管触发来源有多少，一个窗口
+	// 最多发一条聚合事件（此前按来源 IP 各发一条，公网机器会被扫描背景噪音
+	// 刷屏，且消息含 IP 导致 Server 侧按消息哈希的去重对新来源全部失效）。
+	bruteForceAggregateKey = "_aggregate_"
 )
 
 // SSH 失败登录日志正则（兼容 syslog 风格 auth.log / secure）。
@@ -235,16 +240,55 @@ func (c *SecurityCollector) collectSSH() []model.SecurityEvent {
 		_ = f.Close()
 	}
 
-	for ip, count := range c.sshFailureCounts(cutoff) {
-		if count < c.cfg.BruteForceThreshold || !c.markSSHBruteforceAlert(ip, now.UnixMilli(), window) {
-			continue
-		}
-		events = append(events, mkEvent(c.node, c.nodeIP, model.SecurityCatSSHBruteforce, model.SeverityCritical,
-			fmt.Sprintf("检测到 SSH 暴力破解：来源 %s 在 %d 秒内失败 %d 次", ip, c.cfg.BruteForceWindowSec, count),
-			map[string]string{"failCount": strconv.Itoa(count), "windowSec": strconv.Itoa(c.cfg.BruteForceWindowSec)},
-			ip, "", now.UnixMilli()))
-	}
+	counts := c.sshFailureCounts(cutoff)
+	events = append(events, c.bruteforceEvents(counts, now, window)...)
 	return events
+}
+
+// bruteforceEvents 把窗口内达到阈值的来源聚合为一条事件（全局节流：一个窗口
+// 最多一条，与触发来源数量无关）。
+func (c *SecurityCollector) bruteforceEvents(counts map[string]int, now time.Time, window time.Duration) []model.SecurityEvent {
+	offenders := make([]string, 0, 4)
+	total := 0
+	for ip, count := range counts {
+		if count >= c.cfg.BruteForceThreshold {
+			offenders = append(offenders, ip)
+			total += count
+		}
+	}
+	if len(offenders) == 0 {
+		return nil
+	}
+	sort.Strings(offenders)
+	// 全局节流：一个窗口最多一条聚合事件。来源 IP 各不相同属于公网扫描的常态，
+	// 若按来源各发一条，告警中心会被刷屏；聚合后 Server 侧去重也不会因消息里的
+	// IP 变化而失效（窗口内数值稳定）。
+	if !c.markSSHBruteforceAlert(bruteForceAggregateKey, now.UnixMilli(), window) {
+		return nil
+	}
+	const maxTopSources = 3
+	top := offenders
+	if len(top) > maxTopSources {
+		top = top[:maxTopSources]
+	}
+	parts := make([]string, 0, len(top))
+	for _, ip := range top {
+		parts = append(parts, fmt.Sprintf("%s(%d次)", ip, counts[ip]))
+	}
+	detail := strings.Join(parts, "、")
+	if more := len(offenders) - len(top); more > 0 {
+		detail += " 等"
+	}
+	return []model.SecurityEvent{mkEvent(c.node, c.nodeIP, model.SecurityCatSSHBruteforce, model.SeverityCritical,
+		fmt.Sprintf("检测到 SSH 暴力破解：%d 个来源在 %d 秒内共失败 %d 次（%s）",
+			len(offenders), c.cfg.BruteForceWindowSec, total, detail),
+		map[string]string{
+			"sourceCount": strconv.Itoa(len(offenders)),
+			"failTotal":   strconv.Itoa(total),
+			"windowSec":   strconv.Itoa(c.cfg.BruteForceWindowSec),
+			"topSources":  strings.Join(top, ","),
+		},
+		offenders[0], "", now.UnixMilli())}
 }
 
 func (c *SecurityCollector) recordSSHFailure(ip string, timestamp, cutoff int64) {
