@@ -91,7 +91,13 @@ func (s *Store) reindexLocked() {
 		s.roles[r.Name] = r
 	}
 	for _, r := range s.data.Roles {
-		s.roles[r.Name] = r // 自定义角色覆盖（同名时）
+		// 内置角色始终以代码为准：历史版本可能在 users.yaml 中写入了与内置角色
+		// 同名的自定义角色（或未来目录演进产生重名），若允许覆盖，绑定该角色的
+		// 用户会以残缺权限集工作（如超级管理员丢失 system:config 被 403）。
+		if _, builtin := s.roles[r.Name]; builtin {
+			continue
+		}
+		s.roles[r.Name] = r
 	}
 	s.userIdx = make(map[string]int, len(s.data.Users))
 	for i, u := range s.data.Users {

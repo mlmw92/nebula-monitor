@@ -7,6 +7,10 @@ package auth
 
 // ExpandPrincipal 根据用户与其角色列表展开出 Principal（权限并集 + 范围并集）。
 // 角色不存在时忽略；内置角色权限固定，自定义角色权限取自 roleStore。
+//
+// 超级管理员兜底：只要绑定内置超级管理员角色，权限恒为权限目录全量——
+// 不依赖该角色在 store 中的展开结果，避免任何存储层异常（同名自定义角色
+// 残留、旧文件快照缺新权限点等）导致超管被 403。
 func ExpandPrincipal(u User, roleLookup func(name string) (Role, bool)) *Principal {
 	perms := make(map[string]struct{})
 	scopeGlobal := false
@@ -21,6 +25,11 @@ func ExpandPrincipal(u User, roleLookup func(name string) (Role, bool)) *Princip
 		}
 		for _, p := range role.Permissions {
 			perms[p] = struct{}{}
+		}
+		if role.Name == RoleSuperAdmin {
+			for p := range AllPermissionKeys() {
+				perms[p] = struct{}{}
+			}
 		}
 		rs := role.RoleScope()
 		if rs.IsGlobal() {
