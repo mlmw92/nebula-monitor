@@ -29,6 +29,7 @@ import (
 	"github.com/nebula/monitor/internal/server/instancereg"
 	"github.com/nebula/monitor/internal/server/logstore"
 	"github.com/nebula/monitor/internal/server/mwreg"
+	"github.com/nebula/monitor/internal/server/mwview"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
@@ -174,6 +175,9 @@ func main() {
 	if err := nginxaccess.SetGeoOverridePath(cfg.GeoIPFile); err != nil {
 		slog.Warn("加载 IP 地理库覆盖文件失败，已回退内置库", "path", cfg.GeoIPFile, "err", err)
 	}
+
+	// 中间件监控页面展示开关（哪些类型出现在 Tab 上）：空清单 = 全部展示
+	mwview.Default.SetPath(cfg.MiddlewareViewFile)
 
 	// 上报接收（Nginx access log 地理聚合窗口：TTL 1h，实时大屏场景）
 	ngxWin := nginxaccess.NewWindow(nginxaccess.NewGeo(), time.Hour)

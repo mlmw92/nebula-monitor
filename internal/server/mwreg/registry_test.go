@@ -30,13 +30,14 @@ func twin(id, title string) template.Config {
 	}
 }
 
-// TestBuiltinOnlyHasTenTypes 未注入模板源时保持内置 10 类（行为与改造前一致）。
-func TestBuiltinOnlyHasTenTypes(t *testing.T) {
+// TestBuiltinOnlyHasFifteenTypes 未注入模板源时保持内置 15 类。
+func TestBuiltinOnlyHasFifteenTypes(t *testing.T) {
 	reg := BuiltinOnly()
-	if got := len(reg.Types()); got != 10 {
-		t.Fatalf("内置类型数 = %d，want 10", got)
+	if got := len(reg.Types()); got != 15 {
+		t.Fatalf("内置类型数 = %d，want 15", got)
 	}
-	for _, key := range []string{"redis", "mysql", "postgres", "nginx", "kafka", "docker", "rocketmq", "k8s", "mongodb", "fastdfs"} {
+	for _, key := range []string{"redis", "mysql", "postgres", "nginx", "kafka", "docker", "rocketmq", "k8s", "mongodb", "fastdfs",
+		"rabbitmq", "elasticsearch", "clickhouse", "nacos", "zookeeper"} {
 		if !reg.Has(key) {
 			t.Errorf("内置类型缺少 %s", key)
 		}
@@ -45,8 +46,8 @@ func TestBuiltinOnlyHasTenTypes(t *testing.T) {
 	if got := reg.Keys()[0]; got != "redis" {
 		t.Fatalf("首个类型 = %q，want redis（顺序影响界面展示）", got)
 	}
-	if got := reg.Keys()[9]; got != "fastdfs" {
-		t.Fatalf("末个类型 = %q，want fastdfs", got)
+	if got := reg.Keys()[14]; got != "zookeeper" {
+		t.Fatalf("末个类型 = %q，want zookeeper", got)
 	}
 }
 
@@ -115,32 +116,32 @@ func TestBuiltinSummaryAndReportFields(t *testing.T) {
 
 // TestTemplateDerivedTypes 模板派生出独立类型：存活指标统一为 template_target_up + template 标签过滤。
 func TestTemplateDerivedTypes(t *testing.T) {
-	reg := New(&fakeSource{list: []template.Config{twin("rabbitmq", "RabbitMQ")}, rev: 1})
+	reg := New(&fakeSource{list: []template.Config{twin("testmw", "TestMW")}, rev: 1})
 	types := reg.Types()
-	if len(types) != 11 {
-		t.Fatalf("类型数 = %d，want 11（10 内置 + 1 模板）", len(types))
+	if len(types) != 16 {
+		t.Fatalf("类型数 = %d，want 16（15 内置 + 1 模板）", len(types))
 	}
-	t2, ok := reg.Get("rabbitmq")
+	t2, ok := reg.Get("testmw")
 	if !ok {
-		t.Fatal("缺少模板派生类型 rabbitmq")
+		t.Fatal("缺少模板派生类型 testmw")
 	}
 	if t2.Kind != KindTemplate {
 		t.Fatalf("Kind = %q，want template", t2.Kind)
 	}
-	if t2.Label != "RabbitMQ" {
+	if t2.Label != "TestMW" {
 		t.Fatalf("Label 应取 title，got %q", t2.Label)
 	}
 	if t2.UpMetric != template.UpMetricName {
 		t.Fatalf("存活指标 = %q，want %q", t2.UpMetric, template.UpMetricName)
 	}
-	if t2.UpLabels["template"] != "rabbitmq" {
+	if t2.UpLabels["template"] != "testmw" {
 		t.Fatalf("模板类型必须按 template 标签过滤（否则所有模板共用同一指标名会互相误触发）：%v", t2.UpLabels)
 	}
 	if len(t2.Summary) != 2 {
 		t.Fatalf("摘要应来自 rules.metrics，got %+v", t2.Summary)
 	}
 	// label 留空时回退为指标名；指标名按模板 id 加前缀
-	if t2.Summary[0].Metric != "rabbitmq_queue_depth" || t2.Summary[0].Label != "队列深度" || t2.Summary[0].Unit != "个" {
+	if t2.Summary[0].Metric != "testmw_queue_depth" || t2.Summary[0].Label != "队列深度" || t2.Summary[0].Unit != "个" {
 		t.Fatalf("摘要项不符：%+v", t2.Summary[0])
 	}
 	if t2.Summary[1].Label != "consumers" {
@@ -148,26 +149,48 @@ func TestTemplateDerivedTypes(t *testing.T) {
 	}
 }
 
+// TestTemplateDerivedTypesCannotShadowBuiltin 模板 id 与内置类型同名时，
+// Get 必须仍返回内置类型（内置优先），且 Types() 不产生重复 key。
+func TestTemplateDerivedTypesCannotShadowBuiltin(t *testing.T) {
+	reg := New(&fakeSource{list: []template.Config{twin("rabbitmq", "RabbitMQ")}, rev: 1})
+	t2, ok := reg.Get("rabbitmq")
+	if !ok {
+		t.Fatal("缺少 rabbitmq")
+	}
+	if t2.Kind != KindBuiltin {
+		t.Fatalf("同名模板不得遮蔽内置类型：Kind = %q", t2.Kind)
+	}
+	seen := map[string]int{}
+	for _, t := range reg.Types() {
+		seen[t.Key]++
+	}
+	for k, n := range seen {
+		if n > 1 {
+			t.Fatalf("类型 key %s 在 Types() 中重复出现 %d 次", k, n)
+		}
+	}
+}
+
 // TestTemplateTypesNotCached 类型表不缓存：模板增删后下一次读取即生效（无需重启）。
 func TestTemplateTypesNotCached(t *testing.T) {
 	src := &fakeSource{}
 	reg := New(src)
-	if len(reg.Types()) != 10 {
+	if len(reg.Types()) != 15 {
 		t.Fatal("初始应只有内置类型")
 	}
-	src.list = []template.Config{twin("rabbitmq", "RabbitMQ")}
-	if len(reg.Types()) != 11 {
+	src.list = []template.Config{twin("testmw", "TestMW")}
+	if len(reg.Types()) != 16 {
 		t.Fatal("新增模板后类型表应立即反映（不缓存）")
 	}
 	src.list = nil
-	if len(reg.Types()) != 10 {
+	if len(reg.Types()) != 15 {
 		t.Fatal("删除模板后类型表应立即反映")
 	}
 }
 
 // TestNilStoreAndNilRegistry 空值安全：不注入模板源、或调用方拿不到注册表时都不 panic。
 func TestNilStoreAndNilRegistry(t *testing.T) {
-	if got := New(nil).Types(); len(got) != 10 {
+	if got := New(nil).Types(); len(got) != 15 {
 		t.Fatalf("store 为 nil 时应退化为内置类型，got %d", len(got))
 	}
 	var r *Registry

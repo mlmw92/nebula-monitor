@@ -57,16 +57,16 @@ func (s *templateSource) Snapshot() ([]template.Config, uint64) { return s.list,
 
 func point(v float64) []model.Point { return []model.Point{{Value: v}} }
 
-// rabbitmqTemplate 返回一个含摘要规则的模板。
-func rabbitmqTemplate() template.Config {
+// testmwTemplate 返回一个含摘要规则的模板（id 取 testmw，避免与内置类型同名）。
+func testmwTemplate() template.Config {
 	return template.Config{
-		ID:      "rabbitmq",
-		Title:   "RabbitMQ",
+		ID:      "testmw",
+		Title:   "TestMW",
 		Kind:    template.KindPrometheusExporter,
 		Groups:  []string{"default"},
 		Targets: []template.Target{{Instance: "mq-01:15692", Addr: "http://127.0.0.1:15692/metrics"}},
 		Rules: template.Rules{
-			Keep: "^rabbitmq_",
+			Keep: "^testmw_",
 			Metrics: []template.MetricRule{
 				{Name: "queue_depth", Label: "队列深度", Unit: "个"},
 			},
@@ -86,18 +86,18 @@ func templateAPI(t *testing.T) (*API, *seriesStore) {
 	a := scopeTestAPI(t)
 	store := &seriesStore{series: map[string][]model.Series{
 		"template_target_up": {
-			{Labels: map[string]string{"node": "n1", "instance": "mq-01:15692", "template": "rabbitmq", "group": "default"}, Points: point(1)},
-			{Labels: map[string]string{"node": "n1", "instance": "mq-02:15692", "template": "rabbitmq", "group": "default"}, Points: point(0)},
+			{Labels: map[string]string{"node": "n1", "instance": "mq-01:15692", "template": "testmw", "group": "default"}, Points: point(1)},
+			{Labels: map[string]string{"node": "n1", "instance": "mq-02:15692", "template": "testmw", "group": "default"}, Points: point(0)},
 		},
-		"rabbitmq_queue_depth": {
-			{Labels: map[string]string{"node": "n1", "instance": "mq-01:15692", "template": "rabbitmq"}, Points: point(42)},
+		"testmw_queue_depth": {
+			{Labels: map[string]string{"node": "n1", "instance": "mq-01:15692", "template": "testmw"}, Points: point(42)},
 		},
 	}}
 	a.store = store
 	// 一条模板指标上的活跃告警：用于验证「告警按类型前缀归集」对模板类型同样生效
 	// （且不会被某个内置类型抢走——模板 id 与内置前缀互斥由校验器保证）
-	a.alerts = &alertStoreStub{active: []model.AlertEvent{{Metric: "rabbitmq_queue_depth", Node: "n1"}}}
-	a.SetMiddlewareRegistry(mwreg.New(&templateSource{list: []template.Config{rabbitmqTemplate()}}))
+	a.alerts = &alertStoreStub{active: []model.AlertEvent{{Metric: "testmw_queue_depth", Node: "n1"}}}
+	a.SetMiddlewareRegistry(mwreg.New(&templateSource{list: []template.Config{testmwTemplate()}}))
 	return a, store
 }
 
@@ -135,7 +135,7 @@ func TestMiddlewareOverview_IncludesTemplateType(t *testing.T) {
 
 	var found bool
 	for _, item := range resp.Types {
-		if item.Type != "rabbitmq" {
+		if item.Type != "testmw" {
 			// 模板指标的告警不应被内置类型抢走
 			if item.AlertCount != 0 {
 				t.Errorf("内置类型 %s 不应归集模板指标的告警", item.Type)
@@ -143,7 +143,7 @@ func TestMiddlewareOverview_IncludesTemplateType(t *testing.T) {
 			continue
 		}
 		found = true
-		if item.Label != "RabbitMQ" {
+		if item.Label != "TestMW" {
 			t.Errorf("展示名应取模板 title，got %q", item.Label)
 		}
 		// 前端据此区分「内置类型」与「模板派生类型」（模板类型走通用 Tab 组件）
@@ -156,22 +156,22 @@ func TestMiddlewareOverview_IncludesTemplateType(t *testing.T) {
 		if item.AlertCount != 1 {
 			t.Errorf("模板类型应归集到自己的告警，got %d", item.AlertCount)
 		}
-		if len(item.Summary) != 1 || item.Summary[0].Key != "rabbitmq_queue_depth" || item.Summary[0].Value != 42 {
+		if len(item.Summary) != 1 || item.Summary[0].Key != "testmw_queue_depth" || item.Summary[0].Value != 42 {
 			t.Errorf("卡片摘要不符：%+v", item.Summary)
 		}
 	}
 	if !found {
-		t.Fatalf("总览缺少模板派生类型 rabbitmq：%s", rec.Body.String())
+		t.Fatalf("总览缺少模板派生类型 testmw：%s", rec.Body.String())
 	}
 	if resp.AlertCount != 1 {
 		t.Errorf("总告警数 = %d，want 1", resp.AlertCount)
 	}
 	// 存活指标的查询必须带 template 过滤（所有模板共用 template_target_up，
 	// 不过滤会让 A 模板的在线状态被 B 模板的实例影响）；摘要指标名已含模板 id，无需过滤
-	if got := store.labelsFor("template_target_up"); got["template"] != "rabbitmq" {
+	if got := store.labelsFor("template_target_up"); got["template"] != "testmw" {
 		t.Errorf("存活指标查询未按 template 过滤：%v", got)
 	}
-	if got := store.labelsFor("rabbitmq_queue_depth"); got != nil {
+	if got := store.labelsFor("testmw_queue_depth"); got != nil {
 		t.Errorf("摘要指标名已含模板前缀，不应再带标签过滤：%v", got)
 	}
 }
@@ -180,13 +180,13 @@ func TestMiddlewareOverview_IncludesTemplateType(t *testing.T) {
 func TestMiddlewareTypeInstances_TemplateType(t *testing.T) {
 	a, store := templateAPI(t)
 	rec := httptest.NewRecorder()
-	newRoutesMux(a).ServeHTTP(rec, reqWith(globalPrincipal("middleware:read"), http.MethodGet, "/api/v1/middleware/rabbitmq/instances", ""))
+	newRoutesMux(a).ServeHTTP(rec, reqWith(globalPrincipal("middleware:read"), http.MethodGet, "/api/v1/middleware/testmw/instances", ""))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code = %d（body=%s）", rec.Code, rec.Body.String())
 	}
 	// 关键：存活指标查询必须按 template 标签过滤（所有模板共用 template_target_up）
-	if got := store.labelsFor("template_target_up"); got["template"] != "rabbitmq" {
+	if got := store.labelsFor("template_target_up"); got["template"] != "testmw" {
 		t.Fatalf("模板实例查询未按 template 标签过滤：%v", got)
 	}
 
@@ -215,7 +215,7 @@ func TestMiddlewareTypeInstances_TemplateType(t *testing.T) {
 	if first.Instance != "mq-01:15692" || first.Group != "default" || !first.Up {
 		t.Fatalf("首个实例不符：%+v", first)
 	}
-	if len(first.Metrics) != 1 || first.Metrics[0].Key != "rabbitmq_queue_depth" || first.Metrics[0].Value != 42 {
+	if len(first.Metrics) != 1 || first.Metrics[0].Key != "testmw_queue_depth" || first.Metrics[0].Value != 42 {
 		t.Fatalf("实例摘要指标不符：%+v", first.Metrics)
 	}
 	// up=0 的实例仍应列出（离线实例必须可见）
@@ -236,7 +236,7 @@ func TestMiddlewareTypeInstances_UnknownType(t *testing.T) {
 	}
 }
 
-// TestMiddlewareOverview_WithoutRegistry 未注入注册表时退回内置 10 类（行为与改造前一致）。
+// TestMiddlewareOverview_WithoutRegistry 未注入注册表时退回内置 15 类。
 func TestMiddlewareOverview_WithoutRegistry(t *testing.T) {
 	a := scopeTestAPI(t)
 	a.store = &seriesStore{}
@@ -252,7 +252,7 @@ func TestMiddlewareOverview_WithoutRegistry(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("响应解析失败：%v", err)
 	}
-	if len(resp.Types) != 10 {
-		t.Fatalf("未注入注册表时应只有内置 10 类，got %d", len(resp.Types))
+	if len(resp.Types) != 15 {
+		t.Fatalf("未注入注册表时应只有内置 15 类，got %d", len(resp.Types))
 	}
 }

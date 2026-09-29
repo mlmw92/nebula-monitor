@@ -26,6 +26,11 @@ type Result struct {
 	K8s         []model.K8sInstance
 	MongoDB     []model.MongoDBInstance
 	FastDFS     []model.FastDFSInstance
+	RabbitMQ    []model.RabbitMQInstance
+	Elasticsearch []model.ElasticsearchInstance
+	ClickHouse  []model.ClickHouseInstance
+	Nacos       []model.NacosInstance
+	ZooKeeper   []model.ZooKeeperInstance
 
 	SecurityEvents   []model.SecurityEvent
 	SecurityBaseline *model.SecurityBaseline
@@ -169,6 +174,51 @@ func (c *Collector) tasks(res *Result, mu *sync.Mutex) []collectTask {
 			m, inst := c.fastdfs.CollectCtx(ctx)
 			addMetrics(m)
 			res.FastDFS = inst
+			return nil
+		}},
+		{name: "rabbitmq", run: func(ctx context.Context) error {
+			if c.rabbitmq == nil {
+				return nil
+			}
+			m, inst := c.rabbitmq.CollectCtx(ctx)
+			addMetrics(m)
+			res.RabbitMQ = inst
+			return nil
+		}},
+		{name: "elasticsearch", run: func(ctx context.Context) error {
+			if c.es == nil {
+				return nil
+			}
+			m, inst := c.es.CollectCtx(ctx)
+			addMetrics(m)
+			res.Elasticsearch = inst
+			return nil
+		}},
+		{name: "clickhouse", run: func(ctx context.Context) error {
+			if c.clickhouse == nil {
+				return nil
+			}
+			m, inst := c.clickhouse.CollectCtx(ctx)
+			addMetrics(m)
+			res.ClickHouse = inst
+			return nil
+		}},
+		{name: "nacos", run: func(ctx context.Context) error {
+			if c.nacos == nil {
+				return nil
+			}
+			m, inst := c.nacos.CollectCtx(ctx)
+			addMetrics(m)
+			res.Nacos = inst
+			return nil
+		}},
+		{name: "zookeeper", run: func(ctx context.Context) error {
+			if c.zookeeper == nil {
+				return nil
+			}
+			m, inst := c.zookeeper.CollectCtx(ctx)
+			addMetrics(m)
+			res.ZooKeeper = inst
 			return nil
 		}},
 		{name: "security", run: func(ctx context.Context) error {

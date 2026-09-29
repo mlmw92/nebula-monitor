@@ -29,6 +29,11 @@ type Registry struct {
 	k8s       map[string][]model.K8sInstance
 	mongodb   map[string][]model.MongoDBInstance
 	fastdfs   map[string][]model.FastDFSInstance
+	rabbitmq  map[string][]model.RabbitMQInstance
+	es        map[string][]model.ElasticsearchInstance
+	clickhouse map[string][]model.ClickHouseInstance
+	nacos     map[string][]model.NacosInstance
+	zookeeper map[string][]model.ZooKeeperInstance
 }
 
 // Default 全局默认注册表，由 receiver 在每次上报时写入，API 在查询时读取。
@@ -47,6 +52,11 @@ func New() *Registry {
 		k8s:      map[string][]model.K8sInstance{},
 		mongodb:  map[string][]model.MongoDBInstance{},
 		fastdfs:  map[string][]model.FastDFSInstance{},
+		rabbitmq: map[string][]model.RabbitMQInstance{},
+		es:       map[string][]model.ElasticsearchInstance{},
+		clickhouse: map[string][]model.ClickHouseInstance{},
+		nacos:    map[string][]model.NacosInstance{},
+		zookeeper: map[string][]model.ZooKeeperInstance{},
 	}
 }
 
@@ -254,6 +264,106 @@ func (r *Registry) FastDFSInstances() []model.FastDFSInstance {
 	defer r.mu.RUnlock()
 	var all []model.FastDFSInstance
 	for _, v := range r.fastdfs {
+		all = append(all, v...)
+	}
+	return all
+}
+
+// ---- RabbitMQ ----
+
+// SetRabbitMQ 写入指定节点最近一次上报的 RabbitMQ 实例清单。
+func (r *Registry) SetRabbitMQ(node string, instances []model.RabbitMQInstance) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rabbitmq[normalizeNode(node)] = instances
+}
+
+// RabbitMQInstances 返回全部节点已注册的 RabbitMQ 实例（合并所有节点）。
+func (r *Registry) RabbitMQInstances() []model.RabbitMQInstance {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var all []model.RabbitMQInstance
+	for _, v := range r.rabbitmq {
+		all = append(all, v...)
+	}
+	return all
+}
+
+// ---- Elasticsearch ----
+
+// SetElasticsearch 写入指定节点最近一次上报的 Elasticsearch 实例清单。
+func (r *Registry) SetElasticsearch(node string, instances []model.ElasticsearchInstance) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.es[normalizeNode(node)] = instances
+}
+
+// ElasticsearchInstances 返回全部节点已注册的 Elasticsearch 实例（合并所有节点）。
+func (r *Registry) ElasticsearchInstances() []model.ElasticsearchInstance {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var all []model.ElasticsearchInstance
+	for _, v := range r.es {
+		all = append(all, v...)
+	}
+	return all
+}
+
+// ---- ClickHouse ----
+
+// SetClickHouse 写入指定节点最近一次上报的 ClickHouse 实例清单。
+func (r *Registry) SetClickHouse(node string, instances []model.ClickHouseInstance) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.clickhouse[normalizeNode(node)] = instances
+}
+
+// ClickHouseInstances 返回全部节点已注册的 ClickHouse 实例（合并所有节点）。
+func (r *Registry) ClickHouseInstances() []model.ClickHouseInstance {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var all []model.ClickHouseInstance
+	for _, v := range r.clickhouse {
+		all = append(all, v...)
+	}
+	return all
+}
+
+// ---- Nacos ----
+
+// SetNacos 写入指定节点最近一次上报的 Nacos 实例清单。
+func (r *Registry) SetNacos(node string, instances []model.NacosInstance) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nacos[normalizeNode(node)] = instances
+}
+
+// NacosInstances 返回全部节点已注册的 Nacos 实例（合并所有节点）。
+func (r *Registry) NacosInstances() []model.NacosInstance {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var all []model.NacosInstance
+	for _, v := range r.nacos {
+		all = append(all, v...)
+	}
+	return all
+}
+
+// ---- ZooKeeper ----
+
+// SetZooKeeper 写入指定节点最近一次上报的 ZooKeeper 实例清单。
+func (r *Registry) SetZooKeeper(node string, instances []model.ZooKeeperInstance) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.zookeeper[normalizeNode(node)] = instances
+}
+
+// ZooKeeperInstances 返回全部节点已注册的 ZooKeeper 实例（合并所有节点）。
+func (r *Registry) ZooKeeperInstances() []model.ZooKeeperInstance {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var all []model.ZooKeeperInstance
+	for _, v := range r.zookeeper {
 		all = append(all, v...)
 	}
 	return all

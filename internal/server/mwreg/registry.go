@@ -105,10 +105,22 @@ var builtinOnly = &Registry{}
 func BuiltinOnly() *Registry { return builtinOnly }
 
 // Types 返回全部类型：内置在前、模板在后，顺序稳定（前端展示与测试断言都依赖顺序稳定）。
+// 模板 id 与内置类型同名时以内置为准（模板项跳过）——内置 RabbitMQ/ZooKeeper 等出现后，
+// 历史遗留的同名模板不得遮蔽内置类型，也不应在展示层产生重复 Tab。
 func (r *Registry) Types() []Type {
 	out := make([]Type, 0, len(builtinTypes)+4)
-	out = append(out, builtinTypes...)
-	out = append(out, r.TemplateTypes()...)
+	seen := make(map[string]bool, len(builtinTypes))
+	for _, t := range builtinTypes {
+		seen[t.Key] = true
+		out = append(out, t)
+	}
+	for _, t := range r.TemplateTypes() {
+		if seen[t.Key] {
+			continue
+		}
+		seen[t.Key] = true
+		out = append(out, t)
+	}
 	return out
 }
 

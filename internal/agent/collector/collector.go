@@ -38,6 +38,11 @@ type Collector struct {
 	port        *PortCollector
 	mongo       *MongoDBCollector
 	fastdfs     *FastDFSCollector
+	rabbitmq    *RabbitMQCollector
+	es          *ElasticsearchCollector
+	clickhouse  *ClickHouseCollector
+	nacos       *NacosCollector
+	zookeeper   *ZooKeeperCollector
 	security    *SecurityCollector
 
 	// 采集项模板（阶段一：来自本机 agent.yaml；阶段二：可被 Server 下发替换）。
@@ -68,6 +73,11 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	k8sInstances []model.K8sInstanceConfig,
 	mongoInstances []model.MongoDBInstanceConfig,
 	fastdfsInstances []model.FastDFSInstanceConfig,
+	rabbitmqInstances []model.RabbitMQInstanceConfig,
+	esInstances []model.ElasticsearchInstanceConfig,
+	clickhouseInstances []model.ClickHouseInstanceConfig,
+	nacosInstances []model.NacosInstanceConfig,
+	zookeeperInstances []model.ZooKeeperInstanceConfig,
 	portChecks []string,
 	securityCfg config.SecurityConfig,
 	collectTimeout time.Duration,
@@ -123,6 +133,21 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 	}
 	if cfg.FastDFS {
 		c.fastdfs = NewFastDFSCollector(node, fastdfsInstances)
+	}
+	if cfg.RabbitMQ {
+		c.rabbitmq = NewRabbitMQCollector(node, rabbitmqInstances)
+	}
+	if cfg.Elasticsearch {
+		c.es = NewElasticsearchCollector(node, esInstances)
+	}
+	if cfg.ClickHouse {
+		c.clickhouse = NewClickHouseCollector(node, clickhouseInstances)
+	}
+	if cfg.Nacos {
+		c.nacos = NewNacosCollector(node, nacosInstances)
+	}
+	if cfg.ZooKeeper {
+		c.zookeeper = NewZooKeeperCollector(node, zookeeperInstances)
 	}
 	if cfg.Port {
 		c.port = NewPortCollector(node, portChecks)

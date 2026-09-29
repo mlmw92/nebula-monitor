@@ -206,8 +206,8 @@ func TestTemplatesAPI_Presets(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("响应解析失败：%v", err)
 	}
-	if len(resp.Presets) < 4 {
-		t.Fatalf("预设数量 %d 偏少（至少覆盖 4 个常见中间件）", len(resp.Presets))
+	if len(resp.Presets) < 1 {
+		t.Fatalf("预设数量 %d 偏少（RabbitMQ/ES/ClickHouse/Nacos/ZooKeeper 已升级为内置采集，etcd 仍走模板）", len(resp.Presets))
 	}
 	for _, p := range resp.Presets {
 		if p.ID == "" || p.Title == "" || p.Desc == "" || p.Note == "" {

@@ -29,8 +29,8 @@ func TestPresetsAreCompatibleTogether(t *testing.T) {
 	if err := ValidateAll(all); err != nil {
 		t.Fatalf("预设集合不合法（id 冲突或互为前缀）：%v", err)
 	}
-	if len(all) < 4 {
-		t.Fatalf("预设数量 %d 偏少，至少覆盖 4 个常见中间件", len(all))
+	if len(all) < 1 {
+		t.Fatalf("预设数量 %d 偏少（RabbitMQ/ES/ClickHouse/Nacos/ZooKeeper 已升级为内置采集，预设只剩 etcd）", len(all))
 	}
 }
 
@@ -76,8 +76,8 @@ func TestPresetsMetadata(t *testing.T) {
 
 // TestPresetByID 按 id 查预设（Web 端「从预设创建」就走这个入口）。
 func TestPresetByID(t *testing.T) {
-	if _, ok := PresetByID("rabbitmq"); !ok {
-		t.Fatal("应能按 id 取到 rabbitmq 预设")
+	if _, ok := PresetByID("etcd"); !ok {
+		t.Fatal("应能按 id 取到 etcd 预设")
 	}
 	if _, ok := PresetByID("no-such"); ok {
 		t.Fatal("不存在的 id 不应返回预设")

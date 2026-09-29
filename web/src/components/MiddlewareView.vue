@@ -5,12 +5,28 @@
       <div class="header-left">
         <h2 class="page-title">中间件监控</h2>
         <p class="page-desc">
-          Redis / MySQL / PostgreSQL / Nginx / Kafka / Docker / RocketMQ / Kubernetes / MongoDB / FastDFS
-          实例监控与可视化，以及由「采集项模板」派生的自定义类型
+          各类中间件实例监控与可视化，以及由「采集项模板」派生的自定义类型。
+          未部署的类型可在右侧「展示类型」中隐藏。
         </p>
       </div>
-      <el-button @click="$router.push('/templates')">采集项模板</el-button>
+      <div class="header-actions">
+        <el-button @click="viewDialog = true">展示类型</el-button>
+        <el-button @click="$router.push('/templates')">采集项模板</el-button>
+      </div>
     </div>
+
+    <!-- 展示类型配置 -->
+    <el-dialog v-model="viewDialog" title="选择展示的中间件类型" width="480">
+      <div class="view-config-tip">勾选要在中间件监控页展示的类型；全部取消勾选表示展示全部。</div>
+      <el-checkbox-group v-model="viewSelection">
+        <el-checkbox v-for="t in viewAvailable" :key="t" :value="t" class="view-cb">{{ viewLabel(t) }}</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="viewDialog = false">取消</el-button>
+        <el-button @click="saveViewConfig">恢复全部</el-button>
+        <el-button type="primary" :loading="savingView" @click="applyViewConfig">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 中间件类型 Tab -->
     <el-tabs v-model="activeTab" class="mw-tabs" type="border-card">
@@ -94,8 +110,15 @@
         </template>
         <FastDFSTab v-if="activeTab === 'fastdfs'" />
       </el-tab-pane>
+      <!-- 轻采集内置类型：存活 + 核心指标，共用一个 spec 驱动的通用组件 -->
+      <el-tab-pane v-for="t in builtinTabList" :key="t.type" :label="t.label" :name="t.type">
+        <template #label>
+          <span class="tab-label"><span class="tab-emoji">{{ t.emoji }}</span>{{ t.label }}</span>
+        </template>
+        <BuiltinTab v-if="activeTab === t.type" :type="t.type" />
+      </el-tab-pane>
       <!-- 采集项模板派生的类型：由 Server 侧类型注册表动态提供，无需为每类中间件写前端代码 -->
-      <el-tab-pane v-for="t in templateTypes" :key="t.type" :label="t.label" :name="t.type">
+      <el-tab-pane v-for="t in visibleTemplateTypes" :key="t.type" :label="t.label" :name="t.type">
         <template #label>
           <span class="tab-label">
             {{ t.label }}
@@ -138,6 +161,9 @@ const MongoTab = tabLoader(() => import('./mongo/MongoTab.vue'))
 const FastDFSTab = tabLoader(() => import('./fastdfs/FastDFSTab.vue'))
 // 模板派生类型共用一个通用 Tab（实例表 + 摘要指标），因此新增一类中间件不必再写前端组件
 const TemplateTab = tabLoader(() => import('./mw/TemplateTab.vue'))
+// 轻采集内置类型（RabbitMQ/ES/ClickHouse/Nacos/ZooKeeper）共用一个 spec 驱动的通用 Tab
+const BuiltinTab = tabLoader(() => import('./mw/BuiltinTab.vue'))
+import { builtinSpecs } from './mw/builtinSpecs'
 import redisIcon from '../assets/img/redis.svg'
 import mysqlIcon from '../assets/img/mysql.svg'
 import postgresIcon from '../assets/img/postgresql.svg'
@@ -150,7 +176,58 @@ import k8sIcon from '../assets/img/kubernetes.svg'
 import fastdfsIcon from '../assets/img/fastdfs.svg'
 
 const route = useRoute()
-const BUILTIN_TABS = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s', 'mongodb', 'fastdfs']
+const BUILTIN_TABS = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s', 'mongodb', 'fastdfs',
+  'rabbitmq', 'elasticsearch', 'clickhouse', 'nacos', 'zookeeper']
+
+// 轻采集类型的 Tab 元数据（label + emoji），与 builtinSpecs 对应
+const builtinTabList = [
+  { type: 'rabbitmq', label: 'RabbitMQ', emoji: '🐇' },
+  { type: 'elasticsearch', label: 'Elasticsearch', emoji: '🔍' },
+  { type: 'clickhouse', label: 'ClickHouse', emoji: '🏢' },
+  { type: 'nacos', label: 'Nacos', emoji: '☁️' },
+  { type: 'zookeeper', label: 'ZooKeeper', emoji: '🦁' },
+]
+
+// ---- 展示类型开关 ----
+// enabled 为空 = 全部展示；非空 = 只展示清单内的类型
+const viewDialog = ref(false)
+const viewAvailable = ref([])
+const enabledTypes = ref([])
+const viewSelection = ref([])
+const savingView = ref(false)
+
+function viewLabel(key) {
+  return builtinSpecs[key]?.label || key
+}
+const enabledList = computed(() => (enabledTypes.value.length ? enabledTypes.value : null))
+function typeVisible(key) {
+  return !enabledList.value || enabledList.value.includes(key)
+}
+const visibleBuiltinTabs = computed(() => BUILTIN_TABS.filter(typeVisible))
+const visibleTemplateTypes = computed(() => templateTypes.value.filter((t) => typeVisible(t.type)))
+
+async function loadViewConfig() {
+  try {
+    const data = await http.get('/api/v1/middleware/view-config')
+    viewAvailable.value = data.available || []
+    enabledTypes.value = data.enabled || []
+    viewSelection.value = [...enabledTypes.value]
+  } catch (e) {
+    console.error('加载展示配置失败', e)
+  }
+}
+async function saveViewConfig() {
+  savingView.value = true
+  try {
+    const data = await http.put('/api/v1/middleware/view-config', { enabled: viewSelection.value })
+    enabledTypes.value = data.enabled || []
+    viewDialog.value = false
+  } catch (e) {
+    console.error('保存展示配置失败', e)
+  } finally {
+    savingView.value = false
+  }
+}
 
 // 模板派生类型来自 Server 侧类型注册表（总览接口把 kind=template 的类型一并返回）
 const templateTypes = ref([])
@@ -163,7 +240,7 @@ async function loadTemplateTypes() {
   }
 }
 
-const validTabs = computed(() => BUILTIN_TABS.concat(templateTypes.value.map((t) => t.type)))
+const validTabs = computed(() => visibleBuiltinTabs.value.concat(visibleTemplateTypes.value.map((t) => t.type)))
 const activeTab = ref(BUILTIN_TABS.includes(route.query.tab) ? route.query.tab : 'redis')
 
 // 支持从首页等外部链接通过 ?tab= 深链跳转到指定中间件
@@ -176,7 +253,7 @@ watch(
 
 // 模板类型要等类型列表返回后才存在，因此加载完成后再解析一次深链
 onMounted(async () => {
-  await loadTemplateTypes()
+  await Promise.all([loadTemplateTypes(), loadViewConfig()])
   if (route.query.tab && validTabs.value.includes(route.query.tab)) activeTab.value = route.query.tab
 })
 </script>
@@ -213,6 +290,10 @@ onMounted(async () => {
   color: var(--text-dim);
   margin-top: 4px;
 }
+.header-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.view-config-tip { font-size: 13px; color: var(--text-dim); margin-bottom: 12px; }
+.view-cb { display: block; margin: 0 0 4px 0; }
+.tab-emoji { font-size: 15px; }
 .mw-tabs {
   border-radius: var(--radius);
   overflow: hidden;

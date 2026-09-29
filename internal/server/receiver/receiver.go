@@ -273,6 +273,11 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 	instancereg.Default.SetK8s(payload.Node, payload.K8sInstances)
 	instancereg.Default.SetMongoDB(payload.Node, payload.MongoDBInstances)
 	instancereg.Default.SetFastDFS(payload.Node, payload.FastDFSInstances)
+	instancereg.Default.SetRabbitMQ(payload.Node, payload.RabbitMQInstances)
+	instancereg.Default.SetElasticsearch(payload.Node, payload.ElasticsearchInstances)
+	instancereg.Default.SetClickHouse(payload.Node, payload.ClickHouseInstances)
+	instancereg.Default.SetNacos(payload.Node, payload.NacosInstances)
+	instancereg.Default.SetZooKeeper(payload.Node, payload.ZooKeeperInstances)
 
 	if err := r.storage.Write(metrics); err != nil {
 		slog.Error("写入 VM 失败", "node", payload.Node, "err", err)

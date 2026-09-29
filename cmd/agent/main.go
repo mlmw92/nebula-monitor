@@ -132,6 +132,8 @@ func main() {
 		cfg.RedisInstances, cfg.MySQLInstances, cfg.PostgresInstances,
 		cfg.NginxInstances, cfg.KafkaInstances, cfg.DockerInstances,
 		cfg.RocketMQInstances, cfg.K8sInstances, cfg.MongoDBInstances, cfg.FastDFSInstances,
+		cfg.RabbitMQInstances, cfg.ElasticsearchInstances, cfg.ClickHouseInstances,
+		cfg.NacosInstances, cfg.ZooKeeperInstances,
 		cfg.PortChecks, cfg.Security,
 		time.Duration(cfg.CollectTimeout)*time.Second,
 		cfg.Templates, cfg.TemplateGuards,
@@ -197,6 +199,21 @@ func main() {
 	}
 	if cs.FastDFS {
 		enabledCollectors = append(enabledCollectors, "fastdfs")
+	}
+	if cs.RabbitMQ {
+		enabledCollectors = append(enabledCollectors, "rabbitmq")
+	}
+	if cs.Elasticsearch {
+		enabledCollectors = append(enabledCollectors, "elasticsearch")
+	}
+	if cs.ClickHouse {
+		enabledCollectors = append(enabledCollectors, "clickhouse")
+	}
+	if cs.Nacos {
+		enabledCollectors = append(enabledCollectors, "nacos")
+	}
+	if cs.ZooKeeper {
+		enabledCollectors = append(enabledCollectors, "zookeeper")
 	}
 	if cs.Port {
 		enabledCollectors = append(enabledCollectors, "port")
@@ -351,6 +368,11 @@ func collectAndReport(ctx context.Context, coll *collector.Collector, rep *repor
 		K8sInstances:      res.K8s,
 		MongoDBInstances:  res.MongoDB,
 		FastDFSInstances:  res.FastDFS,
+		RabbitMQInstances:    res.RabbitMQ,
+		ElasticsearchInstances: res.Elasticsearch,
+		ClickHouseInstances:  res.ClickHouse,
+		NacosInstances:       res.Nacos,
+		ZooKeeperInstances:   res.ZooKeeper,
 		NginxAccessStats:  res.NginxAccess,
 		SecurityEvents:    res.SecurityEvents,
 		SecurityBaseline:  res.SecurityBaseline,

@@ -193,7 +193,16 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/middleware/k8s/instances", a.permit(a.handleK8sInstances, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/mongodb/instances", a.permit(a.handleMongoDBInstances, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/fastdfs/instances", a.permit(a.handleFastDFSInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/rabbitmq/instances", a.permit(a.handleRabbitMQInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/elasticsearch/instances", a.permit(a.handleElasticsearchInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/clickhouse/instances", a.permit(a.handleClickHouseInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/nacos/instances", a.permit(a.handleNacosInstances, "middleware:read"))
+	mux.HandleFunc("GET /api/v1/middleware/zookeeper/instances", a.permit(a.handleZooKeeperInstances, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/overview", a.permit(a.handleMiddlewareOverview, "middleware:read"))
+	// 中间件类型展示开关：读 middleware:read，写 system:config（与品牌/大屏展示配置同级）
+	mux.HandleFunc("GET /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigGET, "middleware:read"))
+	mux.HandleFunc("PUT /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigPUT, "system:config"))
+	mux.HandleFunc("POST /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigPUT, "system:config"))
 	// 采集项模板（C1 阶段二）：读 middleware:read，写 middleware:write。
 	// templates 是字面量路径段，与既有 /middleware/{type}/instances 一类参数段不冲突（字面量优先）。
 	// 模板派生类型的通用实例接口：内置类型各自的字面量路由优先命中，不会走到这里

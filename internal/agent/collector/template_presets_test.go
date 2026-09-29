@@ -60,16 +60,31 @@ zk_znode_count 130
 jmx_exporter_build_info 1
 `
 
-// TestPresets_RealWorldPayloads 逐个预设核对产出：该留的留下、该挡的挡住。
-func TestPresets_RealWorldPayloads(t *testing.T) {
+// exporterTpl 构造一个 prometheus-exporter 类模板（原预设的等价内联形态）。
+// RabbitMQ/ES/ClickHouse/Nacos/ZooKeeper 已升级为内置采集，预设表只剩 etcd；
+// 这些内联配置保留了原预设规则，作为模板引擎对真实 exporter 输出形态的回归测试资产。
+func exporterTpl(id, addr string, rules template.Rules) template.Config {
+	return template.Config{
+		ID:      id,
+		Title:   id,
+		Kind:    template.KindPrometheusExporter,
+		Targets: []template.Target{{Addr: addr}},
+		Rules:   rules,
+	}
+}
+
+// TestExporterTemplateRules_RealWorldPayloads 逐份规则核对产出：该留的留下、该挡的挡住。
+func TestExporterTemplateRules_RealWorldPayloads(t *testing.T) {
 	cases := []struct {
 		id        string
+		cfg       template.Config
 		body      string
 		wantNames []string // 期望产出（已是加了模板前缀后的最终名）
 		notWant   []string
 	}{
 		{
 			id:   "rabbitmq",
+			cfg:  exporterTpl("rabbitmq", "", template.Rules{Keep: "^rabbitmq_", Drop: "_created$"}),
 			body: rabbitmqSample,
 			// id 与指标族同名，EnsurePrefix 不应重复加前缀
 			wantNames: []string{"rabbitmq_queues_total", "rabbitmq_queue_messages", "rabbitmq_queue_consumers", "rabbitmq_process_resident_memory_bytes"},
@@ -77,34 +92,43 @@ func TestPresets_RealWorldPayloads(t *testing.T) {
 			notWant: []string{"rabbitmq_queue_messages_created", "erlang_vm_process_count", "go_goroutines"},
 		},
 		{
-			id:        "clickhouse",
+			id:   "clickhouse",
+			cfg:  exporterTpl("clickhouse", "", template.Rules{Keep: "^ClickHouse", Drop: "_created$", Rename: []template.RenameRule{
+				{Match: "^ClickHouseProfileEvents_", To: "events_"},
+				{Match: "^ClickHouseMetrics_", To: "metrics_"},
+				{Match: "^ClickHouseAsyncMetrics_", To: "async_"},
+			}}),
 			body:      clickhouseSample,
 			wantNames: []string{"clickhouse_events_Query", "clickhouse_events_QueryMemoryUsage", "clickhouse_metrics_Query", "clickhouse_async_Uptime"},
 			notWant:   []string{"clickhouse_events_Query_created", "go_goroutines"},
 		},
 		{
-			id:        "etcd",
-			body:      etcdSample,
+			id:   "etcd",
+			cfg:  exporterTpl("etcd", "", template.Rules{Keep: "^etcd_", Drop: "_bucket$"}),
+			body: etcdSample,
 			wantNames: []string{"etcd_server_has_leader", "etcd_mvcc_db_total_size_in_bytes", "etcd_disk_wal_fsync_duration_seconds_sum", "etcd_disk_wal_fsync_duration_seconds_count"},
 			// 直方图 bucket 基数高且本项目没有分位数口径，预设置为丢弃
 			notWant: []string{"etcd_disk_wal_fsync_duration_seconds_bucket", "grpc_server_started_total"},
 		},
 		{
-			id:        "elasticsearch",
-			body:      elasticsearchSample,
+			id:   "elasticsearch",
+			cfg:  exporterTpl("elasticsearch", "", template.Rules{Keep: "^elasticsearch_", Drop: "_created$"}),
+			body: elasticsearchSample,
 			wantNames: []string{"elasticsearch_cluster_health_status", "elasticsearch_jvm_memory_used_bytes", "elasticsearch_indices_docs"},
 			notWant:   []string{"process_cpu_seconds_total"},
 		},
 		{
-			id:   "nacos",
+			id:  "nacos",
+			cfg: exporterTpl("nacos", "", template.Rules{Keep: "^nacos_", Drop: "_created$", PromoteLabel: []template.PromoteLabelRule{{Match: "^nacos_monitor$", Label: "name"}}}),
 			body: nacosSample, // 与 promoteLabel 测试共用同一份真实形态样本
 			// nacos_monitor 的多种含义被提升为各自独立的指标名（Nacos 的形态就是「一族多含义」）
 			wantNames: []string{"nacos_monitor_configCount", "nacos_monitor_getConfig", "nacos_monitor_longPolling", "nacos_jvm_memory_used_bytes"},
 			notWant:   []string{"nacos_monitor_created", "jvm_gc_pause_seconds_sum"},
 		},
 		{
-			id:        "zk",
-			body:      zookeeperSample,
+			id:  "zk",
+			cfg: exporterTpl("zk", "", template.Rules{Keep: "^zk_", Drop: "_created$"}),
+			body: zookeeperSample,
 			wantNames: []string{"zk_server_state", "zk_num_alive_connections", "zk_avg_latency", "zk_znode_count"},
 			notWant:   []string{"jmx_exporter_build_info", "zookeeper_zk_server_state"},
 		},
@@ -112,16 +136,12 @@ func TestPresets_RealWorldPayloads(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
-			p, ok := template.PresetByID(tc.id)
-			if !ok {
-				t.Fatalf("找不到预设 %s", tc.id)
-			}
-			cfg := p.Config
+			cfg := tc.cfg
 			srv := promServer(t, tc.body)
 			cfg.Targets = []template.Target{{Addr: srv.URL}}
 
 			if err := template.ValidateAll([]template.Config{cfg}); err != nil {
-				t.Fatalf("预设 %s 未通过校验：%v", tc.id, err)
+				t.Fatalf("模板 %s 未通过校验：%v", tc.id, err)
 			}
 
 			got := NewTemplateRunner("test-node").CollectTemplate(context.Background(), cfg)
@@ -137,7 +157,7 @@ func TestPresets_RealWorldPayloads(t *testing.T) {
 			}
 			for _, name := range tc.notWant {
 				if len(byN[name]) > 0 {
-					t.Errorf("不应产出 %s（预设的 keep/drop 未挡住）", name)
+					t.Errorf("不应产出 %s（keep/drop 未挡住）", name)
 				}
 			}
 			assertNoDuplicateSeries(t, got)
@@ -145,10 +165,9 @@ func TestPresets_RealWorldPayloads(t *testing.T) {
 	}
 }
 
-// TestPresets_RabbitMQKeepsQueueDimension 默认保留队列维度：多维指标是「能定位到哪个队列」的前提。
-func TestPresets_RabbitMQKeepsQueueDimension(t *testing.T) {
-	p, _ := template.PresetByID("rabbitmq")
-	cfg := p.Config
+// TestRabbitMQKeepsQueueDimension 默认保留队列维度：多维指标是「能定位到哪个队列」的前提。
+func TestRabbitMQKeepsQueueDimension(t *testing.T) {
+	cfg := exporterTpl("rabbitmq", "", template.Rules{Keep: "^rabbitmq_", Drop: "_created$"})
 	srv := promServer(t, rabbitmqSample)
 	cfg.Targets = []template.Target{{Addr: srv.URL}}
 
@@ -167,8 +186,7 @@ func TestPresets_RabbitMQKeepsQueueDimension(t *testing.T) {
 // TestTemplate_UnlabelWithoutAggregateOnlyKeepsOne 未声明聚合就丢掉区分序列的标签时，
 // 只保留一条并告警——绝不能把多条「同名同标签」序列一起写进时序库（那是 last-write-wins 的静默损坏）。
 func TestTemplate_UnlabelWithoutAggregateOnlyKeepsOne(t *testing.T) {
-	p, _ := template.PresetByID("rabbitmq")
-	cfg := p.Config
+	cfg := exporterTpl("rabbitmq", "", template.Rules{Keep: "^rabbitmq_", Drop: "_created$"})
 	srv := promServer(t, rabbitmqSample)
 	cfg.Targets = []template.Target{{Addr: srv.URL}}
 	// 这是最容易写出错的配置：想汇总所有队列，于是把 queue 标签删掉
@@ -187,8 +205,7 @@ func TestTemplate_UnlabelWithoutAggregateOnlyKeepsOne(t *testing.T) {
 
 // TestTemplate_AggregateSumsAcrossLabel 声明聚合后才能真正表达「所有队列的消息总数」。
 func TestTemplate_AggregateSumsAcrossLabel(t *testing.T) {
-	p, _ := template.PresetByID("rabbitmq")
-	cfg := p.Config
+	cfg := exporterTpl("rabbitmq", "", template.Rules{Keep: "^rabbitmq_", Drop: "_created$"})
 	srv := promServer(t, rabbitmqSample)
 	cfg.Targets = []template.Target{{Addr: srv.URL}}
 	cfg.Rules.Unlabel = []string{"queue", "vhost"}

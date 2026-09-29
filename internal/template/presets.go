@@ -15,6 +15,10 @@ package template
 //     而本项目目前没有分位数查询口径，保留只是在浪费基数；
 //   - 预设**不预设聚合**：默认保留维度标签（如 RabbitMQ 的 queue），
 //     想汇总时再显式加 rules.aggregate——否则预设会在用户不知情的情况下丢掉细节。
+//
+// 历史说明：RabbitMQ / Elasticsearch / ClickHouse / Nacos / ZooKeeper 已升级为
+// **专用内置采集**（internal/agent/collector + mwreg 内置类型表），不再提供模板预设——
+// 内置采集的体验（专用 Tab / 摘要指标 / 服务离线告警）优于通用模板。Etcd 暂保留模板方式。
 
 // Preset 是一个开箱即用的模板预设。
 type Preset struct {
@@ -45,29 +49,6 @@ func tpl(id, title string, groups []string, addr string, rules Rules) Config {
 func Presets() []Preset {
 	return []Preset{
 		{
-			ID:    "rabbitmq",
-			Title: "RabbitMQ",
-			Desc:  "队列积压、消费者数、连接与内存（rabbitmq_prometheus 插件）",
-			Note: "需启用 rabbitmq_prometheus 插件（默认端口 15692）。" +
-				"队列多时按队列维度的序列数会迅速增长：超过单模板上限会被截断并告警，" +
-				"如需只保留汇总值，请加 rules.aggregate（如 match: \"^rabbitmq_queue_\", op: sum）。",
-			Config: tpl("rabbitmq", "RabbitMQ", nil, "http://127.0.0.1:15692/metrics", Rules{
-				Keep: "^rabbitmq_",
-				Drop: "_created$",
-			}),
-		},
-		{
-			ID:    "elasticsearch",
-			Title: "Elasticsearch",
-			Desc:  "集群健康、JVM 内存、索引文档数（_prometheus/metrics 端点）",
-			Note: "需启用 Elasticsearch 的 prometheus 模块（7.16+，端点 /_prometheus/metrics）。" +
-				"未启用时只有 _nodes/stats 这样的「按节点 id 分组的 JSON」，当前模板语法无法表达该结构。",
-			Config: tpl("elasticsearch", "Elasticsearch", nil, "http://127.0.0.1:9200/_prometheus/metrics", Rules{
-				Keep: "^elasticsearch_",
-				Drop: "_created$",
-			}),
-		},
-		{
 			ID:    "etcd",
 			Title: "Etcd",
 			Desc:  "集群是否有主、DB 大小、WAL/磁盘同步延迟、提案数",
@@ -76,51 +57,6 @@ func Presets() []Preset {
 			Config: tpl("etcd", "Etcd", nil, "http://127.0.0.1:2379/metrics", Rules{
 				Keep: "^etcd_",
 				Drop: "_bucket$",
-			}),
-		},
-		{
-			ID:    "clickhouse",
-			Title: "ClickHouse",
-			Desc:  "查询/写入事件计数与运行时指标（内置 /metrics，默认 9363）",
-			Note: "ClickHouse 的指标名是 ClickHouseProfileEvents_/ClickHouseMetrics_ 前缀（大写），" +
-				"预设用 rename 改写成 clickhouse_events_/clickhouse_metrics_ 以便阅读与检索。",
-			Config: tpl("clickhouse", "ClickHouse", nil, "http://127.0.0.1:9363/metrics", Rules{
-				Keep: "^ClickHouse",
-				Drop: "_created$",
-				Rename: []RenameRule{
-					{Match: "^ClickHouseProfileEvents_", To: "events_"},
-					{Match: "^ClickHouseMetrics_", To: "metrics_"},
-					{Match: "^ClickHouseAsyncMetrics_", To: "async_"},
-				},
-			}),
-		},
-		{
-			ID:    "nacos",
-			Title: "Nacos",
-			Desc:  "配置与服务治理指标（配置数、读写统计、长轮询、注册实例数）",
-			Note: "需开启 metrics：Nacos 2.x 内置 /nacos/actuator/prometheus（默认端口 8848），" +
-				"1.x 的暴露路径随版本与插件不同，请以现场为准。" +
-				"该 exporter 把多种含义塞进同一个指标族、用 name 标签区分（nacos_monitor{module=\"config\",name=\"longPolling\"}），" +
-				"预设用 rules.promoteLabel 把它提升为独立指标名（nacos_monitor_longPolling）——" +
-				"否则所有含义都挤在 nacos_monitor 一个名字下，既无法分别看趋势，也无法按含义配告警。",
-			Config: tpl("nacos", "Nacos", nil, "http://127.0.0.1:8848/nacos/actuator/prometheus", Rules{
-				Keep: "^nacos_",
-				Drop: "_created$",
-				// name 标签是该族「含义标识」，提升为指标名后同样从标签集中移除
-				PromoteLabel: []PromoteLabelRule{{Match: "^nacos_monitor$", Label: "name"}},
-			}),
-		},
-		{
-			// id 取 zk 而不是 zookeeper：模板 id 会作为指标前缀加到响应中的名字上，
-			// 而 exporter 暴露的指标族本身就是 zk_*，用 zookeeper 会得到 zookeeper_zk_xxx 这种叠词。
-			ID:    "zk",
-			Title: "ZooKeeper",
-			Desc:  "节点角色、连接数、平均延迟、znode/watch 数（zookeeper-exporter）",
-			Note: "ZooKeeper 自身不暴露 Prometheus 指标，需第三方 exporter（如 dabealu/zookeeper-exporter，端口 9141）。" +
-				"请把地址改成该 exporter 的 /metrics。",
-			Config: tpl("zk", "ZooKeeper", nil, "http://127.0.0.1:9141/metrics", Rules{
-				Keep: "^zk_",
-				Drop: "_created$",
 			}),
 		},
 	}

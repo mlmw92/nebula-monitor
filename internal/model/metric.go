@@ -122,6 +122,11 @@ type ReportPayload struct {
 	K8sInstances      []K8sInstance         `json:"k8sInstances,omitempty"`      // Kubernetes 集群元信息
 	MongoDBInstances  []MongoDBInstance     `json:"mongoInstances,omitempty"`    // MongoDB 实例元信息
 	FastDFSInstances  []FastDFSInstance     `json:"fastdfsInstances,omitempty"`  // FastDFS 实例元信息
+	RabbitMQInstances    []RabbitMQInstance    `json:"rabbitmqInstances,omitempty"`    // RabbitMQ 实例元信息
+	ElasticsearchInstances []ElasticsearchInstance `json:"elasticsearchInstances,omitempty"` // Elasticsearch 实例元信息
+	ClickHouseInstances  []ClickHouseInstance  `json:"clickhouseInstances,omitempty"`  // ClickHouse 实例元信息
+	NacosInstances       []NacosInstance       `json:"nacosInstances,omitempty"`       // Nacos 实例元信息
+	ZooKeeperInstances   []ZooKeeperInstance   `json:"zookeeperInstances,omitempty"`   // ZooKeeper 实例元信息
 	NginxAccessStats  []NginxAccessStat     `json:"nginxAccessStats,omitempty"`  // Nginx access log 聚合统计
 	SecurityEvents    []SecurityEvent       `json:"securityEvents,omitempty"`    // 安全事件（结构化，非时序）
 	SecurityBaseline  *SecurityBaseline     `json:"securityBaseline,omitempty"`  // 安全基线检查结果
@@ -289,6 +294,134 @@ type FastDFSInstance struct {
 	NetRecvMB      float64 `json:"netRecvMB"`      // 累计网络收（MB）
 	NetSentMB      float64 `json:"netSentMB"`      // 累计网络发（MB）
 	CollectedAt    int64   `json:"collectedAt"`    // 采集时间戳（毫秒）
+}
+
+// ---- RabbitMQ ----
+
+// RabbitMQInstanceConfig 是 Agent 本地配置的 RabbitMQ 实例连接信息。
+// 采集走 rabbitmq_prometheus 插件的 /metrics 端点（默认端口 15692，无需认证）；
+// Username/Password 为可选 Basic Auth（如通过管理端口反代时使用），不上报 Server。
+type RabbitMQInstanceConfig struct {
+	Name     string `yaml:"name"`     // 实例别名
+	Addr     string `yaml:"addr"`     // 地址 host:port（prometheus 插件端口）
+	Username string `yaml:"username"` // 可选 Basic Auth 用户名
+	Password string `yaml:"password"` // 可选 Basic Auth 密码（json:"-"，不上报）
+}
+
+// RabbitMQInstance 是上报给 Server 的 RabbitMQ 实例元信息。
+type RabbitMQInstance struct {
+	Instance    string  `json:"instance"`
+	Name        string  `json:"name"`
+	Node        string  `json:"node"`
+	Group       string  `json:"group"`
+	Version     string  `json:"version"`
+	Connections float64 `json:"connections"`
+	Queues      float64 `json:"queues"`
+	Messages    float64 `json:"messages"`
+	Consumers   float64 `json:"consumers"`
+	Publishers  float64 `json:"publishers"`
+	MemoryBytes float64 `json:"memoryBytes"`
+	FdUsed      float64 `json:"fdUsed"`
+	Up          bool    `json:"up"`
+}
+
+// ---- Elasticsearch ----
+
+// ElasticsearchInstanceConfig 是 Agent 本地配置的 Elasticsearch 实例连接信息。
+// 采集走 _cluster/health 与根路径（JSON，无需 exporter）。
+type ElasticsearchInstanceConfig struct {
+	Name     string `yaml:"name"`     // 实例别名
+	Addr     string `yaml:"addr"`     // 基础地址，如 http://127.0.0.1:9200
+	Username string `yaml:"username"` // 可选 Basic Auth
+	Password string `yaml:"password"` // 可选 Basic Auth（json:"-"，不上报）
+}
+
+// ElasticsearchInstance 是上报给 Server 的 Elasticsearch 实例元信息。
+type ElasticsearchInstance struct {
+	Instance         string  `json:"instance"`
+	Name             string  `json:"name"`
+	Node             string  `json:"node"`
+	Group            string  `json:"group"`
+	ClusterName      string  `json:"clusterName"`
+	Status           string  `json:"status"` // green|yellow|red
+	Version          string  `json:"version"`
+	Nodes            float64 `json:"nodes"`
+	DataNodes        float64 `json:"dataNodes"`
+	ActiveShards     float64 `json:"activeShards"`
+	PrimaryShards    float64 `json:"primaryShards"`
+	UnassignedShards float64 `json:"unassignedShards"`
+	Up               bool    `json:"up"`
+}
+
+// ---- ClickHouse ----
+
+// ClickHouseInstanceConfig 是 Agent 本地配置的 ClickHouse 实例连接信息。
+// 采集走 HTTP 端口（默认 8123）的 SQL 查询，无需 exporter。
+type ClickHouseInstanceConfig struct {
+	Name     string `yaml:"name"`     // 实例别名
+	Addr     string `yaml:"addr"`     // 地址 host:port（HTTP 端口）
+	Username string `yaml:"username"` // 用户名（默认 default）
+	Password string `yaml:"password"` // 密码（json:"-"，不上报）
+}
+
+// ClickHouseInstance 是上报给 Server 的 ClickHouse 实例元信息。
+type ClickHouseInstance struct {
+	Instance       string  `json:"instance"`
+	Name           string  `json:"name"`
+	Node           string  `json:"node"`
+	Group          string  `json:"group"`
+	Version        string  `json:"version"`
+	TCPConnections float64 `json:"tcpConnections"`
+	HTTPConnections float64 `json:"httpConnections"`
+	QueriesRunning float64 `json:"queriesRunning"`
+	MergesRunning  float64 `json:"mergesRunning"`
+	UptimeSeconds  float64 `json:"uptimeSeconds"`
+	Up             bool    `json:"up"`
+}
+
+// ---- Nacos ----
+
+// NacosInstanceConfig 是 Agent 本地配置的 Nacos 实例连接信息。
+// 采集走控制台健康检查接口（readiness），无 exporter 依赖。
+type NacosInstanceConfig struct {
+	Name        string `yaml:"name"`        // 实例别名
+	Addr        string `yaml:"addr"`        // 地址 host:port（默认 8848）
+	ContextPath string `yaml:"contextPath"` // 上下文路径（默认 /nacos）
+}
+
+// NacosInstance 是上报给 Server 的 Nacos 实例元信息。
+type NacosInstance struct {
+	Instance string `json:"instance"`
+	Name     string `json:"name"`
+	Node     string `json:"node"`
+	Group    string `json:"group"`
+	Up       bool   `json:"up"`
+}
+
+// ---- ZooKeeper ----
+
+// ZooKeeperInstanceConfig 是 Agent 本地配置的 ZooKeeper 实例连接信息。
+// 采集走四字命令 mntr（TCP 直连，无需第三方 exporter）。
+type ZooKeeperInstanceConfig struct {
+	Name string `yaml:"name"` // 实例别名
+	Addr string `yaml:"addr"` // 地址 host:port（默认 2181）
+}
+
+// ZooKeeperInstance 是上报给 Server 的 ZooKeeper 实例元信息。
+type ZooKeeperInstance struct {
+	Instance            string  `json:"instance"`
+	Name                string  `json:"name"`
+	Node                string  `json:"node"`
+	Group               string  `json:"group"`
+	Role                string  `json:"role"`    // leader|follower|standalone
+	Version             string  `json:"version"` // zk_version
+	AvgLatency          float64 `json:"avgLatency"`
+	OutstandingRequests float64 `json:"outstandingRequests"`
+	AliveConnections    float64 `json:"aliveConnections"`
+	ZnodeCount          float64 `json:"znodeCount"`
+	Followers           float64 `json:"followers"`
+	SyncedFollowers     float64 `json:"syncedFollowers"`
+	Up                  bool    `json:"up"`
 }
 
 // ---- Nginx ----

@@ -32,6 +32,7 @@ func newTestCollector(t *testing.T, timeout time.Duration) *Collector {
 	cfg := config.CollectorToggle{CPU: true, Memory: true, Disk: true}
 	return New("test-node", "default", nil, cfg,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil,
 		config.SecurityConfig{}, timeout, nil, config.TemplateGuardsConfig{}, nil, "")
 }
 
@@ -51,6 +52,7 @@ func TestCollectAll_TaskListIsComplete(t *testing.T) {
 	want := []string{
 		"host", "redis", "mysql", "postgres", "nginx", "nginx-access",
 		"kafka", "docker", "rocketmq", "k8s", "mongodb", "fastdfs",
+		"rabbitmq", "elasticsearch", "clickhouse", "nacos", "zookeeper",
 		"security", "listeners", "firewall", "host-info",
 	}
 	for _, n := range want {

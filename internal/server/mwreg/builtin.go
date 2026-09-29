@@ -152,4 +152,68 @@ var builtinTypes = []Type{
 			{Metric: "fastdfs_used_space", Label: "已用空间", Agg: "sum", Unit: "B"},
 		},
 	},
+	{
+		Key: "rabbitmq", Label: "RabbitMQ", Kind: KindBuiltin, Emoji: "🐇",
+		UpMetric: "rabbitmq_instance_up", ConnMetric: "rabbitmq_connections",
+		KeyMetrics: []string{
+			"rabbitmq_connections", "rabbitmq_queues", "rabbitmq_queue_messages",
+			"rabbitmq_consumers", "rabbitmq_publishers", "rabbitmq_process_memory_bytes",
+			"rabbitmq_fd_used",
+		},
+		Summary: []SummarySpec{
+			{Metric: "rabbitmq_connections", Label: "连接数", Agg: "max"},
+			{Metric: "rabbitmq_queues", Label: "队列数", Agg: "max"},
+			{Metric: "rabbitmq_queue_messages", Label: "消息总数", Agg: "sum"},
+			{Metric: "rabbitmq_consumers", Label: "消费者数", Agg: "max"},
+		},
+	},
+	{
+		Key: "elasticsearch", Label: "Elasticsearch", Kind: KindBuiltin, Emoji: "🔍",
+		UpMetric: "es_instance_up", ConnMetric: "es_nodes",
+		KeyMetrics: []string{
+			"es_cluster_status", "es_nodes", "es_data_nodes", "es_active_shards",
+			"es_primary_shards", "es_unassigned_shards",
+		},
+		Summary: []SummarySpec{
+			{Metric: "es_cluster_status", Label: "集群状态(0绿/1黄/2红)", Agg: "max", WarnAbove: 0},
+			{Metric: "es_nodes", Label: "节点数", Agg: "max"},
+			{Metric: "es_unassigned_shards", Label: "未分配分片", Agg: "sum"},
+		},
+	},
+	{
+		Key: "clickhouse", Label: "ClickHouse", Kind: KindBuiltin, Emoji: "🏢",
+		UpMetric: "clickhouse_instance_up", ConnMetric: "clickhouse_tcp_connections",
+		KeyMetrics: []string{
+			"clickhouse_tcp_connections", "clickhouse_http_connections",
+			"clickhouse_queries_running", "clickhouse_merges_running",
+			"clickhouse_uptime_seconds",
+		},
+		Summary: []SummarySpec{
+			{Metric: "clickhouse_tcp_connections", Label: "TCP连接", Agg: "max"},
+			{Metric: "clickhouse_queries_running", Label: "运行中查询", Agg: "max"},
+			{Metric: "clickhouse_merges_running", Label: "合并数", Agg: "max"},
+		},
+	},
+	{
+		Key: "nacos", Label: "Nacos", Kind: KindBuiltin, Emoji: "☁️",
+		UpMetric: "nacos_instance_up",
+		KeyMetrics: []string{"nacos_instance_up"},
+		Summary: []SummarySpec{
+			{Metric: "nacos_instance_up", Label: "在线实例", Agg: "sum"},
+		},
+	},
+	{
+		Key: "zookeeper", Label: "ZooKeeper", Kind: KindBuiltin, Emoji: "🦁",
+		UpMetric: "zookeeper_instance_up",
+		KeyMetrics: []string{
+			"zookeeper_avg_latency", "zookeeper_outstanding_requests",
+			"zookeeper_alive_connections", "zookeeper_znode_count",
+			"zookeeper_followers", "zookeeper_synced_followers",
+		},
+		Summary: []SummarySpec{
+			{Metric: "zookeeper_avg_latency", Label: "平均延迟", Agg: "avg", Unit: "ms"},
+			{Metric: "zookeeper_outstanding_requests", Label: "未处理请求", Agg: "max"},
+			{Metric: "zookeeper_alive_connections", Label: "活跃连接", Agg: "max"},
+		},
+	},
 }

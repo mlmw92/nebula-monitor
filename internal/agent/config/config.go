@@ -47,6 +47,11 @@ type Config struct {
 	K8sInstances      []model.K8sInstanceConfig      `yaml:"k8sInstances"`      // Kubernetes 集群连接配置
 	MongoDBInstances  []model.MongoDBInstanceConfig  `yaml:"mongoInstances"`    // MongoDB 实例连接配置
 	FastDFSInstances  []model.FastDFSInstanceConfig  `yaml:"fastdfsInstances"`  // FastDFS 实例连接配置
+	RabbitMQInstances []model.RabbitMQInstanceConfig `yaml:"rabbitmqInstances"` // RabbitMQ 实例连接配置
+	ElasticsearchInstances []model.ElasticsearchInstanceConfig `yaml:"elasticsearchInstances"` // Elasticsearch 实例连接配置
+	ClickHouseInstances []model.ClickHouseInstanceConfig  `yaml:"clickhouseInstances"`  // ClickHouse 实例连接配置
+	NacosInstances    []model.NacosInstanceConfig    `yaml:"nacosInstances"`    // Nacos 实例连接配置
+	ZooKeeperInstances []model.ZooKeeperInstanceConfig `yaml:"zookeeperInstances"` // ZooKeeper 实例连接配置
 	PortChecks        []string                       `yaml:"portChecks"`        // TCP 端口存活检测列表，如 ["80","443","3306"]
 	Templates         []template.Config              `yaml:"templates"`         // 采集项模板（阶段一：只描述「取数 → 映射」，新增中间件无需改 Go 代码）
 	Proxy             ProxyConfig                    `yaml:"proxy"`             // 代理模式配置，mode=edge/hub 时生效
@@ -258,6 +263,11 @@ type CollectorToggle struct {
 	K8s      bool `yaml:"k8s"`      // Kubernetes 集群监控，默认关闭
 	MongoDB  bool `yaml:"mongodb"`  // MongoDB 中间件监控，默认关闭
 	FastDFS  bool `yaml:"fastdfs"`  // FastDFS 中间件监控，默认关闭
+	RabbitMQ bool `yaml:"rabbitmq"` // RabbitMQ 中间件监控，默认关闭
+	Elasticsearch bool `yaml:"elasticsearch"` // Elasticsearch 中间件监控，默认关闭
+	ClickHouse bool `yaml:"clickhouse"` // ClickHouse 中间件监控，默认关闭
+	Nacos   bool `yaml:"nacos"`    // Nacos 中间件监控，默认关闭
+	ZooKeeper bool `yaml:"zookeeper"` // ZooKeeper 中间件监控，默认关闭
 	Port     bool `yaml:"port"`     // 端口存活检测，默认关闭
 	Security bool `yaml:"security"` // 安全采集（SSH 审计/FIM/基线/异常进程/sudo），默认关闭
 }

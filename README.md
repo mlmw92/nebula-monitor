@@ -676,6 +676,10 @@ bash /etc/monitor-agent/agent-install.sh mongodb
 bash /etc/monitor-agent/agent-install.sh fastdfs
 ```
 
+RabbitMQ / Elasticsearch / ClickHouse / Nacos / ZooKeeper 五类暂无向导子命令，
+请在 `/etc/monitor-agent/agent.yaml` 中手动添加对应实例段（示例见下文「手动编辑 YAML」），
+开启对应的 `collectors` 开关并重启 Agent。
+
 向导会引导你逐个填写对应中间件的实例信息（别名、地址、账号/密码、拓扑类型等），完成后自动写入 `agent.yaml`、开启对应的 `collectors` 开关并重启 Agent。**密码仅存本机，不上报 Server。**
 
 > 该命令仅修改配置并重启 Agent，不安装/覆盖二进制。可多次执行以更新实例列表（会覆盖对应中间件的 `xxxInstances` 段）；不同中间件子命令对应的配置段相互独立。
@@ -851,11 +855,12 @@ templates:
 - 下发内容校验不通过时，Agent **保留现有模板**并记一次告警（绝不因模板把采集打断）；
   该告警按版本号去重，不会刷屏；Server 会持续重发，配置修好后自动恢复。
 
-**内置预设**：Web 端「采集项模板 → 新建」里可直接选 **RabbitMQ / Elasticsearch / Etcd / ClickHouse / ZooKeeper / Nacos**
-（接口 `GET /api/v1/middleware/templates/presets`）。取数与映射规则已按各 exporter 的真实输出形态写好
-（含 `keep` 收窄到该中间件指标族、丢掉 `*_created` 与直方图 `_bucket`，Nacos 用 `promoteLabel` 把 `name` 标签拆成独立指标名），
-只需再选生效分组、改成本环境地址。每个预设都带**前置条件说明**
-（如 Elasticsearch 需启用 prometheus 模块、Nacos 2.x 走 `/nacos/actuator/prometheus`），避免「建了却没数据」时无处排查。
+**内置预设**：Web 端「采集项模板 → 新建」里可直接选 **Etcd**（接口 `GET /api/v1/middleware/templates/presets`）。
+Etcd 自带 `/metrics`，预设已写好 keep/drop 规则，只需选生效分组、改成本环境地址，并带**前置条件说明**，避免「建了却没数据」时无处排查。
+
+> **历史说明**：RabbitMQ / Elasticsearch / ClickHouse / Nacos / ZooKeeper 原先也有模板预设，
+> 现已全部升级为**专用内置采集**（见「中间件监控」章节的配置示例），体验与 Redis/MySQL 等内置类型一致
+> （专用 Tab、摘要指标、服务离线告警）。若此前用预设建过这五类的模板，升级后请删除旧模板并改用内置采集。
 
 **汇总维度指标（`rules.aggregate`）**：像 RabbitMQ 这样按队列暴露指标的中间件，
 若用 `unlabel` 丢掉 `queue` 想「汇总所有队列」，会产出多条「同名 + 同标签」的序列，
@@ -1406,6 +1411,80 @@ fastdfsInstances:
 >     metricsServer: true    # k3s 内置 metrics-server
 > ```
 
+**RabbitMQ 配置示例**
+
+采集走 rabbitmq_prometheus 插件的 `/metrics`（默认端口 15692，部署 RabbitMQ 后执行
+`rabbitmq-plugins enable rabbitmq_prometheus` 即可，无需额外 exporter）。
+
+```yaml
+collectors:
+  rabbitmq: true
+
+rabbitmqInstances:
+  - name: "rabbitmq-01"
+    addr: "127.0.0.1:15692"
+    # username / password 可选：仅在通过管理端口反代等需要 Basic Auth 的场景填写
+```
+
+**Elasticsearch 配置示例**
+
+采集走原生 JSON 接口（`/` 与 `/_cluster/health`，默认端口 9200）。
+
+```yaml
+collectors:
+  elasticsearch: true
+
+elasticsearchInstances:
+  - name: "es-01"
+    addr: "http://127.0.0.1:9200"
+    username: ""          # 开启安全认证时填写
+    password: ""
+```
+
+**ClickHouse 配置示例**
+
+采集走 HTTP 端口（默认 8123）执行 SQL（version / system.metrics / uptime），无需 exporter。
+
+```yaml
+collectors:
+  clickhouse: true
+
+clickhouseInstances:
+  - name: "ch-01"
+    addr: "127.0.0.1:8123"
+    username: "default"
+    password: ""
+```
+
+**Nacos 配置示例**
+
+采集走控制台健康检查接口（`/nacos/v1/console/health/readiness`，默认端口 8848），
+提供存活监控与服务离线告警。
+
+```yaml
+collectors:
+  nacos: true
+
+nacosInstances:
+  - name: "nacos-01"
+    addr: "127.0.0.1:8848"
+    contextPath: "/nacos"
+```
+
+**ZooKeeper 配置示例**
+
+采集走四字命令 `mntr`（TCP 直连，默认端口 2181，无需第三方 exporter）。
+若服务端配置了 `4lw.commands.whitelist`，需包含 `mntr`。
+
+```yaml
+collectors:
+  zookeeper: true
+
+zookeeperInstances:
+  - name: "zk-01"
+    addr: "127.0.0.1:2181"
+```
+
 **部署与验证**
 
 > 以下以 Redis 为例，其余中间件步骤完全一致，仅替换对应的 `collectors` 开关与实例段，并在 Web 端进入对应的中间件 Tab 查看。
@@ -1759,6 +1838,13 @@ journalctl -u monitor-proxy-hub -f
 | GET | `/api/v1/middleware/k8s/instances` | Kubernetes 集群列表（集群聚合 + Node / 异常 Pod 明细） |
 | GET | `/api/v1/middleware/mongodb/instances` | MongoDB 实例列表（含副本集角色） |
 | GET | `/api/v1/middleware/fastdfs/instances` | FastDFS 实例列表 |
+| GET | `/api/v1/middleware/rabbitmq/instances` | RabbitMQ 实例列表 |
+| GET | `/api/v1/middleware/elasticsearch/instances` | Elasticsearch 实例列表（集群状态/分片） |
+| GET | `/api/v1/middleware/clickhouse/instances` | ClickHouse 实例列表（连接/查询/合并） |
+| GET | `/api/v1/middleware/nacos/instances` | Nacos 实例列表（存活） |
+| GET | `/api/v1/middleware/zookeeper/instances` | ZooKeeper 实例列表（角色/延迟/znode） |
+| GET | `/api/v1/middleware/view-config` | 中间件监控页面展示开关查询 |
+| PUT | `/api/v1/middleware/view-config` | 保存展示开关（`system:config`） |
 | GET | `/api/v1/middleware/{type}/instances` | 模板派生类型的通用实例列表（内置类型由各自的字面量路由优先命中） |
 | GET | `/api/v1/middleware/nginx/access/summary` | Nginx 访问日志汇总（总请求 / 速率 / 状态码分布 / Top URI / Top IP） |
 | GET | `/api/v1/middleware/nginx/access/geo?scope=cn\|world` | 请求来源地理分布（热力点 / 部署点 / 动线） |

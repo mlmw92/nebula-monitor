@@ -40,6 +40,7 @@ type Config struct {
 	ScreenFile        string          `yaml:"screenFile"`        // 数据大屏模块显隐配置文件（Web 端设置写入）
 	UIFile            string          `yaml:"uiFile"`            // 系统 UI 品牌配置（系统名称/Logo，Web 端设置写入）
 	GeoIPFile         string          `yaml:"geoipFile"`         // IP 地理库（ip2region v4 xdb）存放路径，Web 端上传后覆盖此文件；缺失时用内置库
+	MiddlewareViewFile string         `yaml:"middlewareViewFile"` // 中间件监控页面展示开关（展示哪些类型）；留空用默认路径
 	DashboardsFile    string          `yaml:"dashboardsFile"`    // 自定义仪表盘配置文件（Web 端增删改写入）
 	RetentionFile     string          `yaml:"retentionFile"`     // 数据保留策略配置文件（Web 端可改，保存即热生效）
 	SecurityStoreFile string          `yaml:"securityStoreFile"` // 安全事件/基线持久化文件
@@ -351,6 +352,7 @@ func Default() *Config {
 		LogUploadRateBps:  1 << 20, // 1 MiB/s/节点
 		LogMaxBodyBytes:   4 << 20, // 4 MiB/请求
 		GeoIPFile:         "/var/lib/monitor-server/geoip/ip2region_v4.xdb",
+		MiddlewareViewFile: "/etc/monitor-server/middleware_view.yaml",
 		Auth:              AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: "", UsersFile: "/var/lib/monitor-server/users.yaml", MigrateSingleAdmin: true},
 		Upgrade: UpgradeConfig{
 			Enabled:     true,
