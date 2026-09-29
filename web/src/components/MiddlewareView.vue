@@ -115,7 +115,7 @@
             <img class="tab-icon" :src="t.icon" :alt="t.label" />{{ t.label }}
           </span>
         </template>
-        <BuiltinTab v-if="activeTab === t.type" :type="t.type" />
+        <component :is="t.comp" v-if="activeTab === t.type" />
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -145,9 +145,18 @@ const RocketMQTab = tabLoader(() => import('./rocketmq/RocketMQTab.vue'))
 const K8sTab = tabLoader(() => import('./k8s/K8sTab.vue'))
 const MongoTab = tabLoader(() => import('./mongo/MongoTab.vue'))
 const FastDFSTab = tabLoader(() => import('./fastdfs/FastDFSTab.vue'))
-// 轻采集内置类型（RabbitMQ/ES/ClickHouse/Nacos/ZooKeeper）共用一个 spec 驱动的通用 Tab
-const BuiltinTab = tabLoader(() => import('./mw/BuiltinTab.vue'))
-import { builtinSpecs } from './mw/builtinSpecs'
+// 轻采集内置类型（RabbitMQ/ES/ClickHouse/Nacos/ZooKeeper）：各自独立 Tab 组件
+// （共用基座 mw/LightCollectorTab.vue，spec 放在各自目录，便于后续按类型扩展展示）
+const RabbitMQTab = tabLoader(() => import('./rabbitmq/RabbitMQTab.vue'))
+const ElasticsearchTab = tabLoader(() => import('./elasticsearch/ElasticsearchTab.vue'))
+const ClickHouseTab = tabLoader(() => import('./clickhouse/ClickHouseTab.vue'))
+const NacosTab = tabLoader(() => import('./nacos/NacosTab.vue'))
+const ZooKeeperTab = tabLoader(() => import('./zookeeper/ZooKeeperTab.vue'))
+import rabbitmqIcon from '../assets/img/rabbitmq.svg'
+import elasticsearchIcon from '../assets/img/elasticsearch.svg'
+import clickhouseIcon from '../assets/img/clickhouse.svg'
+import nacosIcon from '../assets/img/nacos.svg'
+import zookeeperIcon from '../assets/img/zookeeper.svg'
 import redisIcon from '../assets/img/redis.svg'
 import mysqlIcon from '../assets/img/mysql.svg'
 import postgresIcon from '../assets/img/postgresql.svg'
@@ -158,23 +167,18 @@ import mongodbIcon from '../assets/img/mongoDB.svg'
 import rocketmqIcon from '../assets/img/rocketMQ.svg'
 import k8sIcon from '../assets/img/kubernetes.svg'
 import fastdfsIcon from '../assets/img/fastdfs.svg'
-import rabbitmqIcon from '../assets/img/rabbitmq.svg'
-import elasticsearchIcon from '../assets/img/elasticsearch.svg'
-import clickhouseIcon from '../assets/img/clickhouse.svg'
-import nacosIcon from '../assets/img/nacos.svg'
-import zookeeperIcon from '../assets/img/zookeeper.svg'
 
 const route = useRoute()
 const BUILTIN_TABS = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s', 'mongodb', 'fastdfs',
   'rabbitmq', 'elasticsearch', 'clickhouse', 'nacos', 'zookeeper']
 
-// 轻采集类型的 Tab 元数据（label + logo），与 builtinSpecs 对应
+// 轻采集类型的 Tab 元数据（label + logo + 组件）
 const builtinTabList = [
-  { type: 'rabbitmq', label: 'RabbitMQ', icon: rabbitmqIcon },
-  { type: 'elasticsearch', label: 'Elasticsearch', icon: elasticsearchIcon },
-  { type: 'clickhouse', label: 'ClickHouse', icon: clickhouseIcon },
-  { type: 'nacos', label: 'Nacos', icon: nacosIcon },
-  { type: 'zookeeper', label: 'ZooKeeper', icon: zookeeperIcon },
+  { type: 'rabbitmq', label: 'RabbitMQ', icon: rabbitmqIcon, comp: RabbitMQTab },
+  { type: 'elasticsearch', label: 'Elasticsearch', icon: elasticsearchIcon, comp: ElasticsearchTab },
+  { type: 'clickhouse', label: 'ClickHouse', icon: clickhouseIcon, comp: ClickHouseTab },
+  { type: 'nacos', label: 'Nacos', icon: nacosIcon, comp: NacosTab },
+  { type: 'zookeeper', label: 'ZooKeeper', icon: zookeeperIcon, comp: ZooKeeperTab },
 ]
 
 // ---- 展示类型开关 ----

@@ -58,6 +58,8 @@
               <MwStatusDot :status="row.up ? 'normal' : 'abnormal'" :label="row.up ? '正常' : '离线'" />
             </template>
           </el-table-column>
+          <!-- 类型专属列（如某中间件特有的状态标签/操作按钮）从这里扩展 -->
+          <slot name="extra-columns" />
         </el-table>
         <div class="pager">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="instances.length" :page-size="pageSize" :current-page="currentPage" :page-sizes="[10, 20, 50, 100]" @current-change="v => currentPage = v" @size-change="v => { pageSize = v; currentPage = 1 }" />
@@ -82,6 +84,8 @@
             <div class="mc-value">{{ m.value }}<small v-if="m.unit"> {{ m.unit }}</small></div>
           </div>
         </div>
+        <!-- 类型专属详情区（如专属图表/子表）从这里扩展 -->
+        <slot name="detail-extra" :instance="selected" />
         <div v-for="t in spec.trends" :key="t.metric" class="trend-block">
           <div class="trend-title">{{ t.name }}（最近 1 小时）</div>
           <div :ref="(el) => setChartRef(el, t.metric)" class="trend-chart"></div>
@@ -100,13 +104,16 @@ import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
 import MwStatusDot from './MwStatusDot.vue'
 import './mw.css'
-import { builtinSpec } from './builtinSpecs'
 
+// spec 结构：
+//   label   类型展示名（空状态文案用）
+//   kpis    跨实例聚合的 KPI 卡：[{ label, metric, agg: sum|max|avg, unit?, tone? }]
+//   columns 实例表指标列：[{ key, label }]（key 为实例 metrics 里的指标名）
+//   trends  详情抽屉趋势图：[{ name, metric }]
 const props = defineProps({
-  type: { type: String, required: true },
+  spec: { type: Object, required: true },
 })
 
-const spec = computed(() => builtinSpec(props.type))
 const instances = ref([])
 const loading = ref(false)
 const drawer = ref(false)
@@ -155,7 +162,7 @@ function rowClass({ row }) {
 async function load() {
   loading.value = true
   try {
-    const data = await http.get(`/api/v1/middleware/${encodeURIComponent(props.type)}/instances`)
+    const data = await http.get(`/api/v1/middleware/${encodeURIComponent(props.spec.type)}/instances`)
     instances.value = data.instances || []
   } catch (e) {
     console.error('加载实例失败', e)
@@ -226,6 +233,13 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.mw-tab { padding: 4px 0; }
+.empty-guide { text-align: center; padding: 48px 24px; }
+.empty-icon { color: var(--text-muted); margin-bottom: 16px; }
+.empty-icon svg { width: 64px; height: 64px; }
+.empty-title { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
+.empty-desc { color: var(--text-dim); margin: 0 0 8px; font-size: 13px; }
+.empty-hint { color: var(--text-muted); font-size: 13px; }
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
 .mw-list { border-radius: var(--radius); padding: 12px; }
 .mw-list-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
