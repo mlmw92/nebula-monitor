@@ -5,9 +5,16 @@
 // 由本文件的 spec 驱动：列定义 / 详情趋势指标。
 // 指标名必须与 internal/agent/collector 中各采集器实际产出的名字一致。
 
+// spec.kpis 是跨实例聚合的 KPI 卡（columns 之外的行）；agg: sum | max | avg
+
 export const builtinSpecs = {
   rabbitmq: {
     label: 'RabbitMQ',
+    kpis: [
+      { label: '总连接数', metric: 'rabbitmq_connections', agg: 'sum' },
+      { label: '总消息数', metric: 'rabbitmq_queue_messages', agg: 'sum' },
+      { label: '总消费者数', metric: 'rabbitmq_consumers', agg: 'sum' },
+    ],
     columns: [
       { key: 'rabbitmq_connections', label: '连接数' },
       { key: 'rabbitmq_queues', label: '队列数' },
@@ -24,6 +31,11 @@ export const builtinSpecs = {
   },
   elasticsearch: {
     label: 'Elasticsearch',
+    kpis: [
+      { label: '节点总数', metric: 'es_nodes', agg: 'max' },
+      { label: '活跃分片', metric: 'es_active_shards', agg: 'sum' },
+      { label: '未分配分片', metric: 'es_unassigned_shards', agg: 'sum' },
+    ],
     columns: [
       { key: 'es_cluster_status', label: '集群状态(0绿/1黄/2红)' },
       { key: 'es_nodes', label: '节点数' },
@@ -38,6 +50,10 @@ export const builtinSpecs = {
   },
   clickhouse: {
     label: 'ClickHouse',
+    kpis: [
+      { label: 'TCP 连接', metric: 'clickhouse_tcp_connections', agg: 'sum' },
+      { label: '运行中查询', metric: 'clickhouse_queries_running', agg: 'sum' },
+    ],
     columns: [
       { key: 'clickhouse_tcp_connections', label: 'TCP连接' },
       { key: 'clickhouse_http_connections', label: 'HTTP连接' },
@@ -57,6 +73,9 @@ export const builtinSpecs = {
   },
   zookeeper: {
     label: 'ZooKeeper',
+    kpis: [
+      { label: '活跃连接', metric: 'zookeeper_alive_connections', agg: 'sum' },
+    ],
     columns: [
       { key: 'zookeeper_avg_latency', label: '平均延迟(ms)' },
       { key: 'zookeeper_outstanding_requests', label: '未处理请求' },
