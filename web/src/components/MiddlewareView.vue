@@ -113,7 +113,9 @@
       <!-- 轻采集内置类型：存活 + 核心指标，共用一个 spec 驱动的通用组件 -->
       <el-tab-pane v-for="t in builtinTabList" :key="t.type" :label="t.label" :name="t.type">
         <template #label>
-          <span class="tab-label"><span class="tab-emoji">{{ t.emoji }}</span>{{ t.label }}</span>
+          <span class="tab-label">
+            <img class="tab-icon" :src="t.icon" :alt="t.label" />{{ t.label }}
+          </span>
         </template>
         <BuiltinTab v-if="activeTab === t.type" :type="t.type" />
       </el-tab-pane>
@@ -174,18 +176,23 @@ import mongodbIcon from '../assets/img/mongoDB.svg'
 import rocketmqIcon from '../assets/img/rocketMQ.svg'
 import k8sIcon from '../assets/img/kubernetes.svg'
 import fastdfsIcon from '../assets/img/fastdfs.svg'
+import rabbitmqIcon from '../assets/img/rabbitmq.svg'
+import elasticsearchIcon from '../assets/img/elasticsearch.svg'
+import clickhouseIcon from '../assets/img/clickhouse.svg'
+import nacosIcon from '../assets/img/nacos.svg'
+import zookeeperIcon from '../assets/img/zookeeper.svg'
 
 const route = useRoute()
 const BUILTIN_TABS = ['redis', 'mysql', 'postgres', 'nginx', 'kafka', 'docker', 'rocketmq', 'k8s', 'mongodb', 'fastdfs',
   'rabbitmq', 'elasticsearch', 'clickhouse', 'nacos', 'zookeeper']
 
-// 轻采集类型的 Tab 元数据（label + emoji），与 builtinSpecs 对应
+// 轻采集类型的 Tab 元数据（label + logo），与 builtinSpecs 对应
 const builtinTabList = [
-  { type: 'rabbitmq', label: 'RabbitMQ', emoji: '🐇' },
-  { type: 'elasticsearch', label: 'Elasticsearch', emoji: '🔍' },
-  { type: 'clickhouse', label: 'ClickHouse', emoji: '🏢' },
-  { type: 'nacos', label: 'Nacos', emoji: '☁️' },
-  { type: 'zookeeper', label: 'ZooKeeper', emoji: '🦁' },
+  { type: 'rabbitmq', label: 'RabbitMQ', icon: rabbitmqIcon },
+  { type: 'elasticsearch', label: 'Elasticsearch', icon: elasticsearchIcon },
+  { type: 'clickhouse', label: 'ClickHouse', icon: clickhouseIcon },
+  { type: 'nacos', label: 'Nacos', icon: nacosIcon },
+  { type: 'zookeeper', label: 'ZooKeeper', icon: zookeeperIcon },
 ]
 
 // ---- 展示类型开关 ----
