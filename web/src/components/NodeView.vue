@@ -89,20 +89,37 @@
         <div class="section-title">实时趋势</div>
         <div class="panel-hint">说明：以下为通过 WebSocket 实时上报的采样（每秒 1 条，横轴为采样时刻，仅保留最近 60 个点）。</div>
         <el-alert
-          v-if="!rtReady && currentStatus === 'online'"
-          type="info"
-          :closable="false"
-          show-icon
-          class="rt-waiting"
-          title="正在等待实时数据…（WebSocket 连接中，通常 1-2 秒内开始上报）"
-        />
-        <el-alert
           v-if="currentStatus === 'offline'"
           type="warning"
           :closable="false"
           show-icon
           class="rt-waiting"
           title="主机离线，实时数据不可用。主机恢复上报后此处会自动更新。"
+        />
+        <el-alert
+          v-else-if="!rtReady && wsState === 'retrying'"
+          type="error"
+          :closable="false"
+          show-icon
+          class="rt-waiting"
+          :title="`WebSocket 连接失败，正在自动重试（第 ${wsRetryCount} 次）…`"
+          description="常见原因：登录已过期（请退出重新登录）；通过反向代理访问时未透传 Upgrade / Connection 头导致握手失败；网络中断。可查看浏览器控制台与 server 日志进一步定位。"
+        />
+        <el-alert
+          v-else-if="!rtReady && wsState === 'open'"
+          type="info"
+          :closable="false"
+          show-icon
+          class="rt-waiting"
+          title="WebSocket 已连接，正在等待实时数据…若超过 1 分钟仍无数据，说明该主机指标查询无结果，请检查主机上报是否正常及 server 日志。"
+        />
+        <el-alert
+          v-else-if="!rtReady"
+          type="info"
+          :closable="false"
+          show-icon
+          class="rt-waiting"
+          title="正在等待实时数据…（WebSocket 连接中，通常 1-2 秒内开始上报）"
         />
         <div class="metric-grid">
           <div class="metric-card">
@@ -454,6 +471,10 @@ const procSearch = ref('')
 const portStatuses = ref([])
 // 实时数据是否已收到首帧（用于等待提示，避免首屏全 0 误导）
 const rtReady = ref(false)
+// WebSocket 连接状态：connecting | open | retrying（失败自动重连中），用于差异化提示
+const wsState = ref('connecting')
+// WebSocket 连续失败次数（收到首帧后归零），仅用于提示文案
+const wsRetryCount = ref(0)
 // 快照接口加载失败信息（进程/端口/防火墙），用于区分「加载失败」与「确实无数据」
 const loadErrors = reactive({ process: '', listeners: '', firewall: '', firewallStatus: '' })
 
@@ -680,17 +701,32 @@ function memClass(v) { return num(v) >= 50 ? 'amber' : 'green' }
 
 // ---------- WebSocket 实时指标 ----------
 function connectWS(name) {
-  if (socket) { try { socket.close() } catch (e) {} socket = null }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
+  // 关闭旧连接前先摘掉回调，避免旧 socket 的 onclose 误触发重连/状态变化
+  if (socket) {
+    const old = socket
+    socket = null
+    old.onopen = old.onmessage = old.onerror = old.onclose = null
+    try { old.close() } catch (e) {}
+  }
   // 切换主机后重置等待态，直到收到新主机首帧数据
   rtReady.value = false
+  wsState.value = 'connecting'
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const url = `${proto}://${location.host}/ws?topic=metrics&node=${encodeURIComponent(name)}`
-  socket = new WebSocket(url)
-  socket.onmessage = (ev) => {
+  const ws = new WebSocket(url)
+  socket = ws
+  ws.onopen = () => {
+    if (socket !== ws) return
+    wsState.value = 'open'
+  }
+  ws.onmessage = (ev) => {
+    if (socket !== ws) return
     try {
       const msg = JSON.parse(ev.data)
       if (msg.type !== 'metrics' || !msg.data) return
       rtReady.value = true
+      wsRetryCount.value = 0
       msg.data.forEach((d) => {
         const key = nameToKey[d.name]
         if (!key) return
@@ -706,10 +742,19 @@ function connectWS(name) {
       scheduleRender()
     } catch (e) { /* ignore */ }
   }
-  socket.onclose = () => {
-    if (autoRefresh.value) reconnectTimer = setTimeout(() => { if (selected.value && autoRefresh.value) connectWS(selected.value) }, 3000)
+  ws.onclose = (ev) => {
+    // 仅处理当前连接：被主动替换的旧连接不应触发重连
+    if (socket !== ws) return
+    // 关闭码帮助定位断开原因：1006=握手失败/网络断（握手未完成不会带状态码），
+    // 1008=服务端拒绝（401/403），4000+ 为自定义；101 后被服务端/中间层正常关闭为 1000/1001
+    console.warn('[NodeView] WebSocket 已关闭', { code: ev.code, reason: ev.reason, wasClean: ev.wasClean })
+    socket = null
+    if (!autoRefresh.value) return
+    wsRetryCount.value++
+    wsState.value = 'retrying'
+    reconnectTimer = setTimeout(() => { if (selected.value && autoRefresh.value) connectWS(selected.value) }, 3000)
   }
-  socket.onerror = () => { try { socket.close() } catch (e) {} }
+  ws.onerror = () => { try { ws.close() } catch (e) {} }
 }
 
 function updateGauges() {
@@ -1209,7 +1254,13 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  if (socket) { try { socket.close() } catch (e) {} }
+  // 先摘掉回调再关闭：否则 onclose 会在卸载后调度重连，泄漏连接
+  if (socket) {
+    const old = socket
+    socket = null
+    old.onopen = old.onmessage = old.onerror = old.onclose = null
+    try { old.close() } catch (e) {}
+  }
   if (reconnectTimer) clearTimeout(reconnectTimer)
   if (nodeTimer) clearInterval(nodeTimer)
   if (alertTimer) clearInterval(alertTimer)

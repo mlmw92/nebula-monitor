@@ -67,6 +67,17 @@ var upgrader = websocket.Upgrader{
 // 值按连接存放在 Client.writeWait（此后不再变更），避免共享可变全局被并发读写。
 const defaultWSWriteWait = 10 * time.Second
 
+// defaultWSPingInterval 是服务端 ping 心跳间隔。若节点查询不到实时数据（TSDB 异常/
+// 主机未上报），pushNodeMetrics 一帧都不推，连接处于静默空闲——nginx/LB 的空闲超时
+// （如 proxy_read_timeout 默认 60s）会把它掐掉，前端随即进入 3s 重连循环，表现为
+// 「WS 不断重新发起请求 + 页面永远等待实时数据」。无论是否有业务数据，按此间隔发
+// ping 保活链路；浏览器会自动回 pong。取值须显著小于常见反代默认空闲超时。
+const defaultWSPingInterval = 20 * time.Second
+
+// defaultWSPongWait 是读侧 pong 等待上限：超过该时长未收到任何 pong/数据帧，
+// 判定链路死亡并注销客户端。须大于 defaultWSPingInterval 的若干倍以容忍丢包。
+const defaultWSPongWait = 60 * time.Second
+
 // Hub 管理 WebSocket 客户端连接，并广播告警事件。
 //
 // 停机安全约定：
@@ -347,6 +358,11 @@ func (h *Hub) pushNodeMetrics(client *Client, store storage.Storage, node string
 		"load1", "load5", "load15", "disk_read_rate", "disk_write_rate"}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	// 连续空周期计数：payload 长期为 0 意味着 TSDB 查询失败或该节点指标未上报，
+	// 前端会一直停留在「正在等待实时数据」。此处打节流日志（首次 + 每 30 次）
+	// 帮助从 server 日志直接定位根因。
+	var emptyCycles int
+	var lastErr error
 	for {
 		select {
 		case <-h.done:
@@ -356,10 +372,16 @@ func (h *Hub) pushNodeMetrics(client *Client, store storage.Storage, node string
 			return
 		case <-ticker.C:
 			var payload []map[string]interface{}
+			recordErr := func(err error) {
+				if err != nil {
+					lastErr = err
+				}
+			}
 			for _, name := range metrics {
 				switch {
 				case name == "disk_used_percent":
 					p, err := aggregateDiskUsageForNode(store, node)
+					recordErr(err)
 					if err != nil || p == nil {
 						continue
 					}
@@ -370,6 +392,7 @@ func (h *Hub) pushNodeMetrics(client *Client, store storage.Storage, node string
 					name == "network_recv_total" || name == "network_sent_total":
 					// 网络指标按接口拆标签上报，需跨接口汇总为单值后再推送
 					p, err := aggregateNetworkMetric(store, node, name)
+					recordErr(err)
 					if err != nil || p == nil {
 						continue
 					}
@@ -378,6 +401,7 @@ func (h *Hub) pushNodeMetrics(client *Client, store storage.Storage, node string
 					})
 				default:
 					p, err := store.QueryLatest(node, name, nil)
+					recordErr(err)
 					if err != nil || p == nil {
 						continue
 					}
@@ -387,10 +411,17 @@ func (h *Hub) pushNodeMetrics(client *Client, store storage.Storage, node string
 				}
 			}
 			if len(payload) > 0 {
+				emptyCycles = 0
 				b, _ := json.Marshal(map[string]interface{}{"type": "metrics", "node": node, "data": payload})
 				// 经 enqueue 写入：写 send 前在 h.mu 内确认客户端仍在 clients 中，
 				// 避免与 CloseClients / Unregister 的 close(send) 竞态 panic。
 				h.enqueue(client, b)
+			} else {
+				emptyCycles++
+				if emptyCycles == 1 || emptyCycles%30 == 0 {
+					slog.Warn("WS 实时推送无可用数据（前端将停留在等待提示）",
+						"node", node, "连续空周期", emptyCycles, "lastErr", lastErr)
+				}
 			}
 		}
 	}
@@ -399,6 +430,10 @@ func (h *Hub) pushNodeMetrics(client *Client, store storage.Storage, node string
 // writePump 发送循环，返回导致其退出的写错误（send 被关闭时返回 nil）。
 // 写失败或 send 被关闭时一并关闭底层连接，促使阻塞在 ReadMessage 的 readPump
 // 退出并注销，避免断线客户端残留。
+//
+// 同时按 defaultWSPingInterval 发送 ping 心跳：即使没有业务数据推送（如节点查询
+// 不到实时指标），也保持链路有流量，避免被反代/LB 的空闲超时掐断后陷入「前端
+// 3s 重连循环」。gorilla 禁止并发写，因此 ping 必须与数据写在同一循环内完成。
 //
 // 每个客户端恰好启动一个 writePump（唯一写者）；退出时关闭 writeDone，
 // 便于测试在该写者消失后再探测连接状态。
@@ -411,29 +446,50 @@ func (c *Client) writePump() error {
 		return nil
 	}
 	defer c.conn.Close()
-	for msg := range c.send {
-		// 每次写前刷新写截止时间：客户端停止读取（零窗口）时阻塞写会在
-		// writeWait 后变成错误（os.ErrDeadlineExceeded），从而走
-		// return → conn.Close() → readPump 退出 → Unregister 的收敛链，
-		// 不会无限挂住。
-		_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
-		if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			return err
+	pingTicker := time.NewTicker(defaultWSPingInterval)
+	defer pingTicker.Stop()
+	for {
+		select {
+		case msg, ok := <-c.send:
+			if !ok {
+				return nil
+			}
+			// 每次写前刷新写截止时间：客户端停止读取（零窗口）时阻塞写会在
+			// writeWait 后变成错误（os.ErrDeadlineExceeded），从而走
+			// return → conn.Close() → readPump 退出 → Unregister 的收敛链，
+			// 不会无限挂住。
+			_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
+			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return err
+			}
+		case <-pingTicker.C:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return err
+			}
 		}
 	}
-	return nil
 }
 
 // readPump 读循环，检测断开后注销（关闭 send 与 done 以通知 pushNodeMetrics 退出）。
+//
+// 配合 writePump 的 ping 心跳设置读截止时间：超过 defaultWSPongWait 未收到任何
+// pong/数据帧判定链路死亡，主动退出并注销，避免半开连接的推送协程按秒空转查询 TSDB。
 func (c *Client) readPump() {
 	defer c.hub.Unregister(c)
 	if c.conn == nil {
 		// 防御：无底层连接的客户端（测试构造）不得 panic；与 writePump 守卫对称。
 		return
 	}
+	// 收到 pong（浏览器对服务端 ping 的自动回应）或任意数据帧都刷新读截止时间。
+	_ = c.conn.SetReadDeadline(time.Now().Add(defaultWSPongWait))
+	c.conn.SetPongHandler(func(string) error {
+		return c.conn.SetReadDeadline(time.Now().Add(defaultWSPongWait))
+	})
 	for {
 		if _, _, err := c.conn.ReadMessage(); err != nil {
 			return
 		}
+		_ = c.conn.SetReadDeadline(time.Now().Add(defaultWSPongWait))
 	}
 }
