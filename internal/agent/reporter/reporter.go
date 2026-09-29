@@ -10,21 +10,15 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
-	"github.com/nebula/monitor/internal/template"
 )
 
 // ReportResponse 是 Server 对上报的响应。command 非空时表示有待执行指令（如 upgrade）。
-// Defense 为结构化防护指令（受控 fail2ban 入侵防御）；Templates 为采集项模板下发（C1 阶段二）。
+// Defense 为结构化防护指令（受控 fail2ban 入侵防御）。
 // 旧 Agent 不消费这些字段、旧 Server 不返回这些字段，双向兼容。
 type ReportResponse struct {
 	Status  string                `json:"status"`
 	Command string                `json:"command,omitempty"`
 	Defense *model.DefenseCommand `json:"defense,omitempty"`
-	// Templates 为 Server 下发的采集项模板：仅当 Agent 在 capabilities 中声明支持、
-	// 且其已生效版本号落后时携带（空数组表示「该分组已无模板」，Agent 应清空）。
-	Templates []template.Config `json:"templates,omitempty"`
-	// TemplateRevision 为本次下发内容的版本号，Agent 应用后随下轮能力声明回执。
-	TemplateRevision uint64 `json:"templateRevision,omitempty"`
 }
 
 // Reporter 发送上报请求到 Server。

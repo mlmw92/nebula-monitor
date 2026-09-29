@@ -10,7 +10,6 @@ import (
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/instancereg"
-	"github.com/nebula/monitor/internal/server/mwreg"
 	"github.com/nebula/monitor/internal/server/report"
 )
 
@@ -718,7 +717,6 @@ func (a *API) handleMiddlewareOverview(w http.ResponseWriter, r *http.Request) {
 	resp := middlewareOverviewResp{Types: make([]middlewareOverviewType, 0, len(types))}
 	for _, t := range types {
 		item := middlewareOverviewType{Type: t.Key, Label: t.Label, Kind: string(t.Kind), AlertCount: alertCount[t.Key]}
-		// UpLabels 用于区分模板类型：所有模板共用 template_target_up，靠 template 标签归属
 		series, err := a.store.QueryAllLatest(t.UpMetric, t.UpLabels)
 		if err != nil {
 			slog.Warn("查询中间件 up 指标失败", "metric", t.UpMetric, "err", err)
@@ -762,93 +760,6 @@ func (a *API) handleMiddlewareOverview(w http.ResponseWriter, r *http.Request) {
 		resp.Types = append(resp.Types, item)
 	}
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// templateInstanceMetric 是模板实例上的一项摘要指标（供前端通用 Tab 直接渲染）。
-type templateInstanceMetric struct {
-	Key   string  `json:"key"`
-	Label string  `json:"label"`
-	Value float64 `json:"value"`
-	Unit  string  `json:"unit"`
-}
-
-// templateInstanceInfo 是模板派生类型的一个实例。
-type templateInstanceInfo struct {
-	Instance string                   `json:"instance"`
-	Node     string                   `json:"node"`
-	Group    string                   `json:"group"`
-	Up       bool                     `json:"up"`
-	Metrics  []templateInstanceMetric `json:"metrics"`
-}
-
-// handleMiddlewareTypeInstances 是**模板派生类型**的通用实例接口。
-//
-// 内置类型各有专用 handler（字段形态差异大，如 Redis 的分片图、K8s 的 Pod 列表），
-// 这里的形态刻意保持通用：模板类型的实例 = 存活指标的 node|instance 组合，
-// 指标值 = 该类型的摘要指标在该实例上的最新值。
-// 内置类型不会走到这里——它们的字面量路由（/middleware/redis/instances 等）优先命中。
-func (a *API) handleMiddlewareTypeInstances(w http.ResponseWriter, r *http.Request) {
-	key := r.PathValue("type")
-	t, ok := a.middlewareRegistry().Get(key)
-	if !ok || t.Kind != mwreg.KindTemplate {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "未知的中间件类型 " + key})
-		return
-	}
-	p := Principal(r)
-
-	ups, err := a.store.QueryAllLatest(t.UpMetric, t.UpLabels)
-	if err != nil {
-		slog.Warn("查询模板实例失败", "type", key, "err", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"type": key, "label": t.Label, "instances": []interface{}{}})
-		return
-	}
-
-	// 摘要指标最新值按 node|instance 建索引：一次查询覆盖全部实例，避免逐实例再查
-	summary := map[string]map[string]float64{}
-	for _, sp := range t.Summary {
-		series, err := a.store.QueryAllLatest(sp.Metric, nil)
-		if err != nil {
-			continue
-		}
-		for _, s := range series {
-			if len(s.Points) == 0 {
-				continue
-			}
-			k := s.Labels["node"] + "|" + s.Labels["instance"]
-			if summary[k] == nil {
-				summary[k] = map[string]float64{}
-			}
-			summary[k][sp.Metric] = s.Points[len(s.Points)-1].Value
-		}
-	}
-
-	out := make([]templateInstanceInfo, 0, len(ups))
-	seen := map[string]bool{}
-	for _, s := range ups {
-		if !a.nodeInScope(p, s.Labels["node"]) {
-			continue
-		}
-		k := s.Labels["node"] + "|" + s.Labels["instance"]
-		if k == "|" || seen[k] {
-			continue
-		}
-		seen[k] = true
-		item := templateInstanceInfo{
-			Instance: s.Labels["instance"],
-			Node:     s.Labels["node"],
-			Group:    s.Labels["group"],
-			Up:       len(s.Points) > 0 && s.Points[len(s.Points)-1].Value > 0,
-		}
-		for _, sp := range t.Summary {
-			if v, ok := summary[k][sp.Metric]; ok {
-				item.Metrics = append(item.Metrics, templateInstanceMetric{
-					Key: sp.Metric, Label: sp.Label, Value: v, Unit: sp.Unit,
-				})
-			}
-		}
-		out = append(out, item)
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"type": key, "label": t.Label, "instances": out})
 }
 
 // nodeIP 返回指定节点上报的主机 IP（primaryIP，首个非回环 IPv4）；节点未在线或查不到时返回空串。

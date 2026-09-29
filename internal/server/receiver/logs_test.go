@@ -127,7 +127,7 @@ func TestHandleLogs_RejectsUndeclaredSource(t *testing.T) {
 	r, _ := newLogsReceiver(t, root, 0, 0, 0)
 	// 节点上报能力：只配了 applog
 	r.nodeMgr.Register(&model.ReportPayload{Node: "n1", Group: "default",
-		Capabilities: &model.ClientCapability{Templates: true, LogSources: []string{"applog"}}})
+		Capabilities: &model.ClientCapability{LogSources: []string{"applog"}}})
 
 	if rec := postLogs(r, logBody(t, sampleBatch("otherlog", 1)), nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("未声明的来源应 403，got %d", rec.Code)

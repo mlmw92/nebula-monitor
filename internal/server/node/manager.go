@@ -101,10 +101,7 @@ func (m *Manager) Register(p *model.ReportPayload) {
 	if hasHostInfo(p.HostInfo) {
 		n.HostInfo = p.HostInfo
 	}
-	// 记录本机已放行的模板取数方式（阶段三）。旧 Agent 不报 capabilities → 保持原值不动，
-	// 避免一次旧版心跳把已放行的信息抹掉。
 	if p.Capabilities != nil {
-		n.TemplateKinds = p.Capabilities.TemplateKinds
 		n.LogSources = p.Capabilities.LogSources
 	}
 	n.Status = "online"

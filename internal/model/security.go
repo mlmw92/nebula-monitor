@@ -166,19 +166,6 @@ type DefenseStatus struct {
 type ClientCapability struct {
 	// Defense 是否支持结构化防护指令（enable/disable/status）。
 	Defense bool `json:"defense,omitempty"`
-	// Templates 是否支持接收 Server 下发的采集项模板（C1 阶段二）。
-	// 旧 Agent 不报此字段，Server 据此不下发——模板可达数 KB，不该发给用不上的节点。
-	Templates bool `json:"templates,omitempty"`
-	// TemplateRevision 是 Agent 当前**已生效**的模板版本号（0 = 仅本机 agent.yaml 配置）。
-	// Server 仅在版本号不一致时携带模板下发，避免每轮心跳都背负整份配置。
-	TemplateRevision uint64 `json:"templateRevision,omitempty"`
-	// TemplateKinds 是 Agent **本机已放行**的取数方式（C1 阶段三：jdbc / exec / file）。
-	//
-	// 这几类会以 root 触碰被监控机本身或携带库凭据，因此由各机器自己在 agent.yaml 的
-	// templateGuards 里决定是否放行；Server 只把模板下发给声明过的节点——
-	// 未启用的节点收到也用不了，只会多出 up=0 噪音与「模板存在却无数据」的误判。
-	// 旧 Agent 不报此字段，因此护栏类模板对它们一律不下发。
-	TemplateKinds []string `json:"templateKinds,omitempty"`
 	// LogSources 是 Agent **本机已配置**的日志来源 id 清单（C2 集中日志）。
 	//
 	// Server 用它判断上行的日志来源是否属于该节点：节点声明过清单之后，

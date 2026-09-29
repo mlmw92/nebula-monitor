@@ -1,4 +1,4 @@
-// Package mwreg 提供中间件类型的运行时注册表：内置类型 + 由「采集项模板」派生出的类型。
+// Package mwreg 提供中间件类型的注册表（内置类型清单的唯一来源）。
 //
 // 为什么需要它：此前「有哪些中间件类型」「每类的存活指标」「卡片展示哪些指标」分散在四处硬编码
 // （api 的 middlewareTypes 与 mwSummarySpecs、report 的 mwDefs、alert 的 serviceMetric 与
@@ -14,20 +14,12 @@
 // ReportPresenceUp 两个显式字段（见 Type 的注释），而不是强行统一。
 package mwreg
 
-import (
-	"strings"
-
-	"github.com/nebula/monitor/internal/template"
-)
-
 // Kind 区分内置类型与模板派生类型。
 type Kind string
 
 const (
 	// KindBuiltin 内置类型（编译期固定）。
 	KindBuiltin Kind = "builtin"
-	// KindTemplate 由采集项模板派生（运行期随模板增删）。
-	KindTemplate Kind = "template"
 )
 
 // SummarySpec 描述卡片/报告上要展示的一个摘要指标。
@@ -48,9 +40,7 @@ type Type struct {
 	Emoji string // 报告用图标
 	// UpMetric 存活指标名；空值表示该类没有存活指标（不应发生）。
 	UpMetric string
-	// UpLabels 存活指标上的附加过滤条件。内置类型为空；
-	// 模板类型为 {"template": <id>}——所有模板共用 template_target_up 这一个指标名，
-	// 靠 template 标签区分归属。
+	// UpLabels 存活指标上的附加过滤条件。内置类型为空。
 	UpLabels map[string]string
 	// ConnMetric 报告里「连接/负载」一栏取的指标（可为空）。
 	ConnMetric string
@@ -81,56 +71,23 @@ func (t Type) UpMetricForReport() string {
 	return t.UpMetric
 }
 
-// TemplateSource 提供模板快照（由 internal/server/templates 实现）。
-type TemplateSource interface {
-	Snapshot() ([]template.Config, uint64)
-}
+// Registry 是中间件类型注册表。
+type Registry struct{}
 
-// Registry 合并内置类型与模板类型。
-//
-// 模板类型是**动态**的：每次读取都从模板快照现算，因此模板增删后下一次请求即见效，
-// 不需要重建注册表、更不需要重启。
-type Registry struct {
-	store TemplateSource // 可空：不注入时只有内置类型
-}
-
-// New 创建注册表。store 可为 nil（只有内置类型，等价于改造前的行为）。
-func New(store TemplateSource) *Registry { return &Registry{store: store} }
+// New 创建注册表。
+func New() *Registry { return &Registry{} }
 
 // builtinOnly 供未注入模板源的调用方复用（避免各处 new 出多个等价实例）。
 var builtinOnly = &Registry{}
 
-// BuiltinOnly 返回只有内置类型的注册表。用于「未注入模板源」的调用方，
-// 使这些路径的行为与改造前完全一致。
+// BuiltinOnly 返回内置类型的注册表（与 New 等价，保留以兼容历史调用方）。
 func BuiltinOnly() *Registry { return builtinOnly }
 
-// Types 返回全部类型：内置在前、模板在后，顺序稳定（前端展示与测试断言都依赖顺序稳定）。
-// 模板 id 与内置类型同名时以内置为准（模板项跳过）——内置 RabbitMQ/ZooKeeper 等出现后，
-// 历史遗留的同名模板不得遮蔽内置类型，也不应在展示层产生重复 Tab。
+// Types 返回全部类型（顺序稳定：前端展示与测试断言都依赖顺序稳定）。
 func (r *Registry) Types() []Type {
-	out := make([]Type, 0, len(builtinTypes)+4)
-	seen := make(map[string]bool, len(builtinTypes))
-	for _, t := range builtinTypes {
-		seen[t.Key] = true
-		out = append(out, t)
-	}
-	for _, t := range r.TemplateTypes() {
-		if seen[t.Key] {
-			continue
-		}
-		seen[t.Key] = true
-		out = append(out, t)
-	}
+	out := make([]Type, len(builtinTypes))
+	copy(out, builtinTypes)
 	return out
-}
-
-// TemplateTypes 只返回由模板派生的类型。
-func (r *Registry) TemplateTypes() []Type {
-	if r == nil || r.store == nil {
-		return nil
-	}
-	list, _ := r.store.Snapshot()
-	return deriveTypes(list)
 }
 
 // Get 按 key 查询类型。
@@ -157,54 +114,4 @@ func (r *Registry) Keys() []string {
 		out = append(out, t.Key)
 	}
 	return out
-}
-
-// deriveTypes 由模板派生类型。
-//
-// 存活指标统一是 template_target_up + {"template": id}：与内置类型的 *_instance_up 不同名，
-// 因此不会与专用采集器形成同名双序列（这也是阶段一选这个指标名的原因）。
-func deriveTypes(list []template.Config) []Type {
-	out := make([]Type, 0, len(list))
-	for _, c := range list {
-		if c.ID == "" {
-			continue
-		}
-		t := Type{
-			Key:      c.ID,
-			Label:    displayLabel(c),
-			Kind:     KindTemplate,
-			Emoji:    "🧩",
-			UpMetric: template.UpMetricName,
-			UpLabels: map[string]string{"template": c.ID},
-		}
-		for _, m := range c.Rules.Metrics {
-			metric := template.EnsurePrefix(c.ID, m.Name)
-			t.Summary = append(t.Summary, SummarySpec{
-				Metric: metric,
-				Label:  firstNonEmpty(strings.TrimSpace(m.Label), m.Name),
-				Agg:    "max",
-				Unit:   m.Unit,
-			})
-			// 报告明细表同样展示模板声明的这些指标
-			t.KeyMetrics = append(t.KeyMetrics, metric)
-		}
-		out = append(out, t)
-	}
-	return out
-}
-
-func displayLabel(c template.Config) string {
-	if s := strings.TrimSpace(c.Title); s != "" {
-		return s
-	}
-	return c.ID
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }

@@ -5,13 +5,11 @@
       <div class="header-left">
         <h2 class="page-title">中间件监控</h2>
         <p class="page-desc">
-          各类中间件实例监控与可视化，以及由「采集项模板」派生的自定义类型。
-          未部署的类型可在右侧「展示类型」中隐藏。
+          各类中间件实例监控与可视化。未部署的类型可在右侧「展示类型」中隐藏。
         </p>
       </div>
       <div class="header-actions">
         <el-button @click="viewDialog = true">展示类型</el-button>
-        <el-button @click="$router.push('/templates')">采集项模板</el-button>
       </div>
     </div>
 
@@ -119,20 +117,6 @@
         </template>
         <BuiltinTab v-if="activeTab === t.type" :type="t.type" />
       </el-tab-pane>
-      <!-- 采集项模板派生的类型：由 Server 侧类型注册表动态提供，无需为每类中间件写前端代码 -->
-      <el-tab-pane v-for="t in visibleTemplateTypes" :key="t.type" :label="t.label" :name="t.type">
-        <template #label>
-          <span class="tab-label">
-            {{ t.label }}
-            <span
-              v-if="t.total === 0"
-              class="tab-hint-dot"
-              title="已配置该模板，但还没有采集到实例"
-            ></span>
-          </span>
-        </template>
-        <TemplateTab v-if="activeTab === t.type" :type="t.type" :label="t.label" />
-      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -161,8 +145,6 @@ const RocketMQTab = tabLoader(() => import('./rocketmq/RocketMQTab.vue'))
 const K8sTab = tabLoader(() => import('./k8s/K8sTab.vue'))
 const MongoTab = tabLoader(() => import('./mongo/MongoTab.vue'))
 const FastDFSTab = tabLoader(() => import('./fastdfs/FastDFSTab.vue'))
-// 模板派生类型共用一个通用 Tab（实例表 + 摘要指标），因此新增一类中间件不必再写前端组件
-const TemplateTab = tabLoader(() => import('./mw/TemplateTab.vue'))
 // 轻采集内置类型（RabbitMQ/ES/ClickHouse/Nacos/ZooKeeper）共用一个 spec 驱动的通用 Tab
 const BuiltinTab = tabLoader(() => import('./mw/BuiltinTab.vue'))
 import { builtinSpecs } from './mw/builtinSpecs'
@@ -236,18 +218,7 @@ async function saveViewConfig() {
   }
 }
 
-// 模板派生类型来自 Server 侧类型注册表（总览接口把 kind=template 的类型一并返回）
-const templateTypes = ref([])
-async function loadTemplateTypes() {
-  try {
-    const data = await http.get('/api/v1/middleware/overview')
-    templateTypes.value = (data.types || []).filter((t) => t.kind === 'template')
-  } catch (e) {
-    console.error('加载模板派生类型失败', e)
-  }
-}
-
-const validTabs = computed(() => visibleBuiltinTabs.value.concat(visibleTemplateTypes.value.map((t) => t.type)))
+const validTabs = computed(() => visibleBuiltinTabs.value)
 const activeTab = ref(BUILTIN_TABS.includes(route.query.tab) ? route.query.tab : 'redis')
 
 // 支持从首页等外部链接通过 ?tab= 深链跳转到指定中间件
@@ -258,9 +229,8 @@ watch(
   }
 )
 
-// 模板类型要等类型列表返回后才存在，因此加载完成后再解析一次深链
 onMounted(async () => {
-  await Promise.all([loadTemplateTypes(), loadViewConfig()])
+  await loadViewConfig()
   if (route.query.tab && validTabs.value.includes(route.query.tab)) activeTab.value = route.query.tab
 })
 </script>
@@ -274,14 +244,6 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 16px;
-}
-/* 模板类型暂无数据时的提示点（与 Tab 内的空状态文案配合） */
-.tab-hint-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--warning, #e6a23c);
-  display: inline-block;
 }
 .page-title {
   font-size: 22px;

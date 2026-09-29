@@ -114,7 +114,6 @@ type API struct {
 	pipeline       *alert.PipelineStore   // 告警事件管道：relabel/enrich/消息模板（可空）
 	selfmon        *selfmon.Monitor       // 自监控收集器（可空；不注入时探针仍可用，只是没有进程指标）
 	retention      *retention.Manager     // 数据保留策略（可空；不注入时接口返回默认策略）
-	templates      TemplatesProvider      // 采集项模板（可空；未注入时模板接口返回空集合）
 	mwRegistry     *mwreg.Registry        // 中间件类型注册表（可空；未注入时退化为内置类型）
 	logs           *logstore.Store        // 集中日志存储（C2；可空，未注入时检索接口返回 503）
 	startedAt      time.Time              // 进程启动时间，供 /healthz、/readyz 报告运行时长
@@ -135,10 +134,7 @@ func (a *API) SetAnalyzer(analyzer *analysis.Analyzer) {
 // SetPipelineStore 注入告警事件管道存储（可选；不注入时相关接口返回空配置）。
 func (a *API) SetPipelineStore(p *alert.PipelineStore) { a.pipeline = p }
 
-// SetTemplateStore 注入采集项模板存储（C1 阶段二；未注入时模板接口返回空集合）。
-func (a *API) SetTemplateStore(p TemplatesProvider) { a.templates = p }
-
-// SetMiddlewareRegistry 注入中间件类型注册表（内置类型 + 模板派生类型）。
+// SetMiddlewareRegistry 注入中间件类型注册表。
 // 未注入时退化为只有内置类型，行为与改造前一致。
 func (a *API) SetMiddlewareRegistry(r *mwreg.Registry) { a.mwRegistry = r }
 
@@ -203,22 +199,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigGET, "middleware:read"))
 	mux.HandleFunc("PUT /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigPUT, "system:config"))
 	mux.HandleFunc("POST /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigPUT, "system:config"))
-	// 采集项模板（C1 阶段二）：读 middleware:read，写 middleware:write。
-	// templates 是字面量路径段，与既有 /middleware/{type}/instances 一类参数段不冲突（字面量优先）。
-	// 模板派生类型的通用实例接口：内置类型各自的字面量路由优先命中，不会走到这里
-	mux.HandleFunc("GET /api/v1/middleware/{type}/instances", a.permit(a.handleMiddlewareTypeInstances, "middleware:read"))
-	mux.HandleFunc("GET /api/v1/middleware/templates", a.permit(a.handleTemplatesList, "middleware:read"))
-	mux.HandleFunc("GET /api/v1/middleware/templates/presets", a.permit(a.handleTemplatePresets, "middleware:read"))
 	// 集中日志检索（C2）：内容敏感，独立权限点 logs:read + 节点分组范围
 	mux.HandleFunc("GET /api/v1/logs", a.permit(a.handleLogsQuery, "logs:read"))
 	// 对外状态页（C3）：**刻意不套 permit**——它是给外部人看的免登录页面。
 	// 暴露范围由「拨测任务是否勾选 public」控制（见 dialtest.Task.Public），
 	// 且响应只含名称/状态/延迟/可用率，不含 target 与节点。
 	mux.HandleFunc("GET /api/v1/status", a.handlePublicStatus)
-	mux.HandleFunc("POST /api/v1/middleware/templates", a.permit(a.handleTemplateCreate, "middleware:write"))
-	mux.HandleFunc("POST /api/v1/middleware/templates/validate", a.permit(a.handleTemplateValidate, "middleware:write"))
-	mux.HandleFunc("PUT /api/v1/middleware/templates/{id}", a.permit(a.handleTemplateUpdate, "middleware:write"))
-	mux.HandleFunc("DELETE /api/v1/middleware/templates/{id}", a.permit(a.handleTemplateDelete, "middleware:write"))
 	mux.HandleFunc("GET /api/v1/middleware/nginx/access/summary", a.permit(a.handleNginxAccessSummary, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/nginx/access/geo", a.permit(a.handleNginxAccessGeo, "middleware:read"))
 

@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,7 +19,6 @@ import (
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/storage"
-	"github.com/nebula/monitor/internal/template"
 )
 
 // itoa 整型转字符串。
@@ -111,23 +109,12 @@ type Receiver struct {
 	sec       *security.Store        // 安全事件/基线存储（可空，传 nil 关闭安全能力）
 	alerts    *alert.Engine          // 告警引擎（安全事件注入告警中心，可空）
 	defense   *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空）
-	templates TemplateProvider       // 采集项模板下发数据源（可空：不注入则不下发）
 
 	// 集中日志（C2）：logs 为 nil 表示该能力关闭（接口回 503，与不配置 logSources 的 Agent 恰好对称）
 	logs       *logstore.Store
 	logMaxBody int64
 	logLimiter *logRateLimiter
 }
-
-// TemplateProvider 提供下发给 Agent 的采集项模板（由 templates 包实现）。
-// 只依赖「取快照 + 版本号」这一最小能力，避免 receiver 依赖存储实现细节。
-type TemplateProvider interface {
-	// Snapshot 一次性返回模板列表与其版本号（两者必须来自同一时刻，否则可能下发到「旧内容 + 新版本号」）。
-	Snapshot() ([]template.Config, uint64)
-}
-
-// SetTemplateStore 注入采集项模板下发源（C1 阶段二；未注入则不下发，行为与阶段一一致）。
-func (r *Receiver) SetTemplateStore(p TemplateProvider) { r.templates = p }
 
 // New 创建 Receiver。auth 为 Agent 接入授权配置（参考哪吒探针密钥机制）；
 // ngx 为 Nginx access log 聚合窗口，可传 nil 关闭该能力；
@@ -378,72 +365,9 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	// 采集项模板下发（C1 阶段二）：仅当 Agent 声明支持、且其**已生效版本号**落后时携带。
-	// 判定逻辑抽成纯函数，便于直接单测（否则要为此构造整套存储与 HTTP 环境）。
-	attachDeliveredTemplates(resp, payload.Capabilities, payload.Group, r.templates)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
-}
-
-// attachDeliveredTemplates 在响应中附加该节点分组适用的模板；无需下发时不改动 resp。
-//
-// 三条闸门，缺一不可：
-//   - Agent 必须声明 Templates 能力：旧 Agent 不认该字段，发了也是白发（模板可达数 KB）；
-//   - 版本号必须与 Agent 已生效版本不同：否则每轮心跳都背负整份配置，随节点数成倍放大；
-//   - 内容必须按 Agent 所属分组过滤：把不属于它的模板发过去，只会让它在无关节点上产出 up=0。
-//
-// 注意「该分组已无模板」时下发的是**空数组**而非跳过：Agent 必须收到「清空」这个事实，
-// 否则会一直跑着已被删除的模板。
-func attachDeliveredTemplates(resp map[string]interface{}, caps *model.ClientCapability, group string, provider TemplateProvider) {
-	if provider == nil || caps == nil || !caps.Templates {
-		return
-	}
-	list, rev := provider.Snapshot()
-	if rev == caps.TemplateRevision {
-		return
-	}
-	scoped := templatesForGroup(list, group)
-	// 再按该节点**本机放行**的取数方式过滤（阶段三：jdbc / exec / file 会以 root 触碰本机或携带库凭据，
-	// 由各机器自己在 agent.yaml 里决定是否放行）。未放行的节点收到也用不了，只会多出 up=0 噪音。
-	scoped = templatesForKinds(scoped, caps.TemplateKinds)
-	resp["templates"] = scoped
-	resp["templateRevision"] = rev
-	// 用 Debug：Agent 若因模板非法而拒绝应用会持续落后（设计如此，配置修好后自愈），
-	// 此处用 Info 会在该场景下按上报周期刷屏；「是否真的生效」由 Agent 日志与 up 指标体现。
-	slog.Debug("已下发采集项模板", "group", group, "count", len(scoped), "revision", rev)
-}
-
-// templatesForKinds 过滤出该节点能执行的模板（见 template.KindEnabledOnNode）。
-//
-// 网络取数类（prometheus-exporter / http-json / http-text）任何节点都能执行；
-// 护栏类（jdbc / exec / file）必须由该节点在上报能力里声明已放行。
-func templatesForKinds(list []template.Config, declared []string) []template.Config {
-	out := make([]template.Config, 0, len(list))
-	for _, t := range list {
-		if template.KindEnabledOnNode(t.Kind, declared) {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-// templatesForGroup 过滤出对该节点分组生效的模板。
-//
-// 空集合也照样下发（而不是跳过）：模板被删空时，Agent 必须收到「清空」这个事实，
-// 否则它会一直跑着已被删除的模板。这也是 Server 侧要求模板必须声明 groups 的原因——
-// 若默认「全部节点」，一台只跑某中间件的机器配一个模板会让其余节点每轮各报一个 up=0。
-func templatesForGroup(list []template.Config, group string) []template.Config {
-	out := make([]template.Config, 0, len(list))
-	for _, t := range list {
-		for _, g := range t.Groups {
-			if strings.TrimSpace(g) == group {
-				out = append(out, t)
-				break
-			}
-		}
-	}
-	return out
 }
 
 // cloneLabels 复制标签 map，避免多个指标共享同一 map 被并发修改。

@@ -29,12 +29,6 @@ import (
 // pidFile Agent 进程 PID 文件路径。
 const pidFile = "/var/run/monitor-agent.pid"
 
-// lastRejectedTemplateRev 记录最近一次因校验失败而被拒绝的模板版本号。
-//
-// 用途是把「同一份非法模板」的告警去重：Server 会持续重发（这是刻意的——
-// 配置修好后能自愈），不去重会按上报周期刷屏。
-var lastRejectedTemplateRev uint64
-
 // 受控 fail2ban 入侵防御相关全局组件（agent 单例）。
 var (
 	// defenseExec 受控 fail2ban 入侵防御执行器单例。
@@ -136,7 +130,6 @@ func main() {
 		cfg.NacosInstances, cfg.ZooKeeperInstances,
 		cfg.PortChecks, cfg.Security,
 		time.Duration(cfg.CollectTimeout)*time.Second,
-		cfg.Templates, cfg.TemplateGuards,
 		cfg.LogSources, cfg.LogOffsetsFile,
 	)
 	// 集中日志（C2）：配置了 logSources 才构造上行器并接上采集器。
@@ -376,15 +369,9 @@ func collectAndReport(ctx context.Context, coll *collector.Collector, rep *repor
 		NginxAccessStats:  res.NginxAccess,
 		SecurityEvents:    res.SecurityEvents,
 		SecurityBaseline:  res.SecurityBaseline,
-		// 声明 Agent 能力：支持结构化入侵防护指令与模板下发（旧 Server 忽略此字段）
+		// 声明 Agent 能力：支持结构化入侵防护指令（旧 Server 忽略此字段）
 		Capabilities: &model.ClientCapability{
-			Defense:   true,
-			Templates: true,
-			// 回执当前已生效的模板版本号：Server 仅在版本不一致时才携带模板（避免每轮背负整份配置）
-			TemplateRevision: coll.TemplateRevision(),
-			// 声明本机已放行的取数方式（阶段三）：Server 只把 exec/file/jdbc 模板下发给声明过的节点，
-			// 未启用的节点不会收到，因而不会每轮各报一个 up=0
-			TemplateKinds: cfg.TemplateGuards.EnabledKinds(),
+			Defense: true,
 			// 声明本机已配置的日志来源（C2）：Server 据此校验上行日志的来源是否属于本节点
 			LogSources: logSourceIDs(cfg.LogSources),
 		},
@@ -433,20 +420,5 @@ func collectAndReport(ctx context.Context, coll *collector.Collector, rep *repor
 			res := defenseExec.Execute(cmd)
 			pendingResult = &res
 		}()
-	}
-
-	// 应用 Server 下发的采集项模板（C1 阶段二）：变更即热生效，无需重启、无需 SIGHUP
-	// —— CollectAll 每轮都会重建任务表，换掉模板集后下一个采集周期自然生效。
-	// 校验失败保留现有模板：模板下发属便利功能，绝不能因它打断采集。
-	if resp.TemplateRevision != 0 && resp.TemplateRevision != coll.TemplateRevision() {
-		if err := coll.ApplyDelivered(resp.Templates, resp.TemplateRevision); err != nil {
-			if lastRejectedTemplateRev != resp.TemplateRevision {
-				lastRejectedTemplateRev = resp.TemplateRevision
-				slog.Warn("Server 下发的采集项模板非法，已忽略并继续使用现有模板",
-					"revision", resp.TemplateRevision, "err", err)
-			}
-		} else {
-			slog.Info("已应用 Server 下发的采集项模板", "count", len(resp.Templates), "revision", resp.TemplateRevision)
-		}
 	}
 }

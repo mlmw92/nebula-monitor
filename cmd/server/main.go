@@ -40,7 +40,6 @@ import (
 	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/selfmon"
 	"github.com/nebula/monitor/internal/server/storage"
-	"github.com/nebula/monitor/internal/server/templates"
 	"github.com/nebula/monitor/internal/server/uicfg"
 	"github.com/nebula/monitor/internal/server/upgrade"
 	"github.com/nebula/monitor/internal/version"
@@ -186,9 +185,6 @@ func main() {
 	defenseStore := security.NewDefenseStore(filepath.Join(filepath.Dir(cfg.SecurityStoreFile), "defense_tasks.json"))
 	recv := receiver.New(store, nodeMgr, cfg.AgentAuth, ngxWin, securityStore, engine, defenseStore)
 
-	// 采集项模板（C1 阶段二）：Web 端统一 CRUD，并作为下发给 Agent 的数据源
-	templateStore := templates.NewStore(cfg.TemplatesFile)
-	recv.SetTemplateStore(templateStore)
 	// 集中日志（C2）：目录留空时取 <DataDir>/logs；未配置时该能力关闭（接口回 503）。
 	// 三个上限都必须有值——「开了日志把盘写满」不是会不会的问题，只是时间问题。
 	logDir := cfg.LogDir
@@ -198,9 +194,9 @@ func main() {
 	// 同一个实例既供上行写入、也供检索读取：读写两侧共用一份存储，布局不会各写各的
 	logStore := logstore.New(logDir, cfg.LogMaxBytesPerDay)
 	recv.SetLogStore(logStore, cfg.LogMaxBodyBytes, cfg.LogUploadRateBps)
-	// 中间件类型注册表：内置 10 类 + 由模板派生的类型，是「有哪些中间件类型」的唯一来源
+	// 中间件类型注册表：内置类型清单的唯一来源
 	//（api 的类型清单、报告分节、告警的服务类型校验都读它）。
-	mwRegistry := mwreg.New(templateStore)
+	mwRegistry := mwreg.New()
 
 	// 拨测模块
 	dialtestStore := dialtest.NewStore(cfg.DialtestFile)
@@ -296,11 +292,10 @@ func main() {
 	rest.SetPipelineStore(pipelineStore)
 	rest.SetSelfMon(mon)
 	rest.SetRetention(retentionMgr)
-	rest.SetTemplateStore(templateStore)
 	// 集中日志检索（C2）：与上行共用同一个存储实例（同一份目录，读写两侧布局必然一致）
 	rest.SetLogStore(logStore)
 	rest.SetMiddlewareRegistry(mwRegistry)
-	// 告警侧同样读注册表：模板派生类型才能被「服务离线」规则监控
+	// 告警侧同样读注册表：服务离线规则的服务类型校验都读它
 	alert.SetMiddlewareRegistry(mwRegistry)
 	mux := http.NewServeMux()
 	recvMux := &receiverMux{recv: recv}

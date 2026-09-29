@@ -35,7 +35,6 @@ type Config struct {
 	Upgrade           UpgradeConfig   `yaml:"upgrade"`           // Web 系统升级模块配置
 	NotifyFile        string          `yaml:"notifyFile"`        // 通知渠道独立配置文件（Web 端配置写入，优先于 server.yaml 的 notify 段）
 	DialtestFile      string          `yaml:"dialtestFile"`      // 拨测任务配置文件
-	TemplatesFile     string          `yaml:"templatesFile"`     // 采集项模板配置文件（Web 端 CRUD，并下发给 Agent）
 	ReportDir         string          `yaml:"reportDir"`         // 报告存储目录
 	ScreenFile        string          `yaml:"screenFile"`        // 数据大屏模块显隐配置文件（Web 端设置写入）
 	UIFile            string          `yaml:"uiFile"`            // 系统 UI 品牌配置（系统名称/Logo，Web 端设置写入）
@@ -338,7 +337,6 @@ func Default() *Config {
 		WebDir:            "/etc/monitor-server/web",
 		NotifyFile:        "/etc/monitor-server/notify.yaml",
 		DialtestFile:      "/etc/monitor-server/dialtest.yaml",
-		TemplatesFile:     "/etc/monitor-server/templates.yaml",
 		ReportDir:         "/var/lib/monitor-server/reports",
 		ScreenFile:        "/etc/monitor-server/screen.yaml",
 		UIFile:            "/etc/monitor-server/ui.yaml",
