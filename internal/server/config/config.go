@@ -43,6 +43,7 @@ type Config struct {
 	DashboardsFile    string          `yaml:"dashboardsFile"`    // 自定义仪表盘配置文件（Web 端增删改写入）
 	RetentionFile     string          `yaml:"retentionFile"`     // 数据保留策略配置文件（Web 端可改，保存即热生效）
 	SecurityStoreFile string          `yaml:"securityStoreFile"` // 安全事件/基线持久化文件
+	AssetStoreFile    string          `yaml:"assetStoreFile"`    // 资产台账库（内嵌 SQLite 单文件）；留空取 <DataDir>/assets.db
 	LogDir            string          `yaml:"logDir"`            // 集中日志存储目录（按 来源/日期/节点 分片）；留空取 <DataDir>/logs
 	LogMaxBytesPerDay int64           `yaml:"logMaxBytesPerDay"` // 单来源每日写入上限（字节），超出丢弃并计数
 	LogUploadRateBps  int64           `yaml:"logUploadRateBps"`  // 单节点日志上行速率上限（字节/秒）
@@ -343,6 +344,7 @@ func Default() *Config {
 		DashboardsFile:    "/etc/monitor-server/dashboards.yaml",
 		RetentionFile:     "/etc/monitor-server/retention.yaml",
 		SecurityStoreFile: "/var/lib/monitor-server/security_store.json",
+		AssetStoreFile:    "/var/lib/monitor-server/assets.db",
 		// 集中日志（C2）：目录留空时由启动逻辑取 <DataDir>/logs；三个上限都必须有值，
 		// 否则「开了日志把盘写满」只是时间问题。
 		LogDir:            "/var/lib/monitor-server/logs",

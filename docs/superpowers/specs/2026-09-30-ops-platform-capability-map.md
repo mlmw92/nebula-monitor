@@ -84,15 +84,15 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 
 | 功能点 | 状态 | 现状与依据 | 优先级 | 复杂度 | 前置依赖 | 归属 |
 |---|---|---|---|---|---|---|
-| 资产自动发现（主机信息/分区/进程/中间件实例/容器清单） | 部分实现 | 采集侧已产出，但**无资产模型**：`internal/agent/collector/hostinfo.go`、`internal/server/instancereg/`；全仓 `asset\|cmdb\|AssetType` 无实现 | **P0** | M | — | D2 |
-| 资产台账（资产类型 / 资产实例 / 属性/标签 / 负责人） | 未实现 | 仅有节点与分组：`internal/server/node/manager.go:ListHostNodes`、`internal/server/api/{nodes,groups}` | **P0** | M | 关系型持久化（ADR-0001） | D2 |
-| 资产关系与拓扑（依赖 / 归属 / 影响传播） | 未实现 | 无关系模型；`README.md` 路线图「依赖拓扑与影响传播 P2」 | **P0** | L | 资产台账 | D2 |
-| 变更历史与审计（字段级 diff / 操作留痕） | 未实现 | 现有审计只记管理写请求：`internal/server/api/audit.go:AuditMiddleware` | **P0** | M | 资产台账 | D2 |
-| 采集值与人工值分离（来源标记 / 冲突可见） | 未实现 | — | P1 | M | 资产台账 | D2 |
+| 资产自动发现（主机信息/分区/进程/中间件实例/容器清单） | **已实现** | 上报链路已接入：`internal/server/receiver/assets.go:applyAssets`（主机 + 15 类中间件实例，幂等）；测试 `internal/server/receiver/assets_test.go` | **P0** | M | — | D2 |
+| 资产台账（资产类型 / 资产实例 / 属性/标签 / 负责人） | 部分实现 | 台账读写已落地：`internal/server/asset`（SQLite）、`GET /api/v1/assets`；**缺人工维护写接口与负责人/标签字段**（`assets:write` 未设）；前端未做 | **P0** | M | 关系型持久化（ADR-0001，已完成） | D2 |
+| 资产关系与拓扑（依赖 / 归属 / 影响传播） | 部分实现 | `runs_on`（实例 → 主机）已随上报自动建立且幂等（`asset.Service.Link`）；`member_of/depends_on/exposes` 与拓扑视图未做 | **P0** | L | 资产台账 | D2 |
+| 变更历史与审计（字段级 diff / 操作留痕） | 部分实现 | 字段级 diff 已落地：`asset_changes` + `asset.Service.History` + `GET /api/v1/assets/{id}/history`（**仅真变化才记录**，首建只写一条 initial）；缺前端时间线与人工写操作的审计联动 | **P0** | M | 资产台账 | D2 |
+| 采集值与人工值分离（来源标记 / 冲突可见） | **已实现** | 属性联合主键含 `source`，`Asset.Value` 取生效值（人工优先），接口返回 `values` + `attrs`（两来源并存） | P1 | M | 资产台账 | D2 |
 | 资产生命周期（上线/下线/退役/成本/维保） | 未实现 | `README.md` 路线图「CMDB（P2）：资产台账、生命周期与变更记录」 | P2 | M | 资产台账 | D2 |
-| 资产与资源范围的映射/迁移 | 未实现 | 现范围为节点分组：`internal/server/auth/policy.go:FilterGroups` | **P0** | M | 资产台账 | D2 |
-| 配置快照与差异巡检（配置项级） | 未实现 | 现有 FIM 只做文件 SHA256：`internal/agent/collector/security.go:loadFIMBaseline/sha256File`；指标统计基线是另一回事：`internal/server/analysis/baseline.go:CalculateBaseline` | **P0** | M | 资产台账 + 配置采集 | D2 |
-| 资产台账页（列表/详情/关系图/变更时间线） | 未实现 | 前端无 `asset/` 目录；顶层页面清单见 §3.13 | **P0** | M | 后端接口 | D2 |
+| 资产与资源范围的映射/迁移 | **已实现** | 接口按资产所属节点走既有范围判定（`api/nodeInScope`）：范围外资产按 404 返回、先过滤再计数；权限点 `assets:read` 已注册并授予运维/只读角色 | **P0** | M | 资产台账 | D2 |
+| 配置快照与差异巡检（配置项级） | 部分实现 | 快照写入/读取已实现：`snapshots` + `snapshot_fields`（同事务）、`asset.Service.Snapshot`；**差异比对与巡检运行未做**；现行 FIM 仍只做文件 SHA256（`internal/agent/collector/security.go:loadFIMBaseline/sha256File`） | **P0** | M | 资产台账 + 配置采集 | D2 |
+| 资产台账页（列表/详情/关系图/变更时间线） | 未实现 | 后端接口已就绪，前端无 `asset/` 目录（顶层页面清单见 §3.13） | **P0** | M | 后端接口（已完成） | D2 |
 
 ### 3.3 配置管理
 

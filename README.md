@@ -202,6 +202,15 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 - **自定义仪表盘**：通过「自定义仪表盘」页面新建看板，自由添加面板（图表类型支持折线/面积/柱状/仪表盘），每个面板可指定指标、限定主机/中间件实例、附加筛选标签与时间范围/步长。看板配置独立持久化到 `dashboards.yaml`（默认 `/etc/monitor-server/dashboards.yaml`），保存即落盘、热生效，升级不覆盖。对应后端接口 `GET/POST/PUT/DELETE /api/v1/dashboards`。
 - **历史数据导出**：在「指标浏览」页面选定指标、主机/实例与时间范围后，可将历史时序数据导出为 CSV 文件（带 BOM，Excel 友好），单序列输出 `timestamp,value`，多序列输出 `timestamp,labels,value`。导出时间跨度上限为 7 天。对应后端接口 `GET /api/v1/metrics/export?metric=&node=&instance=&start=&end=&step=&labels=`。
 
+**资产台账（D2，2026-09-30 起）**
+
+- **自动发现（复用既有采集，不新增采集器）**：Agent 每轮上报时，Server 把**主机**（自然键 = 主机名，与节点标识一致）与**15 类中间件实例**（自然键 = `<类型>:<地址>`）幂等写入资产台账；实例自动建立 `runs_on` 关系指向其宿主主机。台账是**次要数据**：写入失败只记日志，不影响指标上报主链路。
+- **属性区分采集值与人工值**：同一属性可同时存在 `discovery` 与 `manual` 两个值，**人工值不覆盖采集值**，接口同时返回两者（`attrs`）与生效值（`values`，人工优先）。
+- **变更历史**：字段级 diff（哪个字段从什么变成什么），**只在值真的变化时**记录；资产首次建档只写一条 `initial` 记录，不产生逐条噪声。
+- **只读接口与权限**：`GET /api/v1/assets`（支持 `type`/`node`/`keyword`/`limit`/`offset`）、`GET /api/v1/assets/{id}`、`GET /api/v1/assets/{id}/history`；权限点 `assets:read`（目录「资产」，默认授予运维管理员与只读角色）。资源范围按资产所属节点裁剪，**范围外资产按 404 返回**（不区分 403，避免用状态码探测范围外资源），且先过滤再计数。
+- **存储**：内嵌 SQLite 单文件（`server.yaml` 的 `assetStoreFile`，默认 `/var/lib/monitor-server/assets.db`），纯 Go 驱动、无 CGO，三架构离线包不受影响；决策见 `docs/adr/0001-cmdb-relational-store.md`。
+- 设计与实施记录见 `docs/superpowers/specs/2026-09-30-asset-cmdb-design.md`（含已落地项与有意差异）。
+
 **智能分析与预测（只读决策辅助）**
 
 - Web 端「智能分析中心」提供 24 小时、7 天、30 天三个分析窗口；结论按主机风险评分排序，并明确标示关键指标的样本是否充足，避免将无数据误判为低风险。
@@ -346,6 +355,8 @@ securityStoreFile: /var/lib/monitor-server/security_store.json
 > 本节优先级与全景 P0-P3 一一对应（四档，2026-09-30 评审确认）。**本节与全景冲突时，以全景对照表为准。**
 
 **资产与配置（P0 · 首批；设计见 `docs/superpowers/specs/2026-09-30-asset-cmdb-design.md`）**
+
+> **实施进度**：批次 1（2026-09-30）已落地——主机与 15 类中间件实例的自动发现、只读接口、字段级变更历史、采集值/人工值分离、资源范围裁剪（见上方「资产台账」与设计件的「实施记录」）。**待做**：人工维护写接口（`assets:write`）、前端页面、差异巡检、容器/服务端点资产。
 
 - **资产台账与资产类型（P0）**：用模型化的资产（主机 / 中间件实例 / 容器 / 服务端点）替代当前扁平的节点清单；属性区分**采集值与人工值**，人工值不覆盖采集值。**取代本节原「CMDB（P2）」条目**。
 - **资产关联与拓扑（P0）**：`runs_on / member_of / depends_on / exposes` 四类关系。**取代本节原「依赖拓扑与影响传播（P2）」的主体部分**；「告警自动标注波及范围与上游根因」作为其后续依赖项保留。

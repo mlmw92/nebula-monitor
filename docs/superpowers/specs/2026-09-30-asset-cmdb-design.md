@@ -160,3 +160,35 @@ GET    /api/v1/inspect/runs/{id}/findings       # 差异项
 | 巡检误报（字段波动） | 关注字段集合显式声明 + 规范化后比较（去空白/排序）+ 允许容忍列表 |
 | 内嵌数据库与既有 JSON 双轨 | 只承接关系型数据；其余保持 JSON，不做无收益搬迁（ADR-0001 记录） |
 | 自动发现被误解为"网络扫描" | 明确只消费 Agent 授权范围内的既有采集产物，不主动扫描网段 |
+
+## 实施记录（按批次追加）
+
+### 批次 1（2026-09-30）：资产地基与自动发现接入
+
+**已落地**（`internal/server/asset/`、`internal/server/receiver/assets.go`、`internal/server/api/asset_api.go`）：
+
+| 设计项 | 实现状态 | 证据 |
+|---|---|---|
+| 关系型持久化（内嵌 SQLite） | ✅ | `asset.Open`（WAL + busy_timeout + 外键 + 单写连接），`PRAGMA user_version` 版本守卫，幂等建表 + 内置类型播种 |
+| 资产类型 / 资产 / 属性（采集值与人工值并存） | ✅ | `asset_attrs` 联合主键含 `source`；`Asset.Value` 取生效值（人工优先）；测试 `TestApplyKeepsDiscoveryAndManualValuesApart` |
+| 按（类型 + 自然键）幂等 upsert | ✅ | 唯一约束 `(type_key, natural_key)`；`TestApplyIsIdempotentAndRecordsInitialOnce` |
+| 变更历史（字段级 diff，仅真变化才记录） | ✅ | `asset_changes`；`TestApplyWritesChangeOnlyOnRealValueChange` |
+| 资产关联（四类，幂等） | ✅ | `asset_links`；`TestLinkIsIdempotentAndResolvesMissingAssets` |
+| 配置快照（关注字段集合） | ✅（写入/读取，尚无巡检消费方） | `snapshots` + `snapshot_fields`（同一事务写入）；`TestSnapshotCapturesEffectiveValues` |
+| 自动发现：主机 | ✅ | `receiver.applyAssets` → 自然键 = hostname（与 `model.Node.Hostname` 一致），属性含 os/arch/ip/group/agentVersion/cpuModel/cpuCores/memoryMB/diskMB |
+| 自动发现：中间件实例（15 类） | ✅ | `instanceObservations`：显式逐类型转换（不引入反射），自然键 `<类型>:<地址>`，并建立 `runs_on` 指向主机 |
+| 只读接口 | ✅ | `GET /api/v1/assets`、`/api/v1/assets/{id}`、`/api/v1/assets/{id}/history`；API 侧以 `AssetProvider` 接口依赖（不引具体实现类型） |
+| 权限点与资源范围 | ✅ | 新增权限点 `assets:read`（目录「资产」域，授予运维管理员与只读角色）；范围按资产所属节点裁剪，范围外资产按 **404** 返回（不区分 403，避免状态码探测）；先过滤再计数，`total` 不泄露范围外规模 |
+| 变更历史与审计的分工 | ✅（变更侧） | 字段级 diff 落在 `asset_changes`；接口级审计仍走既有 `AuditMiddleware`（写接口尚未开放） |
+| 跨架构交叉编译 | ✅ | `CGO_ENABLED=0` 下 linux/amd64、arm64、arm 均编译通过（ADR-0001 已补记） |
+
+**与设计的差异（有意为之，后续批次处理）**：
+
+1. **暂未设 `assets:write`**：当前写入全部由 Agent 上报驱动（`source=discovery`），没有人工维护入口，所以只设读权限点。手工新建/编辑资产与 `assets:write` 随对应写接口一起加。
+2. **未记录 `bootTime` 与磁盘明细**：每次重启都会产生一条"变更"，会把变更历史刷成噪声；分区表变化同理且体积大。等真的需要"重启事件/磁盘变更"这类诉求时，再以独立资产类型或专门事件承载。
+3. **Elasticsearch 的 `Status`（green/yellow/red）映射到通用 `role` 属性**：它是各类型里唯一的"状态型"字段，先复用 role 位（避免为一类实例新增专用字段），后续若需要更精确的语义再引入 `status` 保留键。
+4. **资产 `Name` 取采集值（主机名）**，人工展示名仍由既有的节点 `DisplayName` 承载；资产侧要覆盖展示名需走 `manual` 提交，属下一批次。
+5. **`inspect`（差异巡检）尚未落地**：快照的写入/读取已具备，比对与巡检运行在下一批次。
+
+**验证方式**：`go test ./internal/server/{asset,receiver,api,auth}/`（含 8 个资产领域用例、上报→台账的幂等与关联用例、范围裁剪与真实路由权限负例）；`go vet`、`gofmt -l` 干净；`go build ./...` 通过。
+

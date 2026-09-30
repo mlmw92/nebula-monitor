@@ -116,6 +116,7 @@ type API struct {
 	retention      *retention.Manager     // 数据保留策略（可空；不注入时接口返回默认策略）
 	mwRegistry     *mwreg.Registry        // 中间件类型注册表（可空；未注入时退化为内置类型）
 	logs           *logstore.Store        // 集中日志存储（C2；可空，未注入时检索接口返回 503）
+	assets         AssetProvider          // 资产台账（可空；未注入时资产接口返回 503）
 	startedAt      time.Time              // 进程启动时间，供 /healthz、/readyz 报告运行时长
 }
 
@@ -195,6 +196,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/middleware/nacos/instances", a.permit(a.handleNacosInstances, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/zookeeper/instances", a.permit(a.handleZooKeeperInstances, "middleware:read"))
 	mux.HandleFunc("GET /api/v1/middleware/overview", a.permit(a.handleMiddlewareOverview, "middleware:read"))
+
+	// 资产台账：assets:read + 资源范围（按资产所属节点裁剪；不可归属的资产对受限用户不可见，
+	// 与 visibleMetricSeries / handleNodesLatest 的判定一致，避免台账成为越权旁路）。
+	mux.HandleFunc("GET /api/v1/assets", a.permit(a.handleAssets, "assets:read"))
+	mux.HandleFunc("GET /api/v1/assets/{id}", a.permit(a.handleAssetDetail, "assets:read"))
+	mux.HandleFunc("GET /api/v1/assets/{id}/history", a.permit(a.handleAssetHistory, "assets:read"))
 	// 中间件类型展示开关：读 middleware:read，写 system:config（与品牌/大屏展示配置同级）
 	mux.HandleFunc("GET /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigGET, "middleware:read"))
 	mux.HandleFunc("PUT /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigPUT, "system:config"))

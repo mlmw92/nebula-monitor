@@ -12,6 +12,7 @@ import (
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/alert"
+	"github.com/nebula/monitor/internal/server/asset"
 	"github.com/nebula/monitor/internal/server/config"
 	"github.com/nebula/monitor/internal/server/instancereg"
 	"github.com/nebula/monitor/internal/server/logstore"
@@ -102,18 +103,21 @@ var FirewallStatusCache = newSnapshotCache[*model.FirewallStatus]()
 
 // Receiver 接收 Agent 上报并写入存储、更新节点索引。
 type Receiver struct {
-	storage   storage.Storage
-	nodeMgr   *node.Manager
-	auth      config.AgentAuthConfig
-	ngx       *nginxaccess.Window    // Nginx access log 地理聚合窗口（可空）
-	sec       *security.Store        // 安全事件/基线存储（可空，传 nil 关闭安全能力）
-	alerts    *alert.Engine          // 告警引擎（安全事件注入告警中心，可空）
-	defense   *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空）
+	storage storage.Storage
+	nodeMgr *node.Manager
+	auth    config.AgentAuthConfig
+	ngx     *nginxaccess.Window    // Nginx access log 地理聚合窗口（可空）
+	sec     *security.Store        // 安全事件/基线存储（可空，传 nil 关闭安全能力）
+	alerts  *alert.Engine          // 告警引擎（安全事件注入告警中心，可空）
+	defense *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空）
 
 	// 集中日志（C2）：logs 为 nil 表示该能力关闭（接口回 503，与不配置 logSources 的 Agent 恰好对称）
 	logs       *logstore.Store
 	logMaxBody int64
 	logLimiter *logRateLimiter
+
+	// 资产台账：nil 表示未启用，此时不写台账（行为与引入资产前一致）。
+	assets *asset.Service
 }
 
 // New 创建 Receiver。auth 为 Agent 接入授权配置（参考哪吒探针密钥机制）；
@@ -265,6 +269,10 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 	instancereg.Default.SetClickHouse(payload.Node, payload.ClickHouseInstances)
 	instancereg.Default.SetNacos(payload.Node, payload.NacosInstances)
 	instancereg.Default.SetZooKeeper(payload.Node, payload.ZooKeeperInstances)
+
+	// 资产台账：把本轮上报的主机与中间件实例幂等写入（详见 assets.go）。
+	// 放在指标写入之前：台账是次要数据，即使它出错也不影响后面的指标主链路。
+	r.applyAssets(&payload)
 
 	if err := r.storage.Write(metrics); err != nil {
 		slog.Error("写入 VM 失败", "node", payload.Node, "err", err)

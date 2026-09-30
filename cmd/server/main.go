@@ -20,6 +20,7 @@ import (
 	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/analysis"
 	"github.com/nebula/monitor/internal/server/api"
+	"github.com/nebula/monitor/internal/server/asset"
 	"github.com/nebula/monitor/internal/server/audit"
 	"github.com/nebula/monitor/internal/server/auth"
 	"github.com/nebula/monitor/internal/server/config"
@@ -194,6 +195,22 @@ func main() {
 	// 同一个实例既供上行写入、也供检索读取：读写两侧共用一份存储，布局不会各写各的
 	logStore := logstore.New(logDir, cfg.LogMaxBytesPerDay)
 	recv.SetLogStore(logStore, cfg.LogMaxBodyBytes, cfg.LogUploadRateBps)
+
+	// 资产台账（内嵌 SQLite 单文件）：库路径留空时取 <DataDir>/assets.db。
+	// 打开失败**不阻断启动**——台账是次要能力，缺它时监控主链路仍应可用。
+	var assetSvc *asset.Service
+	assetPath := cfg.AssetStoreFile
+	if assetPath == "" {
+		assetPath = filepath.Join(cfg.DataDir, "assets.db")
+	}
+	if assetStore, err := asset.Open(assetPath); err != nil {
+		slog.Error("资产台账库不可用，资产能力已关闭", "path", assetPath, "err", err)
+	} else {
+		defer func() { _ = assetStore.Close() }()
+		assetSvc = asset.NewService(assetStore)
+		recv.SetAssetService(assetSvc)
+		slog.Info("资产台账已启用", "path", assetPath)
+	}
 	// 中间件类型注册表：内置类型清单的唯一来源
 	//（api 的类型清单、报告分节、告警的服务类型校验都读它）。
 	mwRegistry := mwreg.New()
@@ -295,6 +312,10 @@ func main() {
 	// 集中日志检索（C2）：与上行共用同一个存储实例（同一份目录，读写两侧布局必然一致）
 	rest.SetLogStore(logStore)
 	rest.SetMiddlewareRegistry(mwRegistry)
+	// 资产台账接口：仅在库可用时注入（传 nil 具体值进接口会得到「非 nil 接口」，必须显式判断）
+	if assetSvc != nil {
+		rest.SetAssetService(assetSvc)
+	}
 	// 告警侧同样读注册表：服务离线规则的服务类型校验都读它
 	alert.SetMiddlewareRegistry(mwRegistry)
 	mux := http.NewServeMux()
