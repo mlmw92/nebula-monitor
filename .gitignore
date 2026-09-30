@@ -18,5 +18,9 @@ Thumbs.db
 # 本地 go build 直接产物（未指定 -o 时落在仓库根的 *.exe）
 *.exe
 
+# 本地整仓备份快照（如 _backup/nebula-monitor-20260728-172302/，
+# 含自带 .git 与 web/node_modules，约 2.9 GB，不入库）
+/_backup/
+
 .claude
 .codebuddy

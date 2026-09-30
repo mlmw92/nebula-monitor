@@ -30,15 +30,6 @@ Agent 二进制的三种运行模式：`collect`（采集上报）、`edge`（�
 **中间件实例（Middleware Instance）**
 Agent 配置中的一个被监控中间件连接项（如 `redisInstances[]` 的一个元素）。存活指标为 `<类型>_instance_up`（如 `mysql_instance_up`、`k8s_cluster_up`、`docker_container_up`）。实例凭据（密码/kubeconfig/token）**仅存 Agent 本地，永不上报**；磁盘上以国密 SM4 加密（`enc:<base64>`）。
 
-**采集项模板（Collector Template）**
-在 `agent.yaml` 或 Web 端声明、决定「新增一类采集指标不改 Go 代码」的采集 DSL 条目。`id` 决定产出指标名的**前缀**（因此不可修改、不得与既有指标族前缀冲突、模板间不得互为前缀）。每个 target 每轮产出 `template_target_up`（1 = 成功；失败时**只产此指标、不产数据**，避免旧值被误读为当前值）。本机模板与 Server 下发模板共用同一套 DSL；Server 下发后**替换**本机模板。
-
-**模板目标（Template Target）**
-采集项模板 `targets[]` 中的一个取数端点，`instance` 标签标识。注意它与「中间件实例」是不同层面的概念：一个中间件实例通常对应一个 target，但 target 也可以指向非中间件的任意端点。
-
-**取数护栏（templateGuards）**
-`jdbc` / `exec` / `file` 三类取数方式在**目标机器本地** `agent.yaml` 的放行开关（`templateGuards.jdbc/exec/file`）。三道门控缺一不可：① 本机护栏（唯一由机器掌握的门）→ ② 能力协商（Agent 只上报已放行的方式，Server 只下发对应模板）→ ③ 中心授权与审计（`middleware:write`）。设计动机：Agent 以 root 运行 + 模板可从 Web 下发到整组节点 = 「Web 一个写权限 ≈ 一批机器的 root」。
-
 **集中日志（Central Logs）**
 Agent `logSources` 按「来源 + 路径 + patterns」采集日志并上行到 Server（`POST /api/v1/logs`，走 `X-Agent-Secret`）。关键语义：默认只上传命中模式的行；新文件从**文件尾**开始不回溯历史；读取进度落盘（`logOffsetsFile`）不丢不重。其指标（`<来源>_log_*_total`）是**每轮增量值而非累计计数器**——配阈值规则时禁止套 `rate()`/`increase()`。
 
@@ -69,7 +60,7 @@ Agent `logSources` 按「来源 + 路径 + patterns」采集日志并上行到 S
 安全监测中心产出的事件（SSH 暴力破解、FIM 文件变更、基线不合规、异常进程/反弹 shell、sudo 提权），通过**复用告警引擎**派发通知，规则 ID 形如 `security-<检测类别>`。因此安全事件与普通告警共享静默/维护窗口/升级/抑制/分组全套机制。
 
 **告警规则模板（Rule Template）**
-「告警中心 → 新建规则」可一键载入的预置配置（阈值、主机离线、各中间件离线、主从切换、集群损坏）。与「采集项模板」**完全无关**，禁用裸称「模板」。
+「告警中心 → 新建规则」可一键载入的预置配置（阈值、主机离线、各中间件离线、主从切换、集群损坏）。当前系统中「模板」一律指本概念，禁用裸称「模板」。
 
 ### 状态语义
 
@@ -99,6 +90,40 @@ Server 自身指标以 `self_*` 前缀、代理模式指标以 `proxy_*` 前缀�
 **资源范围（Resource Scope）**
 用户可配置的节点分组范围，**服务端强制校验**（非前端隐藏）。受限范围未选任何分组 = 无资源权限，不会扩大为全部资源。业务路由已统一配置权限点，节点分组范围在服务端校验（指标读取、hostname 目标、测试告警的权限边界已补齐）；新增接口仍需逐项纳入（见路线图）。
 
+### 演进中术语（设计已定，尚未实现）
+
+本组术语来自《一体化运维平台》设计（`docs/superpowers/specs/2026-09-30-ops-platform-*`、`docs/adr/0001-0003`）。**当前代码中尚无实现**——用于设计与评审时的统一语言；能力落地后，把条目移入上方对应分组。
+
+**资产（Asset）**
+一个被管理的对象实例：一台主机、一个中间件实例、一个容器、一个服务端点。_避免_：资源、对象（均已被其他含义占用）。
+
+**资产类型（Asset Type）**
+资产的定义（字段集合、来源、是否可人工维护）。_避免_：资产模型、模板（「模板」已被告警规则模板占用）。
+
+**配置项（CI）**
+资产在某一时刻的**规范化属性集合**，是「资产 + 属性」的视图，**不是独立实体**。_避免_：把「配置项」与「资产」当成两个实体。
+
+**发现来源（Discovery Source）**
+属性值的来源：`discovery`（采集，来自 Agent）或 `manual`（人工维护）。人工值**不覆盖**采集值，两者并存且差异可见（与 `Node.DisplayName` 既有语义一致）。
+
+**资产关联（Asset Link）**
+两个资产之间的有向关系，当前只保留四类：`runs_on`（运行于）、`member_of`（成员属于）、`depends_on`（依赖）、`exposes`（暴露端点）。
+
+**配置快照（Snapshot）与差异巡检（Inspection）**
+快照 = 某资产在某一时刻被抽取的**关注字段集合**；差异巡检 = 快照与前次快照、或与合规期望值的字段级比对。注意与「文件完整性监测（FIM）」区分：FIM 只比对**文件哈希**，不做字段级差异。
+
+**工作负载（Workload）**
+Kubernetes 中的 Deployment / StatefulSet / DaemonSet / Job 等对象集合。与「中间件实例」不同层面：一个工作负载通常由多个 Pod 组成。
+
+**下行操作（Ops 指令）**
+Server 经**上报响应**下发给 Agent 执行的结构化指令（与既有升级、入侵防御指令同一通道）。_避免_：下发任务、远程命令（「任务」留给批量作业，「命令」留给命令行）。
+
+**高危操作护栏**
+对可能改变被监控对象状态的操作（终端、配置下发等）的四道门控：① 本机护栏（`agent.yaml` 开关，机器自己掌握）→ ② 能力协商（Agent 只上报已开启的能力）→ ③ 中心授权与审计（专属权限点 + 审计留痕）→ ④ 超时作废。默认**只读**。
+
+**日志后端（Log Backend）**
+日志的存储实现：默认自研分片落盘，可选外部后端（如 VictoriaLogs）。与「时序库」并列的另一个存储角色，勿混。
+
 ---
 
 ## 二、核心模块导航
@@ -109,12 +134,11 @@ Server 自身指标以 `self_*` 前缀、代理模式指标以 `proxy_*` 前缀�
 
 | 包 | 职责 | 提示 |
 |---|---|---|
-| `internal/server/receiver` | Agent 上报接收（`/api/v1/report` 鉴权）+ 集中日志上行 + 采集项模板随上报响应下发 | 【安全敏感】公开接口入口 |
+| `internal/server/receiver` | Agent 上报接收（`/api/v1/report` 鉴权）+ 集中日志上行 + 指令随上报响应下发（升级 / 入侵防御） | 【安全敏感】公开接口入口 |
 | `internal/server/auth` | 登录会话、RBAC、用户/角色、登录限流 | 【安全敏感】 |
 | `internal/server/crypto` | 国密 SM3 哈希 / SM4 凭据加密 | 【安全敏感】 |
 | `internal/agent/defense` | fail2ban 托管（创建专属 jail、防火墙 action、封禁审计） | 【安全敏感】以 root 在被监控机执行 |
 | `internal/agent/logship` | 集中日志采集与上行（限速/每日上限/偏移落盘） | 【安全敏感】数据离开被监控机 |
-| `internal/server/templates` + `internal/template` | 采集项模板的存储、校验（启动期一次报全部原因）、预设、下发内容生成；`internal/template` 为 DSL 与取数 kind 实现 | 【安全敏感】三道门控的实现处 |
 | `internal/server/agentdist` | Agent 二进制 CDN 分发与安装脚本下发 | 公开下载面 |
 
 ### 第 2 批：告警引擎与存储
