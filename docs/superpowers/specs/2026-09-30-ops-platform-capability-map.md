@@ -72,7 +72,7 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 |---|---|---|---|---|---|---|
 | 主机指标采集（CPU/内存/负载/磁盘/网络/进程/硬件信息） | 已实现 | `internal/agent/collector/`（hostinfo 等），`README.md` §主机监控 | — | — | — | — |
 | 中间件监控（15 类，直连 + exporter 双模式） | 已实现 | `internal/agent/collector/{redis,mysql,postgres,nginx,kafka,docker,rocketmq,k8s,mongo,fastdfs,rabbitmq,elasticsearch,clickhouse,nacos,zookeeper}.go`；类型清单唯一出处 `internal/server/mwreg/builtin.go` | — | — | — | — |
-| **指标字典与告警规则模板**（可配项目录 + 阈值范本） | 已实现 | `internal/server/metrics/`（目录 + 守卫：目录名必须有产出方）、`internal/server/alert/rules.go:DefaultTemplates`（60 条，按中间件分组 + 阈值依据）、`GET /api/v1/metrics/catalog` 的 `alertGroups` 供规则表单；守卫含「模板方向必须与指标变差方向一致」 | — | — | — | D2 |
+| **指标字典与告警规则模板**（可配项目录 + 阈值范本） | 已实现 | `internal/server/metrics/`（目录 + 守卫：目录名必须有产出方）、`internal/server/alert/rules.go:DefaultTemplates`（65 条，按中间件分组 + 阈值依据）、`GET /api/v1/metrics/catalog` 的 `alertGroups` 供规则表单；守卫含「模板方向必须与指标变差方向一致」 | — | — | — | D2 |
 | 服务拨测（HTTP/HTTPS/TCP/ICMP + 证书到期） | 已实现 | `internal/server/dialtest/scheduler.go` | — | — | — | — |
 | 规则类型（阈值/主机离线/中间件离线/主从切换/集群损坏/安全事件） | 已实现 | `internal/model/metric.go:649-661`（`RuleTypeThreshold`…`RuleTypeSecurityEvent`） | — | — | — | — |
 | 告警治理（三层静默 / 抑制 / 分组 / 收敛 / 升级 / 维护窗口） | 已实现 | `internal/server/alert/`（含 `engine.go` 求值、`rules.go:DefaultTemplates`） | — | — | — | — |

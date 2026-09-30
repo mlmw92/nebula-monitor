@@ -1641,7 +1641,7 @@ journalctl -u monitor-proxy-hub -f
 | POST | `/api/v1/rules/{id}/toggle-silence` | 静音 / 取消静音规则 |
 | GET | `/api/v1/rules/export` | 导出规则 |
 | POST | `/api/v1/rules/import` | 导入规则 |
-| GET | `/api/v1/rules/templates` | 规则模板列表（60 条，按中间件分组，带触发条件与阈值依据） |
+| GET | `/api/v1/rules/templates` | 规则模板列表（65 条，按中间件分组，带触发条件与阈值依据） |
 | GET | `/api/v1/inhibit` | 抑制规则查询 |
 | PUT | `/api/v1/inhibit` | 抑制规则全量更新（热生效） |
 | GET | `/api/v1/grouping` | 告警分组配置查询 |
@@ -1675,7 +1675,7 @@ journalctl -u monitor-proxy-hub -f
   需要把占位替换成实际值）。手输不在字典里的名字（exporter 透传名等）是允许的，但表单会给出
   橙色提示——那是"规则永不触发"最隐蔽的来源。
 - **阈值怎么填**：`docs/configuration-cookbook.md` §三 给出了各中间件的建议阈值、方向与理由，
-  规则表单的「新建规则」下拉里也能直接套用这 60 条模板（自动创建的只有其中 20 条跨环境通用的）。
+  规则表单的「新建规则」下拉里也能直接套用这 65 条模板（自动创建的只有其中 20 条跨环境通用的）。
 
 ### 节点操作（统一下行通道）
 

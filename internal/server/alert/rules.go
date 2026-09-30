@@ -38,7 +38,7 @@ func NewRulesStore(path string) *RulesStore {
 
 // DefaultTemplates 返回可复用的规则模板（不含 ID/时间戳），供前端「从模板新建」挑选。
 //
-// 这里是「可以配什么」的**目录**（约 60 条，按 TemplateGroup 分组）：它不等于自动创建，
+// 这里是「可以配什么」的**目录**（65 条，按 TemplateGroup 分组）：它不等于自动创建，
 // 自动创建的子集见 seedTemplates——两者必须分开，否则一次升级会在用户规则列表里
 // 塞进几十条"这台机器上根本不存在的对象"的规则，把真规则淹掉。
 //
@@ -246,7 +246,7 @@ func DefaultTemplates() []model.AlertRule {
 
 // seededTemplateNames 是「全新安装 / 版本升级时自动创建」的模板名集合。
 //
-// 为什么只播种一小部分：模板库（DefaultTemplates）是**可以配什么**的目录，约 60 条；
+// 为什么只播种一小部分：模板库（DefaultTemplates）是**可以配什么**的目录，65 条；
 // 而自动创建会直接进入用户的规则列表。若全量播种，一次升级就会塞进几十条
 // "这台机器上根本不存在的对象"的规则（例如没装 ClickHouse 也会有一条 ClickHouse 规则），
 // 结果是真规则被淹、用户开始忽略告警列表。
