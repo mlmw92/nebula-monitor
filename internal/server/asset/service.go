@@ -24,8 +24,16 @@ type ListFilter struct {
 	TypeKey string
 	Node    string
 	Keyword string
-	Limit   int
-	Offset  int
+	// Nodes 限定归属节点集合，用于把调用方的资源范围下推到 SQL：
+	//   nil      —— 不做节点限制（未启用认证或全局范围）
+	//   非空切片 —— 只返回归属这些节点的资产
+	//   空切片   —— 无任何可见节点，恒空结果（**不能**当作「不限制」，那是越权旁路）
+	//
+	// 之所以由调用方传入而不是在存储层过滤：资源范围是服务端的授权概念，
+	// 资产库不该知道它；但过滤又必须发生在分页之前，所以以条件形式下推。
+	Nodes  []string
+	Limit  int
+	Offset int
 }
 
 func (f ListFilter) limit() int {
@@ -179,6 +187,11 @@ func (s *Service) GetByID(id int64) (Asset, bool, error) { return s.store.assetB
 
 // List 按条件分页列出资产。
 func (s *Service) List(f ListFilter) ([]Asset, error) { return s.store.listAssets(f) }
+
+// Count 返回符合条件的资产总数（忽略 Limit/Offset），供列表接口做分页。
+//
+// 与 List 用同一套条件（含 Nodes 资源范围下推），保证「总数」与「能翻到的条数」一致。
+func (s *Service) Count(f ListFilter) (int, error) { return s.store.countAssets(f) }
 
 // Link 建立资产关联（幂等：重复建立不报错、不产生重复边）。
 func (s *Service) Link(from, to Ref, kind LinkKind) error {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/nebula/monitor/internal/server/asset"
+	"github.com/nebula/monitor/internal/server/auth"
 )
 
 // AssetProvider 提供资产台账读取（由 asset 包实现）。
@@ -17,6 +18,8 @@ import (
 // 而不是把某个具体实现类型引进本包。
 type AssetProvider interface {
 	List(f asset.ListFilter) ([]asset.Asset, error)
+	// Count 与 List 共用条件（含 Nodes 资源范围），用于给出分页所需的真实总数。
+	Count(f asset.ListFilter) (int, error)
 	Get(ref asset.Ref) (asset.Asset, bool, error)
 	GetByID(id int64) (asset.Asset, bool, error)
 	Apply(ob asset.Observation) (asset.Asset, bool, error)
@@ -85,21 +88,27 @@ func toAssetView(a asset.Asset) assetView {
 	return view
 }
 
-// handleAssets 列出资产台账。
+// handleAssets 列出资产台账（支持分页）。
 //
 // 资源范围：受限用户只能看到所属节点在范围内的资产；资产 Node 为空（不可归属）时对受限用户不可见——
 // 与 visibleMetricSeries / handleNodesLatest 的判定保持一致，避免台账成为越权旁路。
-// 注意**先过滤再计数**：否则「总数」会泄露范围外的资产量。
+//
+// 范围**下推到查询条件**（filter.Nodes），而不是取回一页再在内存里过滤：后者会同时坏掉两件事——
+// 页内被过滤掉的空位不补人（翻页会看到忽多忽少），以及总数只能数到当前页（「共 N 条」永远等于页大小）。
+// 下推后 List 与 Count 条件一致，页内容与总数自洽；下面仍保留一次 nodeInScope 兜底，
+// 保证「即使节点集合算错也不会泄露范围外资产」。
 func (a *API) handleAssets(w http.ResponseWriter, r *http.Request) {
 	if a.assets == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "资产台账未启用"})
 		return
 	}
 	q := r.URL.Query()
+	p := Principal(r)
 	filter := asset.ListFilter{
 		TypeKey: strings.TrimSpace(q.Get("type")),
 		Node:    strings.TrimSpace(q.Get("node")),
 		Keyword: strings.TrimSpace(q.Get("keyword")),
+		Nodes:   a.assetAllowedNodes(p),
 		Limit:   assetIntParam(q.Get("limit"), 0),
 		Offset:  assetIntParam(q.Get("offset"), 0),
 	}
@@ -109,7 +118,12 @@ func (a *API) handleAssets(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询资产台账失败"})
 		return
 	}
-	p := Principal(r)
+	total, err := a.assets.Count(filter)
+	if err != nil {
+		slog.Error("统计资产数量失败", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询资产台账失败"})
+		return
+	}
 	out := make([]assetView, 0, len(items))
 	for _, item := range items {
 		if !a.nodeInScope(p, item.Node) {
@@ -117,7 +131,26 @@ func (a *API) handleAssets(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, toAssetView(item))
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"assets": out, "total": len(out)})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"assets": out, "total": total})
+}
+
+// assetAllowedNodes 计算资源范围允许的归属节点集合，供资产查询下推。
+//
+//   - nil      ：未启用认证或全局范围，不做节点限制
+//   - 非空切片 ：受限用户可见的节点名（只含已注册且分组在范围内的节点）
+//   - 空切片   ：受限但没有任何可见节点；调用方据此得到空结果与 0 条总数
+//
+// 与 nodeInScope 的边界一致：未注册节点（nodeGroup 为空）对受限用户不可归属，因此不在此集合内。
+func (a *API) assetAllowedNodes(p *auth.Principal) []string {
+	if p == nil || p.Scope.IsGlobal() || a.nodeMgr == nil {
+		return nil
+	}
+	nodes := a.visibleNodes(a.nodeMgr.ListHostNodes(), p)
+	out := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, n.Hostname)
+	}
+	return out
 }
 
 // handleAssetDetail 返回单个资产详情。

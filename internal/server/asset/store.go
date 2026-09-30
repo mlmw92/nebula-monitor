@@ -285,26 +285,61 @@ func (s *Store) changesOf(assetID int64, limit int) ([]ChangeRecord, error) {
 	return out, rows.Err()
 }
 
-// listAssets 按条件列出资产（含属性），按「类型 + 自然键」稳定排序。
-func (s *Store) listAssets(f ListFilter) ([]Asset, error) {
-	q := `SELECT a.id,a.type_key,a.natural_key,a.name,a.node,a.created_at,a.updated_at,
-	             t.key,t.value,t.source,t.updated_at,t.updated_by
-	      FROM assets a LEFT JOIN asset_attrs t ON t.asset_id=a.id WHERE 1=1`
+// assetWhere 构造资产筛选的 WHERE 子句（不含 ORDER BY / LIMIT），alias 为表别名。
+//
+// 列表与计数**必须共用同一条件**：页大小与总数若来自两套条件，「共 N 条」与实际能翻到的
+// 条数就会对不上（此前 total 直接取当前页长度，翻页永远只有一页的量）。
+func assetWhere(alias string, f ListFilter) (string, []any) {
+	q := " WHERE 1=1"
 	args := []any{}
 	if f.TypeKey != "" {
-		q += " AND a.type_key=?"
+		q += " AND " + alias + ".type_key=?"
 		args = append(args, f.TypeKey)
 	}
 	if f.Node != "" {
-		q += " AND a.node=?"
+		q += " AND " + alias + ".node=?"
 		args = append(args, f.Node)
 	}
 	if kw := strings.TrimSpace(f.Keyword); kw != "" {
-		q += " AND (a.natural_key LIKE ? OR a.name LIKE ?)"
+		q += " AND (" + alias + ".natural_key LIKE ? OR " + alias + ".name LIKE ?)"
 		like := "%" + kw + "%"
 		args = append(args, like, like)
 	}
-	q += " ORDER BY a.type_key,a.natural_key LIMIT ? OFFSET ?"
+	if f.Nodes != nil {
+		// 资源范围下推：把「可见节点集合」写进 SQL，而不是取回一页再到内存里过滤。
+		// 后者有两个后果：页内被过滤掉的空位不会补人（一页 50 条可能只显示 40 条），
+		// 且总数只能数到当前页——受限用户的翻页体验与「共 N 条」都会失真。
+		if len(f.Nodes) == 0 {
+			// 空集合（受限但无任何可见节点）：恒不匹配。绝不退化成「不过滤」——
+			// 那是把资源范围校验变成越权旁路。
+			q += " AND 1=0"
+			return q, args
+		}
+		q += " AND " + alias + ".node IN (" + placeholders(len(f.Nodes)) + ")"
+		for _, n := range f.Nodes {
+			args = append(args, n)
+		}
+	}
+	return q, args
+}
+
+// placeholders 生成 n 个占位符（"?,?,?"），用于 IN 子句。
+func placeholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}
+
+// listAssets 按条件列出资产（含属性），按「类型 + 自然键」稳定排序。
+func (s *Store) listAssets(f ListFilter) ([]Asset, error) {
+	sub, args := assetWhere("a2", f)
+	// 分页必须作用于**资产**而不是 join 后的行：一个资产有几条属性就有几行，
+	// 直接对 join 结果 LIMIT 会让「一页 50 条」变成「一页 50 行」——属性多的资产
+	// 会挤占同页额度（10 条属性就吃掉一页的 1/5），OFFSET 也随之漂移。
+	// 因此先用子查询选出本页的资产 ID，再取这些资产的属性。
+	q := `SELECT a.id,a.type_key,a.natural_key,a.name,a.node,a.created_at,a.updated_at,
+	             t.key,t.value,t.source,t.updated_at,t.updated_by
+	      FROM assets a LEFT JOIN asset_attrs t ON t.asset_id=a.id
+	      WHERE a.id IN (SELECT a2.id FROM assets a2` + sub + ` ORDER BY a2.type_key,a2.natural_key LIMIT ? OFFSET ?)
+	      ORDER BY a.type_key,a.natural_key,t.key,t.source`
 	args = append(args, f.limit(), f.offset())
 
 	rows, err := s.db.Query(q, args...)
@@ -346,6 +381,19 @@ func (s *Store) listAssets(f ListFilter) ([]Asset, error) {
 		out = append(out, *byID[id])
 	}
 	return out, nil
+}
+
+// countAssets 统计符合条件的资产数量（忽略分页），供列表接口给出真实总数。
+//
+// 与 listAssets 共用 assetWhere，因此「共 N 条」与能翻到的条数必然一致；
+// 走 assets 单表、不 join 属性，代价与页大小无关。
+func (s *Store) countAssets(f ListFilter) (int, error) {
+	where, args := assetWhere("a", f)
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM assets a`+where, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("统计资产数量失败: %w", err)
+	}
+	return n, nil
 }
 
 // linkAssets 建立关联；重复建立视为成功（幂等）。

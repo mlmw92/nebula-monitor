@@ -1,6 +1,7 @@
 package asset
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -274,6 +275,95 @@ func TestListFiltersAndPagination(t *testing.T) {
 	}
 	if len(clamped) != 4 {
 		t.Fatalf("超大页大小应被收敛到上限且返回全部 4 条，实际 %d", len(clamped))
+	}
+}
+
+// 分页必须按**资产**计数，而不是 join 后的行数：一个资产有几条属性就有几行，
+// 直接对 join 结果 LIMIT 会让属性多的资产挤占同页额度、OFFSET 也随之漂移。
+// 依据：前端反馈「台账页没有分页」时排查发现——接口的 total 只等于当前页长度，
+// 且 limit 作用在 join 行上；本用例按「一个 12 属性资产 + 三个单属性资产」构造。
+func TestListPaginatesAssetsNotAttributeRows(t *testing.T) {
+	svc, _ := newTestService(t)
+	many := map[string]string{}
+	for i := 0; i < 12; i++ {
+		many[fmt.Sprintf("attr%02d", i)] = "v"
+	}
+	if _, _, err := svc.Apply(hostObservation("web-01", many)); err != nil {
+		t.Fatalf("写入多属性资产失败: %v", err)
+	}
+	for _, name := range []string{"web-02", "web-03", "web-04"} {
+		if _, _, err := svc.Apply(hostObservation(name, map[string]string{"cpu": "8"})); err != nil {
+			t.Fatalf("写入 %s 失败: %v", name, err)
+		}
+	}
+
+	page, err := svc.List(ListFilter{Limit: 2})
+	if err != nil {
+		t.Fatalf("分页查询失败: %v", err)
+	}
+	if len(page) != 2 {
+		t.Fatalf("一页 2 条应按资产返回 2 个，实际 %d", len(page))
+	}
+	if len(page[0].Attrs) != 12 {
+		t.Fatalf("本页资产应带全部属性（12 条），实际 %d", len(page[0].Attrs))
+	}
+
+	page2, err := svc.List(ListFilter{Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatalf("第二页查询失败: %v", err)
+	}
+	if len(page2) != 2 {
+		t.Fatalf("第二页应得 2 个，实际 %d", len(page2))
+	}
+	for _, a := range page {
+		for _, b := range page2 {
+			if a.ID == b.ID {
+				t.Fatalf("翻页出现重复资产 %d", a.ID)
+			}
+		}
+	}
+}
+
+// Count 与 List 共用同一套条件（含资源范围下推），否则「共 N 条」与实际能翻到的条数对不上。
+func TestCountMatchesListConditions(t *testing.T) {
+	svc, _ := newTestService(t)
+	if _, _, err := svc.Apply(hostObservation("web-01", nil)); err != nil {
+		t.Fatalf("写入 web-01 失败: %v", err)
+	}
+	if _, _, err := svc.Apply(hostObservation("web-02", nil)); err != nil {
+		t.Fatalf("写入 web-02 失败: %v", err)
+	}
+	if _, _, err := svc.Apply(Observation{
+		TypeKey: TypeMiddlewareInst, NaturalKey: "mysql:127.0.0.1:3306", Name: "dev-mysql", Node: "db-01",
+	}); err != nil {
+		t.Fatalf("写入实例资产失败: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		filter ListFilter
+		want   int
+	}{
+		{"无条件", ListFilter{}, 3},
+		{"按类型", ListFilter{TypeKey: TypeHost}, 2},
+		{"按关键词", ListFilter{Keyword: "web"}, 2},
+		{"按资源范围（可见 2 个节点中的 1 个）", ListFilter{Nodes: []string{"web-01", "db-01"}}, 2},
+		// 空集合表示「受限但无可见节点」，必须恒空——若当成「不限制」，资源范围就成了越权旁路。
+		{"空节点集合不等于不限制", ListFilter{Nodes: []string{}}, 0},
+	}
+	for _, tc := range cases {
+		got, err := svc.Count(tc.filter)
+		if err != nil {
+			t.Fatalf("%s：统计失败 %v", tc.name, err)
+		}
+		if got != tc.want {
+			t.Fatalf("%s：应为 %d，实际 %d", tc.name, tc.want, got)
+		}
+	}
+
+	// 分页参数不影响总数：前端据此渲染分页器。
+	if got, err := svc.Count(ListFilter{Limit: 1, Offset: 2}); err != nil || got != 3 {
+		t.Fatalf("总数不应受分页参数影响：got=%d err=%v", got, err)
 	}
 }
 

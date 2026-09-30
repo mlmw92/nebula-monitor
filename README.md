@@ -210,7 +210,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 - **接口与权限**：`GET /api/v1/assets`（支持 `type`/`node`/`keyword`/`limit`/`offset`）、`GET /api/v1/assets/{id}`、`GET /api/v1/assets/{id}/history`，以及人工维护的 `POST /api/v1/assets`、`PUT /api/v1/assets/{id}`。权限点：`assets:read`（默认授予运维管理员与只读角色）、`assets:write`（仅运维管理员，且属**高风险权限**，需二次确认）。资源范围按资产所属节点裁剪，**范围外资产按 404 返回**（不区分 403，避免用状态码探测范围外资源），且先过滤再计数。
 - **人工维护规则**：新建时归属节点必须在调用者范围内（受限用户不允许创建无归属资产）；**不支持通过接口变更归属节点**（节点是范围锚点，可改等于可把资产移出/移入他人可见范围）；更新只写 `manual` 来源，采集值原样保留，变更进入历史并记录操作人。
 - **存储**：内嵌 SQLite 单文件（`server.yaml` 的 `assetStoreFile`，默认 `/var/lib/monitor-server/assets.db`），纯 Go 驱动、无 CGO，三架构离线包不受影响；决策见 `docs/adr/0001-cmdb-relational-store.md`。
-- **Web 端**：左侧菜单「资产与配置 → 资产台账」（路由 `/assets`）。列表支持类型 / 归属节点 / 关键词筛选与分页；详情抽屉展示**属性双来源对比**（人工值与采集值并排，生效值人工优先）与字段级变更历史；「新建资产」「维护人工值」需 `assets:write`，提交前有二次确认（该权限点为高风险）。
+- **Web 端**：左侧菜单「资产与配置 → 资产台账」（路由 `/assets`）。列表支持类型 / 归属节点 / 关键词筛选与**服务端分页**（总数由服务端按资源范围统计，页内容与总数自洽）；详情抽屉展示**属性双来源对比**（人工值与采集值并排，生效值人工优先）与字段级变更历史；「新建资产」「维护人工值」需 `assets:write`，提交前有二次确认（该权限点为高风险）。
 - 设计与实施记录见 `docs/superpowers/specs/2026-09-30-asset-cmdb-design.md`（含已落地项与有意差异）。
 
 **智能分析与预测（只读决策辅助）**

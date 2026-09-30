@@ -233,3 +233,20 @@ GET    /api/v1/inspect/runs/{id}/findings       # 差异项
 
 **验证方式**：`npm --prefix web test`（6 个测试文件全通过，含新增 `src/api/asset.test.js` 4 个用例：筛选参数拼装、ID 编码、limit 语义、更新不携带 node）；`npm --prefix web run build` 通过（14.67s，产物已分包）。
 
+### 批次 4（2026-09-30）：分页与字号修复（实测反馈）
+
+用户在 dev-server 上实测后反馈两点：**字号偏小**、**没有分页**。两者都不是表面问题：
+
+| 反馈 | 根因 | 修法 |
+|---|---|---|
+| 字号偏小 | 该页把 `el-table` 等组件显式设成 `size="small"`（暗色主题下 14px），而 DialTestView / UpgradeView 等页面用 Element Plus 默认尺寸（16px） | 去掉该页的 `size="small"`，与既有页面看齐 |
+| 没有分页 | ① 接口的 `total` 取的是**当前页长度**（`len(out)`），前端据此无法渲染分页器，只能做成「加载更多」；② 更隐蔽的是 `listAssets` 把 `LIMIT/OFFSET` 作用在 `assets LEFT JOIN asset_attrs` 的**结果行**上——一个资产有几条属性就有几行，于是「一页 50 条」实际是「一页 50 行」，属性多的资产挤占同页额度且 `OFFSET` 随之漂移（用例：12 属性的资产 + 3 个单属性资产，`limit=2` 的页装不满） | ① 服务端新增 `Count`，与 `List` **共用同一套 WHERE**（`assetWhere`）给出真实总数；② 分页改为「先按资产选出本页 ID，再取这些资产的属性」；③ 前端改用 `el-pagination` 做服务端分页（`total/sizes/prev/pager/next/jumper`，与其它页面同款） |
+
+顺带修正一处同源缺陷：**资源范围从「取回一页再过滤」改为下推到 SQL**（`ListFilter.Nodes`）。
+过滤发生在分页之后时，页内被剔除的空位不会补人（受限用户会看到忽多忽少的页），总数也只能数到当前页。
+下推后：受限用户看到的 `total` 就是其范围内的真实条数，且与页内容自洽；`Nodes == nil` 表示不限制，
+空切片（受限但无可见节点）显式翻译成 `AND 1=0`，**不**退化成「不过滤」（那是越权旁路）。
+接口层仍保留一次 `nodeInScope` 兜底。
+
+**验证方式**：`go test ./internal/server/asset/ ./internal/server/api/` 新增 5 个用例——按资产分页不被属性行挤占（含第二页不重复）、`Count` 与 `List` 条件一致且空节点集合恒空、`total` 与翻页自洽（含越界页为空）、受限用户每页装满且总数不含范围外资产、无可见节点返回空结果；前端 `npm test` 6 个测试文件与 `npm run build` 通过。
+

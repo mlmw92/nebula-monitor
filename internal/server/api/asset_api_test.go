@@ -385,3 +385,115 @@ func TestAssetsWriteRouteRequiresWritePermission(t *testing.T) {
 		t.Fatalf("缺 assets:write 应返回 403，实际 %d", w.Code)
 	}
 }
+
+// 分页：total 必须是符合条件的资产总数（而不是当前页长度），且翻页内容与 total 自洽。
+// 依据：1.29.1 的 total 直接取当前页长度，前端无法据此做出真正的分页器。
+func TestHandleAssetsPaginationTotalAndPages(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	for _, name := range []string{"web-03", "web-04", "web-05"} {
+		seedAsset(t, svc, asset.TypeHost, name, name, "web-02", nil)
+	}
+	// 全库共 6 条：web-01、db-01、redis、web-03、web-04、web-05
+	readPage := func(query string) (int, []assetView) {
+		t.Helper()
+		req := assetReq(globalPrincipal("assets:read"), "/api/v1/assets"+query)
+		w := httptest.NewRecorder()
+		a.handleAssets(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("状态码 = %d，响应 %s", w.Code, w.Body.String())
+		}
+		var body struct {
+			Assets []assetView `json:"assets"`
+			Total  int         `json:"total"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("解析响应失败: %v", err)
+		}
+		return body.Total, body.Assets
+	}
+
+	total, page1 := readPage("?limit=2&offset=0")
+	if total != 6 {
+		t.Fatalf("total 应为全量 6（与页大小无关），实际 %d", total)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("第一页应得 2 条，实际 %d", len(page1))
+	}
+
+	if _, page2 := readPage("?limit=2&offset=2"); len(page2) != 2 {
+		t.Fatalf("第二页应得 2 条，实际 %d", len(page2))
+	} else if page2[0].ID == page1[0].ID || page2[1].ID == page1[1].ID {
+		t.Fatal("翻页出现了重复资产")
+	}
+
+	if _, page3 := readPage("?limit=2&offset=4"); len(page3) != 2 {
+		t.Fatalf("第三页应得 2 条，实际 %d", len(page3))
+	}
+	if _, page4 := readPage("?limit=2&offset=6"); len(page4) != 0 {
+		t.Fatalf("越界页应为空，实际 %d", len(page4))
+	}
+}
+
+// 受限用户的分页：范围必须下推到查询条件——total 只数范围内资产，
+// 且每页都装满（不是「取一页再过滤」留下空位）。
+func TestHandleAssetsScopedPaginationFillsEveryPage(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	// g1（web-01/web-02）共 4 条：web-01、redis(web-01)、web-02、nginx(web-01)；g2 另有 db-01。
+	seedAsset(t, svc, asset.TypeHost, "web-02", "web-02", "web-02", nil)
+	seedAsset(t, svc, asset.TypeMiddlewareInst, "nginx:10.0.0.1:80", "web-01-nginx", "web-01", nil)
+
+	read := func(query string) (int, []assetView) {
+		t.Helper()
+		req := assetReq(restrictedPrincipal([]string{"assets:read"}, "g1"), "/api/v1/assets"+query)
+		w := httptest.NewRecorder()
+		a.handleAssets(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("状态码 = %d，响应 %s", w.Code, w.Body.String())
+		}
+		var body struct {
+			Assets []assetView `json:"assets"`
+			Total  int         `json:"total"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("解析响应失败: %v", err)
+		}
+		for _, item := range body.Assets {
+			if item.Node != "web-01" && item.Node != "web-02" {
+				t.Fatalf("出现了范围外资产: %+v", item)
+			}
+		}
+		return body.Total, body.Assets
+	}
+
+	total, page1 := read("?limit=2&offset=0")
+	if total != 4 {
+		t.Fatalf("total 应为范围内的 4 条（不得数到范围外的 db-01），实际 %d", total)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("受限用户每页也应装满 2 条，实际 %d", len(page1))
+	}
+	if _, page2 := read("?limit=2&offset=2"); len(page2) != 2 {
+		t.Fatalf("第二页应得 2 条，实际 %d", len(page2))
+	}
+}
+
+// 受限但没有任何可见节点：恒空结果 + 0 条，绝不退化成「不过滤」。
+func TestHandleAssetsRestrictedWithoutVisibleNodesIsEmpty(t *testing.T) {
+	a, _ := assetTestAPI(t)
+	req := assetReq(restrictedPrincipal([]string{"assets:read"}, "g-unknown"), "/api/v1/assets")
+	w := httptest.NewRecorder()
+	a.handleAssets(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("状态码 = %d", w.Code)
+	}
+	var body struct {
+		Assets []assetView `json:"assets"`
+		Total  int         `json:"total"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if body.Total != 0 || len(body.Assets) != 0 {
+		t.Fatalf("无可见节点应返回空结果，实际 total=%d len=%d", body.Total, len(body.Assets))
+	}
+}

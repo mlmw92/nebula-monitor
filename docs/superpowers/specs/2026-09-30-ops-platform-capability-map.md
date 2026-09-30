@@ -92,7 +92,7 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 | 资产生命周期（上线/下线/退役/成本/维保） | 未实现 | `README.md` 路线图「CMDB（P2）：资产台账、生命周期与变更记录」 | P2 | M | 资产台账 | D2 |
 | 资产与资源范围的映射/迁移 | **已实现** | 接口按资产所属节点走既有范围判定（`api/nodeInScope`）：范围外资产按 404 返回、先过滤再计数；权限点 `assets:read` 已注册并授予运维/只读角色 | **P0** | M | 资产台账 | D2 |
 | 配置快照与差异巡检（配置项级） | 部分实现 | 快照写入/读取已实现：`snapshots` + `snapshot_fields`（同事务）、`asset.Service.Snapshot`；**差异比对与巡检运行未做**；现行 FIM 仍只做文件 SHA256（`internal/agent/collector/security.go:loadFIMBaseline/sha256File`） | **P0** | M | 资产台账 + 配置采集 | D2 |
-| 资产台账页（列表/详情/关系图/变更时间线） | 部分实现 | 列表（筛选 + 分页）、详情抽屉（属性双来源对比）、变更时间线与人工维护（新建/维护人工值、高风险二次确认）均已落地：`web/src/components/asset/AssetListView.vue`、`web/src/api/asset.js`、`Sidebar.vue` 新增「资产与配置」分组；**关系图未做**（当前仅 `runs_on` 一种自动关系，收益不足） | **P0** | M | 后端接口（已完成） | D2 |
+| 资产台账页（列表/详情/关系图/变更时间线） | 部分实现 | 列表（筛选 + **服务端分页**，总数由服务端按资源范围统计）、详情抽屉（属性双来源对比）、变更时间线与人工维护（新建/维护人工值、高风险二次确认）均已落地：`web/src/components/asset/AssetListView.vue`、`web/src/api/asset.js`、`Sidebar.vue` 新增「资产与配置」分组；**关系图未做**（当前仅 `runs_on` 一种自动关系，收益不足） | **P0** | M | 后端接口（已完成） | D2 |
 
 ### 3.3 配置管理
 
