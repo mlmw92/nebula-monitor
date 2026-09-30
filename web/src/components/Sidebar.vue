@@ -78,6 +78,7 @@ import {
   Message,
   Connection,
   Document,
+  Files,
   Setting,
   ArrowDown,
   ArrowRight,
@@ -121,6 +122,15 @@ const groups = [
       { key: 'status', to: '/status', label: '对外状态页', icon: View, perm: 'probe:read' },
       { key: 'metrics-explore', to: '/metrics/explore', label: '指标浏览', icon: DataLine, perm: 'nodes:read' },
       { key: 'dashboards', to: '/system/dashboards', label: '自定义仪表盘', icon: Grid, perm: 'dashboard:read' },
+    ],
+  },
+  {
+    key: 'assets',
+    label: '资产与配置',
+    icon: Files,
+    items: [
+      // 读权限即可进入；维护按钮另行按 assets:write 门控（该权限点为高风险，需二次确认）
+      { key: 'assets', to: '/assets', label: '资产台账', icon: Files, perm: 'assets:read' },
     ],
   },
   {

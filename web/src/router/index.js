@@ -30,6 +30,8 @@ const routes = [
       { path: 'hosts', name: 'hosts', component: () => import('../components/HostsView.vue'), meta: { perm: 'nodes:read' } },
       { path: 'node/:name', name: 'node', component: () => import('../components/NodeView.vue'), props: true, meta: { perm: 'nodes:read' } },
       { path: 'middleware', name: 'middleware', component: () => import('../components/MiddlewareView.vue'), meta: { perm: 'middleware:read' } },
+      // 资产台账（D2）：读取需 assets:read；人工维护由后端 assets:write 校验（前端按钮同权限门控）
+      { path: 'assets', name: 'assets', component: () => import('../components/asset/AssetListView.vue'), meta: { perm: 'assets:read' } },
       // 采集项模板管理（读为 middleware:read；写操作由后端 middleware:write 校验，前端按钮同权限门控）
 
       { path: 'alerts', name: 'alerts', component: () => import('../components/AlertsView.vue'), meta: { perm: 'alerts:read' } },

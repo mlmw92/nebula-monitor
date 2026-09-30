@@ -213,3 +213,23 @@ GET    /api/v1/inspect/runs/{id}/findings       # 差异项
 
 **验证方式**：`go test ./internal/server/api/ -run Asset`（12 个用例：新建/冲突/范围三态、更新保留采集值、归属节点拒绝、写权限负例等）；全量 `go test ./internal/...` 通过。
 
+### 批次 3（2026-09-30）：前端资产页
+
+**已落地**（`web/src/components/asset/AssetListView.vue`、`web/src/api/asset.js`、路由与菜单）：
+
+| 设计项 | 实现状态 | 证据 |
+|---|---|---|
+| 资产台账页（列表） | ✅ | 类型 / 归属节点 / 关键词筛选 + 分页（「加载更多」，页大小 50）；筛选项为空时不拼进查询串（`?type=` 与不传语义不同） |
+| 资产详情抽屉 | ✅ | 基本信息 + **属性双来源对比**（同一 key 并排显示人工值与采集值，生效值按「人工优先」与服务端 `Asset.Value` 同一规则计算）+ 变更历史（字段/旧值→新值/来源/操作人/时间） |
+| 人工维护入口 | ✅ | 新建资产对话框与「维护人工值」对话框（属性 name/value 行编辑器）；编辑时**只预填人工值**，避免误以为提交会覆盖采集值 |
+| 权限门控 | ✅ | 菜单与路由按 `assets:read` 隐藏/拦截（`Sidebar.vue` 新增「资产与配置」分组、`router/index.js` 的 `meta.perm`）；维护按钮按 `assets:write` 门控 |
+| 高风险二次确认 | ✅ | 提交前 `ElMessageBox.confirm`（与 `assets:write` 纳入 `HighRiskPermissions` 的服务端语义对齐）；注释明确「前端隐藏仅为体验，服务端才是边界」 |
+| 按需分包 | ✅ | 路由懒加载，构建产物 `AssetListView-*.js` 12.27 kB（gzip 4.52 kB）+ CSS 0.72 kB，不进入主包 |
+
+**与设计的差异**：
+
+1. **关系图（拓扑视图）未做**：数据侧目前只有 `runs_on` 一种自动关系（实例 → 主机），单独画一张关系图的收益不足以支撑成本；等有了人工关系与多跳依赖再做，届时可参考 `2026-09-30-ops-platform-open-source-research.md` 中 NetBox 的"对象 → 关联"呈现方式。
+2. **未做「删除资产」按钮**：后端尚未提供删除接口（见批次 2 差异说明），前端不放置无效入口。
+
+**验证方式**：`npm --prefix web test`（6 个测试文件全通过，含新增 `src/api/asset.test.js` 4 个用例：筛选参数拼装、ID 编码、limit 语义、更新不携带 node）；`npm --prefix web run build` 通过（14.67s，产物已分包）。
+
