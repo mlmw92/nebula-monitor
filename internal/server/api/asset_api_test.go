@@ -477,6 +477,244 @@ func TestHandleAssetsScopedPaginationFillsEveryPage(t *testing.T) {
 	}
 }
 
+// 派生列（状态 / 来源 / 责任人 / 最近上报 / 展示 ID）全部由既有数据推导，不落库。
+// 状态三态在接口层测试里用纯函数覆盖：夹具的资产都是刚写入的，构造不出「失联」。
+func TestAssetDerivedFieldsAreComputedNotStored(t *testing.T) {
+	staleBefore := int64(1000)
+	// 只带采集值的资产（属性 map 的键遵循 asset 包 key@source 的约定，这里只为 ValueFrom 用）
+	withDiscovery := func(at int64) asset.Asset {
+		return asset.Asset{
+			ID: 7, TypeKey: asset.TypeHost, NaturalKey: "srv-01",
+			Attrs: map[string]asset.Attr{
+				"os@" + string(asset.SourceDiscovery): {
+					Key: "os", Value: "CentOS 7.9", Source: asset.SourceDiscovery, UpdatedAt: at,
+				},
+			},
+		}
+	}
+	if got := assetStatusOf(withDiscovery(2000), staleBefore); got != asset.StatusOnline {
+		t.Fatalf("刚上报应为 online，实际 %q", got)
+	}
+	if got := assetStatusOf(withDiscovery(500), staleBefore); got != asset.StatusMissing {
+		t.Fatalf("超阈值未上报应为 missing，实际 %q", got)
+	}
+	manualOnly := asset.Asset{Attrs: map[string]asset.Attr{
+		asset.OwnerKey + "@" + string(asset.SourceManual): {
+			Key: asset.OwnerKey, Value: "张三", Source: asset.SourceManual, UpdatedAt: 900,
+		},
+	}}
+	if got := assetStatusOf(manualOnly, staleBefore); got != asset.StatusArchived {
+		t.Fatalf("纯人工建档不应算失联，应为 archived，实际 %q", got)
+	}
+
+	view := toAssetView(withDiscovery(2000), staleBefore)
+	if view.DisplayID != "ast_7" {
+		t.Fatalf("展示 ID 应为 ast_7，实际 %q", view.DisplayID)
+	}
+	if view.LastSeenAt != 2000 {
+		t.Fatalf("最近上报应取采集时间，实际 %d", view.LastSeenAt)
+	}
+	if view.Source != asset.SourceFilterAuto || view.Owner != "" || view.ConflictCount != 0 {
+		t.Fatalf("无人工值应为 auto 且无责任人：%+v", view)
+	}
+
+	if got := assetSourceKind(2, 0); got != asset.SourceFilterManual {
+		t.Fatalf("有人工值且无冲突应为 manual，实际 %q", got)
+	}
+	if got := assetSourceKind(2, 1); got != asset.SourceFilterMixed {
+		t.Fatalf("存在同字段双来源应为 mixed，实际 %q", got)
+	}
+}
+
+// 摘要与列表必须同源：顶部数字点进列表看到的条数就是摘要上的数字；资源范围同样生效。
+func TestHandleAssetSummaryMatchesListAndScope(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	// web-01（g1，可见）补一条责任人与一条与采集值冲突的人工值
+	if _, _, err := svc.Apply(asset.Observation{
+		TypeKey: asset.TypeHost, NaturalKey: "web-01", Name: "web-01", Node: "web-01",
+		Source: asset.SourceManual, Actor: "alice",
+		Attrs: map[string]string{asset.OwnerKey: "张三", "cpuCores": "8"},
+	}); err != nil {
+		t.Fatalf("写入人工值失败: %v", err)
+	}
+
+	readSummary := func(p *auth.Principal) asset.Stats {
+		t.Helper()
+		req := assetReq(p, "/api/v1/assets/summary")
+		w := httptest.NewRecorder()
+		a.handleAssetSummary(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("状态码 = %d，响应 %s", w.Code, w.Body.String())
+		}
+		var stats asset.Stats
+		if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
+			t.Fatalf("解析摘要失败: %v", err)
+		}
+		return stats
+	}
+	readListTotal := func(p *auth.Principal) int {
+		t.Helper()
+		req := assetReq(p, "/api/v1/assets")
+		w := httptest.NewRecorder()
+		a.handleAssets(w, req)
+		var body struct {
+			Total int `json:"total"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("解析列表失败: %v", err)
+		}
+		return body.Total
+	}
+
+	global := globalPrincipal("assets:read")
+	stats := readSummary(global)
+	if stats.Total != readListTotal(global) {
+		t.Fatalf("摘要总数(%d)必须等于列表总数(%d)", stats.Total, readListTotal(global))
+	}
+	if stats.Total != 3 || stats.Conflict != 1 || stats.NoOwner != 2 || stats.Missing != 0 {
+		t.Fatalf("全局摘要不符：%+v", stats)
+	}
+	// 冲突资产能通过列表下钻查到（摘要与列表同一套条件）
+	req := assetReq(global, "/api/v1/assets?conflict=true")
+	w := httptest.NewRecorder()
+	a.handleAssets(w, req)
+	var drilled struct {
+		Assets []assetView `json:"assets"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &drilled); err != nil {
+		t.Fatalf("解析下钻结果失败: %v", err)
+	}
+	if len(drilled.Assets) != 1 || drilled.Assets[0].ConflictCount != 1 || drilled.Assets[0].Owner != "张三" {
+		t.Fatalf("冲突下钻结果不符：%+v", drilled.Assets)
+	}
+
+	restricted := restrictedPrincipal([]string{"assets:read"}, "g1")
+	scoped := readSummary(restricted)
+	if scoped.Total != readListTotal(restricted) || scoped.Total != 2 {
+		t.Fatalf("受限用户摘要(%d)应等于其列表总数(%d)且为 2", scoped.Total, readListTotal(restricted))
+	}
+	// 状态/来源取值非法要给出 400，而不是静默忽略筛选条件（那会让人以为"筛了但没生效"）
+	bad := httptest.NewRecorder()
+	a.handleAssetSummary(bad, assetReq(global, "/api/v1/assets/summary?status=bogus"))
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("非法状态取值应返回 400，实际 %d", bad.Code)
+	}
+}
+
+// 恢复采集值：删掉人工值、保留采集值、写字段级变更记录；无可恢复字段时报 400。
+func TestHandleAssetUpdateResetsManualValue(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	host, _, _ := svc.Get(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"})
+	// 先制造一个冲突字段（cpuCores 采集值 4 + 人工值 8）
+	if _, _, err := svc.Apply(asset.Observation{
+		TypeKey: asset.TypeHost, NaturalKey: "web-01", Name: "web-01", Node: "web-01",
+		Source: asset.SourceManual, Actor: "alice", Attrs: map[string]string{"cpuCores": "8"},
+	}); err != nil {
+		t.Fatalf("写入人工值失败: %v", err)
+	}
+
+	req := assetWriteReq(globalPrincipal("assets:write"), http.MethodPut, "/api/v1/assets",
+		assetWriteBody{ResetAttrs: []string{"cpuCores"}})
+	req.SetPathValue("id", strconv.FormatInt(host.ID, 10))
+	w := httptest.NewRecorder()
+	a.handleAssetUpdate(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("恢复采集值应返回 200，实际 %d，响应 %s", w.Code, w.Body.String())
+	}
+	var view assetView
+	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	// 关键点：响应里必须已经是恢复后的状态，而不是恢复前的对象
+	if got := view.Values["cpuCores"]; got != "4" {
+		t.Fatalf("恢复后生效值应回落为采集值 4，实际 %q", got)
+	}
+	if view.ConflictCount != 0 || view.Source != asset.SourceFilterAuto {
+		t.Fatalf("恢复后不应再有冲突：%+v", view)
+	}
+
+	history, err := svc.History(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"}, 0)
+	if err != nil {
+		t.Fatalf("查询变更历史失败: %v", err)
+	}
+	if history[0].Field != "cpuCores" || history[0].Old != "8" || history[0].New != "" {
+		t.Fatalf("恢复应留下变更记录，实际 %+v", history[0])
+	}
+
+	// 再恢复一次：没有人工值了，必须明确失败而不是假装成功
+	again := assetWriteReq(globalPrincipal("assets:write"), http.MethodPut, "/api/v1/assets",
+		assetWriteBody{ResetAttrs: []string{"cpuCores"}})
+	again.SetPathValue("id", strconv.FormatInt(host.ID, 10))
+	w = httptest.NewRecorder()
+	a.handleAssetUpdate(w, again)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("无可恢复字段应返回 400，实际 %d", w.Code)
+	}
+}
+
+// 关联关系：范围外的对端不返回——一条边足以暴露范围外资产的名字。
+func TestHandleAssetLinksSkipsOutOfScopePeer(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	redisRef := asset.Ref{TypeKey: asset.TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6379"}
+	// 范围内的对端（web-01，g1）与范围外的对端（db-01，g2）各建一条边
+	if err := svc.Link(redisRef, asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"}, asset.LinkRunsOn); err != nil {
+		t.Fatalf("建立范围内关联失败: %v", err)
+	}
+	if err := svc.Link(redisRef, asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "db-01"}, asset.LinkRunsOn); err != nil {
+		t.Fatalf("建立范围外关联失败: %v", err)
+	}
+	redis, _, _ := svc.Get(redisRef)
+
+	read := func(p *auth.Principal) []assetLinkView {
+		t.Helper()
+		req := assetReq(p, "/api/v1/assets/"+strconv.FormatInt(redis.ID, 10)+"/links")
+		req.SetPathValue("id", strconv.FormatInt(redis.ID, 10))
+		w := httptest.NewRecorder()
+		a.handleAssetLinks(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("状态码 = %d，响应 %s", w.Code, w.Body.String())
+		}
+		var body struct {
+			Links []assetLinkView `json:"links"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("解析关联失败: %v", err)
+		}
+		return body.Links
+	}
+
+	global := read(globalPrincipal("assets:read"))
+	if len(global) != 2 {
+		t.Fatalf("全局用户应看到 2 条边，实际 %d", len(global))
+	}
+	for _, l := range global {
+		if l.Kind != string(asset.LinkRunsOn) || l.Direction != "out" || l.PeerKey == "" {
+			t.Fatalf("边的形态不符：%+v", l)
+		}
+	}
+
+	scoped := read(restrictedPrincipal([]string{"assets:read"}, "g1"))
+	if len(scoped) != 1 || scoped[0].PeerKey != "web-01" {
+		t.Fatalf("受限用户只应看到范围内对端，实际 %+v", scoped)
+	}
+
+	// 反方向也要能取到：从主机看「被谁依赖」，方向标记为 in
+	host, _, _ := svc.Get(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"})
+	req := assetReq(restrictedPrincipal([]string{"assets:read"}, "g1"), "/api/v1/assets/"+strconv.FormatInt(host.ID, 10)+"/links")
+	req.SetPathValue("id", strconv.FormatInt(host.ID, 10))
+	w := httptest.NewRecorder()
+	a.handleAssetLinks(w, req)
+	var body struct {
+		Links []assetLinkView `json:"links"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("解析入边失败: %v", err)
+	}
+	if len(body.Links) != 1 || body.Links[0].Direction != "in" || body.Links[0].PeerKey != "redis:127.0.0.1:6379" {
+		t.Fatalf("主机侧应看到方向为 in 的边，实际 %+v", body.Links)
+	}
+}
+
 // 受限但没有任何可见节点：恒空结果 + 0 条，绝不退化成「不过滤」。
 func TestHandleAssetsRestrictedWithoutVisibleNodesIsEmpty(t *testing.T) {
 	a, _ := assetTestAPI(t)

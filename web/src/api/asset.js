@@ -29,4 +29,19 @@ export const createAsset = (payload) => http.post('/api/v1/assets', payload)
 
 // 维护人工值（名称与属性）：只写 manual 来源，采集值不受影响。
 // 注意服务端不接受 node 变更（归属节点是资源范围锚点），因此这里也不传。
+// payload.resetAttrs 列出要「恢复采集值」的字段（删掉这些字段的人工值），与 attrs 是两个方向。
 export const updateAsset = (id, payload) => http.put('/api/v1/assets/' + encodeURIComponent(id), payload)
+
+// 台账健康度摘要（总数 / 失联 / 无责任人 / 冲突 / 近 7 天变更）。
+// 与列表共用同一套筛选参数：顶部数字点进去必须看到同一个集合。
+export const getAssetSummary = (params = {}) => {
+  const q = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') q.append(k, v)
+  }
+  const s = q.toString()
+  return http.get('/api/v1/assets/summary' + (s ? '?' + s : ''))
+}
+
+// 资产的直接关联（出边 + 入边）；范围外的对端由服务端剔除，前端拿到的都是可见资产。
+export const getAssetLinks = (id) => http.get('/api/v1/assets/' + encodeURIComponent(id) + '/links')

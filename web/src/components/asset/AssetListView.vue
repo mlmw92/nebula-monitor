@@ -4,34 +4,86 @@
       <div class="head-row">
         <h2>资产台账</h2>
         <span class="muted">
-          主机与中间件实例由 Agent 每轮上报自动发现；人工维护的值不会覆盖采集值，两者差异在详情中可见
+          主机与中间件实例由 Agent 每轮上报自动发现；人工值不覆盖采集值，两者差异在详情里逐字段可见
         </span>
       </div>
     </header>
 
+    <!-- 健康度：数字与列表同一套条件，点数字即下钻（服务端同源，不会出现"摘要 12 条、列表 11 条"） -->
+    <div class="panel health">
+      <div class="h-item" title="清空筛选，查看全部" @click="drillAll">
+        <div class="h-label">资产总数</div>
+        <div class="h-value">{{ summary.total }}</div>
+        <div class="h-hint">点击下钻</div>
+      </div>
+      <div class="h-item" title="只看向上采集已过期（超过 5 分钟未上报）的资产" @click="drillStatus('missing')">
+        <div class="h-label">失联</div>
+        <div class="h-value" :class="{ danger: summary.missing > 0 }">{{ summary.missing }}</div>
+        <div class="h-hint">超 5 分钟未上报</div>
+      </div>
+      <div class="h-item" title="只看向人工未指派责任人的资产" @click="drillNoOwner">
+        <div class="h-label">无责任人</div>
+        <div class="h-value" :class="{ warn: summary.noOwner > 0 }">{{ summary.noOwner }}</div>
+        <div class="h-hint">人工值未指派</div>
+      </div>
+      <div class="h-item" title="只看向同一字段人工值与采集值并存的资产" @click="drillConflict">
+        <div class="h-label">人工 / 采集冲突</div>
+        <div class="h-value" :class="{ warn: summary.conflict > 0 }">{{ summary.conflict }}</div>
+        <div class="h-hint">同字段双值不一致</div>
+      </div>
+      <div class="h-item">
+        <div class="h-label">近 7 天变更</div>
+        <div class="h-value">{{ summary.changes }}</div>
+        <div class="h-hint">含采集与人工</div>
+      </div>
+      <div class="spacer"></div>
+      <span class="muted">状态与来源均由既有数据推导，不单独落库</span>
+    </div>
+
     <div class="panel">
-      <div class="toolbar">
-        <el-select v-model="filter.type" placeholder="全部类型" clearable style="width: 170px">
+      <div class="filters">
+        <el-select v-model="filter.type" placeholder="全部类型" clearable style="width: 150px">
           <el-option label="主机" value="host" />
           <el-option label="中间件实例" value="middleware-instance" />
+        </el-select>
+        <el-select v-model="filter.status" placeholder="全部状态" clearable style="width: 140px">
+          <el-option label="在线" value="online" />
+          <el-option label="失联" value="missing" />
+          <el-option label="归档" value="archived" />
+        </el-select>
+        <el-select v-model="filter.source" placeholder="全部来源" clearable style="width: 140px">
+          <el-option label="自动" value="auto" />
+          <el-option label="人工" value="manual" />
+          <el-option label="混合" value="mixed" />
         </el-select>
         <el-input
           v-model="filter.node"
           clearable
           placeholder="归属节点，如 web-01"
-          style="width: 200px"
+          style="width: 180px"
           @keyup.enter="reload"
         />
         <el-input
           v-model="filter.keyword"
           clearable
-          placeholder="名称或自然键关键字"
-          style="width: 220px"
+          placeholder="搜索资产名 / 自然键 / 属性值"
+          style="width: 240px"
           @keyup.enter="reload"
         />
         <el-button type="primary" :loading="loading" @click="reload">查询</el-button>
-        <span v-if="canWrite" style="margin-left: auto">
-          <el-button @click="openCreate">新建资产</el-button>
+        <el-button @click="resetFilter">重置</el-button>
+        <!-- 下钻态可见且可撤销：否则「点了无责任人」之后列表为什么变少会没人说得清 -->
+        <el-tag v-if="drill.ownerMissing" closable type="warning" @close="clearDrill">下钻：无责任人</el-tag>
+        <el-tag v-if="drill.conflict" closable type="warning" @close="clearDrill">下钻：人工/采集冲突</el-tag>
+      </div>
+
+      <div class="toolbar">
+        <el-button v-if="canWrite" type="primary" @click="openCreate">新建资产</el-button>
+        <span class="tag" :class="{ locked: !canWrite }">
+          {{ canWrite ? 'assets:write' : '只读（缺 assets:write）' }}
+        </span>
+        <span class="muted" style="margin-left: auto">
+          范围外资产按「不存在」返回，不做 403 区分；人工维护需二次确认
         </span>
       </div>
 
@@ -41,37 +93,55 @@
         :data="items"
         v-loading="loading"
         empty-text="没有匹配的资产（资产会在 Agent 首次上报后自动出现）"
+        :row-class-name="rowClass"
         style="width: 100%"
+        @row-click="openDetail"
       >
-        <el-table-column label="名称" min-width="180">
+        <el-table-column label="资产名称" min-width="260">
           <template #default="{ row }">
-            <a class="link" @click="openDetail(row)">{{ row.name || row.naturalKey }}</a>
+            <div class="name">{{ row.name || row.naturalKey }}</div>
+            <div class="sub">{{ subtitle(row) }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="类型" width="130">
+        <el-table-column label="类型" width="140">
           <template #default="{ row }">
-            <span class="tag">{{ typeLabel(row.typeKey) }}</span>
+            <span class="tag" :class="row.typeKey === 'host' ? 'host' : 'mw'">{{ typeLabel(row) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="naturalKey" label="自然键" min-width="210" show-overflow-tooltip />
-        <el-table-column label="归属节点" width="150">
+        <el-table-column label="归属节点" width="140">
           <template #default="{ row }">{{ row.node || '—' }}</template>
         </el-table-column>
-        <el-table-column label="属性数" width="100">
-          <template #default="{ row }">{{ Object.keys(row.values || {}).length }}</template>
-        </el-table-column>
-        <el-table-column label="最近更新" width="190">
-          <template #default="{ row }">{{ fmtTime(row.updatedAt) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="状态" width="110">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openDetail(row)">详情</el-button>
-            <el-button v-if="canWrite" link type="primary" @click="openEdit(row)">维护</el-button>
+            <span class="dot" :class="row.status" />
+            <span :class="row.status === 'missing' ? 'st-miss' : 'st-ok'">{{ statusLabel(row.status) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="最近上报" width="130">
+          <template #default="{ row }">
+            <span v-if="row.lastSeenAt">{{ relTime(row.lastSeenAt) }}</span>
+            <span v-else class="muted">从未上报</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="来源" width="100">
+          <template #default="{ row }">
+            <span :class="'src-' + row.source">{{ sourceLabel(row.source) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="责任人" width="110">
+          <template #default="{ row }">
+            <span v-if="row.owner">{{ row.owner }}</span>
+            <span v-else class="muted">未指派</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="180" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click.stop="openDetail(row)">详情</el-button>
+            <el-button v-if="canWrite" link type="primary" @click.stop="openEdit(row)">维护人工值</el-button>
           </template>
         </el-table-column>
       </el-table>
 
-      <!-- 服务端分页：total 来自后端真实统计（受资源范围约束），页内条数与总数自洽 -->
       <div class="pager">
         <el-pagination
           background
@@ -86,57 +156,156 @@
       </div>
     </div>
 
-    <!-- 详情：属性双来源对比 + 变更历史 -->
-    <el-drawer v-model="detailVisible" size="720px" :title="detail ? detail.name || detail.naturalKey : '资产详情'">
+    <!-- 详情抽屉：原型的三 Tab（属性对比 / 变更历史 / 关联关系） -->
+    <el-drawer v-model="detailVisible" size="780px" :title="detail ? detail.name || detail.naturalKey : '资产详情'">
       <div v-if="detail" class="detail">
-        <el-descriptions :column="1" border>
-          <el-descriptions-item label="类型">{{ typeLabel(detail.typeKey) }}</el-descriptions-item>
-          <el-descriptions-item label="自然键">{{ detail.naturalKey }}</el-descriptions-item>
-          <el-descriptions-item label="归属节点">{{ detail.node || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="建档时间">{{ fmtTime(detail.createdAt) }}</el-descriptions-item>
-          <el-descriptions-item label="最近更新">{{ fmtTime(detail.updatedAt) }}</el-descriptions-item>
-        </el-descriptions>
-
-        <h4 class="sec">属性（人工值优先，采集值原样保留）</h4>
-        <el-table :data="attrRows" empty-text="暂无属性" style="width: 100%">
-          <el-table-column prop="key" label="属性" width="150" />
-          <el-table-column prop="effective" label="生效值" min-width="140" show-overflow-tooltip />
-          <el-table-column label="来源明细" min-width="240">
-            <template #default="{ row }">
-              <div v-if="row.manual !== undefined" class="src">
-                <span class="tag">人工</span> {{ row.manual }}
-                <span v-if="row.manualBy" class="muted">（{{ row.manualBy }}）</span>
-              </div>
-              <div v-if="row.discovery !== undefined" class="src">
-                <span class="tag online">采集</span> {{ row.discovery }}
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
-
-        <h4 class="sec">变更历史（字段级）</h4>
-        <el-table :data="history" empty-text="暂无变更" style="width: 100%">
-          <el-table-column label="时间" width="180">
-            <template #default="{ row }">{{ fmtTime(row.at) }}</template>
-          </el-table-column>
-          <el-table-column prop="field" label="字段" width="130" />
-          <el-table-column label="变化" min-width="200">
-            <template #default="{ row }">
-              <template v-if="row.kind === 'initial'"><span class="muted">建档</span></template>
-              <template v-else>
-                <span class="muted">{{ row.old || '（空）' }}</span> → <b>{{ row.new || '（空）' }}</b>
-              </template>
-            </template>
-          </el-table-column>
-          <el-table-column label="来源" width="100">
-            <template #default="{ row }">{{ row.source === 'manual' ? '人工' : '采集' }}</template>
-          </el-table-column>
-          <el-table-column prop="actor" label="操作人" width="120" />
-        </el-table>
-
-        <div v-if="canWrite" class="drawer-actions">
-          <el-button type="primary" @click="openEdit(detail)">维护人工值</el-button>
+        <div class="d-tags">
+          <span class="tag" :class="detail.typeKey === 'host' ? 'host' : 'mw'">{{ typeLabel(detail) }}</span>
+          <span class="tag" :class="detail.status === 'missing' ? 'offline' : 'online'">{{ statusLabel(detail.status) }}</span>
+          <span class="tag">{{ detail.node || '无归属节点' }}</span>
+          <span class="tag" v-if="detail.owner">{{ detail.owner }}</span>
         </div>
+        <div class="d-meta">
+          自然键 <code>{{ detail.naturalKey }}</code> · 资产 ID <code>{{ detail.displayId }}</code> ·
+          首次发现 {{ fmtTime(detail.createdAt) }} ·
+          最近上报 {{ detail.lastSeenAt ? relTime(detail.lastSeenAt) : '从未上报' }}
+        </div>
+
+        <el-tabs v-model="tab">
+          <el-tab-pane :label="`属性对比 ${detail.attrs.length}`" name="attr">
+            <el-alert
+              v-if="detail.conflictCount > 0"
+              type="warning"
+              :closable="false"
+              show-icon
+              :title="`该资产有 ${detail.conflictCount} 个字段的人工值与采集值不一致，生效值取人工值`"
+              class="alert-gap"
+            />
+            <div class="sec">
+              <span>技术属性</span>
+              <span class="muted">由 Agent 采集写入；人工值不覆盖采集值</span>
+            </div>
+            <el-table :data="techRows" empty-text="暂无采集属性" style="width: 100%">
+              <el-table-column label="字段" width="150">
+                <template #default="{ row }"><span class="mono">{{ row.key }}</span></template>
+              </el-table-column>
+              <el-table-column label="采集值" min-width="150">
+                <template #default="{ row }">
+                  <span v-if="row.discovery !== undefined" :class="{ struck: row.conflict }">{{ row.discovery }}</span>
+                  <span v-else class="muted">—</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="人工值" min-width="150">
+                <template #default="{ row }">
+                  <span v-if="row.manual !== undefined">{{ row.manual }}</span>
+                  <span v-else class="muted">—</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="生效值" min-width="200">
+                <template #default="{ row }">
+                  <span>{{ row.effective }}</span>
+                  <span class="srcpill" :class="row.manual !== undefined ? 'man' : 'auto'">
+                    {{ row.manual !== undefined ? '人工' : '自动' }}
+                  </span>
+                  <el-button
+                    v-if="row.conflict && canWrite"
+                    link
+                    type="warning"
+                    @click="restoreAttr(row.key)"
+                  >恢复采集值</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <div class="sec">
+              <span>管理属性</span>
+              <span class="muted">仅人工维护，采集不写入（责任人固定用 owner 键）</span>
+            </div>
+            <el-table :data="manualRows" empty-text="暂无人工属性" style="width: 100%">
+              <el-table-column label="字段" width="150">
+                <template #default="{ row }"><span class="mono">{{ row.key }}</span></template>
+              </el-table-column>
+              <el-table-column label="人工值" min-width="200">
+                <template #default="{ row }">{{ row.manual }}</template>
+              </el-table-column>
+              <el-table-column label="维护人 / 时间" min-width="200">
+                <template #default="{ row }">
+                  <span class="muted">{{ row.manualBy || '—' }} · {{ fmtTime(row.manualAt) }}</span>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <div class="sec">
+              <span>归属节点</span>
+              <span class="muted">资源范围锚点，接口与界面均不可变更</span>
+            </div>
+            <el-descriptions :column="1" border>
+              <el-descriptions-item label="归属节点">{{ detail.node || '无' }}</el-descriptions-item>
+            </el-descriptions>
+
+            <div v-if="canWrite" class="drawer-actions">
+              <el-button type="primary" @click="openEdit(detail)">维护人工值</el-button>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane :label="`变更历史 ${history.length}`" name="history">
+            <div class="sec">
+              <span>变更历史</span>
+              <span class="muted">字段级 diff，仅在值真正变化时记录</span>
+            </div>
+            <el-timeline v-if="history.length">
+              <el-timeline-item
+                v-for="rec in history"
+                :key="rec.at + rec.field + (rec.new || '')"
+                :timestamp="fmtTime(rec.at)"
+                :type="rec.kind === 'initial' ? 'success' : rec.source === 'manual' ? 'primary' : 'info'"
+                placement="top"
+              >
+                <div class="tl-title">
+                  <template v-if="rec.kind === 'initial'">资产建档</template>
+                  <template v-else-if="rec.new">
+                    更新 <span class="mono">{{ rec.field }}</span>
+                  </template>
+                  <template v-else>恢复采集值 <span class="mono">{{ rec.field }}</span></template>
+                </div>
+                <div v-if="rec.kind !== 'initial'" class="tl-diff">
+                  <span class="struck">{{ rec.old || '（空）' }}</span> → <b>{{ rec.new || '（已清除）' }}</b>
+                </div>
+                <div class="muted">
+                  来源 {{ rec.source === 'manual' ? '人工' : '采集' }}
+                  <template v-if="rec.actor"> · 操作人 {{ rec.actor }}</template>
+                </div>
+              </el-timeline-item>
+            </el-timeline>
+            <el-empty v-else description="暂无变更" />
+          </el-tab-pane>
+
+          <el-tab-pane :label="`关联关系 ${links.length}`" name="links">
+            <div class="sec">
+              <span>关联关系</span>
+              <span class="muted">自动发现时建立：中间件实例 runs_on 宿主主机</span>
+            </div>
+            <el-table :data="links" empty-text="暂无关联" style="width: 100%">
+              <el-table-column label="方向" width="110">
+                <template #default="{ row }">
+                  <span :class="'rel-' + row.direction">{{ row.direction === 'out' ? '本资产 →' : '← 指向本资产' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="关系" width="130">
+                <template #default="{ row }"><span class="tag">{{ kindLabel(row.kind) }}</span></template>
+              </el-table-column>
+              <el-table-column label="对端资产" min-width="240">
+                <template #default="{ row }">
+                  <span class="mono">{{ row.peerKey }}</span>
+                  <span class="muted">（{{ row.peerType === 'host' ? '主机' : '实例' }}）</span>
+                </template>
+              </el-table-column>
+            </el-table>
+            <p class="muted note">
+              仅展示自动发现的直接关系，范围外的对端不返回。业务系统 / 分组等上层关系与人工关系维护属后续批次。
+            </p>
+          </el-tab-pane>
+        </el-tabs>
       </div>
     </el-drawer>
 
@@ -161,7 +330,7 @@
         <el-form-item label="属性">
           <div class="attr-editor">
             <div v-for="(row, i) in editAttrs" :key="i" class="attr-row">
-              <el-input v-model="row.key" placeholder="属性名" style="width: 42%" />
+              <el-input v-model="row.key" placeholder="属性名（责任人填 owner）" style="width: 42%" />
               <el-input v-model="row.value" placeholder="值" style="width: 42%" />
               <el-button link type="danger" @click="editAttrs.splice(i, 1)">删除</el-button>
             </div>
@@ -191,7 +360,7 @@
         <el-form-item label="属性">
           <div class="attr-editor">
             <div v-for="(row, i) in editAttrs" :key="i" class="attr-row">
-              <el-input v-model="row.key" placeholder="属性名" style="width: 42%" />
+              <el-input v-model="row.key" placeholder="属性名（责任人填 owner）" style="width: 42%" />
               <el-input v-model="row.value" placeholder="值" style="width: 42%" />
               <el-button link type="danger" @click="editAttrs.splice(i, 1)">删除</el-button>
             </div>
@@ -210,7 +379,15 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listAssets, getAsset, getAssetHistory, createAsset, updateAsset } from '../../api/asset'
+import {
+  listAssets,
+  getAsset,
+  getAssetHistory,
+  getAssetLinks,
+  getAssetSummary,
+  createAsset,
+  updateAsset,
+} from '../../api/asset'
 import { useAuth } from '../../composables/useAuth'
 
 const auth = useAuth()
@@ -224,12 +401,17 @@ const pageSize = ref(20)
 const loading = ref(false)
 const saving = ref(false)
 const loadError = ref('')
+const summary = ref({ total: 0, missing: 0, noOwner: 0, conflict: 0, changes: 0 })
 
-const filter = ref({ type: '', node: '', keyword: '' })
+const filter = ref({ type: '', status: '', source: '', node: '', keyword: '' })
+// 摘要下钻的两个布尔条件（无责任人 / 有冲突）：不在下拉里，单独记状态以便显示与撤销
+const drill = ref({ ownerMissing: false, conflict: false })
 
 const detailVisible = ref(false)
 const detail = ref(null)
 const history = ref([])
+const links = ref([])
+const tab = ref('attr')
 
 const createVisible = ref(false)
 const editVisible = ref(false)
@@ -237,18 +419,72 @@ const editId = ref('')
 const editAttrs = ref([])
 const form = ref({ typeKey: 'host', naturalKey: '', name: '', node: '' })
 
-const TYPE_LABELS = { host: '主机', 'middleware-instance': '中间件实例' }
-const typeLabel = (key) => TYPE_LABELS[key] || key
+// 类型展示：主机固定；实例用自然键前缀（<类型>:<地址>）映射成产品名
+const INSTANCE_LABELS = {
+  redis: 'Redis', mysql: 'MySQL', postgres: 'PostgreSQL', mongodb: 'MongoDB', nginx: 'Nginx',
+  kafka: 'Kafka', rocketmq: 'RocketMQ', rabbitmq: 'RabbitMQ', kubernetes: 'Kubernetes',
+  elasticsearch: 'Elasticsearch', clickhouse: 'ClickHouse', nacos: 'Nacos', zookeeper: 'ZooKeeper',
+  fastdfs: 'FastDFS', docker: 'Docker',
+}
+function typeLabel(row) {
+  if (row.typeKey === 'host') return '主机'
+  const prefix = String(row.naturalKey || '').split(':')[0]
+  return INSTANCE_LABELS[prefix] || prefix || '实例'
+}
+const STATUS_LABELS = { online: '在线', missing: '失联', archived: '归档' }
+const statusLabel = (s) => STATUS_LABELS[s] || s
+const SOURCE_LABELS = { auto: '自动', manual: '人工', mixed: '混合' }
+const sourceLabel = (s) => SOURCE_LABELS[s] || s
+const KIND_LABELS = { runs_on: 'runs_on 宿主机', member_of: 'member_of 集群', depends_on: 'depends_on 依赖', exposes: 'exposes 暴露' }
+const kindLabel = (k) => KIND_LABELS[k] || k
 
 function fmtTime(ts) {
   if (!ts) return '—'
   return new Date(ts).toLocaleString('zh-CN', { hour12: false })
 }
 
-// 属性按 key 归并：同一 key 的采集值与人工值并排展示，便于直接看出差异。
-const attrRows = computed(() => {
+// 相对时间：台账看的是「多久没上报了」，绝对时间在列表里反而要多算一步
+function relTime(ts) {
+  if (!ts) return '—'
+  const diff = Date.now() - ts
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)} 分钟前`
+  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} 小时前`
+  return `${Math.floor(diff / 86400_000)} 天前`
+}
+
+// 副标题：主机看 OS 与规格，实例看拓扑/角色与版本；有冲突时优先提示冲突
+function subtitle(row) {
+  if (row.conflictCount > 0) {
+    return `自然键 ${row.naturalKey} · ${row.conflictCount} 个字段的人工值与采集值不一致`
+  }
+  const v = row.values || {}
+  if (row.typeKey === 'host') {
+    const parts = [row.naturalKey]
+    if (v.os) parts.push(v.os)
+    if (v.cpuCores) parts.push(`${v.cpuCores}C`)
+    if (v.memoryMB) parts.push(`${Math.round(Number(v.memoryMB) / 1024)}G`)
+    return parts.join(' · ')
+  }
+  const parts = []
+  if (v.topology) parts.push(v.topology)
+  else if (v.role) parts.push(v.role)
+  if (v.up) parts.push(v.up === 'true' ? '在线' : '离线')
+  if (v.version) parts.push(v.version)
+  return parts.length ? parts.join(' · ') : row.naturalKey
+}
+
+function rowClass({ row }) {
+  if (row.conflictCount > 0) return 'row-conflict'
+  if (row.status === 'missing') return 'row-missing'
+  return ''
+}
+
+// 属性对比的两种分段：技术属性 = 有采集值（含冲突），管理属性 = 仅人工写
+const attrMap = computed(() => detail.value && detail.value.attrs ? detail.value.attrs : [])
+const techRows = computed(() => {
   const byKey = new Map()
-  for (const attr of (detail.value && detail.value.attrs) || []) {
+  for (const attr of attrMap.value) {
     const row = byKey.get(attr.key) || { key: attr.key }
     if (attr.source === 'manual') {
       row.manual = attr.value
@@ -258,26 +494,56 @@ const attrRows = computed(() => {
     }
     byKey.set(attr.key, row)
   }
+  const out = []
   for (const row of byKey.values()) {
-    // 生效值：人工优先（与服务端 Asset.Value 同一规则）
+    if (row.discovery === undefined && row.manual === undefined) continue
+    row.conflict = row.discovery !== undefined && row.manual !== undefined
     row.effective = row.manual !== undefined ? row.manual : row.discovery
+    if (row.discovery !== undefined) out.push(row)
   }
-  return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key))
+  return out.sort((a, b) => a.key.localeCompare(b.key))
+})
+const manualRows = computed(() => {
+  const byKey = new Map()
+  for (const attr of attrMap.value) {
+    const row = byKey.get(attr.key) || { key: attr.key }
+    if (attr.source === 'manual') {
+      row.manual = attr.value
+      row.manualBy = attr.updatedBy || ''
+      row.manualAt = attr.updatedAt
+    } else {
+      row.discovery = attr.value
+    }
+    byKey.set(attr.key, row)
+  }
+  return [...byKey.values()]
+    .filter((row) => row.manual !== undefined && row.discovery === undefined)
+    .sort((a, b) => a.key.localeCompare(b.key))
 })
 
-// 服务端分页：分页参数直接进查询，不再把整库拉进浏览器。
+// 列表与摘要共用同一套筛选参数，保证「点数字看到的」与「数字本身」一致
+function filterParams() {
+  const params = {
+    type: filter.value.type,
+    status: filter.value.status,
+    source: filter.value.source,
+    node: filter.value.node,
+    keyword: filter.value.keyword,
+  }
+  if (drill.value.ownerMissing) params.ownerMissing = 'true'
+  if (drill.value.conflict) params.conflict = 'true'
+  return params
+}
+
 async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    const params = {
-      ...filter.value,
-      limit: pageSize.value,
-      offset: (page.value - 1) * pageSize.value,
-    }
-    const res = await listAssets(params)
+    const params = { ...filterParams(), limit: pageSize.value, offset: (page.value - 1) * pageSize.value }
+    const [res, sum] = await Promise.all([listAssets(params), getAssetSummary(filterParams())])
     items.value = (res && res.assets) || []
     total.value = (res && res.total) || 0
+    summary.value = sum || summary.value
   } catch (e) {
     loadError.value = e.message || '加载资产失败'
     items.value = []
@@ -287,31 +553,64 @@ async function load() {
   }
 }
 
-// 筛选条件变化后必须回到第一页：否则会停在一个新条件下不存在的页码上（显示空列表）。
 function reload() {
   page.value = 1
   load()
+}
+
+function resetFilter() {
+  filter.value = { type: '', status: '', source: '', node: '', keyword: '' }
+  drill.value = { ownerMissing: false, conflict: false }
+  reload()
+}
+
+// 健康度下钻：直接改筛选条件并回到第一页（改完的态会在筛选行以标签显示）
+function drillAll() {
+  resetFilter()
+}
+function drillStatus(status) {
+  drill.value = { ownerMissing: false, conflict: false }
+  filter.value = { ...filter.value, status }
+  reload()
+}
+function drillNoOwner() {
+  drill.value = { ownerMissing: true, conflict: false }
+  reload()
+}
+function drillConflict() {
+  drill.value = { conflict: true, ownerMissing: false }
+  reload()
+}
+function clearDrill() {
+  drill.value = { ownerMissing: false, conflict: false }
+  reload()
 }
 
 function onPageChange(p) {
   page.value = p
   load()
 }
-
 function onSizeChange(size) {
   pageSize.value = size
   page.value = 1
   load()
 }
 
+async function loadDetail(id) {
+  detail.value = await getAsset(id)
+  const [hist, rel] = await Promise.all([getAssetHistory(id), getAssetLinks(id)])
+  history.value = (hist && hist.records) || []
+  links.value = (rel && rel.links) || []
+}
+
 async function openDetail(row) {
   detail.value = row
   history.value = []
+  links.value = []
+  tab.value = 'attr'
   detailVisible.value = true
   try {
-    detail.value = await getAsset(row.id)
-    const res = await getAssetHistory(row.id)
-    history.value = (res && res.records) || []
+    await loadDetail(row.id)
   } catch (e) {
     ElMessage.error(e.message || '加载资产详情失败')
   }
@@ -380,24 +679,46 @@ async function submitCreate() {
 }
 
 async function submitEdit() {
+  const id = editId.value
   const payload = { name: form.value.name.trim(), attrs: attrsPayload(editAttrs.value) }
   if (!(await confirmWrite('将写入这些人工值；采集值不会被覆盖'))) return
   saving.value = true
   try {
-    const updated = await updateAsset(editId.value, payload)
+    await updateAsset(id, payload)
     ElMessage.success('已保存人工值')
     editVisible.value = false
-    if (detail.value && String(detail.value.id) === String(editId.value)) {
-      detail.value = updated
-      const res = await getAssetHistory(editId.value)
-      history.value = (res && res.records) || []
-    }
-    load()
+    await afterWrite(id)
   } catch (e) {
     ElMessage.error(e.message || '保存失败')
   } finally {
     saving.value = false
   }
+}
+
+// 恢复采集值：删掉该字段的人工值，让生效值回落到采集值（不是把采集值写回）
+async function restoreAttr(key) {
+  const id = detail.value.id
+  if (!(await confirmWrite(`将清除字段「${key}」的人工值，生效值回落为采集值`))) return
+  try {
+    const updated = await updateAsset(id, { resetAttrs: [key] })
+    detail.value = updated
+    ElMessage.success('已恢复采集值')
+    await afterWrite(id)
+  } catch (e) {
+    ElMessage.error(e.message || '恢复失败')
+  }
+}
+
+// 写入后统一刷新：详情（若打开着当前资产）、列表与摘要
+async function afterWrite(id) {
+  if (detailVisible.value && detail.value && String(detail.value.id) === String(id)) {
+    try {
+      await loadDetail(id)
+    } catch (e) {
+      /* 详情刷新失败不影响列表刷新 */
+    }
+  }
+  await load()
 }
 
 onMounted(load)
@@ -410,34 +731,201 @@ onMounted(load)
   gap: 12px;
   flex-wrap: wrap;
 }
+.panel + .panel,
+.health + .panel {
+  margin-top: 12px;
+}
+.health {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 14px 20px;
+}
+.health .h-item {
+  padding: 0 22px;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+}
+.health .h-item:first-child {
+  padding-left: 0;
+}
+.health .h-item:last-of-type {
+  border-right: none;
+  cursor: default;
+}
+.health .h-label {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.health .h-value {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  font-family: var(--mono);
+}
+.health .h-value.warn {
+  color: var(--warn);
+}
+.health .h-value.danger {
+  color: var(--danger);
+}
+.health .h-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+.health .spacer {
+  flex: 1;
+}
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
 .toolbar {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
+}
+.tag.locked {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
+}
+.name {
+  color: var(--accent);
+  font-weight: 500;
+}
+.sub {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-top: 2px;
+}
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+.dot.online {
+  background: var(--accent);
+}
+.dot.missing {
+  background: var(--danger);
+}
+.dot.archived {
+  background: var(--text-dim);
+}
+.st-ok {
+  color: var(--accent);
+}
+.st-miss {
+  color: var(--danger);
+}
+.src-auto {
+  color: var(--text-dim);
+}
+.src-manual {
+  color: var(--violet);
+}
+.src-mixed {
+  color: var(--warn);
+  font-weight: 500;
 }
 .pager {
   display: flex;
   justify-content: flex-end;
   margin-top: 14px;
 }
-.link {
-  color: var(--accent);
-  cursor: pointer;
+/* 行高亮需穿透到 Element Plus 生成的 tr 上（scoped 样式默认作用不到组件内部） */
+:deep(.row-conflict) {
+  background: rgba(255, 176, 32, 0.07);
+}
+:deep(.row-missing) {
+  background: rgba(255, 80, 80, 0.07);
+}
+.d-tags {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.d-meta {
+  margin: 10px 0 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.d-meta code {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.sec {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 16px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.sec .muted {
+  font-weight: 400;
+  font-size: 12px;
 }
 .muted {
   color: var(--text-dim);
   font-size: 13px;
 }
-.sec {
-  margin: 20px 0 10px;
-  font-size: 14px;
+.mono {
+  font-family: var(--mono);
+}
+.struck {
+  color: var(--text-dim);
+  text-decoration: line-through;
+  margin-right: 4px;
+}
+.srcpill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 18px;
+}
+.srcpill.auto {
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text-dim);
 }
-.src {
+.srcpill.man {
+  background: var(--accent-dim);
+  color: var(--violet);
+}
+.tl-title {
+  font-size: 14px;
+}
+.tl-diff {
   font-size: 13px;
+  color: var(--text-dim);
+  margin: 4px 0;
+}
+.rel-out {
+  color: var(--accent);
+}
+.rel-in {
+  color: var(--violet);
+}
+.note {
+  margin-top: 14px;
   line-height: 20px;
+}
+.drawer-actions {
+  margin-top: 18px;
 }
 .attr-row {
   display: flex;
@@ -447,8 +935,5 @@ onMounted(load)
 }
 .attr-editor {
   width: 100%;
-}
-.drawer-actions {
-  margin-top: 18px;
 }
 </style>

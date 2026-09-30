@@ -301,9 +301,37 @@ func assetWhere(alias string, f ListFilter) (string, []any) {
 		args = append(args, f.Node)
 	}
 	if kw := strings.TrimSpace(f.Keyword); kw != "" {
-		q += " AND (" + alias + ".natural_key LIKE ? OR " + alias + ".name LIKE ?)"
+		// 关键词同时匹配属性值：台账最常见的用法是「拿 IP / 业务名 / 资产编号 找资产」，
+		// 只搜名称与自然键会让"明明有这条记录却搜不到"。
+		q += " AND (" + alias + ".natural_key LIKE ? OR " + alias + ".name LIKE ?" +
+			" OR EXISTS (SELECT 1 FROM asset_attrs v WHERE v.asset_id=" + alias + ".id AND v.value LIKE ?))"
 		like := "%" + kw + "%"
-		args = append(args, like, like)
+		args = append(args, like, like, like)
+	}
+	switch f.Status {
+	case StatusArchived:
+		q += " AND NOT " + hasDiscoveryCond(alias)
+	case StatusMissing:
+		// MAX() 在无采集值时返回 NULL，而 SQL 中 NULL < x 为假：因此这里无需再判"是否被采集过"。
+		q += " AND " + lastSeenExpr(alias) + " < ?"
+		args = append(args, f.StaleBefore)
+	case StatusOnline:
+		q += " AND " + lastSeenExpr(alias) + " >= ?"
+		args = append(args, f.StaleBefore)
+	}
+	switch f.Source {
+	case SourceFilterAuto:
+		q += " AND NOT " + hasManualCond(alias)
+	case SourceFilterMixed:
+		q += " AND " + conflictCond(alias)
+	case SourceFilterManual:
+		q += " AND " + hasManualCond(alias) + " AND NOT " + conflictCond(alias)
+	}
+	if f.OwnerMissing {
+		q += " AND " + ownerMissingCond(alias)
+	}
+	if f.HasConflict {
+		q += " AND " + conflictCond(alias)
 	}
 	if f.Nodes != nil {
 		// 资源范围下推：把「可见节点集合」写进 SQL，而不是取回一页再到内存里过滤。
@@ -326,6 +354,37 @@ func assetWhere(alias string, f ListFilter) (string, []any) {
 // placeholders 生成 n 个占位符（"?,?,?"），用于 IN 子句。
 func placeholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}
+
+// 以下条件片段全部以「资产 alias」为基准，供列表、计数与摘要共用同一套语义。
+// 用子查询而不是把状态/来源落库：它们是采集时间与两种来源共同推导出来的结论，
+// 存成一列就必须有人定期刷新，反而会写出「字段说 online、现实已失联」的自相矛盾。
+
+// hasDiscoveryCond 判断资产是否被采集过。
+func hasDiscoveryCond(alias string) string {
+	return `EXISTS (SELECT 1 FROM asset_attrs d WHERE d.asset_id=` + alias + `.id AND d.source='discovery')`
+}
+
+// lastSeenExpr 取最近的采集写入时刻（毫秒）；从未采集时为 NULL。
+func lastSeenExpr(alias string) string {
+	return `(SELECT MAX(d.updated_at) FROM asset_attrs d WHERE d.asset_id=` + alias + `.id AND d.source='discovery')`
+}
+
+// hasManualCond 判断资产是否存在人工值。
+func hasManualCond(alias string) string {
+	return `EXISTS (SELECT 1 FROM asset_attrs m WHERE m.asset_id=` + alias + `.id AND m.source='manual')`
+}
+
+// conflictCond 判断是否存在「同一字段人工值与采集值并存」。
+func conflictCond(alias string) string {
+	return `EXISTS (SELECT 1 FROM asset_attrs m WHERE m.asset_id=` + alias + `.id AND m.source='manual'
+	         AND EXISTS (SELECT 1 FROM asset_attrs d WHERE d.asset_id=m.asset_id AND d.key=m.key AND d.source='discovery'))`
+}
+
+// ownerMissingCond 判断人工未指派责任人（空值与纯空白都算未指派）。
+func ownerMissingCond(alias string) string {
+	return `NOT EXISTS (SELECT 1 FROM asset_attrs o WHERE o.asset_id=` + alias + `.id AND o.source='manual'
+	         AND o.key='` + OwnerKey + `' AND TRIM(o.value) <> '')`
 }
 
 // listAssets 按条件列出资产（含属性），按「类型 + 自然键」稳定排序。
@@ -394,6 +453,93 @@ func (s *Store) countAssets(f ListFilter) (int, error) {
 		return 0, fmt.Errorf("统计资产数量失败: %w", err)
 	}
 	return n, nil
+}
+
+// assetStats 汇总台账健康度数字。
+//
+// 用聚合查询而不是「把资产全查出来在内存里数」：摘要要覆盖筛选结果集里的**全部**资产，
+// 内存统计会把「摘要随台账增长而变慢、变占内存」这件事埋到生产环境才发现。
+// 每个数字都与列表共用同一套 assetWhere（含资源范围），因此顶部数字能直接下钻到列表。
+func (s *Store) assetStats(f ListFilter, changesSince int64) (Stats, error) {
+	where, args := assetWhere("a", f)
+	count := func(extra string, extraArgs ...any) (int, error) {
+		var n int
+		query := `SELECT COUNT(*) FROM assets a` + where + extra
+		if err := s.db.QueryRow(query, append(append([]any{}, args...), extraArgs...)...).Scan(&n); err != nil {
+			return 0, err
+		}
+		return n, nil
+	}
+
+	var out Stats
+	var err error
+	if out.Total, err = count(""); err != nil {
+		return Stats{}, fmt.Errorf("统计资产总数失败: %w", err)
+	}
+	if out.Missing, err = count(" AND "+lastSeenExpr("a")+" < ?", f.StaleBefore); err != nil {
+		return Stats{}, fmt.Errorf("统计失联资产失败: %w", err)
+	}
+	if out.NoOwner, err = count(" AND " + ownerMissingCond("a")); err != nil {
+		return Stats{}, fmt.Errorf("统计无责任人资产失败: %w", err)
+	}
+	if out.Conflict, err = count(" AND " + conflictCond("a")); err != nil {
+		return Stats{}, fmt.Errorf("统计冲突资产失败: %w", err)
+	}
+	if changesSince > 0 {
+		// 变更数要 join asset_changes，单独走一条查询（where 仍是同一套，含资源范围）。
+		var n int
+		query := `SELECT COUNT(*) FROM asset_changes c JOIN assets a ON a.id=c.asset_id` + where + ` AND c.at >= ?`
+		if err := s.db.QueryRow(query, append(append([]any{}, args...), changesSince)...).Scan(&n); err != nil {
+			return Stats{}, fmt.Errorf("统计变更数失败: %w", err)
+		}
+		out.Changes = n
+	}
+	return out, nil
+}
+
+// deleteManualAttrs 删除指定字段的人工值，并为每个真正删除的字段写一条变更记录。
+//
+// 删除与记录放在同一事务：否则会出现「界面显示已恢复、历史里查不到」这类自相矛盾。
+// 只删 source=manual，不动采集值——"恢复采集值"从来不需要写采集侧。
+func (s *Store) deleteManualAttrs(assetID int64, keys []string, at int64, actor string) ([]Attr, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("开启事务失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	removed := make([]Attr, 0, len(keys))
+	for _, key := range keys {
+		var value string
+		err := tx.QueryRow(`SELECT value FROM asset_attrs WHERE asset_id=? AND key=? AND source=?`,
+			assetID, key, string(SourceManual)).Scan(&value)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("查询人工值失败: %w", err)
+		}
+		if _, err := tx.Exec(`DELETE FROM asset_attrs WHERE asset_id=? AND key=? AND source=?`,
+			assetID, key, string(SourceManual)); err != nil {
+			return nil, fmt.Errorf("删除人工值失败: %w", err)
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO asset_changes(asset_id,field,old_value,new_value,source,actor,kind,at) VALUES(?,?,?,?,?,?,?,?)`,
+			assetID, key, value, "", string(SourceManual), actor, string(ChangeUpdate), at,
+		); err != nil {
+			return nil, fmt.Errorf("写入资产变更记录失败: %w", err)
+		}
+		removed = append(removed, Attr{Key: key, Value: value, Source: SourceManual, UpdatedAt: at, UpdatedBy: actor})
+	}
+	if len(removed) > 0 {
+		if _, err := tx.Exec(`UPDATE assets SET updated_at=? WHERE id=?`, at, assetID); err != nil {
+			return nil, fmt.Errorf("更新资产时间戳失败: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("提交恢复采集值失败: %w", err)
+	}
+	return removed, nil
 }
 
 // linkAssets 建立关联；重复建立视为成功（幂等）。

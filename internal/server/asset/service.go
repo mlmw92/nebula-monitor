@@ -23,6 +23,7 @@ const (
 type ListFilter struct {
 	TypeKey string
 	Node    string
+	// Keyword 匹配资产名称、自然键与**属性值**（原型：搜索资产名 / 自然键 / 属性值）。
 	Keyword string
 	// Nodes 限定归属节点集合，用于把调用方的资源范围下推到 SQL：
 	//   nil      —— 不做节点限制（未启用认证或全局范围）
@@ -31,9 +32,72 @@ type ListFilter struct {
 	//
 	// 之所以由调用方传入而不是在存储层过滤：资源范围是服务端的授权概念，
 	// 资产库不该知道它；但过滤又必须发生在分页之前，所以以条件形式下推。
-	Nodes  []string
-	Limit  int
-	Offset int
+	Nodes []string
+	// Source 过滤资产来源（SourceAuto / SourceManual / SourceMixed）；空串不过滤。
+	Source string
+	// Status 过滤资产状态（StatusOnline / StatusMissing / StatusArchived）；空串不过滤。
+	// missing / online 需要 StaleBefore：晚于该时刻上报即为 online，早于即 missing。
+	Status string
+	// StaleBefore 是失联判定的分界时刻（毫秒），由 API 按「当前时间 - 阈值」传入。
+	// 存储层不自己取当前时间：那样同一个查询的列表与总数可能落在不同瞬间，
+	// 门槛上的资产会在两处得到不同结论（总数与列表对不上）。
+	StaleBefore int64
+	// OwnerMissing 只返回人工未指派责任人的资产（摘要「无责任人」下钻用）。
+	OwnerMissing bool
+	// HasConflict 只返回存在「同字段人工值与采集值并存」的资产（摘要「冲突」下钻用）。
+	HasConflict bool
+	Limit       int
+	Offset      int
+}
+
+// 来源过滤取值：与前端「来源」下拉、摘要下钻保持一致。
+//
+// 命名带 Filter 前缀以免与 SourceManual（属性来源）混淆——两者都是 "manual" 语义但不同层次：
+// 属性来源说「这条值是人工写的」，来源过滤说「这个资产有人工介入」。
+const (
+	SourceFilterAuto   = "auto"   // 无任何人工值
+	SourceFilterManual = "manual" // 有人工值且无冲突
+	SourceFilterMixed  = "mixed"  // 存在同字段人工值与采集值并存
+)
+
+// 状态过滤取值。
+//
+// 状态是**派生**的（不落库）：归档 = 从无采集（纯人工建档）；missing = 最近采集早于失联阈值；
+// online = 有采集且新鲜。刻意不把状态存成一列——它是时间与采集共同推导出来的结论，
+// 存下来就必须有人定期刷新，反而会写出"字段说 online、现实已失联"的自相矛盾。
+const (
+	StatusOnline   = "online"
+	StatusMissing  = "missing"
+	StatusArchived = "archived"
+)
+
+// Stats 是台账摘要（供列表页顶部的健康度条使用）。
+type Stats struct {
+	Total int `json:"total"`
+	// Missing 是「曾被采集、但已超过失联阈值未再上报」的资产数（不含纯人工归档资产）。
+	Missing  int `json:"missing"`
+	NoOwner  int `json:"noOwner"`
+	Conflict int `json:"conflict"`
+	// Changes 是窗口内发生变更的字段数（含采集与人工）。窗口由调用方给出（默认近 7 天）。
+	Changes int `json:"changes"`
+}
+
+// ValidSourceFilter 判断来源过滤取值是否受支持（空串表示不过滤）。
+func ValidSourceFilter(v string) bool {
+	switch v {
+	case "", SourceFilterAuto, SourceFilterManual, SourceFilterMixed:
+		return true
+	}
+	return false
+}
+
+// ValidStatusFilter 判断状态过滤取值是否受支持（空串表示不过滤）。
+func ValidStatusFilter(v string) bool {
+	switch v {
+	case "", StatusOnline, StatusMissing, StatusArchived:
+		return true
+	}
+	return false
 }
 
 func (f ListFilter) limit() int {
@@ -192,6 +256,46 @@ func (s *Service) List(f ListFilter) ([]Asset, error) { return s.store.listAsset
 //
 // 与 List 用同一套条件（含 Nodes 资源范围下推），保证「总数」与「能翻到的条数」一致。
 func (s *Service) Count(f ListFilter) (int, error) { return s.store.countAssets(f) }
+
+// Stats 汇总台账健康度：总数 / 失联 / 无责任人 / 冲突 / 窗口内变更。
+//
+// 五个数字必须来自**同一套筛选条件与同一时刻**，否则顶部数字点进列表会出现
+// 「摘要说 12 个失联、列表却是 11 条」——这正是摘要最容易失信的地方。
+func (s *Service) Stats(f ListFilter, changesSince int64) (Stats, error) {
+	return s.store.assetStats(f, changesSince)
+}
+
+// ResetManual 清除指定字段的人工值，使字段回落到采集值（原型的「恢复采集值」）。
+//
+// 只删人工值：采集值一直没被动过，所以"恢复"是**删除**而不是写回——
+// 写回会把当前采集值固化成一条人工值，此后采集再变反而显示成"人工值覆盖"，
+// 等于用一个更隐蔽的错误替换了原来那个。
+func (s *Service) ResetManual(ref Ref, keys []string, actor string) (Asset, error) {
+	a, err := s.resolve(ref)
+	if err != nil {
+		return Asset{}, err
+	}
+	want := make([]string, 0, len(keys))
+	seen := map[string]bool{}
+	for _, key := range keys {
+		if key = strings.TrimSpace(key); key != "" && !seen[key] {
+			seen[key] = true
+			want = append(want, key)
+		}
+	}
+	if len(want) == 0 {
+		return Asset{}, errors.New("未指定要恢复的字段")
+	}
+	removed, err := s.store.deleteManualAttrs(a.ID, want, s.now(), actor)
+	if err != nil {
+		return Asset{}, err
+	}
+	if len(removed) == 0 {
+		return Asset{}, errors.New("这些字段没有人工值，无需恢复")
+	}
+	updated, _, err := s.store.assetByNatural(a.TypeKey, a.NaturalKey)
+	return updated, err
+}
 
 // Link 建立资产关联（幂等：重复建立不报错、不产生重复边）。
 func (s *Service) Link(from, to Ref, kind LinkKind) error {

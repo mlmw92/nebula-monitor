@@ -367,6 +367,151 @@ func TestCountMatchesListConditions(t *testing.T) {
 	}
 }
 
+// seedLedger 造一份覆盖四种来源/状态形态的台账：
+// auto-01（仅采集）/ manual-01（采集 + 管理属性）/ mixed-01（采集 + 同字段人工值）/ manual-only（纯人工）。
+func seedLedger(t *testing.T, svc *Service) {
+	t.Helper()
+	apply := func(typeKey, key, node string, src Source, attrs map[string]string) {
+		t.Helper()
+		if _, _, err := svc.Apply(Observation{
+			TypeKey: typeKey, NaturalKey: key, Name: key, Node: node, Source: src, Actor: "tester", Attrs: attrs,
+		}); err != nil {
+			t.Fatalf("写入 %s 失败: %v", key, err)
+		}
+	}
+	apply(TypeHost, "auto-01", "auto-01", "", map[string]string{"cpu": "8"})
+	apply(TypeHost, "manual-01", "manual-01", "", map[string]string{"cpu": "8"})
+	apply(TypeHost, "manual-01", "manual-01", SourceManual, map[string]string{OwnerKey: "张三"})
+	apply(TypeHost, "mixed-01", "mixed-01", "", map[string]string{"mem": "64"})
+	apply(TypeHost, "mixed-01", "mixed-01", SourceManual, map[string]string{"mem": "32"})
+	apply(TypeHost, "manual-only", "manual-only", SourceManual, map[string]string{OwnerKey: "李四"})
+}
+
+// 来源 / 状态 / 责任人 / 冲突四类筛选都由数据推导（不落库），且与摘要在同一口径上。
+func TestListFiltersBySourceStatusOwnerAndConflict(t *testing.T) {
+	svc, _ := newTestService(t)
+	now := int64(1_700_000_000_000)
+	svc.now = func() int64 { return now }
+	seedLedger(t, svc)
+
+	count := func(name string, f ListFilter, want int) {
+		t.Helper()
+		got, err := svc.Count(f)
+		if err != nil {
+			t.Fatalf("%s：统计失败 %v", name, err)
+		}
+		if got != want {
+			t.Fatalf("%s：应为 %d，实际 %d", name, want, got)
+		}
+	}
+
+	// 来源：auto=无人工值；manual=有人工值且无冲突；mixed=同字段两种来源并存
+	count("来源 auto", ListFilter{Source: SourceFilterAuto}, 1)
+	count("来源 manual", ListFilter{Source: SourceFilterManual}, 2) // manual-01 与 manual-only
+	count("来源 mixed", ListFilter{Source: SourceFilterMixed}, 1)   // mixed-01
+	count("来源 不过滤", ListFilter{}, 4)
+
+	// 状态：阈值之上（更早）为失联，之下为在线；从无采集为归档
+	count("全部在线", ListFilter{Status: StatusOnline, StaleBefore: now}, 3)
+	count("全部失联", ListFilter{Status: StatusMissing, StaleBefore: now + 1}, 3)
+	count("归档（纯人工）", ListFilter{Status: StatusArchived}, 1)
+	// 归档的资产不能同时算作失联：把阈值推到未来，也只有"被采集过"的那 3 个算失联
+	count("失联不含归档", ListFilter{Status: StatusMissing, StaleBefore: now + 1}, 3)
+
+	// 责任人：manual-only 与 manual-01 已指派；auto-01 / mixed-01 未指派
+	count("无责任人", ListFilter{OwnerMissing: true}, 2)
+	// 冲突：只有 mixed-01 同字段两种来源并存
+	count("存在冲突", ListFilter{HasConflict: true}, 1)
+
+	// 关键词命中属性值（拿"业务名/资产编号/IP"找资产是台账最常见的用法）
+	count("关键词命中属性值", ListFilter{Keyword: "张三"}, 1)
+	count("关键词命中自然键", ListFilter{Keyword: "mixed"}, 1)
+	count("关键词命中名称", ListFilter{Keyword: "manual-only"}, 1)
+
+	// 组合条件：混合来源 + 无责任人 → 只有 mixed-01
+	count("组合条件", ListFilter{Source: SourceFilterMixed, OwnerMissing: true}, 1)
+}
+
+// 摘要的五个数字必须与列表同源：能用同一组筛选条件把列表查出来，数量一致。
+func TestStatsMatchListAndScope(t *testing.T) {
+	svc, _ := newTestService(t)
+	now := int64(1_700_000_000_000)
+	svc.now = func() int64 { return now }
+	seedLedger(t, svc)
+	// 建档与人工写入都会产生变更记录，这里校验的是「窗口是否真的生效」。
+	stats, err := svc.Stats(ListFilter{}, now-3600_000)
+	if err != nil {
+		t.Fatalf("统计摘要失败: %v", err)
+	}
+	if stats.Total != 4 || stats.NoOwner != 2 || stats.Conflict != 1 {
+		t.Fatalf("摘要数字不符：%+v", stats)
+	}
+	if stats.Missing != 0 {
+		t.Fatalf("刚写入的资产不应算失联，实际 %d", stats.Missing)
+	}
+	if stats.Changes == 0 {
+		t.Fatal("窗口内的变更数应大于 0")
+	}
+	// 窗口起点晚于所有写入：变更数为 0（证明窗口参数真的生效）
+	if later, err := svc.Stats(ListFilter{}, now+1); err != nil || later.Changes != 0 {
+		t.Fatalf("窗口外的变更不应被计入：%+v err=%v", later, err)
+	}
+
+	// 资源范围下推后摘要同样只数范围内的资产（摘要不得成为范围旁路）
+	scoped, err := svc.Stats(ListFilter{Nodes: []string{"auto-01"}}, now-3600_000)
+	if err != nil {
+		t.Fatalf("范围内统计失败: %v", err)
+	}
+	// 范围内只有 auto-01：它的建档记录算 1 条变更；其余资产的变更不得被统计进来。
+	if scoped.Total != 1 || scoped.NoOwner != 1 || scoped.Conflict != 0 || scoped.Changes != 1 {
+		t.Fatalf("范围内摘要不符：%+v", scoped)
+	}
+	if scoped, err = svc.Stats(ListFilter{Nodes: []string{}}, now-3600_000); err != nil || scoped.Total != 0 {
+		t.Fatalf("空节点集合应恒空：%+v err=%v", scoped, err)
+	}
+}
+
+// 恢复采集值 = 删除人工值（不是把采集值写回），并留下可追溯的变更记录。
+func TestResetManualKeepsDiscoveryAndRecordsChange(t *testing.T) {
+	svc, _ := newTestService(t)
+	svc.now = func() int64 { return 1000 }
+	seedLedger(t, svc)
+
+	ref := Ref{TypeKey: TypeHost, NaturalKey: "mixed-01"}
+	updated, err := svc.ResetManual(ref, []string{" mem ", "mem", ""}, "alice")
+	if err != nil {
+		t.Fatalf("恢复采集值失败: %v", err)
+	}
+	// 生效值回落为采集值，且人工值确实不存在了
+	if v, _ := updated.Value("mem"); v != "64" {
+		t.Fatalf("恢复后生效值应为采集值 64，实际 %q", v)
+	}
+	if _, ok := updated.ValueFrom("mem", SourceManual); ok {
+		t.Fatal("人工值应已删除")
+	}
+	if v, ok := updated.ValueFrom("mem", SourceDiscovery); !ok || v != "64" {
+		t.Fatalf("采集值不得被删除，实际 %q ok=%v", v, ok)
+	}
+
+	history, err := svc.History(ref, 0)
+	if err != nil {
+		t.Fatalf("查询变更历史失败: %v", err)
+	}
+	newest := history[0]
+	if newest.Field != "mem" || newest.Old != "32" || newest.New != "" ||
+		newest.Source != SourceManual || newest.Kind != ChangeUpdate || newest.Actor != "alice" {
+		t.Fatalf("恢复应留下字段级变更记录，实际 %+v", newest)
+	}
+
+	// 没有人工值时给明确错误，而不是静默成功
+	if _, err := svc.ResetManual(ref, []string{"mem"}, "alice"); err == nil {
+		t.Fatal("重复恢复应报错")
+	}
+	if _, err := svc.ResetManual(ref, []string{"  "}, "alice"); err == nil {
+		t.Fatal("空字段名应报错")
+	}
+}
+
 // 快照保存的是「生效值」，且字段集合可按关注项裁剪。
 func TestSnapshotCapturesEffectiveValues(t *testing.T) {
 	svc, _ := newTestService(t)

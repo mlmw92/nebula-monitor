@@ -200,8 +200,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// 资产台账：assets:read + 资源范围（按资产所属节点裁剪；不可归属的资产对受限用户不可见，
 	// 与 visibleMetricSeries / handleNodesLatest 的判定一致，避免台账成为越权旁路）。
 	mux.HandleFunc("GET /api/v1/assets", a.permit(a.handleAssets, "assets:read"))
+	// 摘要与列表同权限、同筛选参数：顶部健康度数字必须能点进列表看到同一个集合。
+	// 字面量路径比 {id} 更具体，ServeMux 会优先匹配，两者不冲突。
+	mux.HandleFunc("GET /api/v1/assets/summary", a.permit(a.handleAssetSummary, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}", a.permit(a.handleAssetDetail, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}/history", a.permit(a.handleAssetHistory, "assets:read"))
+	mux.HandleFunc("GET /api/v1/assets/{id}/links", a.permit(a.handleAssetLinks, "assets:read"))
 	// 人工维护：写接口在 handler 内自行做资源范围判定（新建时目标节点可能还不存在资产）。
 	mux.HandleFunc("POST /api/v1/assets", a.permit(a.handleAssetCreate, "assets:write"))
 	mux.HandleFunc("PUT /api/v1/assets/{id}", a.permit(a.handleAssetUpdate, "assets:write"))

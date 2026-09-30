@@ -7,7 +7,10 @@
 // （主机信息、中间件实例、容器清单），本包通过 Apply 消费这些观测值，不新增采集器。
 package asset
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // Source 是属性值的来源。
 //
@@ -133,6 +136,91 @@ func (a Asset) ValueFrom(key string, src Source) (string, bool) {
 		return "", false
 	}
 	return attr.Value, true
+}
+
+// OwnerKey 是「责任人」的约定属性键。
+//
+// 责任人是唯一被列表、摘要与筛选直接消费的管理属性，因此约定一个固定键；
+// 其余管理属性（业务系统 / 环境 / 维保到期 / 资产编号…）保持自由键——
+// 在字典与枚举能力上线前，不把一堆展示字段固化成领域概念。
+const OwnerKey = "owner"
+
+// Owner 返回人工维护的责任人（空串表示未指派）。
+func (a Asset) Owner() string {
+	if v, ok := a.ValueFrom(OwnerKey, SourceManual); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+// SourceMix 统计人工值数量与「人工、采集并存」的字段数量。
+//
+// conflict 的语义是**同一字段**两种来源都有值——这是资产台账最需要人处理的一类数据：
+// 生效值取人工值，但采集值仍在变，不处理就会一直"看着像对、其实已过期"。
+func (a Asset) SourceMix() (manualCount, conflictCount int) {
+	byKey := map[string]struct{ discovery, manual bool }{}
+	for _, attr := range a.Attrs {
+		entry := byKey[attr.Key]
+		if attr.Source == SourceManual {
+			entry.manual = true
+			manualCount++
+		} else {
+			entry.discovery = true
+		}
+		byKey[attr.Key] = entry
+	}
+	for _, entry := range byKey {
+		if entry.discovery && entry.manual {
+			conflictCount++
+		}
+	}
+	return manualCount, conflictCount
+}
+
+// ConflictKeys 返回同时存在采集值与人工值的字段名（按字典序，便于稳定展示与测试）。
+func (a Asset) ConflictKeys() []string {
+	byKey := map[string]struct{ discovery, manual bool }{}
+	for _, attr := range a.Attrs {
+		entry := byKey[attr.Key]
+		if attr.Source == SourceManual {
+			entry.manual = true
+		} else {
+			entry.discovery = true
+		}
+		byKey[attr.Key] = entry
+	}
+	out := make([]string, 0, len(byKey))
+	for key, entry := range byKey {
+		if entry.discovery && entry.manual {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// HasDiscovery 判断资产是否被采集过（纯人工建档的资产为 false）。
+func (a Asset) HasDiscovery() bool {
+	for _, attr := range a.Attrs {
+		if attr.Source == SourceDiscovery {
+			return true
+		}
+	}
+	return false
+}
+
+// LastSeenAt 返回最近一次**采集**写入的时间（毫秒）；从未被采集时返回 0。
+//
+// 不能用 Asset.UpdatedAt：人工维护也会刷新它，于是"最近上报"会显示成人工改动的时间，
+// 失联判定随之失真（这正是原型里「最近上报」与「最近更新」要分开的原因）。
+func (a Asset) LastSeenAt() int64 {
+	var latest int64
+	for _, attr := range a.Attrs {
+		if attr.Source == SourceDiscovery && attr.UpdatedAt > latest {
+			latest = attr.UpdatedAt
+		}
+	}
+	return latest
 }
 
 // attrID 是属性在 map 中的键：同一 key 的来源不同则是不同条目。
