@@ -273,6 +273,12 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* 菜单超出视口时必须能滚动：此前这里没有 overflow，而 .sidebar 是 overflow: hidden，
+     于是多展开几个分组后底部（系统设置里的升级/用户/角色）直接被裁掉且无法滚动到。
+     min-height: 0 是必须的——flex 子项默认 min-height:auto 不会收缩，加了 overflow 也不生效。 */
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .nav-item {
   display: flex;

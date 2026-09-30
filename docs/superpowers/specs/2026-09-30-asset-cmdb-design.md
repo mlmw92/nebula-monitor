@@ -399,3 +399,17 @@ GET    /api/v1/inspect/runs/{id}/findings       # 差异项
 
 **验证方式**：`npm test` 6 个文件 + `npm run build` 通过；全文检索确认无 `.lock` 残留。
 
+### 批次 12（2026-09-30）：左侧菜单无法滚动（1.30.7）
+
+**反馈**：截图里菜单底部被裁掉（「系统设置 → 个人中心」以下看不见），**无法上下滚动**。
+
+**根因**：`.sidebar` 是 `overflow: hidden` 的定高 flex 列（`top:0; bottom:0`），而 `.nav`
+只写了 `flex: 1`、既没有 `overflow-y: auto`，也没写 `min-height: 0`。分组默认收起时高度够用，
+一旦展开几个分组（或分辨率偏小），超出视口的部分就被直接裁掉、且没有任何滚动入口。
+
+**修法**：`.nav` 加 `min-height: 0; overflow-y: auto; overflow-x: hidden`。
+`min-height: 0` 不是可选项——flex 子项默认 `min-height: auto` 不会收缩，只加 `overflow`
+仍然不会出现滚动条。品牌区、版本信息与底部按钮保持固定，只有菜单区滚动。
+
+**验证方式**：`npm test` 6 个文件 + `npm run build` 通过；产物 CSS 中 `.nav` 含 `overflow-y:auto`。
+
