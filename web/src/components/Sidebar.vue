@@ -31,8 +31,21 @@
         </div>
         <div v-show="!collapsed && isGroupOpen(g)" class="nav-group-items">
           <template v-for="sub in g.items" :key="sub.key">
+            <!-- 免登录的独立页（对外状态页）：用新标签页打开，避免把管理台顶掉。
+                 用原生 a + hash 链接：hash 路由下 " #/status " 就是它的地址，中间键/Ctrl+点击也照常工作。 -->
+            <a
+              v-if="isItemVisible(sub) && sub.newTab"
+              :href="'#' + sub.to"
+              target="_blank"
+              rel="noopener"
+              class="nav-subitem"
+            >
+              <span class="sub-dot"></span>
+              <span class="label">{{ sub.label }}</span>
+              <el-icon class="ext-icon" :size="12"><TopRight /></el-icon>
+            </a>
             <router-link
-              v-if="isItemVisible(sub)"
+              v-else-if="isItemVisible(sub)"
               :to="sub.to"
               class="nav-subitem"
               :class="{ active: isActiveItem(sub) }"
@@ -89,6 +102,7 @@ import {
   List,
   Aim,
   View,
+  TopRight,
 } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { useBrand } from '../composables/useBrand'
@@ -118,8 +132,9 @@ const groups = [
       { key: 'middleware', to: '/middleware', label: '中间件监控', icon: Connection, perm: 'middleware:read' },
       { key: 'logs', to: '/logs', label: '集中日志', icon: List, perm: 'logs:read' },
       { key: 'dialtest', to: '/dialtest', label: '服务拨测', icon: Aim, perm: 'probe:read' },
-      // 对外状态页入口（页面本身免登录，菜单项属管理侧快捷入口）
-      { key: 'status', to: '/status', label: '对外状态页', icon: View, perm: 'probe:read' },
+      // 对外状态页入口：页面本身免登录、且在管理壳之外（/status 与 /screen 同级），
+      // 所以在管理台里点它应当新开标签页——否则看完外部视角就回不到原来的页面了。
+      { key: 'status', to: '/status', label: '对外状态页', icon: View, perm: 'probe:read', newTab: true },
       { key: 'metrics-explore', to: '/metrics/explore', label: '指标浏览', icon: DataLine, perm: 'nodes:read' },
       { key: 'dashboards', to: '/system/dashboards', label: '自定义仪表盘', icon: Grid, perm: 'dashboard:read' },
     ],
@@ -376,6 +391,12 @@ onMounted(() => {
   background: currentColor;
   opacity: 0.6;
   flex-shrink: 0;
+}
+/* 新标签页打开的入口（对外状态页）：给一个 ↖ 提示，
+   避免"点了怎么多出一个页签"的困惑；同时区分于普通菜单项 */
+.ext-icon {
+  margin-left: auto;
+  color: var(--text-muted);
 }
 /* 版本信息 */
 .version-info {
