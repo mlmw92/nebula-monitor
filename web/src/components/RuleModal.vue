@@ -50,12 +50,17 @@
         <!-- 阈值规则 -->
         <template v-if="form.type === ''">
           <el-form-item label="监控指标" required>
+            <!-- 指标清单来自服务端指标字典（/api/v1/metrics/catalog），不再前端硬编码：
+                 硬编码那张表只覆盖 7 组指标，MySQL/Nginx/Kafka/ES/拨测证书全都选不到，
+                 而界面上看不出"少了什么"。allow-create 保留手输能力——
+                 exporter 透传名与日志模式指标不在字典里，但确实可以配。 -->
             <el-select
               v-model="form.metric"
-              filterable clearable
-              placeholder="搜索并选择指标"
+              filterable clearable allow-create default-first-option
+              placeholder="搜索指标，或直接输入指标名（如 exporter 透传名）"
               :filter-method="filterMetrics"
               style="width: 100%"
+              @change="onMetricChange"
             >
               <el-option-group v-for="g in filteredGroups" :key="g.category" :label="g.category">
                 <el-option v-for="m in g.metrics" :key="m.name" :value="m.name" :label="`${m.label} (${m.name})`">
@@ -63,11 +68,24 @@
                     <span class="metric-label">{{ m.label }}</span>
                     <span class="metric-name">{{ m.name }}</span>
                     <span v-if="m.unit" class="metric-unit">{{ m.unit }}</span>
+                    <span v-if="m.dynamic" class="metric-flag">按维度命名</span>
+                    <span v-else-if="m.noAlert" class="metric-flag">不常设阈值</span>
                   </div>
                 </el-option>
               </el-option-group>
             </el-select>
-            <div v-if="selectedMetric" class="field-hint">{{ selectedMetric.description }}<template v-if="selectedMetric.unit"> · 单位：{{ selectedMetric.unit }}</template></div>
+            <div v-if="metricLoadError" class="field-hint warn">{{ metricLoadError }}（可手动输入指标名）</div>
+            <div v-if="selectedMetric" class="field-hint">
+              {{ selectedMetric.description }}<template v-if="selectedMetric.unit"> · 单位：{{ selectedMetric.unit }}</template>
+            </div>
+            <!-- 不在字典里的名字不阻止提交（exporter 透传名是合法的），但必须显式提醒：
+                 指标名写错不会报错，规则会永远不触发——这是最难发现的一类故障。 -->
+            <div v-else-if="form.metric" class="field-hint warn">
+              该指标名不在指标字典中。若是 exporter 透传名或日志模式指标则属正常；否则请核对拼写——写错的规则会永远不触发，且不会报错。
+            </div>
+            <div v-if="selectedMetric && selectedMetric.dynamic" class="field-hint warn">
+              这是「按维度命名」的指标族，请把名字中的占位部分替换成实际值（例如 applog_log_err_total）。
+            </div>
           </el-form-item>
           <el-row :gutter="12" align="middle">
             <el-col :span="7">
@@ -349,7 +367,6 @@
 import { reactive, ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import http from '../api/http'
-import { metricGroups, metricMap } from '../metrics/dictionary'
 
 const props = defineProps({ rule: Object, groups: Array, channels: { type: Array, default: () => [] } })
 const emit = defineEmits(['close', 'saved'])
@@ -418,7 +435,7 @@ watch(() => props.rule, (r) => {
   }
 }, { immediate: true })
 
-onMounted(loadNodes)
+onMounted(() => { loadNodes(); loadMetricCatalog() })
 
 async function loadNodes() {
   try { nodeList.value = (await http.get('/api/v1/nodes')).nodes || [] }
@@ -428,15 +445,61 @@ async function loadNodes() {
 function addQuiet() { form.quietPeriods.push({ days: [], start: '02:00', end: '06:00' }) }
 function removeQuiet(idx) { form.quietPeriods.splice(idx, 1) }
 
-const filteredGroups = ref(metricGroups)
+// 指标字典从服务端拉取（服务端那份由守卫测试保证"真的有人产出这个名字"）。
+const metricGroups = ref([])
+const metricMap = ref({})
+const metricLoadError = ref('')
+const filteredGroups = ref([])
+
+async function loadMetricCatalog() {
+  try {
+    const res = await http.get('/api/v1/metrics/catalog')
+    const groups = (res.alertGroups || []).map((g) => ({
+      category: g.title || g.key,
+      metrics: (g.metrics || []).map((m) => ({
+        name: m.name,
+        label: m.title,
+        unit: m.unit,
+        description: m.desc || '',
+        noAlert: !!m.noAlert,
+        worseWhen: m.worseWhen || '',
+        dynamic: !!m.dynamic,
+      })),
+    }))
+    metricGroups.value = groups
+    filteredGroups.value = groups
+    metricMap.value = Object.fromEntries(groups.flatMap((g) => g.metrics).map((m) => [m.name, m]))
+  } catch (e) {
+    // 拉不到就退回"只能手输"：指标名本身是自由字符串，不能让字典故障挡住配规则
+    metricLoadError.value = e.message || '加载指标字典失败'
+  }
+}
+
 function filterMetrics(query) {
   const q = (query || '').trim().toLowerCase()
-  if (!q) { filteredGroups.value = metricGroups; return }
-  filteredGroups.value = metricGroups
-    .map((g) => ({ category: g.category, metrics: g.metrics.filter((m) => m.name.toLowerCase().includes(q) || m.label.toLowerCase().includes(q) || (m.description || '').toLowerCase().includes(q) || (m.unit || '').toLowerCase().includes(q)) }))
+  if (!q) { filteredGroups.value = metricGroups.value; return }
+  filteredGroups.value = metricGroups.value
+    .map((g) => ({
+      category: g.category,
+      metrics: g.metrics.filter((m) => m.name.toLowerCase().includes(q)
+        || m.label.toLowerCase().includes(q)
+        || (m.description || '').toLowerCase().includes(q)
+        || (m.unit || '').toLowerCase().includes(q)),
+    }))
     .filter((g) => g.metrics.length > 0)
 }
-const selectedMetric = computed(() => (form.metric ? metricMap[form.metric] : null))
+
+const selectedMetric = computed(() => (form.metric ? metricMap.value[form.metric] : null))
+
+// 选中指标后自动把运算符摆到"变差方向"上，但**只纠正明显矛盾的选择**（当前 > 而指标越小越糟，
+// 或反之）——不覆盖用户特意选的方向。配反方向的症状是规则永不触发，值得这一步自动纠偏。
+function onMetricChange(name) {
+  const meta = metricMap.value[name]
+  if (!meta || !meta.worseWhen) return
+  const op = form.operator
+  if (meta.worseWhen === 'low' && (op === '>' || op === '>=')) form.operator = '<'
+  else if (meta.worseWhen === 'high' && (op === '<' || op === '<=')) form.operator = '>'
+}
 
 async function submit() {
   if (!form.name || !form.severity) { ElMessage.warning('请填写完整：规则名称、告警级别均为必填项'); return }
@@ -495,12 +558,25 @@ async function submit() {
   line-height: 1.5;
   margin-top: 4px;
 }
+/* 警告类提示：指标名不在字典、或选了"按维度命名"的指标族时必须显眼——
+   这两种情况都会让规则静默不触发，是最难发现的一类故障 */
+.field-hint.warn {
+  color: var(--el-color-warning);
+}
 
 /* 指标下拉 */
 .metric-option { display: flex; align-items: center; gap: 8px; }
 .metric-label { font-weight: 500; }
 .metric-name { color: var(--text-dim); font-size: 13px; }
 .metric-unit { margin-left: auto; padding: 0 6px; font-size: 13px; color: var(--el-color-primary); background: var(--el-color-primary-light-9); border-radius: 4px; }
+.metric-flag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: rgba(127, 127, 127, 0.14);
+  border-radius: 4px;
+}
 
 /* 静默时段行 */
 .quiet-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }

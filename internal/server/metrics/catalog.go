@@ -113,7 +113,8 @@ type MetricMeta struct {
 	// （给 uptime 设阈值不会告诉你任何事），因此选择器里会把它排到后面并给出提示。
 	//
 	// 否定式命名是刻意的：绝大多数指标都可告警，逐个写 `Alertable: true` 只会淹没真正需要标注的那几条。
-	NoAlert bool `json:"-"`
+	// 对外同样用否定式（`noAlert`）：这样"缺少该字段"就等于"可告警"，前端不必处理三态。
+	NoAlert bool `json:"noAlert,omitempty"`
 	// Dynamic 标记「名字由运行时拼出」的指标族（如 nginx_access_requests_by_status{status="5xx"}、
 	// 日志模式指标 `applog_log_<模式名>_total`）。这类名字无法在目录里逐一登记，
 	// 但告警确实可用，故以"族"的形式登记一个代表并在界面上说明。

@@ -155,12 +155,23 @@
           <el-button size="small" @click="exportRules">导出</el-button>
           <el-button size="small" @click="fileInput.click()">导入</el-button>
           <input ref="fileInput" type="file" accept="application/json,.json" style="display: none" @change="onFileChange" />
-          <el-dropdown split-button type="primary" size="small" @command="onTemplateCmd">
+          <el-dropdown split-button type="primary" size="small" popper-class="rule-template-menu" @command="onTemplateCmd">
           <span @click="newRule">新建规则</span>
           <template #dropdown>
+            <!-- 模板库有 60 条，必须可滚动 + 带分组与阈值说明：只列名字会让人无从选起，
+                 而「该填什么值」正是不知道该怎么配的人最需要的那句话。 -->
             <el-dropdown-menu>
               <el-dropdown-item command="__blank">空白规则</el-dropdown-item>
-              <el-dropdown-item v-for="t in templates" :key="t.name" :command="t.name">{{ t.name }}</el-dropdown-item>
+              <el-dropdown-item v-for="t in templates" :key="t.name" :command="t.name">
+                <div class="tpl-item">
+                  <div class="tpl-head">
+                    <span class="tpl-group">{{ t.templateGroup || '其它' }}</span>
+                    <span class="tpl-name">{{ t.name }}</span>
+                  </div>
+                  <div class="tpl-cond">{{ templateCondition(t) }}</div>
+                  <div v-if="t.desc" class="tpl-desc">{{ t.desc }}</div>
+                </div>
+              </el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -877,6 +888,32 @@ function onTemplateCmd(cmd) {
   const t = templates.value.find((x) => x.name === cmd)
   if (t) editing.value = { ...t }
 }
+
+// templateCondition 把模板的触发条件写成一行中文，供选择器直接展示。
+//
+// 为什么值得单独算一次：模板列表如果只给规则名，「CPU 使用率过高」到底是 80 还是 95、
+// 持续多久、用哪个指标，用户只能点进去才知道——而点进去再退出来这条路径，
+// 正是"不知道该怎么配"的人放弃的地方。
+function templateCondition(t) {
+  if (!t) return ''
+  if (!t.type) {
+    const unit = ''
+    return `指标 ${t.metric} ${t.operator} ${t.threshold}${unit}，持续 ${t.for || '立即'}`
+  }
+  const typeNames = {
+    node_offline: '主机离线',
+    service_down: '服务离线',
+    role_change: '主从切换',
+    cluster_fault: '集群损坏',
+    security_event: '安全事件',
+  }
+  const parts = [typeNames[t.type] || t.type]
+  if (t.service) parts.push(t.service)
+  if (t.topology) parts.push(t.topology)
+  if (t.category) parts.push(t.category)
+  if (t.for) parts.push(`持续 ${t.for}`)
+  return parts.join(' · ')
+}
 function edit(rule) {
   editing.value = { ...rule }
 }
@@ -1443,5 +1480,50 @@ onUnmounted(() => {
   font-size: 13px;
   color: var(--text-dim);
   flex-shrink: 0;
+}
+</style>
+
+<!-- 模板下拉的样式必须**不加 scoped**：下拉面板由 Element Plus 传送到 body，
+   scoped 选择器匹配不到它。用 popper-class 命名空间避免污染全局。 -->
+<style>
+.rule-template-menu .el-dropdown-menu {
+  max-height: 62vh;
+  overflow-y: auto;
+  min-width: 420px;
+}
+.rule-template-menu .el-dropdown-menu__item {
+  height: auto;
+  padding: 8px 14px;
+  line-height: 1.4;
+}
+.tpl-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: normal;
+}
+.tpl-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tpl-group {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--el-color-primary-light-9, rgba(64, 158, 255, 0.12));
+  color: var(--el-color-primary, #409eff);
+  font-size: 12px;
+}
+.tpl-name {
+  font-weight: 500;
+}
+.tpl-cond {
+  font-size: 12.5px;
+  opacity: 0.9;
+}
+.tpl-desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #909399);
 }
 </style>
