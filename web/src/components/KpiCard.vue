@@ -4,6 +4,8 @@
     <div class="kpi-body">
       <div class="kpi-num">{{ value }}</div>
       <div class="kpi-text">{{ label }}</div>
+      <!-- hint 可选：仅在需要的页面（如资产台账的健康度）补充一行口径说明 -->
+      <div v-if="hint" class="kpi-hint">{{ hint }}</div>
     </div>
   </div>
 </template>
@@ -13,6 +15,7 @@ defineProps({
   value: { type: [String, Number], default: '' },
   label: { type: String, default: '' },
   tone: { type: String, default: 'total' },
+  hint: { type: String, default: '' },
 })
 </script>
 
@@ -72,6 +75,12 @@ defineProps({
   font-size: 13px;
   color: var(--text-dim);
   margin-top: 1px;
+  white-space: nowrap;
+}
+.kpi-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
   white-space: nowrap;
 }
 

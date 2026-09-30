@@ -309,3 +309,16 @@ GET    /api/v1/inspect/runs/{id}/findings       # 差异项
 
 **验证方式**：`go build ./...` + `go test ./internal/server/asset/ ./internal/server/api/` 通过；`npm test` 6 个文件 + `npm run build` 通过。
 
+### 批次 8（2026-09-30）：头部与筛选区重做（1.30.3）
+
+用户升级 1.30.2 后仍反馈「这块区域很难看」，并建议借鉴其它页面。对照仓库既有页面（`AlertsView`、`SecurityView`、各中间件 Tab、`DockerTab`）后确认：**本页的健康度条是仓库里唯一的"自绘横条"**，其它页面统一使用 `KpiCard` 组件（顶部彩条 + 图标 + 数值 + 标签）。
+
+| 区域 | 1.30.2 | 1.30.3 |
+|---|---|---|
+| 健康度 | 自绘 `.panel.health` 横条：靠分隔线切分、无图标、无卡片边界 | 5 张 `KpiCard`（`tone` 分别用 total/down/ops/mem/conn），网格 `minmax(150px,1fr)`——1080 宽窗口下 5 张同行不落单；前 4 张可点击下钻 |
+| KpiCard | 只有 `value / label / tone` | 增加**可选** `hint` 属性（补充口径说明行，如"超 30 分钟未上报"），不传则与原来完全一致，其它页面不受影响 |
+| 筛选 | 裸排列的控件，无标签、间距靠默认值 | `.filter-bar` 浅底圆角容器 + 字段标签（类型/状态/来源/归属节点）+ 关键词框前置搜索图标；宽度统一 |
+| 操作 | 按钮、权限徽标与一长串说明挤在一行且未对齐 | `.action-bar`：左侧「新建资产 + `assets:write` 徽标」，右侧（`margin-left:auto`）一行 muted 说明；说明合并了两句原先分散的文案 |
+
+**验证方式**：`npm test` 6 个文件 + `npm run build` 通过（`KpiCard` 独立分包 0.75 kB，`AssetListView` 23.55 kB / gzip 8.54 kB）。
+

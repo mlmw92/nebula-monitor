@@ -9,67 +9,79 @@
       </div>
     </header>
 
-    <!-- 健康度：数字与列表同一套条件，点数字即下钻（服务端同源，不会出现"摘要 12 条、列表 11 条"） -->
-    <div class="panel health">
-      <div class="h-item" title="清空筛选，查看全部" @click="drillAll">
-        <div class="h-label">资产总数</div>
-        <div class="h-value">{{ summary.total }}</div>
-        <div class="h-hint">点击下钻</div>
+    <!-- 健康度：与其它监控页统一的 KpiCard 卡片行；数字与列表同一套条件，点卡片即下钻 -->
+    <div class="kpi-row">
+      <div class="kpi-click" title="清空筛选，查看全部资产" @click="drillAll">
+        <KpiCard :value="summary.total" label="资产总数" hint="点击下钻" tone="total">
+          <template #icon><el-icon :size="20"><Files /></el-icon></template>
+        </KpiCard>
       </div>
-      <div class="h-item" title="只看向上采集已过期（超过 30 分钟未上报）的资产" @click="drillStatus('missing')">
-        <div class="h-label">失联</div>
-        <div class="h-value" :class="{ danger: summary.missing > 0 }">{{ summary.missing }}</div>
-        <div class="h-hint">超 30 分钟未上报</div>
+      <div class="kpi-click" title="只看超过 30 分钟未上报的资产" @click="drillStatus('missing')">
+        <KpiCard :value="summary.missing" label="失联" hint="超 30 分钟未上报" tone="down">
+          <template #icon><el-icon :size="20"><WarningFilled /></el-icon></template>
+        </KpiCard>
       </div>
-      <div class="h-item" title="只看向人工未指派责任人的资产" @click="drillNoOwner">
-        <div class="h-label">无责任人</div>
-        <div class="h-value" :class="{ warn: summary.noOwner > 0 }">{{ summary.noOwner }}</div>
-        <div class="h-hint">人工值未指派</div>
+      <div class="kpi-click" title="只看人工未指派责任人的资产" @click="drillNoOwner">
+        <KpiCard :value="summary.noOwner" label="无责任人" hint="人工值未指派" tone="ops">
+          <template #icon><el-icon :size="20"><UserFilled /></el-icon></template>
+        </KpiCard>
       </div>
-      <div class="h-item" title="只看向同一字段人工值与采集值并存的资产" @click="drillConflict">
-        <div class="h-label">人工 / 采集冲突</div>
-        <div class="h-value" :class="{ warn: summary.conflict > 0 }">{{ summary.conflict }}</div>
-        <div class="h-hint">同字段双值不一致</div>
+      <div class="kpi-click" title="只看同一字段人工值与采集值并存的资产" @click="drillConflict">
+        <KpiCard :value="summary.conflict" label="人工 / 采集冲突" hint="同字段双值不一致" tone="mem">
+          <template #icon><el-icon :size="20"><Switch /></el-icon></template>
+        </KpiCard>
       </div>
-      <div class="h-item">
-        <div class="h-label">近 7 天变更</div>
-        <div class="h-value">{{ summary.changes }}</div>
-        <div class="h-hint">含采集与人工</div>
+      <div class="kpi-click kpi-static">
+        <KpiCard :value="summary.changes" label="近 7 天变更" hint="含采集与人工" tone="conn">
+          <template #icon><el-icon :size="20"><DataLine /></el-icon></template>
+        </KpiCard>
       </div>
-      <div class="spacer"></div>
-      <span class="muted">状态与来源均由既有数据推导，不单独落库</span>
     </div>
 
     <div class="panel">
-      <div class="filters">
-        <el-select v-model="filter.type" placeholder="全部类型" clearable style="width: 150px">
-          <el-option label="主机" value="host" />
-          <el-option label="中间件实例" value="middleware-instance" />
-        </el-select>
-        <el-select v-model="filter.status" placeholder="全部状态" clearable style="width: 140px">
-          <el-option label="在线" value="online" />
-          <el-option label="失联" value="missing" />
-          <el-option label="归档" value="archived" />
-        </el-select>
-        <el-select v-model="filter.source" placeholder="全部来源" clearable style="width: 140px">
-          <el-option label="自动" value="auto" />
-          <el-option label="人工" value="manual" />
-          <el-option label="混合" value="mixed" />
-        </el-select>
-        <el-input
-          v-model="filter.node"
-          clearable
-          placeholder="归属节点，如 web-01"
-          style="width: 180px"
-          @keyup.enter="reload"
-        />
+      <div class="filter-bar">
+        <div class="field">
+          <span class="field-label">类型</span>
+          <el-select v-model="filter.type" placeholder="全部类型" clearable style="width: 150px">
+            <el-option label="主机" value="host" />
+            <el-option label="中间件实例" value="middleware-instance" />
+          </el-select>
+        </div>
+        <div class="field">
+          <span class="field-label">状态</span>
+          <el-select v-model="filter.status" placeholder="全部状态" clearable style="width: 130px">
+            <el-option label="在线" value="online" />
+            <el-option label="失联" value="missing" />
+            <el-option label="归档" value="archived" />
+          </el-select>
+        </div>
+        <div class="field">
+          <span class="field-label">来源</span>
+          <el-select v-model="filter.source" placeholder="全部来源" clearable style="width: 130px">
+            <el-option label="自动" value="auto" />
+            <el-option label="人工" value="manual" />
+            <el-option label="混合" value="mixed" />
+          </el-select>
+        </div>
+        <div class="field">
+          <span class="field-label">归属节点</span>
+          <el-input
+            v-model="filter.node"
+            clearable
+            placeholder="如 web-01"
+            style="width: 150px"
+            @keyup.enter="reload"
+          />
+        </div>
         <el-input
           v-model="filter.keyword"
           clearable
           placeholder="搜索资产名 / 自然键 / 属性值"
-          style="width: 240px"
+          style="width: 260px"
           @keyup.enter="reload"
-        />
+        >
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
         <el-button type="primary" :loading="loading" @click="reload">查询</el-button>
         <el-button @click="resetFilter">重置</el-button>
         <!-- 下钻态可见且可撤销：否则「点了无责任人」之后列表为什么变少会没人说得清 -->
@@ -77,12 +89,12 @@
         <el-tag v-if="drill.conflict" closable type="warning" @close="clearDrill">下钻：人工/采集冲突</el-tag>
       </div>
 
-      <div class="toolbar">
+      <div class="action-bar">
         <el-button v-if="canWrite" type="primary" @click="openCreate">新建资产</el-button>
         <span v-if="canWrite" class="lock">assets:write</span>
-        <span v-else class="muted">只读（缺 assets:write）</span>
-        <span class="muted" style="margin-left: auto">
-          范围外资产按「不存在」返回，不做 403 区分；人工维护需二次确认
+        <span v-else class="muted">当前账号只读（缺 assets:write）</span>
+        <span class="muted action-note">
+          范围外资产按「不存在」返回，不做 403 区分；状态与来源由既有数据推导，不单独落库
         </span>
       </div>
 
@@ -416,6 +428,8 @@ import {
   updateAsset,
 } from '../../api/asset'
 import { useAuth } from '../../composables/useAuth'
+// 与中间件 / 容器等页面统一的 KPI 卡片（顶部彩条 + 图标 + 数值）
+import KpiCard from '../KpiCard.vue'
 
 const auth = useAuth()
 // 前端隐藏仅为体验：服务端 assets:write 是真正的边界（且属高风险权限，提交前二次确认）。
@@ -814,69 +828,61 @@ onMounted(load)
   font-size: 18px;
 }
 .panel + .panel,
-.health + .panel {
+.kpi-row + .panel {
   margin-top: 12px;
 }
-.health {
+/* 健康度卡片行：复用全局 KpiCard，与中间件 / 容器等页面同一视觉语言 */
+.kpi-row {
+  display: grid;
+  /* 150px 下限保证 1080 宽的窗口下 5 张卡也在同一行，不会落单一张 */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.kpi-click {
   display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 14px 20px;
-}
-.health .h-item {
-  padding: 0 22px;
-  border-right: 1px solid rgba(255, 255, 255, 0.12);
   cursor: pointer;
-  transition: opacity 0.15s;
 }
-.health .h-item:hover {
-  opacity: 0.85;
+/* 卡片为子组件根节点：需要穿透一层才能撑满网格单元 */
+.kpi-click :deep(.kpi-card) {
+  width: 100%;
 }
-.health .h-item:first-child {
-  padding-left: 0;
-}
-.health .h-item:last-of-type {
-  border-right: none;
+/* 「近 7 天变更」不可下钻，保留卡片样式但不给手型 */
+.kpi-static {
   cursor: default;
 }
-.health .h-label {
+/* 筛选条：面板内的一块浅底，把「筛选」与「操作」两行分开 */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.field-label {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.65);
-  margin-bottom: 5px;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
-.health .h-value {
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1;
-  font-family: var(--mono);
-}
-.health .h-value.warn {
-  color: var(--warn);
-}
-.health .h-value.danger {
-  color: var(--danger);
-}
-.health .h-hint {
-  font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.4);
-  margin-top: 5px;
-}
-.health .spacer {
-  flex: 1;
-}
-.filters {
+.action-bar {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
+.action-note {
+  margin-left: auto;
+  text-align: right;
 }
 /* 工具栏权限徽标：与原型的小锁样式对齐 */
 .lock {
