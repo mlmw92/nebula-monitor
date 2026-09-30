@@ -683,6 +683,12 @@ type AlertRule struct {
 	Category     string        `json:"category,omitempty"`     // 安全事件规则类别：见 SecurityCat*；为空表示全部安全类别
 	QuietPeriods []QuietPeriod `json:"quietPeriods,omitempty"` // 按周重复的静默时段（与单次静默、全局维护窗口构成三层静默）
 	Escalation   *Escalation   `json:"escalation,omitempty"`   // 告警升级策略（持续未恢复时升级级别/渠道并重复提醒）
+	// TemplateGroup / Desc 只服务于「从模板新建」：前者是模板分组（界面上归类展示），
+	// 后者说明「为什么是这个阈值、该怎么调」。两者都**不参与评估**。
+	//
+	// 不要复用上面的 Group（那是"作用的节点分组"）——同名不同义会让模板分组静默变成节点范围。
+	TemplateGroup string `json:"templateGroup,omitempty"` // 模板分组：主机|MySQL|Redis|…（仅展示用）
+	Desc          string `json:"desc,omitempty"`          // 模板说明：阈值依据与调整建议（仅展示用）
 	CreatedAt    int64         `json:"createdAt"`              // 创建时间（毫秒）
 	UpdatedAt    int64         `json:"updatedAt"`              // 更新时间（毫秒）
 }

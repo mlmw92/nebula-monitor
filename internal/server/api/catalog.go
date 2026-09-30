@@ -6,8 +6,15 @@ import (
 	"github.com/nebula/monitor/internal/server/metrics"
 )
 
-// handleMetricsCatalog 返回按分类分组的指标目录（指标自动发现主入口）。
+// handleMetricsCatalog 返回指标目录（指标自动发现主入口），同时给告警规则表单用。
 // GET /api/v1/metrics/catalog
+//
+// 响应里有两份数据，服务的是两类界面：
+//   - catalog / categories：按分类原始分组（「指标浏览」页用它逐项浏览与查询）；
+//   - alertGroups：带**中文分类名**、且把"不适合设阈值"的指标排到组内最后的分组列表
+//     （告警表单的指标选择器用它）。同一次请求返回两者，是为了让"告警里能选的指标"
+//     与"指标浏览里看到的"永远是同一份数据——此前告警表单用的是前端硬编码的一张短表，
+//     于是 MySQL/Nginx/Kafka/ES/拨测全都不在可选范围内，而没人发现。
 func (a *API) handleMetricsCatalog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -15,8 +22,9 @@ func (a *API) handleMetricsCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	catalog := metrics.ListByCategory()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"catalog":   catalog,
-		"categories": metrics.SortedCategories(),
+		"catalog":     catalog,
+		"categories":  metrics.SortedCategories(),
+		"alertGroups": metrics.AlertCatalog(),
 	})
 }
 
