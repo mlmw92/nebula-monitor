@@ -113,8 +113,7 @@
         </el-table-column>
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
-            <span class="dot" :class="row.status" />
-            <span :class="row.status === 'missing' ? 'st-miss' : 'st-ok'">{{ statusLabel(row.status) }}</span>
+            <span class="tag" :class="row.status">{{ statusLabel(row.status) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="最近上报" width="130">
@@ -125,7 +124,7 @@
         </el-table-column>
         <el-table-column label="来源" width="100">
           <template #default="{ row }">
-            <span :class="'src-' + row.source">{{ sourceLabel(row.source) }}</span>
+            <span class="tag" :class="'src-' + row.source">{{ sourceLabel(row.source) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="责任人" width="110">
@@ -161,7 +160,7 @@
       <div v-if="detail" class="detail">
         <div class="d-tags">
           <span class="tag" :class="detail.typeKey === 'host' ? 'host' : 'mw'">{{ typeLabel(detail) }}</span>
-          <span class="tag" :class="detail.status === 'missing' ? 'offline' : 'online'">{{ statusLabel(detail.status) }}</span>
+          <span class="tag" :class="detail.status">{{ statusLabel(detail.status) }}</span>
           <span class="tag">{{ detail.node || '无归属节点' }}</span>
           <span class="tag" v-if="detail.owner">{{ detail.owner }}</span>
         </div>
@@ -309,28 +308,49 @@
       </div>
     </el-drawer>
 
-    <!-- 新建：手工建档（人工来源） -->
+    <!-- 新建：手工建档（人工来源）。表单项与列表列一一对应：
+         资产名称→「资产名称」，类型+地址→「类型」，归属节点→「归属节点」，责任人→「责任人」；
+         自然键由「实例类型 + 地址」自动拼出，不要求用户理解 <类型>:<地址> 的内部约定。 -->
     <el-dialog v-model="createVisible" title="新建资产" width="640px">
       <el-form label-width="100px">
         <el-form-item label="资产类型">
-          <el-select v-model="form.typeKey" style="width: 100%">
-            <el-option label="主机" value="host" />
-            <el-option label="中间件实例" value="middleware-instance" />
-          </el-select>
+          <el-radio-group v-model="assetKind">
+            <el-radio-button value="host">主机</el-radio-button>
+            <el-radio-button value="instance">中间件实例</el-radio-button>
+          </el-radio-group>
         </el-form-item>
-        <el-form-item label="自然键">
-          <el-input v-model="form.naturalKey" placeholder="主机填 hostname；实例填 <类型>:<地址>，如 redis:127.0.0.1:6379" />
+        <el-form-item v-if="assetKind === 'host'" label="主机名">
+          <el-input v-model="form.naturalKey" placeholder="与 Agent 上报的 hostname 一致，如 web-01" />
         </el-form-item>
-        <el-form-item label="名称">
-          <el-input v-model="form.name" placeholder="可留空" />
+        <template v-else>
+          <el-form-item label="实例类型">
+            <el-select v-model="instanceType" style="width: 100%">
+              <el-option v-for="(label, key) in INSTANCE_LABELS" :key="key" :label="label" :value="key" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="实例地址">
+            <el-input v-model="instanceAddr" placeholder="host:port，如 127.0.0.1:6379" />
+          </el-form-item>
+          <el-form-item label="自然键">
+            <el-input :model-value="naturalKeyPreview || '填写实例类型与地址后自动生成'" disabled />
+          </el-form-item>
+        </template>
+        <el-form-item label="资产名称">
+          <el-input v-model="form.name" placeholder="可留空，默认展示自然键" />
         </el-form-item>
         <el-form-item label="归属节点">
-          <el-input v-model="form.node" placeholder="必须是你有权访问的节点；决定资源范围可见性" />
+          <el-input
+            v-model="form.node"
+            :placeholder="assetKind === 'host' ? '留空则默认为主机自身' : '必须是你有权访问的节点；决定资源范围可见性'"
+          />
         </el-form-item>
-        <el-form-item label="属性">
+        <el-form-item label="责任人">
+          <el-input v-model="ownerInput" placeholder="选填；以人工属性 owner 记录，列表按它展示与统计" />
+        </el-form-item>
+        <el-form-item label="其它属性">
           <div class="attr-editor">
             <div v-for="(row, i) in editAttrs" :key="i" class="attr-row">
-              <el-input v-model="row.key" placeholder="属性名（责任人填 owner）" style="width: 42%" />
+              <el-input v-model="row.key" placeholder="属性名" style="width: 42%" />
               <el-input v-model="row.value" placeholder="值" style="width: 42%" />
               <el-button link type="danger" @click="editAttrs.splice(i, 1)">删除</el-button>
             </div>
@@ -344,7 +364,8 @@
       </template>
     </el-dialog>
 
-    <!-- 维护：只更新人工值（采集值不受影响） -->
+    <!-- 维护：只更新人工值（采集值不受影响）。与列表对齐：名称 / 责任人 / 其它属性；
+         责任人清空提交 = 恢复「未指派」（走 resetAttrs 删除人工值，而不是写入空值）。 -->
     <el-dialog v-model="editVisible" title="维护人工值" width="640px">
       <el-alert
         type="info"
@@ -354,13 +375,19 @@
         class="alert-gap"
       />
       <el-form label-width="100px">
-        <el-form-item label="名称">
+        <el-form-item label="资产">
+          <el-input :model-value="editLabel" disabled />
+        </el-form-item>
+        <el-form-item label="资产名称">
           <el-input v-model="form.name" placeholder="留空表示不修改" />
         </el-form-item>
-        <el-form-item label="属性">
+        <el-form-item label="责任人">
+          <el-input v-model="ownerInput" :placeholder="editHadOwner ? '清空并提交 = 恢复未指派' : '选填'" />
+        </el-form-item>
+        <el-form-item label="其它属性">
           <div class="attr-editor">
             <div v-for="(row, i) in editAttrs" :key="i" class="attr-row">
-              <el-input v-model="row.key" placeholder="属性名（责任人填 owner）" style="width: 42%" />
+              <el-input v-model="row.key" placeholder="属性名" style="width: 42%" />
               <el-input v-model="row.value" placeholder="值" style="width: 42%" />
               <el-button link type="danger" @click="editAttrs.splice(i, 1)">删除</el-button>
             </div>
@@ -418,6 +445,26 @@ const editVisible = ref(false)
 const editId = ref('')
 const editAttrs = ref([])
 const form = ref({ typeKey: 'host', naturalKey: '', name: '', node: '' })
+// 表单与列表列一一对应：类型（主机/实例 + 实例类型）、责任人（owner 键）
+const assetKind = ref('host')
+const instanceType = ref('redis')
+const instanceAddr = ref('')
+const ownerInput = ref('')
+const editHadOwner = ref(false)
+
+// 责任人的约定属性键，与服务端 asset.OwnerKey 一致
+const OWNER_KEY = 'owner'
+
+// 实例的自然键 = <类型>:<地址>，由表单自动拼出
+const naturalKeyPreview = computed(() => {
+  const addr = instanceAddr.value.trim()
+  return instanceType.value && addr ? `${instanceType.value}:${addr}` : ''
+})
+
+const editLabel = computed(() => {
+  const kind = form.value.typeKey === 'host' ? '主机' : '中间件实例'
+  return `${form.value.naturalKey}（${kind}）`
+})
 
 // 类型展示：主机固定；实例用自然键前缀（<类型>:<地址>）映射成产品名
 const INSTANCE_LABELS = {
@@ -617,6 +664,10 @@ async function openDetail(row) {
 }
 
 function openCreate() {
+  assetKind.value = 'host'
+  instanceType.value = 'redis'
+  instanceAddr.value = ''
+  ownerInput.value = ''
   form.value = { typeKey: 'host', naturalKey: '', name: '', node: '' }
   editAttrs.value = [{ key: '', value: '' }]
   createVisible.value = true
@@ -625,9 +676,11 @@ function openCreate() {
 function openEdit(row) {
   editId.value = row.id
   form.value = { typeKey: row.typeKey, naturalKey: row.naturalKey, name: '', node: row.node || '' }
+  ownerInput.value = row.owner || ''
+  editHadOwner.value = !!row.owner
   // 预填当前人工值：采集值不预填，避免误以为「提交就会覆盖采集值」
   editAttrs.value = (row.attrs || [])
-    .filter((a) => a.source === 'manual')
+    .filter((a) => a.source === 'manual' && a.key !== OWNER_KEY)
     .map((a) => ({ key: a.key, value: a.value }))
   if (!editAttrs.value.length) editAttrs.value = [{ key: '', value: '' }]
   editVisible.value = true
@@ -653,18 +706,27 @@ async function confirmWrite(action) {
 }
 
 async function submitCreate() {
-  const payload = {
-    typeKey: form.value.typeKey,
-    naturalKey: form.value.naturalKey.trim(),
-    name: form.value.name.trim(),
-    node: form.value.node.trim(),
-    attrs: attrsPayload(editAttrs.value),
-  }
-  if (!payload.typeKey || !payload.naturalKey) {
-    ElMessage.warning('资产类型与自然键为必填项')
+  let typeKey = 'host'
+  let naturalKey = form.value.naturalKey.trim()
+  let node = form.value.node.trim()
+  if (assetKind.value === 'instance') {
+    typeKey = 'middleware-instance'
+    naturalKey = naturalKeyPreview.value
+    if (!instanceType.value || !instanceAddr.value.trim()) {
+      ElMessage.warning('实例类型与实例地址为必填项')
+      return
+    }
+  } else if (!naturalKey) {
+    ElMessage.warning('主机名为必填项')
     return
   }
-  if (!(await confirmWrite(`将新建资产 ${payload.naturalKey}（归属节点 ${payload.node || '未指定'}）`))) return
+  // 主机的归属节点默认是它自己：主机资产的 Node 恒等于 hostname（与服务端自动发现一致）
+  if (assetKind.value === 'host' && !node) node = naturalKey
+  const attrs = attrsPayload(editAttrs.value)
+  const owner = ownerInput.value.trim()
+  if (owner) attrs[OWNER_KEY] = owner
+  const payload = { typeKey, naturalKey, name: form.value.name.trim(), node, attrs }
+  if (!(await confirmWrite(`将新建资产 ${naturalKey}（归属节点 ${node || '未指定'}）`))) return
   saving.value = true
   try {
     await createAsset(payload)
@@ -680,11 +742,20 @@ async function submitCreate() {
 
 async function submitEdit() {
   const id = editId.value
-  const payload = { name: form.value.name.trim(), attrs: attrsPayload(editAttrs.value) }
+  const attrs = attrsPayload(editAttrs.value)
+  const resetAttrs = []
+  const owner = ownerInput.value.trim()
+  if (owner) attrs[OWNER_KEY] = owner
+  else if (editHadOwner.value) resetAttrs.push(OWNER_KEY)
+  const name = form.value.name.trim()
+  if (!name && !Object.keys(attrs).length && !resetAttrs.length) {
+    ElMessage.warning('没有需要更新的内容')
+    return
+  }
   if (!(await confirmWrite('将写入这些人工值；采集值不会被覆盖'))) return
   saving.value = true
   try {
-    await updateAsset(id, payload)
+    await updateAsset(id, { name, attrs, resetAttrs })
     ElMessage.success('已保存人工值')
     editVisible.value = false
     await afterWrite(id)
@@ -725,11 +796,22 @@ onMounted(load)
 </script>
 
 <style scoped>
+/* 与 LogsView 等页面同一套头部约定：.view 自带内边距、h2 统一字号 */
+.view {
+  padding: 16px;
+}
+.view-head {
+  margin-bottom: 12px;
+}
 .view-head .head-row {
   display: flex;
   align-items: baseline;
   gap: 12px;
   flex-wrap: wrap;
+}
+.view-head h2 {
+  margin: 0;
+  font-size: 18px;
 }
 .panel + .panel,
 .health + .panel {
@@ -743,8 +825,13 @@ onMounted(load)
 }
 .health .h-item {
   padding: 0 22px;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--border-strong, var(--border));
   cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.health .h-item:hover {
+  background: rgba(255, 255, 255, 0.04);
 }
 .health .h-item:first-child {
   padding-left: 0;
@@ -796,6 +883,35 @@ onMounted(load)
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-dim);
 }
+/* 类型 / 状态 / 来源的配色：全局 .tag 只提供形状，颜色按语义在本页定义 */
+.tag.host {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.tag.mw {
+  background: rgba(167, 139, 250, 0.16);
+  color: var(--violet);
+}
+.tag.missing {
+  background: rgba(255, 93, 108, 0.16);
+  color: var(--danger);
+}
+.tag.archived {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+}
+.tag.src-auto {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+}
+.tag.src-manual {
+  background: var(--accent-dim);
+  color: var(--violet);
+}
+.tag.src-mixed {
+  background: rgba(255, 180, 84, 0.16);
+  color: var(--warn);
+}
 .name {
   color: var(--accent);
   font-weight: 500;
@@ -804,39 +920,6 @@ onMounted(load)
   color: var(--text-dim);
   font-size: 12px;
   margin-top: 2px;
-}
-.dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  margin-right: 6px;
-  vertical-align: 1px;
-}
-.dot.online {
-  background: var(--accent);
-}
-.dot.missing {
-  background: var(--danger);
-}
-.dot.archived {
-  background: var(--text-dim);
-}
-.st-ok {
-  color: var(--accent);
-}
-.st-miss {
-  color: var(--danger);
-}
-.src-auto {
-  color: var(--text-dim);
-}
-.src-manual {
-  color: var(--violet);
-}
-.src-mixed {
-  color: var(--warn);
-  font-weight: 500;
 }
 .pager {
   display: flex;
