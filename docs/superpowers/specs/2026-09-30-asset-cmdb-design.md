@@ -384,3 +384,18 @@ GET    /api/v1/inspect/runs/{id}/findings       # 差异项
 `status=exited`、`image` 与 `up=false` 均落库；`go test ./internal/server/{receiver,asset,api}` 通过；
 `npm test` 6 个文件 + `npm run build` 通过。
 
+### 批次 11（2026-09-30）：去掉按钮旁的权限徽标（1.30.6）
+
+**反馈**：「新建资产旁边这个图标是干啥的」。
+
+那是批次 6 从原型照搬的权限标注 `.lock`（`＋ 新建资产 [assets:write]`）。原型里的这行标注是
+**给开发看的**（说明该动作需要哪个权限点），搬到线上界面就成了噪声：普通运维不需要知道权限点名字，
+而真正缺权限的人本来就不显示这个按钮。
+
+**改法**：删掉徽标与对应样式，改为一句话的语义 + 悬停提示：
+
+- 有权限：按钮悬停提示「需要 `assets:write` 权限；属高风险操作，提交前会二次确认」（native title，不占视觉）
+- 无权限：按钮与徽标都不出现，只留一行 muted 文案「当前账号只读：缺 assets:write 权限，可在「权限模型 → 资产」中授予」
+
+**验证方式**：`npm test` 6 个文件 + `npm run build` 通过；全文检索确认无 `.lock` 残留。
+

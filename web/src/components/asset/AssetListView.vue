@@ -90,9 +90,17 @@
       </div>
 
       <div class="action-bar">
-        <el-button v-if="canWrite" type="primary" @click="openCreate">新建资产</el-button>
-        <span v-if="canWrite" class="lock">assets:write</span>
-        <span v-else class="muted">当前账号只读（缺 assets:write）</span>
+        <!-- 权限点不再做成按钮旁的小徽标：那是原型给开发看的标注，放在线上是噪声。
+             需要时用悬停提示说明；真正缺权限的人看到的是下面那句只读提示。 -->
+        <el-button
+          v-if="canWrite"
+          type="primary"
+          title="需要 assets:write 权限；属高风险操作，提交前会二次确认"
+          @click="openCreate"
+        >新建资产</el-button>
+        <span v-else class="muted">
+          当前账号只读：缺 assets:write 权限，可在「权限模型 → 资产」中授予
+        </span>
         <span class="muted action-note">
           范围外资产按「不存在」返回，不做 403 区分；状态与来源由既有数据推导，不单独落库
         </span>
@@ -920,17 +928,6 @@ onMounted(load)
 .action-note {
   margin-left: auto;
   text-align: right;
-}
-/* 工具栏权限徽标：与原型的小锁样式对齐 */
-.lock {
-  display: inline-block;
-  padding: 1px 5px;
-  border: 1px solid rgba(255, 180, 84, 0.45);
-  border-radius: 3px;
-  background: rgba(255, 180, 84, 0.1);
-  color: #ffb054;
-  font-size: 11px;
-  line-height: 16px;
 }
 /* 类型 / 状态 / 来源的配色：
    - 类型用 tag pill（与原型一致）；
