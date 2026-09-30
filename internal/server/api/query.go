@@ -209,6 +209,15 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// 人工维护：写接口在 handler 内自行做资源范围判定（新建时目标节点可能还不存在资产）。
 	mux.HandleFunc("POST /api/v1/assets", a.permit(a.handleAssetCreate, "assets:write"))
 	mux.HandleFunc("PUT /api/v1/assets/{id}", a.permit(a.handleAssetUpdate, "assets:write"))
+	// 配置快照与「期望值（标杆）」：快照是巡检基线的证据，标杆来自某资产的快照 → 属台账维护
+	mux.HandleFunc("GET /api/v1/assets/{id}/snapshots", a.permit(a.handleAssetSnapshots, "assets:read"))
+	mux.HandleFunc("POST /api/v1/assets/{id}/baseline", a.permit(a.handleAssetBaselineSet, "assets:write"))
+	mux.HandleFunc("DELETE /api/v1/assets/{id}/baseline", a.permit(a.handleAssetBaselineDelete, "assets:write"))
+	// 配置巡检（inspect）：只给结论、不改配置，因此「跑」与「改」分成两个权限点
+	mux.HandleFunc("POST /api/v1/inspect/runs", a.permit(a.handleInspectRunCreate, "inspect:run"))
+	mux.HandleFunc("GET /api/v1/inspect/runs", a.permit(a.handleInspectRuns, "inspect:read"))
+	mux.HandleFunc("GET /api/v1/inspect/runs/{id}/findings", a.permit(a.handleInspectFindings, "inspect:read"))
+	mux.HandleFunc("GET /api/v1/inspect/baselines", a.permit(a.handleInspectBaselines, "inspect:read"))
 	// 中间件类型展示开关：读 middleware:read，写 system:config（与品牌/大屏展示配置同级）
 	mux.HandleFunc("GET /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigGET, "middleware:read"))
 	mux.HandleFunc("PUT /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigPUT, "system:config"))

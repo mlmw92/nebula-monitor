@@ -215,6 +215,7 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 - 详情抽屉分三 Tab：**属性对比**（技术属性 / 管理属性 / 归属节点分段，字段级并排展示采集值、人工值与生效值及来源，冲突字段高亮并可「恢复采集值」）、**变更历史**（时间线，含字段级 diff 与操作人）、**关联关系**（自动发现的 `runs_on` 等直接关系，范围外的对端不返回）。
 - **上报状态**（上报正常 / 失联 / 归档）与**来源**（自动 / 人工 / 混合）均为**派生值**，不单独落库：归档指从无采集的纯人工建档资产，失联指超过 **30 分钟**未再上报（判定依据是「最后一次采集上报时刻」`asset_seen`，与属性值是否变化无关）。它描述的是「Agent 是否还在上报这条资产」，**不表示实例/容器自身可用**——后者是名称副标题里的采集结论（Docker 显示容器状态 `运行中/已退出`，其它实例显示 `实例可达/不可达`）。责任人用约定人工属性键 `owner`。
 - 「新建资产」「维护人工值」「恢复采集值」需 `assets:write`，提交前有二次确认（该权限点为高风险）。
+- **配置巡检（差异比对）**：新增菜单「资产与配置 → 配置巡检」（路由 `/inspect`）。三层比对里本次落地两层——**L2 快照前后 diff**（新增 `added` / 变更 `changed` / 缺失 `missing`）与 **L3 与期望值比对**（`deviation`）。期望值来自**标杆资产**：在资产详情抽屉里把一台标准机「设为期望值」，同类型的其它资产与之不一致的字段即产出合规偏差（每个类型只保留一个标杆）。巡检**只给结论、不自动修复**；首次见到的资产只建立基线（界面显式说明"数据不足 ≠ 不合规"）；`up` / `status` / `uptime` 等**运行态字段默认不参与比对**，避免探活翻转把差异清单淹掉。权限点：`inspect:read`（看记录与差异，默认授予运维与只读角色）、`inspect:run`（触发巡检，仅运维管理员）——刻意把「跑」与「改」分开：巡检不改任何配置。单次巡检覆盖资产上限 5000，超限会**显式标注截断**而不是静默少检。
 - 设计与实施记录见 `docs/superpowers/specs/2026-09-30-asset-cmdb-design.md`（含已落地项与有意差异）。
 
 **智能分析与预测（只读决策辅助）**
@@ -1559,6 +1560,25 @@ journalctl -u monitor-proxy-hub -f
 | GET | `/api/v1/metrics/catalog` | 指标目录（可采集指标定义） |
 | GET | `/api/v1/metrics/active` | 最近有数据上报的指标 |
 | GET | `/api/v1/metrics/export?node=&metric=&start=&end=` | 导出指标 CSV |
+
+### 资产与配置巡检
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/assets?type=&node=&keyword=&limit=&offset=` | 资产列表（服务端分页；按资源范围裁剪，范围外按 404/不返回） |
+| GET | `/api/v1/assets/summary?...` | 台账健康度（总数 / 失联 / 无责任人 / 冲突 / 近 7 天变更） |
+| GET | `/api/v1/assets/{id}` | 资产详情（属性双来源 + 生效值 + 派生状态/来源/责任人） |
+| GET | `/api/v1/assets/{id}/history?limit=` | 字段级变更历史（含操作人） |
+| GET | `/api/v1/assets/{id}/links` | 直接关联（出边 + 入边；范围外对端不返回） |
+| GET | `/api/v1/assets/{id}/snapshots?limit=` | 配置快照列表（差异巡检的基线） |
+| POST | `/api/v1/assets` | 手工新建资产（`assets:write`，归属节点须在范围内） |
+| PUT | `/api/v1/assets/{id}` | 维护人工值 / 恢复采集值（`assets:write`；不接受改归属节点） |
+| POST | `/api/v1/assets/{id}/baseline` | 设为该资产类型的期望值（标杆，`assets:write`） |
+| DELETE | `/api/v1/assets/{id}/baseline` | 清除该资产类型的期望值（`assets:write`） |
+| POST | `/api/v1/inspect/runs` | 触发一次配置巡检（`inspect:run`；范围同台账筛选） |
+| GET | `/api/v1/inspect/runs?limit=` | 巡检记录（`inspect:read`） |
+| GET | `/api/v1/inspect/runs/{id}/findings?limit=` | 差异项（按严重级别排序） |
+| GET | `/api/v1/inspect/baselines` | 各资产类型当前的期望值来源 |
 
 ### 中间件监控
 

@@ -264,6 +264,78 @@ type Snapshot struct {
 	Fields  map[string]string
 }
 
+// FindingKind 是差异项的分类（对齐设计件「差异分级」的四种）。
+type FindingKind string
+
+const (
+	// FindingAdded 新增：本次出现、上次快照里没有的字段。
+	FindingAdded FindingKind = "added"
+	// FindingChanged 变更：同一字段、值不同（运维最关心的那一类）。
+	FindingChanged FindingKind = "changed"
+	// FindingMissing 缺失：上次快照里有、本次没有的字段。
+	FindingMissing FindingKind = "missing"
+	// FindingDeviation 合规偏差：与「标杆资产」的期望值不一致（L3）。
+	FindingDeviation FindingKind = "deviation"
+)
+
+// FindingLevel 是差异项的严重级别。
+//
+// 分级刻意区分「值变了」与「字段没了」：后者通常意味着采集退化或配置被删，
+// 比前者更该被看见；而新增字段多数只是采集到了新项，属提示级。
+type FindingLevel string
+
+const (
+	FindingInfo     FindingLevel = "info"
+	FindingWarning  FindingLevel = "warning"
+	FindingCritical FindingLevel = "critical"
+)
+
+// InspectRun 是一次差异巡检的执行记录。
+type InspectRun struct {
+	ID int64
+	// Scope 是本次巡检的范围描述（如 all / type:host / node:web-01），供人读懂记录用途。
+	Scope     string
+	Actor     string
+	StartedAt int64
+	// Baselined 是「本次首次建立基线、因而无法比对」的资产数。
+	// 单独计数是为了让界面能解释「为什么第一次巡检没有差异」——数据不足不等于不合规。
+	Baselined int
+	Assets    int
+	Findings  int
+	// Truncated 表示资产数超过单次巡检上限，本次只覆盖了前 N 个（绝不静默截断）。
+	Truncated bool
+}
+
+// InspectFinding 是一条差异项。
+//
+// 冗余存资产的身份字段（type/key/name/node）而不是只存 asset_id：
+// 巡检记录是**证据**，资产后来被删除也不该让历史结论变得无法解读。
+type InspectFinding struct {
+	ID        int64
+	RunID     int64
+	AssetID   int64
+	AssetType string
+	AssetKey  string
+	AssetName string
+	Node      string
+	Field     string
+	Kind      FindingKind
+	Level     FindingLevel
+	Expected  string
+	Actual    string
+	At        int64
+}
+
+// Baseline 是「标杆资产」：以它的某次快照作为该资产类型的期望值（L3 合规比对）。
+type Baseline struct {
+	TypeKey    string
+	AssetID    int64
+	AssetKey   string
+	SnapshotID int64
+	SetBy      string
+	SetAt      int64
+}
+
 // Observation 是一次提交给 Service.Apply 的观测：采集轮次或一次人工维护。
 type Observation struct {
 	TypeKey    string

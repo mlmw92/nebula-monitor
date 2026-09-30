@@ -30,6 +30,15 @@ type AssetProvider interface {
 	// ResetManual 清除指定字段的人工值（原型里的「恢复采集值」）。
 	ResetManual(ref asset.Ref, keys []string, actor string) (asset.Asset, error)
 	History(ref asset.Ref, limit int) ([]asset.ChangeRecord, error)
+	// Snapshots 列出资产的配置快照头（时间倒序）。
+	Snapshots(ref asset.Ref, limit int) ([]asset.Snapshot, error)
+	// 差异巡检（inspect）：读结论 + 维护标杆，都不改动资产本身。
+	RunInspect(sc asset.InspectScope, actor string) (asset.InspectRun, error)
+	InspectRuns(limit int) ([]asset.InspectRun, error)
+	InspectFindings(runID int64, limit int) ([]asset.InspectFinding, error)
+	Baselines() ([]asset.Baseline, error)
+	SetBaseline(ref asset.Ref, actor string) (asset.Baseline, error)
+	ClearBaseline(typeKey string) error
 	// Links 返回资产的直接关联（出边与入边）。
 	Links(ref asset.Ref) ([]asset.Link, error)
 }

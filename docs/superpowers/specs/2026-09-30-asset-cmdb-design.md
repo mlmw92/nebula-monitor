@@ -399,6 +399,53 @@ GET    /api/v1/inspect/runs/{id}/findings       # 差异项
 
 **验证方式**：`npm test` 6 个文件 + `npm run build` 通过；全文检索确认无 `.lock` 残留。
 
+### 批次 13（2026-09-30）：差异巡检（inspect）落地
+
+补上「资产与配置」P0 的最后一块。设计件 §「配置快照与差异巡检」定的是三层比对，
+本次落地 **L2（快照前后 diff）+ L3（与期望值比对）**，L1（文件 SHA256）仍是既有 FIM 的职责。
+
+**表**（纯附加，不提升 `schemaVersion`，保留「回滚旧版本可沿用 assets.db」）：
+
+| 表 | 用途 |
+|---|---|
+| `inspect_runs` | 一次巡检：范围 / 操作人 / 覆盖资产数 / 首次建基线数 / 差异数 / `truncated` |
+| `inspect_findings` | 差异项：冗余存资产身份（type/key/name/node），**不加外键级联**——巡检记录是证据，资产被删后结论仍须可读 |
+| `inspect_baselines` | 期望值（标杆）：**按资产类型**只保留一个，指向某资产的某次快照 |
+
+**四个关键决策**（都写进代码注释）：
+
+1. **巡检即快照推进**：设计里快照由 Agent 顺带产出，但 Agent 侧尚无该能力；若不就地抽快照，
+   就永远没有可比对的基线。因此 `RunInspect` = 「取最近快照 → 与当前生效值比对 → 落 finding →
+   推进快照」，且**只在本资产字段真的变了或还没有快照时才推进**（否则巡检比配置变化频繁时会把快照表刷爆）。
+2. **首次无基线不产出差异**，只计入 `baselined` 并让界面解释："数据不足 ≠ 不合规"（沿用对外状态页的既有语义）。
+3. **排除运行态字段**（`up` / `status` / `uptime`）：巡检问的是"配置有没有变"，
+   把每次探活都可能翻转的字段放进来会把真正的配置变更淹掉。
+4. **级别规则**：新增 `added` = info（多数只是采集到新项）、变更 `changed` = warning、
+   缺失 `missing` = **critical**（字段消失通常意味着采集退化或配置被删，比"值变了"更该被看见）、
+   合规偏差 `deviation` = warning。
+
+**接口与权限**：`POST /api/v1/inspect/runs`（`inspect:run`）、`GET /api/v1/inspect/runs`、
+`GET /api/v1/inspect/runs/{id}/findings`、`GET /api/v1/inspect/baselines`（`inspect:read`）、
+`POST|DELETE /api/v1/assets/{id}/baseline`、`GET /api/v1/assets/{id}/snapshots`（`assets:read`/`assets:write`）。
+**「跑巡检」与「改台账」刻意分成两个权限点**：巡检只给结论、不改任何配置。
+范围复用台账筛选（含资源范围下推）：受限用户只检得到自己范围内的资产——
+否则会出现"巡检说某台有问题、列表里却找不到它"。单次巡检资产上限 5000，超限**显式标注 `truncated`**。
+
+**前端**：新增「资产与配置 → 配置巡检」（`web/src/components/asset/InspectView.vue`，路由 `/inspect`，
+`inspect:read` 门控）：范围筛选 + 执行巡检（`inspect:run` 门控）+ 巡检记录表 + 差异项表（级别/差异类型/
+期望值→实际值）+ 期望值（标杆）列表与清除。资产详情抽屉新增「设为期望值（标杆）」/「清除期望值」。
+
+**与设计的差异**：① 快照列表接口已提供（`GET /assets/{id}/snapshots`），但界面暂不展示快照时间线——
+差异项里已有 expected/actual，单独列快照收益不足；② **巡检结果尚未接入巡检报告**（设计 §「巡检结果的可视化」
+提到的 report 章节）——列为后续。
+
+**验证方式**：服务层 5 个用例（首次只建基线 + 值不变/`up` 翻转不产差异、`added`/`missing` 两种分级、
+标杆偏差与清除标杆、资源范围下推与空范围恒空、记录可检索 + 非法记录 ID 报错）；
+接口层 5 个用例（`inspect:run` 权限负例 + 首次巡检 baselined 计数、受限巡检只覆盖范围内资产、
+标杆受范围约束且范围外 404、读取权限负例 + 非法 ID 400、快照列表范围外 404）。
+`go test ./internal/server/{asset,api,auth,receiver}` 通过；`npm test` + `npm run build` 通过
+（`InspectView` 按需分包 6.96 kB / gzip 3.47 kB）。
+
 ### 批次 12（2026-09-30）：左侧菜单无法滚动（1.30.7）
 
 **反馈**：截图里菜单底部被裁掉（「系统设置 → 个人中心」以下看不见），**无法上下滚动**。

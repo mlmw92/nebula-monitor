@@ -32,6 +32,8 @@ const routes = [
       { path: 'middleware', name: 'middleware', component: () => import('../components/MiddlewareView.vue'), meta: { perm: 'middleware:read' } },
       // 资产台账（D2）：读取需 assets:read；人工维护由后端 assets:write 校验（前端按钮同权限门控）
       { path: 'assets', name: 'assets', component: () => import('../components/asset/AssetListView.vue'), meta: { perm: 'assets:read' } },
+      // 配置巡检（D2）：看记录/差异需 inspect:read；触发巡检是独立权限点 inspect:run（页面内门控）
+      { path: 'inspect', name: 'inspect', component: () => import('../components/asset/InspectView.vue'), meta: { perm: 'inspect:read' } },
       // 采集项模板管理（读为 middleware:read；写操作由后端 middleware:write 校验，前端按钮同权限门控）
 
       { path: 'alerts', name: 'alerts', component: () => import('../components/AlertsView.vue'), meta: { perm: 'alerts:read' } },

@@ -94,6 +94,47 @@ var schemaStatements = []string{
 		asset_id     INTEGER PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
 		last_seen_at INTEGER NOT NULL
 	)`,
+	// 差异巡检（inspect）：一次运行 + 若干差异项 + 每个资产类型最多一个「标杆」。
+	//
+	// 差异项**不加外键级联**：巡检记录是历史证据，资产后来被删除也不该让结论无法解读，
+	// 因此冗余存资产身份字段（type/key/name/node）而非只存 asset_id。
+	`CREATE TABLE IF NOT EXISTS inspect_runs(
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		scope       TEXT NOT NULL DEFAULT '',
+		actor       TEXT NOT NULL DEFAULT '',
+		started_at  INTEGER NOT NULL,
+		assets      INTEGER NOT NULL DEFAULT 0,
+		baselined   INTEGER NOT NULL DEFAULT 0,
+		findings    INTEGER NOT NULL DEFAULT 0,
+		truncated   INTEGER NOT NULL DEFAULT 0
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_inspect_runs_at ON inspect_runs(started_at DESC)`,
+	`CREATE TABLE IF NOT EXISTS inspect_findings(
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		run_id     INTEGER NOT NULL REFERENCES inspect_runs(id) ON DELETE CASCADE,
+		asset_id   INTEGER NOT NULL,
+		asset_type TEXT NOT NULL DEFAULT '',
+		asset_key  TEXT NOT NULL DEFAULT '',
+		asset_name TEXT NOT NULL DEFAULT '',
+		node       TEXT NOT NULL DEFAULT '',
+		field      TEXT NOT NULL DEFAULT '',
+		kind       TEXT NOT NULL,
+		level      TEXT NOT NULL DEFAULT '',
+		expected   TEXT NOT NULL DEFAULT '',
+		actual     TEXT NOT NULL DEFAULT '',
+		at         INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_inspect_findings_run ON inspect_findings(run_id, level, kind)`,
+	// inspect_baselines 按**资产类型**存标杆：期望值是「同类资产该长什么样」，
+	// 而不是某台机器自己的历史值（后者由快照前后比对覆盖，见 L2）。
+	`CREATE TABLE IF NOT EXISTS inspect_baselines(
+		type_key    TEXT PRIMARY KEY,
+		asset_id    INTEGER NOT NULL,
+		asset_key   TEXT NOT NULL DEFAULT '',
+		snapshot_id INTEGER NOT NULL,
+		set_by      TEXT NOT NULL DEFAULT '',
+		set_at      INTEGER NOT NULL
+	)`,
 }
 
 // Store 是资产领域的 SQLite 持久化适配器。
@@ -436,27 +477,16 @@ func ownerMissingCond(alias string) string {
 	         AND o.key='` + OwnerKey + `' AND TRIM(o.value) <> '')`
 }
 
-// listAssets 按条件列出资产（含属性），按「类型 + 自然键」稳定排序。
-func (s *Store) listAssets(f ListFilter) ([]Asset, error) {
-	sub, args := assetWhere("a2", f)
-	// 分页必须作用于**资产**而不是 join 后的行：一个资产有几条属性就有几行，
-	// 直接对 join 结果 LIMIT 会让「一页 50 条」变成「一页 50 行」——属性多的资产
-	// 会挤占同页额度（10 条属性就吃掉一页的 1/5），OFFSET 也随之漂移。
-	// 因此先用子查询选出本页的资产 ID，再取这些资产的属性。
-	q := `SELECT a.id,a.type_key,a.natural_key,a.name,a.node,a.created_at,a.updated_at,
-	             (SELECT se.last_seen_at FROM asset_seen se WHERE se.asset_id=a.id),
-	             t.key,t.value,t.source,t.updated_at,t.updated_by
-	      FROM assets a LEFT JOIN asset_attrs t ON t.asset_id=a.id
-	      WHERE a.id IN (SELECT a2.id FROM assets a2` + sub + ` ORDER BY a2.type_key,a2.natural_key LIMIT ? OFFSET ?)
-	      ORDER BY a.type_key,a.natural_key,t.key,t.source`
-	args = append(args, f.limit(), f.offset())
+// assetSelectColumns 是「资产 + 属性」查询共用的列清单。
+//
+// 抽成常量是为了让 listAssets（分页）与 listAssetsAll（巡检全量）不会有一天列数不一致——
+// 那种错误只在 Scan 处才暴露，且报错信息很难指向真正的原因。
+const assetSelectColumns = `a.id,a.type_key,a.natural_key,a.name,a.node,a.created_at,a.updated_at,
+             (SELECT se.last_seen_at FROM asset_seen se WHERE se.asset_id=a.id),
+             t.key,t.value,t.source,t.updated_at,t.updated_by`
 
-	rows, err := s.db.Query(q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("查询资产列表失败: %w", err)
-	}
-	defer rows.Close()
-
+// scanAssets 把「资产 + 属性」的行集合组装成 Asset 切片（同一资产的多行合并，保留查询顺序）。
+func scanAssets(rows *sql.Rows) ([]Asset, error) {
 	var order []int64
 	byID := map[int64]*Asset{}
 	for rows.Next() {
@@ -465,7 +495,7 @@ func (s *Store) listAssets(f ListFilter) ([]Asset, error) {
 		var attrAt, seenAt sql.NullInt64
 		if err := rows.Scan(&a.ID, &a.TypeKey, &a.NaturalKey, &a.Name, &a.Node,
 			&a.CreatedAt, &a.UpdatedAt, &seenAt, &key, &value, &source, &attrAt, &by); err != nil {
-			return nil, fmt.Errorf("读取资产列表失败: %w", err)
+			return nil, err
 		}
 		a.SeenAt = seenAt.Int64
 		cur, ok := byID[a.ID]
@@ -484,11 +514,58 @@ func (s *Store) listAssets(f ListFilter) ([]Asset, error) {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("读取资产列表失败: %w", err)
+		return nil, err
 	}
 	out := make([]Asset, 0, len(order))
 	for _, id := range order {
 		out = append(out, *byID[id])
+	}
+	return out, nil
+}
+
+// listAssets 按条件分页列出资产（含属性），按「类型 + 自然键」稳定排序。
+func (s *Store) listAssets(f ListFilter) ([]Asset, error) {
+	sub, args := assetWhere("a2", f)
+	// 分页必须作用于**资产**而不是 join 后的行：一个资产有几条属性就有几行，
+	// 直接对 join 结果 LIMIT 会让「一页 50 条」变成「一页 50 行」——属性多的资产
+	// 会挤占同页额度（10 条属性就吃掉一页的 1/5），OFFSET 也随之漂移。
+	// 因此先用子查询选出本页的资产 ID，再取这些资产的属性。
+	q := `SELECT ` + assetSelectColumns + `
+	      FROM assets a LEFT JOIN asset_attrs t ON t.asset_id=a.id
+	      WHERE a.id IN (SELECT a2.id FROM assets a2` + sub + ` ORDER BY a2.type_key,a2.natural_key LIMIT ? OFFSET ?)
+	      ORDER BY a.type_key,a.natural_key,t.key,t.source`
+	args = append(args, f.limit(), f.offset())
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("查询资产列表失败: %w", err)
+	}
+	defer rows.Close()
+	out, err := scanAssets(rows)
+	if err != nil {
+		return nil, fmt.Errorf("读取资产列表失败: %w", err)
+	}
+	return out, nil
+}
+
+// listAssetsAll 按条件列出**全部**符合条件的资产（含属性），不分页。
+//
+// 巡检必须用它：分页版默认只取一页，用它跑巡检等于"只检了前 50 台却报告说检过了"，
+// 比不检更危险（会让人以为其余资产都合规）。
+func (s *Store) listAssetsAll(f ListFilter) ([]Asset, error) {
+	where, args := assetWhere("a", f)
+	q := `SELECT ` + assetSelectColumns + `
+	      FROM assets a LEFT JOIN asset_attrs t ON t.asset_id=a.id` + where +
+		` ORDER BY a.type_key,a.natural_key,t.key,t.source`
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("查询资产列表失败: %w", err)
+	}
+	defer rows.Close()
+	out, err := scanAssets(rows)
+	if err != nil {
+		return nil, fmt.Errorf("读取资产列表失败: %w", err)
 	}
 	return out, nil
 }
@@ -706,6 +783,181 @@ func (s *Store) snapshotFieldsOf(snapshotID int64) (map[string]string, error) {
 			return nil, fmt.Errorf("读取配置快照字段失败: %w", err)
 		}
 		out[key] = value
+	}
+	return out, rows.Err()
+}
+
+// latestSnapshot 取资产最近一份快照（含字段）；该资产还没有快照时 ok=false。
+func (s *Store) latestSnapshot(assetID int64) (Snapshot, bool, error) {
+	sn := Snapshot{AssetID: assetID}
+	err := s.db.QueryRow(
+		`SELECT id,taken_at FROM snapshots WHERE asset_id=? ORDER BY taken_at DESC, id DESC LIMIT 1`,
+		assetID,
+	).Scan(&sn.ID, &sn.TakenAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Snapshot{}, false, nil
+	}
+	if err != nil {
+		return Snapshot{}, false, fmt.Errorf("查询资产快照失败: %w", err)
+	}
+	fields, err := s.snapshotFieldsOf(sn.ID)
+	if err != nil {
+		return Snapshot{}, false, err
+	}
+	sn.Fields = fields
+	return sn, true, nil
+}
+
+// recordInspectRun 在同一事务里写入巡检记录与全部差异项，返回记录主键。
+//
+// 为什么必须原子：记录与差异项是同一份证据的两半，「有记录、没差异」会被读成
+// 「本次全部合规」——那比直接报错更糟。findings 为空时不写任何差异项行。
+func (s *Store) recordInspectRun(r InspectRun, findings []InspectFinding) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("写入巡检记录失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	truncated := 0
+	if r.Truncated {
+		truncated = 1
+	}
+	res, err := tx.Exec(
+		`INSERT INTO inspect_runs(scope,actor,started_at,assets,baselined,findings,truncated) VALUES(?,?,?,?,?,?,?)`,
+		r.Scope, r.Actor, r.StartedAt, r.Assets, r.Baselined, r.Findings, truncated)
+	if err != nil {
+		return 0, fmt.Errorf("写入巡检记录失败: %w", err)
+	}
+	runID, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("读取巡检记录主键失败: %w", err)
+	}
+	for i := range findings {
+		f := &findings[i]
+		if _, err := tx.Exec(
+			`INSERT INTO inspect_findings(run_id,asset_id,asset_type,asset_key,asset_name,node,field,kind,level,expected,actual,at)
+			 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			runID, f.AssetID, f.AssetType, f.AssetKey, f.AssetName, f.Node,
+			f.Field, string(f.Kind), string(f.Level), f.Expected, f.Actual, f.At,
+		); err != nil {
+			return 0, fmt.Errorf("写入差异项失败: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("提交巡检结果失败: %w", err)
+	}
+	return runID, nil
+}
+
+// inspectRunsOf 列出巡检记录（时间倒序）。
+func (s *Store) inspectRunsOf(limit int) ([]InspectRun, error) {
+	if limit <= 0 {
+		limit = defaultInspectRunLimit
+	}
+	rows, err := s.db.Query(
+		`SELECT id,scope,actor,started_at,assets,baselined,findings,truncated
+		 FROM inspect_runs ORDER BY started_at DESC, id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("查询巡检记录失败: %w", err)
+	}
+	defer rows.Close()
+	var out []InspectRun
+	for rows.Next() {
+		var r InspectRun
+		var truncated int
+		if err := rows.Scan(&r.ID, &r.Scope, &r.Actor, &r.StartedAt,
+			&r.Assets, &r.Baselined, &r.Findings, &truncated); err != nil {
+			return nil, fmt.Errorf("读取巡检记录失败: %w", err)
+		}
+		r.Truncated = truncated != 0
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// findingsOf 取某次巡检的差异项：严重级别高的排前面，同级按资产与字段稳定排序。
+func (s *Store) findingsOf(runID int64, limit int) ([]InspectFinding, error) {
+	if limit <= 0 {
+		limit = defaultInspectFindingLimit
+	}
+	rows, err := s.db.Query(
+		`SELECT id,run_id,asset_id,asset_type,asset_key,asset_name,node,field,kind,level,expected,actual,at
+		 FROM inspect_findings WHERE run_id=?
+		 ORDER BY CASE level WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+		          asset_type, asset_key, field
+		 LIMIT ?`, runID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("查询差异项失败: %w", err)
+	}
+	defer rows.Close()
+	var out []InspectFinding
+	for rows.Next() {
+		var f InspectFinding
+		var kind, level string
+		if err := rows.Scan(&f.ID, &f.RunID, &f.AssetID, &f.AssetType, &f.AssetKey, &f.AssetName,
+			&f.Node, &f.Field, &kind, &level, &f.Expected, &f.Actual, &f.At); err != nil {
+			return nil, fmt.Errorf("读取差异项失败: %w", err)
+		}
+		f.Kind, f.Level = FindingKind(kind), FindingLevel(level)
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// setBaseline 把某资产的快照设为**该资产类型**的标杆（同类型只保留一个）。
+func (s *Store) setBaseline(b Baseline) error {
+	if _, err := s.db.Exec(
+		`INSERT INTO inspect_baselines(type_key,asset_id,asset_key,snapshot_id,set_by,set_at) VALUES(?,?,?,?,?,?)
+		 ON CONFLICT(type_key) DO UPDATE SET
+		   asset_id=excluded.asset_id, asset_key=excluded.asset_key,
+		   snapshot_id=excluded.snapshot_id, set_by=excluded.set_by, set_at=excluded.set_at`,
+		b.TypeKey, b.AssetID, b.AssetKey, b.SnapshotID, b.SetBy, b.SetAt,
+	); err != nil {
+		return fmt.Errorf("设置巡检标杆失败: %w", err)
+	}
+	return nil
+}
+
+// clearBaseline 清除某资产类型的标杆；本来没有也视为成功（幂等）。
+func (s *Store) clearBaseline(typeKey string) error {
+	if _, err := s.db.Exec(`DELETE FROM inspect_baselines WHERE type_key=?`, typeKey); err != nil {
+		return fmt.Errorf("清除巡检标杆失败: %w", err)
+	}
+	return nil
+}
+
+// baselineOf 取某资产类型的标杆。
+func (s *Store) baselineOf(typeKey string) (Baseline, bool, error) {
+	var b Baseline
+	err := s.db.QueryRow(
+		`SELECT type_key,asset_id,asset_key,snapshot_id,set_by,set_at FROM inspect_baselines WHERE type_key=?`,
+		typeKey,
+	).Scan(&b.TypeKey, &b.AssetID, &b.AssetKey, &b.SnapshotID, &b.SetBy, &b.SetAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Baseline{}, false, nil
+	}
+	if err != nil {
+		return Baseline{}, false, fmt.Errorf("查询巡检标杆失败: %w", err)
+	}
+	return b, true, nil
+}
+
+// baselinesOf 列出全部标杆（界面用于显示"哪些类型已经有期望值"）。
+func (s *Store) baselinesOf() ([]Baseline, error) {
+	rows, err := s.db.Query(
+		`SELECT type_key,asset_id,asset_key,snapshot_id,set_by,set_at FROM inspect_baselines ORDER BY type_key`)
+	if err != nil {
+		return nil, fmt.Errorf("查询巡检标杆失败: %w", err)
+	}
+	defer rows.Close()
+	var out []Baseline
+	for rows.Next() {
+		var b Baseline
+		if err := rows.Scan(&b.TypeKey, &b.AssetID, &b.AssetKey, &b.SnapshotID, &b.SetBy, &b.SetAt); err != nil {
+			return nil, fmt.Errorf("读取巡检标杆失败: %w", err)
+		}
+		out = append(out, b)
 	}
 	return out, rows.Err()
 }

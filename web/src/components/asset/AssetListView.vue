@@ -271,6 +271,14 @@
 
             <div v-if="canWrite" class="drawer-actions">
               <el-button type="primary" @click="openEdit(detail)">编辑资产</el-button>
+              <!-- 期望值（标杆）：配置巡检的合规偏差以它为基准，按资产类型只保留一个 -->
+              <el-button v-if="!isBaseline" title="把本资产的当前配置设为该类型的期望值（配置巡检的合规偏差以它为基准）" @click="makeBaseline">
+                设为期望值（标杆）
+              </el-button>
+              <template v-else>
+                <span class="muted">本资产是「{{ typeLabel(detail) }}」类型的期望值</span>
+                <el-button type="danger" plain @click="dropBaseline">清除期望值</el-button>
+              </template>
             </div>
           </el-tab-pane>
 
@@ -445,6 +453,9 @@ import {
   getAssetSummary,
   createAsset,
   updateAsset,
+  listInspectBaselines,
+  setAssetBaseline,
+  clearAssetBaseline,
 } from '../../api/asset'
 import { useAuth } from '../../composables/useAuth'
 // 与中间件 / 容器等页面统一的 KPI 卡片（顶部彩条 + 图标 + 数值）
@@ -472,6 +483,8 @@ const detail = ref(null)
 const history = ref([])
 const links = ref([])
 const tab = ref('attr')
+// 各资产类型当前的期望值（标杆）来源，用于抽屉里显示"本资产是不是标杆"
+const baselines = ref([])
 
 const createVisible = ref(false)
 const editVisible = ref(false)
@@ -623,6 +636,14 @@ const manualRows = computed(() => {
     .sort((a, b) => a.key.localeCompare(b.key))
 })
 
+// 本资产是否是其资产类型的期望值（标杆）：抽屉据此在「设为」与「清除」之间切换。
+const isBaseline = computed(() => {
+  const d = detail.value
+  if (!d) return false
+  const b = baselines.value.find((x) => x.typeKey === d.typeKey)
+  return !!(b && String(b.assetId) === String(d.id))
+})
+
 // 列表与摘要共用同一套筛选参数，保证「点数字看到的」与「数字本身」一致
 function filterParams() {
   const params = {
@@ -700,9 +721,11 @@ function onSizeChange(size) {
 
 async function loadDetail(id) {
   detail.value = await getAsset(id)
-  const [hist, rel] = await Promise.all([getAssetHistory(id), getAssetLinks(id)])
+  // 标杆列表一并取：抽屉要能回答"本资产是不是该类型的期望值"
+  const [hist, rel, bl] = await Promise.all([getAssetHistory(id), getAssetLinks(id), listInspectBaselines()])
   history.value = (hist && hist.records) || []
   links.value = (rel && rel.links) || []
+  baselines.value = (bl && bl.baselines) || []
 }
 
 async function openDetail(row) {
@@ -836,6 +859,32 @@ async function restoreAttr(key) {
     await afterWrite(id)
   } catch (e) {
     ElMessage.error(e.message || '恢复失败')
+  }
+}
+
+// 把本资产的当前配置设为该资产类型的期望值（标杆）：配置巡检的合规偏差以它为基准。
+async function makeBaseline() {
+  const d = detail.value
+  if (!(await confirmWrite(`将把 ${d.name || d.naturalKey} 的当前配置设为「${typeLabel(d)}」类型的期望值（每个类型只保留一个）`))) return
+  try {
+    await setAssetBaseline(d.id)
+    ElMessage.success('已设为期望值')
+    await afterWrite(d.id)
+  } catch (e) {
+    ElMessage.error(e.message || '设置期望值失败')
+  }
+}
+
+// 清除该资产所属类型的期望值：此后只做快照前后比对，不再产出合规偏差。
+async function dropBaseline() {
+  const d = detail.value
+  if (!(await confirmWrite(`将清除「${typeLabel(d)}」类型的期望值，此后不再做合规偏差比对`))) return
+  try {
+    await clearAssetBaseline(d.id)
+    ElMessage.success('已清除期望值')
+    await afterWrite(d.id)
+  } catch (e) {
+    ElMessage.error(e.message || '清除期望值失败')
   }
 }
 

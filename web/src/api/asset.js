@@ -4,18 +4,20 @@
 // 服务端才是安全边界（资源范围、权限点都在服务端校验），这里不做任何权限判断。
 import http from './http'
 
-// 资产列表：type / node / keyword 过滤 + limit / offset 分页。
-// 空值不拼进查询串：`?type=` 与「不传 type」在服务端语义不同，传空串会把筛选条件写坏。
-export const listAssets = (params = {}) => {
+// withQuery 拼接查询串，空值一律不拼：
+// `?type=` 与「不传 type」在服务端语义不同（前者是"筛选类型为空"，后者是"全部类型"），
+// 传空串会把筛选条件写坏。
+const withQuery = (path, params = {}) => {
   const q = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== '') {
-      q.append(k, v)
-    }
+    if (v !== undefined && v !== null && v !== '') q.append(k, v)
   }
   const s = q.toString()
-  return http.get('/api/v1/assets' + (s ? '?' + s : ''))
+  return path + (s ? '?' + s : '')
 }
+
+// 资产列表：type / node / keyword 过滤 + limit / offset 分页。
+export const listAssets = (params = {}) => http.get(withQuery('/api/v1/assets', params))
 
 // 资产详情（属性含采集值与人工值两个来源，values 为生效值）
 export const getAsset = (id) => http.get('/api/v1/assets/' + encodeURIComponent(id))
@@ -34,14 +36,33 @@ export const updateAsset = (id, payload) => http.put('/api/v1/assets/' + encodeU
 
 // 台账健康度摘要（总数 / 失联 / 无责任人 / 冲突 / 近 7 天变更）。
 // 与列表共用同一套筛选参数：顶部数字点进去必须看到同一个集合。
-export const getAssetSummary = (params = {}) => {
-  const q = new URLSearchParams()
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== '') q.append(k, v)
-  }
-  const s = q.toString()
-  return http.get('/api/v1/assets/summary' + (s ? '?' + s : ''))
-}
+export const getAssetSummary = (params = {}) => http.get(withQuery('/api/v1/assets/summary', params))
 
 // 资产的直接关联（出边 + 入边）；范围外的对端由服务端剔除，前端拿到的都是可见资产。
 export const getAssetLinks = (id) => http.get('/api/v1/assets/' + encodeURIComponent(id) + '/links')
+
+// ---- 配置巡检（inspect）----
+// 巡检只给结论、不改配置；「跑」与「改」在服务端是两个权限点（inspect:run / assets:write）。
+
+// 触发一次巡检：范围复用台账筛选（type / node / keyword），fields 为关注字段（留空=服务端默认）。
+export const runInspect = (payload = {}) => http.post('/api/v1/inspect/runs', payload)
+
+// 巡检记录（时间倒序）。
+export const listInspectRuns = (limit = 0) => http.get(withQuery('/api/v1/inspect/runs', { limit }))
+
+// 某次巡检的差异项（严重级别高的排前面）。
+export const listInspectFindings = (runId, limit = 0) =>
+  http.get(withQuery('/api/v1/inspect/runs/' + encodeURIComponent(runId) + '/findings', { limit }))
+
+// 各资产类型当前的期望值来源（标杆资产）。
+export const listInspectBaselines = () => http.get('/api/v1/inspect/baselines')
+
+// 把某资产的当前配置设为该资产类型的期望值（标杆）；服务端按类型只保留一个。
+export const setAssetBaseline = (id) => http.post('/api/v1/assets/' + encodeURIComponent(id) + '/baseline', {})
+
+// 清除该资产所属类型的标杆（幂等）。
+export const clearAssetBaseline = (id) => http.del('/api/v1/assets/' + encodeURIComponent(id) + '/baseline')
+
+// 配置快照（巡检基线；只在首次或字段真变化时新增）
+export const listAssetSnapshots = (id, limit = 0) =>
+  http.get(withQuery('/api/v1/assets/' + encodeURIComponent(id) + '/snapshots', { limit }))

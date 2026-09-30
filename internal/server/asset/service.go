@@ -17,6 +17,15 @@ const (
 
 	defaultHistoryLimit  = 200
 	defaultSnapshotLimit = 50
+
+	// defaultInspectRunLimit / defaultInspectFindingLimit 是巡检记录与差异项的返回上限。
+	defaultInspectRunLimit     = 50
+	defaultInspectFindingLimit = 500
+	// maxInspectAssets 是单次巡检覆盖的资产上限。
+	//
+	// 超限时**显式截断并在记录里标注**（`truncated`）：宁可在界面看到"本次只覆盖了前 N 个"，
+	// 也不能让一次巡检把整库读进内存、或者悄悄只检了一部分却报告"已巡检"。
+	maxInspectAssets = 5000
 )
 
 // ListFilter 是资产列表的查询条件。零值表示「全部资产」，但始终受默认分页约束。
@@ -425,6 +434,235 @@ func (s *Service) resolve(ref Ref) (Asset, error) {
 		return Asset{}, fmt.Errorf("资产不存在: %s/%s", ref.TypeKey, ref.NaturalKey)
 	}
 	return a, nil
+}
+
+// ---- 差异巡检（inspect）----
+
+// runtimeFields 是巡检默认排除的「运行态字段」。
+//
+// 巡检问的是「配置有没有变」；up / status / uptime 这类字段每次探活都可能翻转，
+// 放进差异清单只会把真正的配置变更淹掉（它们已经有专门的告警与状态通道）。
+var runtimeFields = map[string]bool{
+	"up": true, "status": true, "uptime": true, "uptimeSeconds": true,
+}
+
+// InspectScope 是一次差异巡检的范围。
+type InspectScope struct {
+	// Filter 复用台账筛选（含资源范围下推）：巡检只覆盖调用方有权看到的资产。
+	Filter ListFilter
+	// Fields 是关注字段；为空表示「全部生效字段减去运行态字段」（见 runtimeFields）。
+	Fields []string
+}
+
+// RunInspect 执行一次差异巡检：L2（与上一次快照比对）+ L3（与类型标杆比对）。
+//
+// 只给结论、不改任何东西（对齐既有"只读决策辅助"口径）：findings 是证据，
+// 修复动作属于后续的配置下发能力。
+func (s *Service) RunInspect(sc InspectScope, actor string) (InspectRun, error) {
+	at := s.now()
+	filter := sc.Filter
+
+	// 资产上限：先数后取。超限时用分页版取前 N 个并显式标注 truncated。
+	total, err := s.store.countAssets(filter)
+	if err != nil {
+		return InspectRun{}, err
+	}
+	truncated := total > maxInspectAssets
+	var assets []Asset
+	if truncated {
+		filter.Limit, filter.Offset = maxInspectAssets, 0
+		assets, err = s.store.listAssets(filter)
+	} else {
+		assets, err = s.store.listAssetsAll(filter)
+	}
+	if err != nil {
+		return InspectRun{}, err
+	}
+
+	run := InspectRun{Scope: inspectScopeLabel(sc.Filter), Actor: actor, StartedAt: at, Truncated: truncated}
+	findings := make([]InspectFinding, 0, 16)
+	for _, a := range assets {
+		run.Assets++
+		cur := focusFields(a, sc.Fields)
+
+		prev, hasPrev, err := s.store.latestSnapshot(a.ID)
+		if err != nil {
+			return InspectRun{}, err
+		}
+		// L2：与上一次快照比对。没有快照 = 数据不足（首次巡检）→ 只建立基线，不产出差异，
+		// 「未知」不等于「不合规」（沿用对外状态页的既有语义）。
+		baselineAdvanced := false
+		if hasPrev {
+			before := len(findings) // 只看本资产新增的差异，不能拿全局累计数判断
+			for k, v := range cur {
+				old, ok := prev.Fields[k]
+				if !ok {
+					findings = append(findings, newFinding(a, at, k, FindingAdded, FindingInfo, "", v))
+					continue
+				}
+				if !sameValue(old, v) {
+					findings = append(findings, newFinding(a, at, k, FindingChanged, FindingWarning, old, v))
+				}
+			}
+			for k, v := range prev.Fields {
+				if _, ok := cur[k]; !ok {
+					findings = append(findings, newFinding(a, at, k, FindingMissing, FindingCritical, v, ""))
+				}
+			}
+			baselineAdvanced = len(findings) > before
+		} else {
+			run.Baselined++
+		}
+
+		// L3：与该资产类型的标杆比对（标杆资产不与自己比）。
+		bl, hasBaseline, err := s.store.baselineOf(a.TypeKey)
+		if err != nil {
+			return InspectRun{}, err
+		}
+		if hasBaseline && bl.AssetID != a.ID {
+			expected, err := s.store.snapshotFieldsOf(bl.SnapshotID)
+			if err != nil {
+				return InspectRun{}, err
+			}
+			for k, want := range expected {
+				got, ok := cur[k]
+				if ok && !sameValue(want, got) {
+					findings = append(findings, newFinding(a, at, k, FindingDeviation, FindingWarning, want, got))
+				}
+			}
+		}
+
+		// 快照只在「还没有」或「本资产自身字段真的变了」时推进：
+		// 值没变时再存一份同样的快照不会提供任何新信息，只会把快照表刷大
+		// （巡检可能比配置变化频繁得多）。
+		if !hasPrev || baselineAdvanced {
+			if _, err := s.store.recordSnapshot(a.ID, at, cur); err != nil {
+				return InspectRun{}, err
+			}
+		}
+	}
+
+	run.Findings = len(findings)
+	runID, err := s.store.recordInspectRun(run, findings)
+	if err != nil {
+		return InspectRun{}, err
+	}
+	run.ID = runID
+	return run, nil
+}
+
+// InspectRuns 列出巡检记录（时间倒序）。
+func (s *Service) InspectRuns(limit int) ([]InspectRun, error) { return s.store.inspectRunsOf(limit) }
+
+// InspectFindings 取某次巡检的差异项（严重级别高的排前面）。
+func (s *Service) InspectFindings(runID int64, limit int) ([]InspectFinding, error) {
+	if runID <= 0 {
+		return nil, errors.New("巡检记录 ID 不能为空")
+	}
+	return s.store.findingsOf(runID, limit)
+}
+
+// Baselines 列出各资产类型当前的期望值来源（标杆资产）。
+func (s *Service) Baselines() ([]Baseline, error) { return s.store.baselinesOf() }
+
+// SetBaseline 把某资产的**当前**配置设为该资产类型的期望值（标杆）。
+//
+// 期望值的语义是「同类资产该长什么样」，所以这里抽的快照必须与巡检用的关注字段口径一致
+// （同一 focusFields）：否则标杆里会带上 up 这类运行态字段，导致所有同类资产都"偏差"。
+func (s *Service) SetBaseline(ref Ref, actor string) (Baseline, error) {
+	a, err := s.resolve(ref)
+	if err != nil {
+		return Baseline{}, err
+	}
+	at := s.now()
+	id, err := s.store.recordSnapshot(a.ID, at, focusFields(a, nil))
+	if err != nil {
+		return Baseline{}, err
+	}
+	b := Baseline{
+		TypeKey: a.TypeKey, AssetID: a.ID, AssetKey: a.NaturalKey,
+		SnapshotID: id, SetBy: actor, SetAt: at,
+	}
+	if err := s.store.setBaseline(b); err != nil {
+		return Baseline{}, err
+	}
+	return b, nil
+}
+
+// ClearBaseline 清除某资产类型的标杆；本来没有也返回成功（幂等）。
+func (s *Service) ClearBaseline(typeKey string) error {
+	typeKey = strings.TrimSpace(typeKey)
+	if typeKey == "" {
+		return errors.New("资产类型不能为空")
+	}
+	return s.store.clearBaseline(typeKey)
+}
+
+// focusFields 抽取资产的「关注字段集合」（生效值，人工优先）。
+//
+// fields 非空时按它裁剪；为空时取全部生效字段但排除运行态字段（见 runtimeFields）。
+func focusFields(a Asset, fields []string) map[string]string {
+	want := map[string]bool{}
+	for _, k := range fields {
+		if k = strings.TrimSpace(k); k != "" {
+			want[k] = true
+		}
+	}
+	pick := len(want) > 0
+	out := map[string]string{}
+	for _, attr := range a.Attrs {
+		key := attr.Key
+		if _, done := out[key]; done {
+			continue
+		}
+		if pick {
+			if !want[key] {
+				continue
+			}
+		} else if runtimeFields[key] {
+			continue
+		}
+		v, ok := a.Value(key)
+		if !ok {
+			continue
+		}
+		out[key] = v
+	}
+	return out
+}
+
+// newFinding 构造一条差异项，冗余带上资产身份（证据要在资产被删后仍可解读）。
+func newFinding(a Asset, at int64, field string, kind FindingKind, level FindingLevel, expected, actual string) InspectFinding {
+	return InspectFinding{
+		AssetID: a.ID, AssetType: a.TypeKey, AssetKey: a.NaturalKey, AssetName: a.Name, Node: a.Node,
+		Field: field, Kind: kind, Level: level, Expected: expected, Actual: actual, At: at,
+	}
+}
+
+// sameValue 用与 Apply 相同的规范化口径比较（忽略首尾空白与大小写）：
+// 否则巡检会把「仅大小写不同的写入」报成变更，与变更历史的口径自相矛盾。
+func sameValue(x, y string) bool { return normalizeValue(x) == normalizeValue(y) }
+
+// inspectScopeLabel 生成人能读懂的巡检范围描述（记录里要能回答"这次检的是哪些"）。
+func inspectScopeLabel(f ListFilter) string {
+	parts := make([]string, 0, 3)
+	if f.TypeKey != "" {
+		parts = append(parts, "type:"+f.TypeKey)
+	}
+	if f.Node != "" {
+		parts = append(parts, "node:"+f.Node)
+	}
+	if f.Keyword != "" {
+		parts = append(parts, "q:"+f.Keyword)
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, " ")
+	}
+	if f.Nodes != nil {
+		// 受限用户：范围由资源范围决定，界面上说明"我的范围内"比写 all 更诚实
+		return "scope:mine"
+	}
+	return "all"
 }
 
 func newAttr(key, value string, src Source, at int64, actor string) Attr {

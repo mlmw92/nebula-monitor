@@ -146,6 +146,8 @@ const groups = [
     items: [
       // 读权限即可进入；维护按钮另行按 assets:write 门控（该权限点为高风险，需二次确认）
       { key: 'assets', to: '/assets', label: '资产台账', icon: Files, perm: 'assets:read' },
+      // 配置巡检：读看记录与差异；触发巡检另有 inspect:run（页面内门控）
+      { key: 'inspect', to: '/inspect', label: '配置巡检', icon: Aim, perm: 'inspect:read' },
     ],
   },
   {

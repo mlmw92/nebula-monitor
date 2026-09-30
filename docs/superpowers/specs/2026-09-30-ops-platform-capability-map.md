@@ -91,7 +91,7 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 | 采集值与人工值分离（来源标记 / 冲突可见） | **已实现** | 属性联合主键含 `source`，`Asset.Value` 取生效值（人工优先），接口返回 `values` + `attrs`（两来源并存） | P1 | M | 资产台账 | D2 |
 | 资产生命周期（上线/下线/退役/成本/维保） | 未实现 | `README.md` 路线图「CMDB（P2）：资产台账、生命周期与变更记录」 | P2 | M | 资产台账 | D2 |
 | 资产与资源范围的映射/迁移 | **已实现** | 接口按资产所属节点走既有范围判定（`api/nodeInScope`）：范围外资产按 404 返回、先过滤再计数；权限点 `assets:read` 已注册并授予运维/只读角色 | **P0** | M | 资产台账 | D2 |
-| 配置快照与差异巡检（配置项级） | 部分实现 | 快照写入/读取已实现：`snapshots` + `snapshot_fields`（同事务）、`asset.Service.Snapshot`；**差异比对与巡检运行未做**；现行 FIM 仍只做文件 SHA256（`internal/agent/collector/security.go:loadFIMBaseline/sha256File`） | **P0** | M | 资产台账 + 配置采集 | D2 |
+| 配置快照与差异巡检（配置项级） | 已实现 | 快照：`snapshots` + `snapshot_fields`（同事务）、`asset.Service.Snapshot`；**巡检（L2 快照前后 diff + L3 与期望值比对）已落地**：`inspect_runs` / `inspect_findings` / `inspect_baselines` + `asset.Service.RunInspect` + `POST /api/v1/inspect/runs` + 前端「配置巡检」页；差异分级 added/changed/missing/deviation，首次无基线只建基线不报差异；现行 FIM（文件 SHA256）仍是独立的 L1 层（`internal/agent/collector/security.go`）；**未接巡检报告章节** | **P0** | M | 资产台账 | D2 |
 | 资产台账页（列表/详情/关系/变更时间线） | 已实现 | 按原型 `asset-prototype.html` 对齐：健康度条（总数/失联/无责任人/冲突/近 7 天变更，前四项可下钻且下钻态可撤销）、筛选（类型/状态/来源/归属节点/关键词含属性值）、服务端分页、表格列（名称+副标题/类型/节点/状态/最近上报/来源/责任人）、抽屉三 Tab（属性对比四列+冲突高亮+恢复采集值、变更历史时间线、关联关系含方向）。证据：`web/src/components/asset/AssetListView.vue`、`internal/server/api/asset_api.go`、`internal/server/asset/{service,store,model}.go` | **P0** | M | — | D2 |
 | 资产台账：批量维护 / 批量转派 / 导出 CSV | 未实现 | 原型工具栏的批量按钮与「导出清单 CSV」；批量删除原型自身置灰（后端无删除接口） | P1 | M | 台账页（已完成） | D2 |
 | 资产台账：配置项模型页 / 关系视图页 | 未实现 | 原型侧边栏已预留入口（标注 D3）；关系视图依赖更多关系类型 | P2 | L | 关系类型扩展 | D2 |
@@ -191,7 +191,7 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 | 巡检报告（日/周/月 HTML + 资源趋势 + SLA 可用性） | 已实现 | `internal/server/report/report.go`、`internal/server/api/middleware_api.go:handleReportGenerate/Download/History` | — | — | — | — |
 | 安全基线评分（0-100 合规清单） | 已实现 | `internal/agent/collector/security.go`（`mkBaselineItem` 等）、`internal/server/security/store.go:Ingest/Baselines/Summary` | — | — | — | — |
 | 文件完整性监测（FIM，文件哈希基线比对） | 已实现 | `internal/agent/collector/security.go:loadFIMBaseline/saveFIMBaseline/sha256File` | — | — | — | — |
-| 配置项级差异巡检（配置快照 vs 合规模板） | 未实现 | FIM 只覆盖文件哈希；无字段级 diff | **P0** | M | 资产与配置（D2） | D2 |
+| 配置项级差异巡检（配置快照 vs 合规模板） | 已实现 | 字段级 diff 与「期望值（标杆）」比对均已落地（见 §3.2「配置快照与差异巡检」）；期望值当前来自人工指定的**标杆资产**，尚未接入安全基线清单自动生成期望值 | **P0** | M | 资产与配置（D2） | D2 |
 | 巡检周期化调度（自动生成报告） | 部分实现 | 报告由 Web 端触发；通用定时任务未实现（`README.md` 路线图「定时计划任务」含自动生成报告） | P2 | M | 定时计划任务 | — |
 | 合规报告/合规矩阵导出 | 部分实现 | HTML 报告可下载；无合规矩阵 CSV/PDF 导出 | P2 | S | — | — |
 

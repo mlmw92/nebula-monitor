@@ -554,6 +554,241 @@ func TestSnapshotCapturesEffectiveValues(t *testing.T) {
 	}
 }
 
+// 巡检第一次运行只建立基线（数据不足 ≠ 不合规），第二次才产出差异；
+// 且运行态字段（up 等）必须被排除——否则每次探活翻转都会变成一条"变更"，
+// 真正的配置变更会被淹掉。
+func TestRunInspectBaselineThenDiff(t *testing.T) {
+	svc, _ := newTestService(t)
+	now := int64(1_700_000_000_000)
+	svc.now = func() int64 { return now }
+
+	if _, _, err := svc.Apply(hostObservation("web-01", map[string]string{
+		"os": "Ubuntu 24.04", "cpu": "8", "up": "true",
+	})); err != nil {
+		t.Fatalf("写入资产失败: %v", err)
+	}
+
+	first, err := svc.RunInspect(InspectScope{}, "alice")
+	if err != nil {
+		t.Fatalf("首次巡检失败: %v", err)
+	}
+	if first.ID == 0 {
+		t.Fatal("巡检记录应有主键")
+	}
+	if first.Assets != 1 || first.Baselined != 1 || first.Findings != 0 {
+		t.Fatalf("首次巡检应只建立基线：%+v", first)
+	}
+	if first.Scope != "all" || first.Actor != "alice" {
+		t.Fatalf("巡检记录应带范围与操作人：%+v", first)
+	}
+
+	// 配置项变化（cpu 8→16）+ 运行态字段翻转（up true→false）
+	now += 60_000
+	if _, _, err := svc.Apply(hostObservation("web-01", map[string]string{
+		"os": "Ubuntu 24.04", "cpu": "16", "up": "false",
+	})); err != nil {
+		t.Fatalf("写入资产失败: %v", err)
+	}
+	second, err := svc.RunInspect(InspectScope{}, "alice")
+	if err != nil {
+		t.Fatalf("二次巡检失败: %v", err)
+	}
+	if second.Baselined != 0 {
+		t.Fatalf("已有基线不应再计入 baselined：%+v", second)
+	}
+	if second.Findings != 1 {
+		t.Fatalf("应只有 cpu 一条变更（up 属运行态字段应被排除），实际 %d：%+v",
+			second.Findings, mustFindings(t, svc, second.ID))
+	}
+	f := mustFindings(t, svc, second.ID)[0]
+	if f.Kind != FindingChanged || f.Level != FindingWarning {
+		t.Fatalf("值变化应为 changed/warning，实际 %s/%s", f.Kind, f.Level)
+	}
+	if f.Field != "cpu" || f.Expected != "8" || f.Actual != "16" {
+		t.Fatalf("差异项内容不符：%+v", f)
+	}
+	// 冗余身份字段：资产后来被删除时，历史结论仍应可读
+	if f.AssetKey != "web-01" || f.AssetType != TypeHost || f.Node != "web-01" {
+		t.Fatalf("差异项应带资产身份：%+v", f)
+	}
+	// 巡检只给结论：不得改动资产本身
+	got, _, err := svc.Get(Ref{TypeKey: TypeHost, NaturalKey: "web-01"})
+	if err != nil {
+		t.Fatalf("回读资产失败: %v", err)
+	}
+	if v, _ := got.ValueFrom("cpu", SourceDiscovery); v != "16" {
+		t.Fatalf("巡检不应改动资产属性，实际 cpu=%q", v)
+	}
+}
+
+// 新增人工属性 → added（info）；把该人工值恢复掉、字段彻底消失 → missing（critical）。
+func TestRunInspectAddedAndMissingKinds(t *testing.T) {
+	svc, _ := newTestService(t)
+	now := int64(1_700_000_100_000)
+	svc.now = func() int64 { return now }
+	ref := Ref{TypeKey: TypeHost, NaturalKey: "web-02"}
+
+	if _, _, err := svc.Apply(hostObservation("web-02", map[string]string{"cpu": "8"})); err != nil {
+		t.Fatalf("写入资产失败: %v", err)
+	}
+	if _, err := svc.RunInspect(InspectScope{}, "alice"); err != nil {
+		t.Fatalf("建立基线失败: %v", err)
+	}
+
+	manual := hostObservation("web-02", map[string]string{"vendor": "Dell"})
+	manual.Source = SourceManual
+	if _, _, err := svc.Apply(manual); err != nil {
+		t.Fatalf("写入人工属性失败: %v", err)
+	}
+	now += 60_000
+	added, err := svc.RunInspect(InspectScope{}, "alice")
+	if err != nil {
+		t.Fatalf("巡检失败: %v", err)
+	}
+	if !hasFinding(mustFindings(t, svc, added.ID), "vendor", FindingAdded, FindingInfo) {
+		t.Fatalf("应报出新增字段 vendor：%+v", mustFindings(t, svc, added.ID))
+	}
+
+	// 清掉人工值：采集侧也没有该字段 → 字段从关注集合里消失 → missing
+	if _, err := svc.ResetManual(ref, []string{"vendor"}, "alice"); err != nil {
+		t.Fatalf("恢复采集值失败: %v", err)
+	}
+	now += 60_000
+	missing, err := svc.RunInspect(InspectScope{}, "alice")
+	if err != nil {
+		t.Fatalf("巡检失败: %v", err)
+	}
+	if !hasFinding(mustFindings(t, svc, missing.ID), "vendor", FindingMissing, FindingCritical) {
+		t.Fatalf("应报出缺失字段 vendor：%+v", mustFindings(t, svc, missing.ID))
+	}
+}
+
+// 期望值（标杆）来自同类资产：其它同类型资产与之不一致的字段产出 deviation；
+// 标杆自身不与自己比；清除标杆后不再有偏差。L3 不依赖 L2 基线（首次巡检即可报偏差）。
+func TestRunInspectDeviationAgainstBaseline(t *testing.T) {
+	svc, _ := newTestService(t)
+	svc.now = func() int64 { return 1_700_000_200_000 }
+
+	if _, _, err := svc.Apply(hostObservation("web-01", map[string]string{"os": "Ubuntu 24.04", "cpu": "8"})); err != nil {
+		t.Fatalf("写入资产失败: %v", err)
+	}
+	if _, _, err := svc.Apply(hostObservation("web-02", map[string]string{"os": "CentOS 7.9", "cpu": "8"})); err != nil {
+		t.Fatalf("写入资产失败: %v", err)
+	}
+
+	b, err := svc.SetBaseline(Ref{TypeKey: TypeHost, NaturalKey: "web-01"}, "alice")
+	if err != nil {
+		t.Fatalf("设置标杆失败: %v", err)
+	}
+	if b.TypeKey != TypeHost || b.AssetKey != "web-01" || b.SnapshotID == 0 {
+		t.Fatalf("标杆内容不符：%+v", b)
+	}
+	all, err := svc.Baselines()
+	if err != nil || len(all) != 1 || all[0].TypeKey != TypeHost {
+		t.Fatalf("标杆列表不符：%+v err=%v", all, err)
+	}
+
+	run, err := svc.RunInspect(InspectScope{}, "alice")
+	if err != nil {
+		t.Fatalf("巡检失败: %v", err)
+	}
+	if run.Baselined != 1 {
+		t.Fatalf("标杆资产已因设置标杆而有了快照，只有 web-02 该计入 baselined，实际 %d", run.Baselined)
+	}
+	findings := mustFindings(t, svc, run.ID)
+	if len(findings) != 1 {
+		t.Fatalf("应只有 web-02 的 os 偏差，实际 %+v", findings)
+	}
+	f := findings[0]
+	if f.AssetKey != "web-02" || f.Field != "os" || f.Kind != FindingDeviation || f.Level != FindingWarning {
+		t.Fatalf("偏差内容不符：%+v", f)
+	}
+	if f.Expected != "Ubuntu 24.04" || f.Actual != "CentOS 7.9" {
+		t.Fatalf("偏差的期望值与实际值不符：%+v", f)
+	}
+
+	if err := svc.ClearBaseline(TypeHost); err != nil {
+		t.Fatalf("清除标杆失败: %v", err)
+	}
+	after, err := svc.RunInspect(InspectScope{}, "alice")
+	if err != nil {
+		t.Fatalf("巡检失败: %v", err)
+	}
+	if fs := mustFindings(t, svc, after.ID); len(fs) != 0 {
+		t.Fatalf("清除标杆后不应再有偏差，实际 %+v", fs)
+	}
+}
+
+// 资源范围必须下推到巡检：受限用户只检自己范围内的资产，
+// 否则会出现"巡检报了某个资产、列表里却找不到它"。
+func TestRunInspectRespectsResourceScope(t *testing.T) {
+	svc, _ := newTestService(t)
+	svc.now = func() int64 { return 1_700_000_300_000 }
+	for _, name := range []string{"web-01", "db-01"} {
+		if _, _, err := svc.Apply(hostObservation(name, nil)); err != nil {
+			t.Fatalf("写入 %s 失败: %v", name, err)
+		}
+	}
+
+	scoped, err := svc.RunInspect(InspectScope{Filter: ListFilter{Nodes: []string{"web-01"}}}, "alice")
+	if err != nil {
+		t.Fatalf("巡检失败: %v", err)
+	}
+	if scoped.Assets != 1 || scoped.Baselined != 1 {
+		t.Fatalf("范围内应只有 1 个资产：%+v", scoped)
+	}
+	if scoped.Scope != "scope:mine" {
+		t.Fatalf("受限巡检的范围描述应为 scope:mine，实际 %q", scoped.Scope)
+	}
+
+	// 空节点集合 = 受限但无可见节点：恒空（不能退化成"检全部"）
+	empty, err := svc.RunInspect(InspectScope{Filter: ListFilter{Nodes: []string{}}}, "alice")
+	if err != nil {
+		t.Fatalf("巡检失败: %v", err)
+	}
+	if empty.Assets != 0 || empty.Baselined != 0 {
+		t.Fatalf("无可见节点时应检 0 个资产：%+v", empty)
+	}
+}
+
+// 巡检记录与差异项必须能按记录检索：界面靠它回答"上次检了什么、差在哪"。
+func TestInspectRunsAndFindingsAreQueryable(t *testing.T) {
+	svc, _ := newTestService(t)
+	svc.now = func() int64 { return 1_700_000_400_000 }
+	if _, err := svc.RunInspect(InspectScope{Filter: ListFilter{TypeKey: TypeHost}}, "alice"); err != nil {
+		t.Fatalf("巡检失败: %v", err)
+	}
+	runs, err := svc.InspectRuns(0)
+	if err != nil {
+		t.Fatalf("列出巡检记录失败: %v", err)
+	}
+	if len(runs) != 1 || runs[0].Scope != "type:"+TypeHost {
+		t.Fatalf("巡检记录不符：%+v", runs)
+	}
+	// 非法记录 ID 必须报错，而不是静默返回空差异
+	if _, err := svc.InspectFindings(0, 0); err == nil {
+		t.Fatal("空记录 ID 应报错")
+	}
+}
+
+func mustFindings(t *testing.T, svc *Service, runID int64) []InspectFinding {
+	t.Helper()
+	fs, err := svc.InspectFindings(runID, 0)
+	if err != nil {
+		t.Fatalf("读取差异项失败: %v", err)
+	}
+	return fs
+}
+
+func hasFinding(fs []InspectFinding, field string, kind FindingKind, level FindingLevel) bool {
+	for _, f := range fs {
+		if f.Field == field && f.Kind == kind && f.Level == level {
+			return true
+		}
+	}
+	return false
+}
+
 // 迁移幂等：同一路径重复打开不应报错，也不应丢数据。
 func TestOpenIsIdempotentOnSamePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "asset.db")
