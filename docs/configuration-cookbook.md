@@ -273,3 +273,81 @@ logSources:
   `patterns` 收窄上传范围。
 - **多行合并按行首模式**：`startPattern` 写太宽会把整个文件吸成一条（受 `maxLines` 兜底），
   写太窄则堆栈会被拆散——拿真实日志试一次再上生产。
+
+## 三、告警规则（阈值与方向怎么定）
+
+面向「知道要监控什么，但不确定该填多少」的场景。规则入口：「告警 → 告警规则」，
+右上「新建规则」下拉里可直接套用内置模板（60 条，按中间件分组，每条都给出触发条件与阈值依据）。
+
+### 3.1 指标从哪里来
+
+指标下拉的内容来自**服务端指标字典**（`GET /api/v1/metrics/catalog`），它由守卫测试保证
+「目录里出现的每个指标名都真的有人产出」。所以下拉里能选到的，就是能配的。
+
+两类特殊标记：
+
+| 标记 | 含义 | 怎么配 |
+|---|---|---|
+| **不常设阈值** | 累计计数器（`*_total`、`*_requests`）、容量信息（`*_total_bytes`、`*_cores`）、运行时长（`*_uptime*`） | 它们不是不能比较，而是比较结果没有运维含义（给 uptime 设阈值不会告诉你任何事）。要用就用「变化」语义关注，或改用同族的比例/速率指标 |
+| **按维度命名** | 名字由运行时拼出：`mongodb_opcounters_query`、`nginx_access_requests_by_status`、`<来源>_log_<模式>_total` | 选中后**把占位部分替换成实际值**（日志类：先到「集中日志」页确认来源 ID 与模式名），否则规则查不到数据 |
+
+### 3.2 两个「静默失效」陷阱（比阈值本身更容易出事）
+
+这两类错误都**不会报错**，规则只是永远不触发——只能靠人来发现，所以表单专门做了提示：
+
+1. **方向配反**。典型例子：给「证书剩余天数」（`dial_test_cert_expiry`）配成 `> 15`，
+   语义变成"剩余天数大于 15 天才告警"——证书要过期了反而不告警。
+   规则表单在选中指标后会按该指标的**变差方向**自动纠正明显矛盾的运算符（当前是 `>` 而指标越小越糟 → 改成 `<`），
+   但**不会覆盖你特意选的方向**，所以自己也要看一眼。
+2. **指标名写错**。手输的名字（exporter 透传名、日志模式指标）不校验存在性，
+   拼错后规则照常保存、照常显示、永不触发。表单对不在字典里的名字会给橙色提示——
+   如果那是 exporter 透传名或日志模式指标，忽略提示即可。
+
+### 3.3 常见阈值速查
+
+| 场景 | 指标 | 运算符 | 建议阈值 | 持续 | 说明 |
+|---|---|---|---|---|---|
+| CPU 使用率 | `cpu_usage` | `>` | 85 | 5m | 偶发尖峰正常，靠「持续」过滤 |
+| 内存使用率 | `mem_used_percent` | `>` | 90 | 5m | 判真实余量看 `mem_available_bytes`（含可回收缓存） |
+| 磁盘使用率 | `disk_used_percent` | `>` | 85 | 5m | 已做真实磁盘汇总；写满会让日志与数据库同时不可用 |
+| 系统负载 | `load1` | `>` | 核数 × 2 | 5m | 8 核机器填 16 |
+| Swap | `swap_used_percent` | `>` | 50 | 10m | 大量占用通常意味着物理内存不足 |
+| TCP 重传 | `tcp_retransmit_rate` | `>` | 100 | 5m | 内网正常接近 0 |
+| MySQL 主从延迟 | `mysql_seconds_behind_master` | `>` | 30 | 5m | 读从库会拿到旧数据 |
+| MySQL 连接数 | `mysql_threads_connected` | `>` | 上限 × 0.8 | 5m | 上限见 `mysql_max_connections`（默认 500 → 400） |
+| MySQL 缓冲池命中率 | `mysql_innodb_buffer_pool_hit_rate` | `<` | 95 | 10m | 低于 95% 说明缓冲池装不下热数据 |
+| Redis 内存率 | `redis_used_memory_percent` | `>` | 85 | 5m | 需已设置 `maxmemory` |
+| Redis 命中率 | `redis_hit_rate` | `<` | 80 | 10m | 骤降常见于缓存穿透或键集中过期 |
+| Redis 碎片率 | `redis_memory_fragmentation_ratio` | `>` | 1.5 | 15m | 可开 `activedefrag` 或安排重启 |
+| Redis 集群故障槽 | `redis_cluster_slots_fail` | `>` | 0 | 5m | 非 0 即这部分键不可用 |
+| Nginx 连接丢弃 | `nginx_connection_drop_rate` | `>` | 1 | 5m | `accepts - handled` 增长，backlog 打满 |
+| Kafka 副本不足分区 | `kafka_under_replicated_partitions` | `>` | 0 | 5m | 持续非 0：有 Broker 掉线 |
+| Kafka 离线分区 | `kafka_offline_partitions` | `>` | 0 | 2m | 任何非 0 都意味着分区不可读写 |
+| Kafka 消费积压 | `kafka_consumer_lag_max` | `>` | 10 万 | 10m | 取所有消费组最大值，按业务吞吐调整 |
+| Kafka Controller | `kafka_active_controller_count` | `!=` | 1 | 2m | 正常恒为 1；>1 脑裂、=0 无主 |
+| ES 集群状态 | `es_cluster_status` | `>=` | 1（黄）/ 2（红） | 5m / 2m | 0 绿 1 黄 2 红；黄=无冗余、红=数据不可用 |
+| ES 未分配分片 | `es_unassigned_shards` | `>` | 0 | 10m | 黄/红的直接原因，先查磁盘水位 |
+| ZooKeeper 排队 | `zookeeper_outstanding_requests` | `>` | 10 | 5m | 常见于磁盘慢或事务日志同盘 |
+| RabbitMQ 队列积压 | `rabbitmq_queue_messages` | `>` | 1 万 | 10m | 消费者跟不上生产 |
+| RabbitMQ 文件描述符 | `rabbitmq_fd_used` | `>` | 5 万 | 10m | 接近 ulimit 会出现连接被拒 |
+| ClickHouse 合并 | `clickhouse_merges_running` | `>` | 20 | 10m | 写入过快或分区粒度过细 |
+| MongoDB 副本延迟 | `mongodb_repl_lag` | `>` | 10 | 5m | 读从库会拿到旧数据 |
+| RocketMQ 积压 | `rocketmq_message_accumulation` | `>` | 1 万 | 10m | 按业务吞吐调整 |
+| FastDFS 离线 Storage | `fastdfs_storage_offline_count` | `>` | 0 | 5m | 容量与冗余同时下降 |
+| K8s 异常 Deployment | `k8s_deployments_unhealthy` | `>` | 0 | 10m | 多为镜像拉取或探针失败 |
+| K8s Pending Pod | `k8s_pods_pending` | `>` | 10 | 10m | 资源不足或调度约束无法满足 |
+| 拨测失败 | `dial_test_up` | `<=` | 0 | 3m | 按拨测任务维度上报 |
+| 拨测延迟 | `dial_test_latency` | `>` | 2000 | 5m | 含 DNS 与 TLS，按 SLO 调整 |
+| 证书即将到期 | `dial_test_cert_expiry` | `<` | 15（天） | 1h | **越小越糟**，方向别配反 |
+| 端口不可达 | `port_up` | `<=` | 0 | 5m | Agent 侧 TCP 探测 |
+| 日志采集不可用 | `log_up` | `<=` | 0 | 10m | "配了却没有数据"的第一现场信号 |
+| 日志丢弃 | `log_dropped_total` | `>` | 0 | 10m | 丢弃是正常结果，但不该持续发生 |
+
+### 3.4 配之前先确认「有数据」
+
+规则**不会**因为指标没有数据而报错，只会安静地不触发。所以新配一条规则前，建议先到
+「指标浏览」页搜一下这个指标名：
+
+- 能查到数据 → 直接配；
+- 一条序列都没有 → 先解决采集（指标浏览会把目录里但未上线的指标标出来），
+  否则你会以为"规则配好了"，实际等到故障发生才发现它从来没生效。

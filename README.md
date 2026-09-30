@@ -1641,7 +1641,7 @@ journalctl -u monitor-proxy-hub -f
 | POST | `/api/v1/rules/{id}/toggle-silence` | 静音 / 取消静音规则 |
 | GET | `/api/v1/rules/export` | 导出规则 |
 | POST | `/api/v1/rules/import` | 导入规则 |
-| GET | `/api/v1/rules/templates` | 规则模板列表 |
+| GET | `/api/v1/rules/templates` | 规则模板列表（60 条，按中间件分组，带触发条件与阈值依据） |
 | GET | `/api/v1/inhibit` | 抑制规则查询 |
 | PUT | `/api/v1/inhibit` | 抑制规则全量更新（热生效） |
 | GET | `/api/v1/grouping` | 告警分组配置查询 |
@@ -1653,11 +1653,29 @@ journalctl -u monitor-proxy-hub -f
 > 事件管道的**场景化示例模板**与可用变量（内置标签、事件字段、`{{ts .StartsAt}}` 时间格式化）
 > 见 `docs/configuration-cookbook.md`；页面上「站点与品牌 → 告警事件管道」也内置了
 > 「示例模板」下拉，可先预览再一键追加（追加不覆盖已有规则）。
+
 | GET | `/api/v1/maintenance` | 维护窗口查询 |
 | PUT | `/api/v1/maintenance` | 维护窗口设置 |
 | GET | `/api/v1/notify` | 通知配置查询 |
 | PUT | `/api/v1/notify` | 通知配置保存（热生效） |
 | POST | `/api/v1/notify/test` | 发送测试通知 |
+
+### 告警规则的指标从哪来（指标字典）
+
+规则表单里的指标下拉来自**服务端指标字典** `internal/server/metrics/`（`GET /api/v1/metrics/catalog`
+的 `alertGroups`），不是前端硬编码的一张短表——后者曾只覆盖 7 组指标，导致 MySQL/Nginx/Kafka/ES/拨测证书
+一条都选不到，而界面上看不出「少了什么」。
+
+- **两条守卫固定住这个不变量**：目录里出现的每个指标名，必须能在 `internal/agent/collector`、
+  `internal/server/receiver`、`internal/server/dialtest` 里找到产出方（名字写错的症状是静默失效：
+  指标浏览查不到数据、规则永不触发，都不报错）；每条规则模板的运算符方向必须与指标的
+  **变差方向**（`WorseWhen`）一致（给「证书剩余天数」配 `>` 是这类模板最经典的错）。
+- **两类指标有标记**：「不常设阈值」（累计计数器 / 容量 / 运行时长）与「按维度命名」
+  （`mongodb_opcounters_query`、`nginx_access_requests_by_status`、`<来源>_log_<模式>_total`，
+  需要把占位替换成实际值）。手输不在字典里的名字（exporter 透传名等）是允许的，但表单会给出
+  橙色提示——那是"规则永不触发"最隐蔽的来源。
+- **阈值怎么填**：`docs/configuration-cookbook.md` §三 给出了各中间件的建议阈值、方向与理由，
+  规则表单的「新建规则」下拉里也能直接套用这 60 条模板（自动创建的只有其中 20 条跨环境通用的）。
 
 ### 安全中心与审计
 

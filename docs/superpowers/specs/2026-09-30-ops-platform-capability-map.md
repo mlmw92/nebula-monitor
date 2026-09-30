@@ -46,7 +46,7 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 
 | # | 领域 | 功能点 | 已实现 | 部分实现 | 未实现 | 本次最高优先级 |
 |---|---|---|---|---|---|---|
-| 1 | 监控告警 | 9 | 6 | 0 | 3 | P1 |
+| 1 | 监控告警 | 10 | 7 | 0 | 3 | P1 |
 | 2 | 资产 / CMDB | 9 | 6 | 2 | 1 | **P0** |
 | 3 | 配置管理 | 6 | 2 | 0 | 4 | P2 |
 | 4 | 自动化执行 | 6 | 0 | 3 | 3 | P1 |
@@ -60,9 +60,9 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 | 12 | 报表大屏 | 8 | 6 | 0 | 2 | P2 |
 | 13 | 权限审计 | 7 | 5 | 0 | 2 | P0 |
 | 14 | 开放集成 | 7 | 4 | 0 | 3 | P2 |
-| | **合计** | **92** | **44** | **9** | **39** | |
+| | **合计** | **93** | **45** | **9** | **39** | |
 
-**一句话结论**：采集、告警、存储、权限、审计、离线交付这一侧**已经很扎实**（37 项已实现多集中于此）；缺口集中在**"从数据到管理"的四件事——模型化（资产）、操作面（容器/执行）、索引化（日志/检索）、闭环化（工单/审批/自愈）**。
+**一句话结论**：采集、告警、存储、权限、审计、离线交付这一侧**已经很扎实**（45 项已实现多集中于此）；缺口集中在**"从数据到管理"的四件事——模型化（资产）、操作面（容器/执行）、索引化（日志/检索）、闭环化（工单/审批/自愈）**。
 
 ## 三、逐领域功能点表
 
@@ -71,7 +71,8 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 | 功能点 | 状态 | 现状与依据 | 优先级 | 复杂度 | 前置依赖 | 归属 |
 |---|---|---|---|---|---|---|
 | 主机指标采集（CPU/内存/负载/磁盘/网络/进程/硬件信息） | 已实现 | `internal/agent/collector/`（hostinfo 等），`README.md` §主机监控 | — | — | — | — |
-| 中间件监控（10 类，直连 + exporter 双模式） | 已实现 | `internal/agent/collector/{redis,mysql,postgres,nginx,kafka,docker,rocketmq,k8s,mongo,fastdfs}.go` | — | — | — | — |
+| 中间件监控（15 类，直连 + exporter 双模式） | 已实现 | `internal/agent/collector/{redis,mysql,postgres,nginx,kafka,docker,rocketmq,k8s,mongo,fastdfs,rabbitmq,elasticsearch,clickhouse,nacos,zookeeper}.go`；类型清单唯一出处 `internal/server/mwreg/builtin.go` | — | — | — | — |
+| **指标字典与告警规则模板**（可配项目录 + 阈值范本） | 已实现 | `internal/server/metrics/`（目录 + 守卫：目录名必须有产出方）、`internal/server/alert/rules.go:DefaultTemplates`（60 条，按中间件分组 + 阈值依据）、`GET /api/v1/metrics/catalog` 的 `alertGroups` 供规则表单；守卫含「模板方向必须与指标变差方向一致」 | — | — | — | D2 |
 | 服务拨测（HTTP/HTTPS/TCP/ICMP + 证书到期） | 已实现 | `internal/server/dialtest/scheduler.go` | — | — | — | — |
 | 规则类型（阈值/主机离线/中间件离线/主从切换/集群损坏/安全事件） | 已实现 | `internal/model/metric.go:649-661`（`RuleTypeThreshold`…`RuleTypeSecurityEvent`） | — | — | — | — |
 | 告警治理（三层静默 / 抑制 / 分组 / 收敛 / 升级 / 维护窗口） | 已实现 | `internal/server/alert/`（含 `engine.go` 求值、`rules.go:DefaultTemplates`） | — | — | — | — |
