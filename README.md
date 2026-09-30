@@ -216,6 +216,8 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 - **上报状态**（上报正常 / 失联 / 归档）与**来源**（自动 / 人工 / 混合）均为**派生值**，不单独落库：归档指从无采集的纯人工建档资产，失联指超过 **30 分钟**未再上报（判定依据是「最后一次采集上报时刻」`asset_seen`，与属性值是否变化无关）。它描述的是「Agent 是否还在上报这条资产」，**不表示实例/容器自身可用**——后者是名称副标题里的采集结论（Docker 显示容器状态 `运行中/已退出`，其它实例显示 `实例可达/不可达`）。责任人用约定人工属性键 `owner`。
 - 「新建资产」「维护人工值」「恢复采集值」需 `assets:write`，提交前有二次确认（该权限点为高风险）。
 - **配置巡检（差异比对）**：新增菜单「资产与配置 → 配置巡检」（路由 `/inspect`）。三层比对里本次落地两层——**L2 快照前后 diff**（新增 `added` / 变更 `changed` / 缺失 `missing`）与 **L3 与期望值比对**（`deviation`）。期望值来自**标杆资产**：在资产详情抽屉里把一台标准机「设为期望值」，同类型的其它资产与之不一致的字段即产出合规偏差（每个类型只保留一个标杆）。巡检**只给结论、不自动修复**；首次见到的资产只建立基线（界面显式说明"数据不足 ≠ 不合规"）；`up` / `status` / `uptime` 等**运行态字段默认不参与比对**，避免探活翻转把差异清单淹掉。权限点：`inspect:read`（看记录与差异，默认授予运维与只读角色）、`inspect:run`（触发巡检，仅运维管理员）——刻意把「跑」与「改」分开：巡检不改任何配置。单次巡检覆盖资产上限 5000，超限会**显式标注截断**而不是静默少检。
+- **忽略（软删）与彻底删除**：采集来的资产由上报驱动，**删了会在下一轮上报时重建**，所以对它们正确的动作是**忽略**——从台账与统计中隐藏、巡检也不再看它，但**采集仍在继续**（恢复后看到的是最新状态），且下一轮上报不会把忽略冲掉。摘要是单独给出「已忽略」计数的（可下钻），否则用户会以为忽略过的东西找不回来了。**彻底删除**只对纯人工建档的资产开放（采集资产返回 409 并提示改用忽略），删除会级联清掉属性/关系/变更/快照，若该资产是某类型的巡检标杆会一并清除。忽略/恢复只进操作审计，不写字段级变更历史（那里只记属性值的变化）。
+- **标签**：独立于属性的**分类维度**（业务系统 / 环境 / 机房…），支持按 `key` 或 `key:value` 筛选（如 `label=env:prod`），列表与详情展示为 chips，变更进字段级变更历史（字段名 `label:<key>`）。与属性的分工：属性是采集值/人工值（含 `owner`），参与巡检比对；标签只用于展示与筛选，**不参与巡检**。
 - 设计与实施记录见 `docs/superpowers/specs/2026-09-30-asset-cmdb-design.md`（含已落地项与有意差异）。
 
 **智能分析与预测（只读决策辅助）**
@@ -1565,7 +1567,7 @@ journalctl -u monitor-proxy-hub -f
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/v1/assets?type=&node=&keyword=&limit=&offset=` | 资产列表（服务端分页；按资源范围裁剪，范围外按 404/不返回） |
+| GET | `/api/v1/assets?type=&node=&keyword=&label=&ignored=&limit=&offset=` | 资产列表（服务端分页；`label=key\|key:value` 按标签筛；`ignored=with\|only` 控制已忽略可见性，默认隐藏） |
 | GET | `/api/v1/assets/summary?...` | 台账健康度（总数 / 失联 / 无责任人 / 冲突 / 近 7 天变更） |
 | GET | `/api/v1/assets/{id}` | 资产详情（属性双来源 + 生效值 + 派生状态/来源/责任人） |
 | GET | `/api/v1/assets/{id}/history?limit=` | 字段级变更历史（含操作人） |
@@ -1575,6 +1577,10 @@ journalctl -u monitor-proxy-hub -f
 | PUT | `/api/v1/assets/{id}` | 维护人工值 / 恢复采集值（`assets:write`；不接受改归属节点） |
 | POST | `/api/v1/assets/{id}/baseline` | 设为该资产类型的期望值（标杆，`assets:write`） |
 | DELETE | `/api/v1/assets/{id}/baseline` | 清除该资产类型的期望值（`assets:write`） |
+| POST | `/api/v1/assets/{id}/ignore` | 忽略（从台账隐藏，可恢复；采集继续，`assets:write`） |
+| POST | `/api/v1/assets/{id}/restore` | 解除忽略（幂等，`assets:write`） |
+| POST | `/api/v1/assets/{id}/purge` | 彻底删除（**仅纯人工建档资产**；采集资产 409 并提示改用忽略，`assets:write`） |
+| PUT | `/api/v1/assets/{id}/labels` | 维护标签（`labels` 写入/覆盖 + `remove` 删除，`assets:write`） |
 | POST | `/api/v1/inspect/runs` | 触发一次配置巡检（`inspect:run`；范围同台账筛选） |
 | GET | `/api/v1/inspect/runs?limit=` | 巡检记录（`inspect:read`） |
 | GET | `/api/v1/inspect/runs/{id}/findings?limit=` | 差异项（按严重级别排序） |

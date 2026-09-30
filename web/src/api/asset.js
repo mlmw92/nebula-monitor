@@ -66,3 +66,18 @@ export const clearAssetBaseline = (id) => http.del('/api/v1/assets/' + encodeURI
 // 配置快照（巡检基线；只在首次或字段真变化时新增）
 export const listAssetSnapshots = (id, limit = 0) =>
   http.get(withQuery('/api/v1/assets/' + encodeURIComponent(id) + '/snapshots', { limit }))
+
+// ---- 生命周期与标签 ----
+// 忽略 = 从台账隐藏（可恢复、不停止采集）；彻底删除**仅限纯人工建档资产**
+// （采集资产会被下一轮上报重建，服务端会返回 409 并提示改用忽略）。
+
+export const ignoreAsset = (id, reason = '') =>
+  http.post('/api/v1/assets/' + encodeURIComponent(id) + '/ignore', { reason })
+
+export const restoreAsset = (id) => http.post('/api/v1/assets/' + encodeURIComponent(id) + '/restore', {})
+
+export const purgeAsset = (id) => http.post('/api/v1/assets/' + encodeURIComponent(id) + '/purge', {})
+
+// 标签维护：labels 写入/覆盖，remove 删除；两者键冲突时服务端返回 400。
+export const updateAssetLabels = (id, labels, remove = []) =>
+  http.put('/api/v1/assets/' + encodeURIComponent(id) + '/labels', { labels, remove })

@@ -31,6 +31,11 @@
           <template #icon><el-icon :size="20"><Switch /></el-icon></template>
         </KpiCard>
       </div>
+      <div class="kpi-click" title="只看已从台账隐藏（忽略）的资产；采集仍在继续，可逐个恢复" @click="drillIgnored">
+        <KpiCard :value="summary.ignored" label="已忽略" hint="已从台账隐藏" tone="conn">
+          <template #icon><el-icon :size="20"><Hide /></el-icon></template>
+        </KpiCard>
+      </div>
       <div class="kpi-click kpi-static">
         <KpiCard :value="summary.changes" label="近 7 天变更" hint="含采集与人工" tone="conn">
           <template #icon><el-icon :size="20"><DataLine /></el-icon></template>
@@ -82,11 +87,26 @@
         >
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
+        <div class="field">
+          <span class="field-label">标签</span>
+          <el-input
+            v-model="filter.label"
+            clearable
+            placeholder="如 env:prod 或 env"
+            style="width: 150px"
+            title="按标签筛选：key:value 精确匹配值；只填 key 表示「存在该标签」"
+            @keyup.enter="reload"
+          />
+        </div>
+        <el-checkbox v-model="showIgnored" title="连已忽略的资产一起显示（它们带「已忽略」标记，可在这里恢复）">
+          含已忽略
+        </el-checkbox>
         <el-button type="primary" :loading="loading" @click="reload">查询</el-button>
         <el-button @click="resetFilter">重置</el-button>
         <!-- 下钻态可见且可撤销：否则「点了无责任人」之后列表为什么变少会没人说得清 -->
         <el-tag v-if="drill.ownerMissing" closable type="warning" @close="clearDrill">下钻：无责任人</el-tag>
         <el-tag v-if="drill.conflict" closable type="warning" @close="clearDrill">下钻：人工/采集冲突</el-tag>
+        <el-tag v-if="drill.ignored" closable type="info" @close="clearDrill">下钻：已忽略</el-tag>
       </div>
 
       <div class="action-bar">
@@ -118,8 +138,21 @@
       >
         <el-table-column label="资产名称" min-width="260">
           <template #default="{ row }">
-            <div class="name">{{ row.name || row.naturalKey }}</div>
+            <div class="name">
+              {{ row.name || row.naturalKey }}
+              <!-- 已忽略的行只在「含已忽略」视图里出现，必须显式标记，否则会被当成正常台账资产 -->
+              <span
+                v-if="row.ignored"
+                class="tag-ignored"
+                :title="`已从台账隐藏${row.ignoredBy ? '（' + row.ignoredBy + '）' : ''}${row.ignoreReason ? '：' + row.ignoreReason : ''}`"
+              >已忽略</span>
+            </div>
             <div class="sub">{{ subtitle(row) }}</div>
+            <div v-if="labelList(row).length" class="labels">
+              <span v-for="lb in labelList(row)" :key="lb.key" class="label-chip">
+                {{ lb.key }}<template v-if="lb.value">:{{ lb.value }}</template>
+              </span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="类型" width="140">
@@ -160,10 +193,30 @@
             <span v-else class="muted">未指派</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="openDetail(row)">详情</el-button>
             <el-button v-if="canWrite" link type="primary" @click.stop="openEdit(row)">编辑</el-button>
+            <!-- 低频且破坏性的动作收进「更多」：避免误点，也让行内保持清爽 -->
+            <el-dropdown v-if="canWrite" trigger="click" @command="(cmd) => onRowCommand(cmd, row)">
+              <el-button link type="primary" @click.stop>
+                更多<el-icon :size="12"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-if="!row.ignored" command="ignore">
+                    忽略（从台账隐藏）
+                  </el-dropdown-item>
+                  <el-dropdown-item v-else command="restore">
+                    恢复（重新纳入台账）
+                  </el-dropdown-item>
+                  <!-- 采集资产删了会被下一轮上报重建，所以只对纯人工资产提供彻底删除 -->
+                  <el-dropdown-item v-if="!row.hasDiscovery" command="purge" divided>
+                    彻底删除（仅人工资产）
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -195,6 +248,32 @@
           自然键 <code>{{ detail.naturalKey }}</code> · 资产 ID <code>{{ detail.displayId }}</code> ·
           首次发现 {{ fmtTime(detail.createdAt) }} ·
           最近上报 {{ detail.lastSeenAt ? relTime(detail.lastSeenAt) : '从未上报' }}
+        </div>
+
+        <!-- 已忽略：必须显式说明"它还在、只是被隐藏了"，否则用户会以为资产被删了 -->
+        <el-alert
+          v-if="detail.ignored"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="alert-gap"
+          :title="`该资产已从台账隐藏（忽略）${detail.ignoredBy ? ' · ' + detail.ignoredBy : ''}${detail.ignoredAt ? ' · ' + fmtTime(detail.ignoredAt) : ''}`"
+          :description="`${detail.ignoreReason ? '理由：' + detail.ignoreReason + '；' : ''}采集仍在继续，恢复后会看到最新状态。列表与统计默认不包含它。`"
+        />
+        <div v-if="detail.ignored && canWrite" class="drawer-actions">
+          <el-button type="primary" @click="doRestore(detail)">恢复（重新纳入台账）</el-button>
+        </div>
+
+        <!-- 标签：与属性分开的分类维度 -->
+        <div class="d-labels">
+          <span class="d-labels-title">标签</span>
+          <template v-if="labelList(detail).length">
+            <span v-for="lb in labelList(detail)" :key="lb.key" class="label-chip">
+              {{ lb.key }}<template v-if="lb.value">:{{ lb.value }}</template>
+            </span>
+          </template>
+          <span v-else class="muted">未打标签（用于分类与筛选，如 env:prod、system:order）</span>
+          <el-button v-if="canWrite" link type="primary" class="d-labels-edit" @click="openEdit(detail)">编辑标签</el-button>
         </div>
 
         <el-tabs v-model="tab">
@@ -433,6 +512,20 @@
             <el-button link type="primary" @click="editAttrs.push({ key: '', value: '' })">+ 添加属性</el-button>
           </div>
         </el-form-item>
+        <el-form-item label="标签">
+          <div class="attr-editor">
+            <div class="muted label-hint">
+              分类维度（如 env:prod、system:order），与「其它属性」不同：标签只用于筛选与展示，不参与巡检比对。
+              删除某一行即删除该标签；键留空的行会被忽略。
+            </div>
+            <div v-for="(row, i) in editLabels" :key="i" class="attr-row">
+              <el-input v-model="row.key" placeholder="标签键，如 env" style="width: 42%" />
+              <el-input v-model="row.value" placeholder="值，如 prod（可留空）" style="width: 42%" />
+              <el-button link type="danger" @click="removeLabelRow(i)">删除</el-button>
+            </div>
+            <el-button link type="primary" @click="addLabelRow">+ 添加标签</el-button>
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
@@ -456,6 +549,10 @@ import {
   listInspectBaselines,
   setAssetBaseline,
   clearAssetBaseline,
+  ignoreAsset,
+  restoreAsset,
+  purgeAsset,
+  updateAssetLabels,
 } from '../../api/asset'
 import { useAuth } from '../../composables/useAuth'
 // 与中间件 / 容器等页面统一的 KPI 卡片（顶部彩条 + 图标 + 数值）
@@ -472,11 +569,11 @@ const pageSize = ref(20)
 const loading = ref(false)
 const saving = ref(false)
 const loadError = ref('')
-const summary = ref({ total: 0, missing: 0, noOwner: 0, conflict: 0, changes: 0 })
+const summary = ref({ total: 0, missing: 0, noOwner: 0, conflict: 0, changes: 0, ignored: 0 })
 
-const filter = ref({ type: '', status: '', source: '', node: '', keyword: '' })
-// 摘要下钻的两个布尔条件（无责任人 / 有冲突）：不在下拉里，单独记状态以便显示与撤销
-const drill = ref({ ownerMissing: false, conflict: false })
+const filter = ref({ type: '', status: '', source: '', node: '', keyword: '', label: '', ignored: '' })
+// 摘要下钻的三个条件（无责任人 / 有冲突 / 已忽略）：不在下拉里，单独记状态以便显示与撤销
+const drill = ref({ ownerMissing: false, conflict: false, ignored: false })
 
 const detailVisible = ref(false)
 const detail = ref(null)
@@ -499,6 +596,9 @@ const ownerInput = ref('')
 const editHadOwner = ref(false)
 // 编辑前的名称：用于判断「名称是否真的被改过」，未改则不提交该字段
 const editOriginalName = ref('')
+// 标签编辑：表单里的行 + 原标签（后者用于推断"哪些键被删掉了"）
+const editLabels = ref([])
+const editOriginalLabels = ref({})
 
 // 责任人的约定属性键，与服务端 asset.OwnerKey 一致
 const OWNER_KEY = 'owner'
@@ -644,6 +744,88 @@ const isBaseline = computed(() => {
   return !!(b && String(b.assetId) === String(d.id))
 })
 
+// 「含已忽略」开关：映射到 filter.ignored（with / 空串=默认隐藏）
+const showIgnored = computed({
+  get: () => filter.value.ignored === 'with',
+  set: (v) => {
+    filter.value = { ...filter.value, ignored: v ? 'with' : '' }
+    reload()
+  },
+})
+
+// labelFingerprint 把标签集规范化成可比较的字符串（按键排序）：
+// 直接 JSON.stringify 会受键顺序影响，出现"没改却判定改了"的假阳性。
+function labelFingerprint(labels) {
+  return Object.keys(labels || {})
+    .sort()
+    .map((k) => `${k}=${labels[k]}`)
+    .join('\n')
+}
+
+// labelList 把标签对象转成可渲染的数组（键排序，展示稳定）
+function labelList(row) {
+  const labels = (row && row.labels) || {}
+  return Object.keys(labels)
+    .sort()
+    .map((key) => ({ key, value: labels[key] }))
+}
+
+// 标签行操作（编辑对话框内）
+function addLabelRow() {
+  editLabels.value.push({ key: '', value: '' })
+}
+function removeLabelRow(idx) {
+  editLabels.value.splice(idx, 1)
+}
+
+// 行内「更多」菜单：忽略 / 恢复 / 彻底删除
+function onRowCommand(cmd, row) {
+  if (cmd === 'ignore') doIgnore(row)
+  else if (cmd === 'restore') doRestore(row)
+  else if (cmd === 'purge') doPurge(row)
+}
+
+// 忽略：从台账隐藏。采集仍在继续，因此这不是删除，也不会被下一轮上报复活。
+async function doIgnore(row) {
+  const reason = await ElMessageBox.prompt(
+    `${row.name || row.naturalKey}\n\n忽略后该资产从台账与统计中隐藏（采集仍在继续），可随时恢复。`,
+    '忽略资产',
+    { type: 'warning', confirmButtonText: '忽略', cancelButtonText: '取消', inputPlaceholder: '忽略理由（可选，便于日后理解为什么藏了它）' },
+  ).then((r) => r.value).catch(() => null)
+  if (reason === null) return
+  try {
+    await ignoreAsset(row.id, reason || '')
+    ElMessage.success('已忽略（可在筛选栏勾选「含已忽略」查看或恢复）')
+    await afterWrite(row.id)
+  } catch (e) {
+    ElMessage.error(e.message || '忽略失败')
+  }
+}
+
+// 恢复：重新纳入台账
+async function doRestore(row) {
+  try {
+    await restoreAsset(row.id)
+    ElMessage.success('已恢复到台账')
+    await afterWrite(row.id)
+  } catch (e) {
+    ElMessage.error(e.message || '恢复失败')
+  }
+}
+
+// 彻底删除：仅纯人工资产（采集资产会被下一轮上报重建，服务端也会拒绝）
+async function doPurge(row) {
+  if (!(await confirmWrite(`将彻底删除「${row.name || row.naturalKey}」及其变更历史与快照，删除后不可恢复`))) return
+  try {
+    await purgeAsset(row.id)
+    ElMessage.success('已彻底删除')
+    detailVisible.value = false
+    await afterWrite(row.id)
+  } catch (e) {
+    ElMessage.error(e.message || '删除失败')
+  }
+}
+
 // 列表与摘要共用同一套筛选参数，保证「点数字看到的」与「数字本身」一致
 function filterParams() {
   const params = {
@@ -652,6 +834,9 @@ function filterParams() {
     source: filter.value.source,
     node: filter.value.node,
     keyword: filter.value.keyword,
+    label: filter.value.label,
+    // ignored 空串=默认隐藏已忽略；with=连已忽略一起看
+    ignored: filter.value.ignored,
   }
   if (drill.value.ownerMissing) params.ownerMissing = 'true'
   if (drill.value.conflict) params.conflict = 'true'
@@ -682,30 +867,45 @@ function reload() {
 }
 
 function resetFilter() {
-  filter.value = { type: '', status: '', source: '', node: '', keyword: '' }
-  drill.value = { ownerMissing: false, conflict: false }
+  filter.value = { type: '', status: '', source: '', node: '', keyword: '', label: '', ignored: '' }
+  drill.value = { ownerMissing: false, conflict: false, ignored: false }
   reload()
 }
 
-// 健康度下钻：直接改筛选条件并回到第一页（改完的态会在筛选行以标签显示）
+// 健康度下钻：直接改筛选条件并回到第一页（改完的态会在筛选行以标签显示）。
+// 每次下钻都先清掉其它下钻态：否则"先看无责任人、再点已忽略"会叠加成两个条件，
+// 界面上的数字与列表就会对不上，而用户很难发现是残留条件造成的。
+function clearDrillState() {
+  drill.value = { ownerMissing: false, conflict: false, ignored: false }
+  filter.value = { ...filter.value, ignored: '' }
+}
 function drillAll() {
   resetFilter()
 }
 function drillStatus(status) {
-  drill.value = { ownerMissing: false, conflict: false }
+  clearDrillState()
   filter.value = { ...filter.value, status }
   reload()
 }
 function drillNoOwner() {
-  drill.value = { ownerMissing: true, conflict: false }
+  clearDrillState()
+  drill.value.ownerMissing = true
   reload()
 }
 function drillConflict() {
-  drill.value = { conflict: true, ownerMissing: false }
+  clearDrillState()
+  drill.value.conflict = true
+  reload()
+}
+// 已忽略下钻：看"我藏起来的那些资产"，可逐个恢复
+function drillIgnored() {
+  clearDrillState()
+  drill.value.ignored = true
+  filter.value = { ...filter.value, ignored: 'only' }
   reload()
 }
 function clearDrill() {
-  drill.value = { ownerMissing: false, conflict: false }
+  clearDrillState()
   reload()
 }
 
@@ -758,6 +958,9 @@ function openEdit(row) {
   form.value = { typeKey: row.typeKey, naturalKey: row.naturalKey, name: row.name || '', node: row.node || '' }
   ownerInput.value = row.owner || ''
   editHadOwner.value = !!row.owner
+  // 标签：预填当前值，并在提交时对比出"被删掉的键"（不需要额外的删除态）
+  editOriginalLabels.value = { ...(row.labels || {}) }
+  editLabels.value = Object.entries(row.labels || {}).map(([key, value]) => ({ key, value }))
   // 预填当前人工值：采集值不预填，避免误以为「提交就会覆盖采集值」
   editAttrs.value = (row.attrs || [])
     .filter((a) => a.source === 'manual' && a.key !== OWNER_KEY)
@@ -830,15 +1033,33 @@ async function submitEdit() {
   const name = form.value.name.trim()
   // 名称预填的是原值：只有真正改过才提交（服务端把「空名称」视为不修改）
   const nameChanged = name !== '' && name !== editOriginalName.value.trim()
-  if (!nameChanged && !Object.keys(attrs).length && !resetAttrs.length) {
+
+  // 标签：本次表单里的键值；原标签里不在其中的键就是要删除的
+  const labels = {}
+  for (const row of editLabels.value) {
+    const key = (row.key || '').trim()
+    if (key) labels[key] = (row.value || '').trim()
+  }
+  const remove = Object.keys(editOriginalLabels.value).filter((k) => !(k in labels))
+  const labelsChanged = labelFingerprint(labels) !== labelFingerprint(editOriginalLabels.value)
+
+  if (!nameChanged && !labelsChanged && !Object.keys(attrs).length && !resetAttrs.length) {
     ElMessage.warning('没有需要更新的内容')
     return
   }
-  if (!(await confirmWrite(nameChanged ? `将资产名称改为「${name}」，并写入这些人工值；采集值不会被覆盖` : '将写入这些人工值；采集值不会被覆盖'))) return
+  const what = []
+  if (nameChanged) what.push(`资产名称改为「${name}」`)
+  if (labelsChanged) what.push('更新标签')
+  if (Object.keys(attrs).length || resetAttrs.length) what.push('写入人工值')
+  if (!(await confirmWrite(`将${what.join('、')}；采集值不会被覆盖`))) return
   saving.value = true
   try {
-    await updateAsset(id, { name: nameChanged ? name : '', attrs, resetAttrs })
-    ElMessage.success('已保存人工值')
+    // 名称与人工值走台账接口；标签有独立接口（职责分开：属性 vs 分类维度）
+    if (nameChanged || Object.keys(attrs).length || resetAttrs.length) {
+      await updateAsset(id, { name: nameChanged ? name : '', attrs, resetAttrs })
+    }
+    if (labelsChanged) await updateAssetLabels(id, labels, remove)
+    ElMessage.success('已保存')
     editVisible.value = false
     await afterWrite(id)
   } catch (e) {
@@ -1036,6 +1257,54 @@ onMounted(load)
 .src-mixed {
   color: var(--warn);
   font-weight: 500;
+}
+/* 标签：分类维度的展示（列表名称下与抽屉头部各一处） */
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.label-chip {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.14);
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 16px;
+  font-family: var(--mono);
+}
+/* 已忽略标记：只在「含已忽略」视图里出现，必须显眼 */
+.tag-ignored {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 15px;
+  vertical-align: 1px;
+}
+.d-labels {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+.d-labels-title {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-right: 2px;
+}
+.d-labels-edit {
+  margin-left: auto;
+}
+.label-hint {
+  line-height: 18px;
+  margin-bottom: 6px;
 }
 .name {
   color: var(--accent);

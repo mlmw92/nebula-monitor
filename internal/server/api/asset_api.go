@@ -89,6 +89,10 @@ type assetView struct {
 	Attrs         []assetAttrView   `json:"attrs"`
 	// Labels 是管理标签（分类维度），与属性分开：属性是采集/人工的值，标签用于筛选与展示。
 	Labels map[string]string `json:"labels"`
+	// HasDiscovery 表示该资产有采集值（由 Agent 上报自动发现）。
+	// 前端据此决定是否提供「彻底删除」：采集资产删了会被下一轮上报重建，
+	// 那种入口点了也没意义（服务端仍会再拦一次）。
+	HasDiscovery bool `json:"hasDiscovery"`
 	// Ignored 表示该资产已从台账隐藏；列表默认不返回它们，但会返回 ignored 计数。
 	Ignored      bool   `json:"ignored"`
 	IgnoreReason string `json:"ignoreReason,omitempty"`
@@ -175,7 +179,8 @@ func toAssetView(a asset.Asset, staleBefore int64) assetView {
 		ManualCount: manual, ConflictCount: conflict, ConflictKeys: a.ConflictKeys(),
 		Values: map[string]string{}, Attrs: make([]assetAttrView, 0, len(a.Attrs)),
 		Labels: map[string]string{},
-		Ignored: a.Ignored, IgnoreReason: a.IgnoreReason, IgnoredBy: a.IgnoredBy, IgnoredAt: a.IgnoredAt,
+		HasDiscovery: a.HasDiscovery(),
+		Ignored:      a.Ignored, IgnoreReason: a.IgnoreReason, IgnoredBy: a.IgnoredBy, IgnoredAt: a.IgnoredAt,
 	}
 	for k, v := range a.Labels {
 		view.Labels[k] = v
