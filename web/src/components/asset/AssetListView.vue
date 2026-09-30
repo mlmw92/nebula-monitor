@@ -16,10 +16,10 @@
         <div class="h-value">{{ summary.total }}</div>
         <div class="h-hint">点击下钻</div>
       </div>
-      <div class="h-item" title="只看向上采集已过期（超过 5 分钟未上报）的资产" @click="drillStatus('missing')">
+      <div class="h-item" title="只看向上采集已过期（超过 30 分钟未上报）的资产" @click="drillStatus('missing')">
         <div class="h-label">失联</div>
         <div class="h-value" :class="{ danger: summary.missing > 0 }">{{ summary.missing }}</div>
-        <div class="h-hint">超 5 分钟未上报</div>
+        <div class="h-hint">超 30 分钟未上报</div>
       </div>
       <div class="h-item" title="只看向人工未指派责任人的资产" @click="drillNoOwner">
         <div class="h-label">无责任人</div>
@@ -79,9 +79,8 @@
 
       <div class="toolbar">
         <el-button v-if="canWrite" type="primary" @click="openCreate">新建资产</el-button>
-        <span class="tag" :class="{ locked: !canWrite }">
-          {{ canWrite ? 'assets:write' : '只读（缺 assets:write）' }}
-        </span>
+        <span v-if="canWrite" class="lock">assets:write</span>
+        <span v-else class="muted">只读（缺 assets:write）</span>
         <span class="muted" style="margin-left: auto">
           范围外资产按「不存在」返回，不做 403 区分；人工维护需二次确认
         </span>
@@ -113,7 +112,8 @@
         </el-table-column>
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
-            <span class="tag" :class="row.status">{{ statusLabel(row.status) }}</span>
+            <span class="dot" :class="row.status" />
+            <span :class="'st-' + row.status">{{ statusLabel(row.status) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="最近上报" width="130">
@@ -124,7 +124,7 @@
         </el-table-column>
         <el-table-column label="来源" width="100">
           <template #default="{ row }">
-            <span class="tag" :class="'src-' + row.source">{{ sourceLabel(row.source) }}</span>
+            <span :class="'src-' + row.source">{{ sourceLabel(row.source) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="责任人" width="110">
@@ -825,13 +825,12 @@ onMounted(load)
 }
 .health .h-item {
   padding: 0 22px;
-  border-right: 1px solid var(--border-strong, var(--border));
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
   cursor: pointer;
-  border-radius: 6px;
-  transition: background 0.15s;
+  transition: opacity 0.15s;
 }
 .health .h-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  opacity: 0.85;
 }
 .health .h-item:first-child {
   padding-left: 0;
@@ -842,11 +841,11 @@ onMounted(load)
 }
 .health .h-label {
   font-size: 13px;
-  color: var(--text-dim);
-  margin-bottom: 6px;
+  color: rgba(255, 255, 255, 0.65);
+  margin-bottom: 5px;
 }
 .health .h-value {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1;
   font-family: var(--mono);
@@ -858,9 +857,9 @@ onMounted(load)
   color: var(--danger);
 }
 .health .h-hint {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-top: 6px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 5px;
 }
 .health .spacer {
   flex: 1;
@@ -879,11 +878,21 @@ onMounted(load)
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.tag.locked {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-dim);
+/* 工具栏权限徽标：与原型的小锁样式对齐 */
+.lock {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid rgba(255, 180, 84, 0.45);
+  border-radius: 3px;
+  background: rgba(255, 180, 84, 0.1);
+  color: #ffb054;
+  font-size: 11px;
+  line-height: 16px;
 }
-/* 类型 / 状态 / 来源的配色：全局 .tag 只提供形状，颜色按语义在本页定义 */
+/* 类型 / 状态 / 来源的配色：
+   - 类型用 tag pill（与原型一致）；
+   - 列表里的状态用「圆点 + 文字」（原型表格列如此）；
+   - 列表里的来源用纯文字着色（原型表格列如此）。 */
 .tag.host {
   background: var(--accent-dim);
   color: var(--accent);
@@ -892,6 +901,7 @@ onMounted(load)
   background: rgba(167, 139, 250, 0.16);
   color: var(--violet);
 }
+/* 抽屉头部仍用 tag 展示状态，因此 .tag.missing / .tag.archived 保留 */
 .tag.missing {
   background: rgba(255, 93, 108, 0.16);
   color: var(--danger);
@@ -900,17 +910,43 @@ onMounted(load)
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-dim);
 }
-.tag.src-auto {
-  background: rgba(255, 255, 255, 0.06);
+/* 列表状态：圆点 + 文字 */
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: 1px;
+}
+.dot.online {
+  background: var(--accent);
+}
+.dot.missing {
+  background: var(--danger);
+}
+.dot.archived {
+  background: var(--text-dim);
+}
+.st-online {
+  color: var(--accent);
+}
+.st-missing {
+  color: var(--danger);
+}
+.st-archived {
   color: var(--text-dim);
 }
-.tag.src-manual {
-  background: var(--accent-dim);
+/* 列表来源：纯文字着色 */
+.src-auto {
+  color: var(--text-dim);
+}
+.src-manual {
   color: var(--violet);
 }
-.tag.src-mixed {
-  background: rgba(255, 180, 84, 0.16);
+.src-mixed {
   color: var(--warn);
+  font-weight: 500;
 }
 .name {
   color: var(--accent);

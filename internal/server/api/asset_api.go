@@ -91,9 +91,10 @@ type assetLinkView struct {
 
 // 失联判定阈值：超过它未再上报即视为 missing。
 //
-// 5 分钟是采集周期（默认 15s）的 20 倍，足以容忍一次采集抖动或 Agent 重启，
-// 又不会把"真掉线"藏起来。改动它会影响摘要「失联」与列表 status=missing 的口径，两者同源。
-const assetStaleThreshold = 5 * time.Minute
+// 原型标注为「超 30 分钟未上报」；对服务器资产而言，30 分钟既能覆盖一次 Agent 短暂失联或
+// 系统重启，又不会把真掉线藏太久。改动它会影响摘要「失联」与列表 status=missing 的口径，
+// 列表与摘要必须传同一个 StaleBefore。
+const assetStaleThreshold = 30 * time.Minute
 
 // assetChangeWindow 是摘要「近 N 天变更」的窗口。
 const assetChangeWindow = 7 * 24 * time.Hour
