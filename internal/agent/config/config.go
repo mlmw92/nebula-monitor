@@ -61,6 +61,56 @@ type Config struct {
 	LogSources []LogSourceConfig `yaml:"logSources"`
 	// LogOffsetsFile 是日志读取偏移的落盘路径（重启不丢进度、不重复上传）。
 	LogOffsetsFile string `yaml:"logOffsetsFile"`
+
+	// Guards 是本机护栏：机器自己决定允不允许平台下发操作动作（见 internal/agent/ops）。
+	Guards GuardsConfig `yaml:"guards"`
+}
+
+// GuardsConfig 是本机护栏配置。
+//
+// 为什么护栏在 Agent 侧而不只在 Server 侧：Agent 以 root 运行，Web 上的一个写权限
+// ≈ 一批机器的 root。因此"能不能在这台机器上执行写操作"必须由**机器自己的配置**决定，
+// 中心只能决定"要不要下发"——机器决定"要不要执行"。这条原则沿用自已移除的采集项模板护栏。
+type GuardsConfig struct {
+	Ops OpsGuards `yaml:"ops"`
+}
+
+// OpsGuards 是下行操作（ops）的本机护栏。
+//
+// 默认值刻意保守：只读允许、写操作全禁。要放行写操作必须同时写 `write: true` **和**
+// 列出允许的单元——少任何一个都不放行，避免"开了一个总开关就放开了所有服务"。
+type OpsGuards struct {
+	// ReadOnly 是否允许只读动作（节点诊断包 / 查询服务状态）。默认 true；显式写 false 可整体关闭。
+	ReadOnly *bool `yaml:"readOnly"`
+	// Write 是否允许写动作（重启服务）。默认 false。
+	Write bool `yaml:"write"`
+	// Units 是允许写操作的 systemd 单元清单（可省略 `.service` 后缀）。
+	// 为空时即使 write=true 也不放行任何写操作。
+	Units []string `yaml:"units"`
+}
+
+// OpsReadOnlyEnabled 返回是否放行只读动作（默认放行）。
+func (g OpsGuards) OpsReadOnlyEnabled() bool {
+	return g.ReadOnly == nil || *g.ReadOnly
+}
+
+// OpsAllowedUnits 返回归一化后的允许单元集合（统一补 .service 后缀）。
+//
+// 归一化在此处做一次：配置文件里写 `nginx` 与写 `nginx.service` 都应该放行同一个单元，
+// 否则"我明明加了却还是被拒"会变成一个纯配置拼写的谜题。
+func (g OpsGuards) OpsAllowedUnits() map[string]bool {
+	out := make(map[string]bool, len(g.Units))
+	for _, u := range g.Units {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		if !strings.Contains(u, ".") {
+			u += ".service"
+		}
+		out[u] = true
+	}
+	return out
 }
 
 // LogSourceConfig 是一个日志来源。

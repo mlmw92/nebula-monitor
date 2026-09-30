@@ -213,6 +213,12 @@ func PermissionCatalog() []permDomain {
 			{"inspect:run", "执行配置巡检"},
 		}},
 		{Domain: "安全中心", Items: []Permission{{"security:read", "查看"}, {"security:write", "操作"}, {"agent:secret:read", "查看 Agent 密钥"}}},
+		// 下行操作：读看动作目录与任务状态；执行指下发动作到指定节点（属高风险）。
+		// 执行成功与否还取决于目标机器自己的 guards.ops 放行情况——权限只是四道护栏之一。
+		{Domain: "节点操作", Items: []Permission{
+			{"ops:read", "查看操作任务"},
+			{"ops:exec", "下发操作任务（高风险）"},
+		}},
 		// 日志内容可能含密码/个人信息/业务数据，因此单独设权限点：不默认给只读角色，按需授予
 		{Domain: "集中日志", Items: []Permission{{"logs:read", "查看集中日志"}}},
 		{Domain: "Agent", Items: []Permission{{"agent:read", "查看"}, {"agent:upgrade", "升级"}}},

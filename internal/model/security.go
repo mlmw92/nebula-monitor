@@ -171,6 +171,12 @@ type ClientCapability struct {
 	// Server 用它判断上行的日志来源是否属于该节点：节点声明过清单之后，
 	// 清单之外的来源会被拒（避免悄悄往新的目录里写）。
 	LogSources []string `json:"logSources,omitempty"`
+	// Ops 是 Agent **本机放行**的下行动作清单（见 internal/server/ops 与 OpsCommand.Kind）。
+	//
+	// 它是「能力协商」这道护栏的实体：Agent 只声明它本机护栏允许执行的动作，
+	// Server 只下发给声明过的动作。因此这个清单同时反映了两件事——
+	// Agent 版本是否认识该动作，以及**机器自己是否同意**执行它（写操作默认不放行）。
+	Ops []string `json:"ops,omitempty"`
 }
 
 // ReportPayload 扩展：新增 Capabilities 与 DefenseResult 字段（不影响既有字段）。

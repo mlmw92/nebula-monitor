@@ -29,6 +29,7 @@ import (
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
+	"github.com/nebula/monitor/internal/server/ops"
 	"github.com/nebula/monitor/internal/server/receiver"
 	"github.com/nebula/monitor/internal/server/report"
 	"github.com/nebula/monitor/internal/server/retention"
@@ -109,6 +110,7 @@ type API struct {
 	security       *security.Store        // 安全事件/基线存储（可空，关闭安全能力）
 	audit          *audit.Store           // 管理操作审计存储（可空）
 	defenseStore   *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空，关闭防护能力）
+	ops            *ops.Service           // 统一下行操作通道（可空；用 SetOpsService 注入）
 	authStore      *auth.Store            // 多用户角色权限存储（可空：未启用登录认证时为 nil）
 	analysis       *analysis.Analyzer     // 只读智能分析服务（可空）
 	pipeline       *alert.PipelineStore   // 告警事件管道：relabel/enrich/消息模板（可空）
@@ -271,6 +273,14 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/security/defense/{node}/{action}", a.permitNode(a.handleDefenseAction, "security:write"))
 	mux.HandleFunc("GET /api/v1/security/defense/tasks", a.permit(a.handleDefenseTasks, "security:read"))
 	mux.HandleFunc("GET /api/v1/security/defense/tasks/{node}", a.permitNode(a.handleDefenseTasks, "security:read"))
+
+	// 统一下行操作通道：查看 ops:read；**下发 ops:exec（高危）**——即使是只读动作，
+	// 它也是"在一批机器上执行东西"的能力。节点资源范围在 handler 内按节点名校验
+	// （目标节点来自请求体，不是路径参数，因此不能用 permitNode）。
+	mux.HandleFunc("GET /api/v1/ops/actions", a.permit(a.handleOpsActions, "ops:read"))
+	mux.HandleFunc("GET /api/v1/ops/tasks", a.permit(a.handleOpsTasks, "ops:read"))
+	mux.HandleFunc("GET /api/v1/ops/tasks/{id}", a.permit(a.handleOpsTask, "ops:read"))
+	mux.HandleFunc("POST /api/v1/ops/tasks", a.permit(a.handleOpsCreate, "ops:exec"))
 
 	// 安装信息含 Agent 长期密钥 → agent:secret:read（高危）；version 登录即可；agent/check 走 X-Agent-Secret（公开）
 	mux.HandleFunc("GET /api/v1/install-info", a.permit(a.handleInstallInfo, "agent:secret:read"))

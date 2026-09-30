@@ -133,6 +133,7 @@ type ReportPayload struct {
 	Capabilities      *ClientCapability     `json:"capabilities,omitempty"`      // Agent 能力声明（旧 Agent 不报此字段，前端据此判断兼容）
 	DefenseStatus     *DefenseStatus        `json:"defenseStatus,omitempty"`     // 入侵防护当前状态（由 Agent 定期采集上报）
 	DefenseResult     *DefenseCommandResult `json:"defenseResult,omitempty"`     // 防护指令执行结果回执
+	OpsResult         *OpsResult            `json:"opsResult,omitempty"`         // 下行操作任务的执行结果回执（见 ops.go）
 	Listeners         []ListenerStat        `json:"listeners"`                   // 监听端口列表（TCP/UDP）；null 表示旧 Agent，[] 表示已采集但为空
 	FirewallRules     []FirewallRule        `json:"firewallRules"`               // 防火墙规则列表；null 表示旧 Agent，[] 表示已采集但为空
 	FirewallStatus    *FirewallStatus       `json:"firewallStatus,omitempty"`    // 防火墙整体状态（由 Agent 定期采集上报）

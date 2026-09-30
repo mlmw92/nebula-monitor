@@ -18,6 +18,7 @@ import (
 	"github.com/nebula/monitor/internal/agent/collector"
 	"github.com/nebula/monitor/internal/agent/config"
 	"github.com/nebula/monitor/internal/agent/defense"
+	opsagent "github.com/nebula/monitor/internal/agent/ops"
 	"github.com/nebula/monitor/internal/agent/logship"
 	"github.com/nebula/monitor/internal/agent/proxy"
 	"github.com/nebula/monitor/internal/agent/reporter"
@@ -29,6 +30,10 @@ import (
 // pidFile Agent 进程 PID 文件路径。
 const pidFile = "/var/run/monitor-agent.pid"
 
+// opsExecutedPath 是下行操作执行记录的落盘路径（幂等：同一任务不重复执行）。
+// 与 defense 的状态文件同处一棵目录树（/var/lib/nebula-monitor）。
+const opsExecutedPath = "/var/lib/nebula-monitor/ops/executed.json"
+
 // 受控 fail2ban 入侵防御相关全局组件（agent 单例）。
 var (
 	// defenseExec 受控 fail2ban 入侵防御执行器单例。
@@ -37,11 +42,23 @@ var (
 	banCollector = defense.NewBanEventCollector()
 	// pendingResult 已执行指令的结果，将在下一次 report 带回服务端。
 	pendingResult *model.DefenseCommandResult
+	// opsExec 统一下行操作执行器（在 main 中按配置的本机护栏创建）。
+	opsExec *opsagent.Executor
+	// pendingOpsResult 已执行操作任务的结果，将在下一次 report 带回服务端。
+	pendingOpsResult *model.OpsResult
 )
 
 // agentBinSHA 是当前 agent 二进制的 SHA256，随上报提交给 Server，
 // 作为升级成功的确认依据（与版本号解耦：CDN 里的二进制是什么，目标就是什么）。
 var agentBinSHA = binSHA256()
+
+// opsSupported 返回本机放行的下行动作清单；执行器未初始化（如代理模式）时返回空。
+func opsSupported() []string {
+	if opsExec == nil {
+		return nil
+	}
+	return opsExec.Supported()
+}
 
 // binSHA256 计算当前 agent 二进制的 SHA256（十六进制小写）。
 // logSourceIDs 取日志来源 id 清单（上报给 Server，用于校验上行日志的来源是否属于本节点）。
@@ -106,6 +123,21 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
+
+	// 统一下行操作执行器：本机护栏决定"这台机器愿意执行什么"，能力声明即由此产生。
+	// 启动时把放行情况打进日志——排查"为什么下发被拒绝"时，第一步就是看这行。
+	nodeName := cfg.Node
+	if nodeName == "" {
+		if h, err := os.Hostname(); err == nil {
+			nodeName = h
+		}
+	}
+	opsExec = opsagent.New(nodeName, cfg.Guards.Ops, opsExecutedPath)
+	slog.Info("下行操作本机护栏已就绪",
+		"readOnly", cfg.Guards.Ops.OpsReadOnlyEnabled(),
+		"write", cfg.Guards.Ops.Write,
+		"units", cfg.Guards.Ops.Units,
+		"supported", opsExec.Supported())
 
 	// 代理模式（edge/hub）走独立启动路径，不进入采集主循环
 	if cfg.Mode == config.ModeEdge || cfg.Mode == config.ModeHub {
@@ -374,11 +406,15 @@ func collectAndReport(ctx context.Context, coll *collector.Collector, rep *repor
 			Defense: true,
 			// 声明本机已配置的日志来源（C2）：Server 据此校验上行日志的来源是否属于本节点
 			LogSources: logSourceIDs(cfg.LogSources),
+			// 声明本机**放行**的下行动作（由 guards.ops 决定，不是"Agent 支持什么"）：
+			// Server 只下发声明过的动作，于是"机器不同意"这件事在协议层就生效了。
+			Ops: opsSupported(),
 		},
 		// 上报当前 nebula 托管 SSH 防护状态
 		DefenseStatus: defenseExec.Status(),
 		// 携带上一次指令执行结果回执（若有）
 		DefenseResult:  pendingResult,
+		OpsResult:      pendingOpsResult,
 		Listeners:      res.Listeners,
 		FirewallRules:  res.FirewallRules,
 		FirewallStatus: res.FirewallStatus,
@@ -393,6 +429,9 @@ func collectAndReport(ctx context.Context, coll *collector.Collector, rep *repor
 	if pendingResult != nil {
 		pendingResult = nil
 	}
+	if pendingOpsResult != nil {
+		pendingOpsResult = nil
+	}
 	slog.Debug("上报成功", "metrics", len(res.Metrics), "procs", len(res.Processes), "banEvents", len(banEvents))
 
 	// 检查 Server 下发的指令
@@ -403,6 +442,23 @@ func collectAndReport(ctx context.Context, coll *collector.Collector, rep *repor
 		// 准备就绪后通过 systemctl stop 或升级信号文件停止本进程再替换。
 		// 若脚本失败，agent 保持运行，等待 Server 下次心跳重试，不会假死。
 		slog.Debug("自升级已在后台执行，agent 继续运行")
+	}
+
+	// 处理统一下行操作任务：与防护指令同一模式（先回 running，再异步执行，结果随下轮上报带回）。
+	// 异步执行是必须的——诊断包里可能有 ss/systemctl 这类会阻塞几秒的命令，
+	// 同步执行会把整轮采集卡住。
+	if resp.Ops != nil && opsExec != nil {
+		cmd := *resp.Ops
+		slog.Info("收到操作任务", "id", cmd.ID, "kind", cmd.Kind, "params", cmd.Params)
+		go func() {
+			pendingOpsResult = &model.OpsResult{
+				CommandID: cmd.ID,
+				State:     model.OpsStateRunning,
+				At:        model.NowMillis(),
+			}
+			res := opsExec.Execute(cmd)
+			pendingOpsResult = &res
+		}()
 	}
 
 	// 处理结构化入侵防护指令（enable/disable/status）

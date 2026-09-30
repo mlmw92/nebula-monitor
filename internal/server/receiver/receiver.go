@@ -18,6 +18,7 @@ import (
 	"github.com/nebula/monitor/internal/server/logstore"
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
+	"github.com/nebula/monitor/internal/server/ops"
 	"github.com/nebula/monitor/internal/server/security"
 	"github.com/nebula/monitor/internal/server/storage"
 )
@@ -110,6 +111,7 @@ type Receiver struct {
 	sec     *security.Store        // 安全事件/基线存储（可空，传 nil 关闭安全能力）
 	alerts  *alert.Engine          // 告警引擎（安全事件注入告警中心，可空）
 	defense *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空）
+	ops     *ops.Service           // 统一下行操作通道（可空；用 SetOps 注入）
 
 	// 集中日志（C2）：logs 为 nil 表示该能力关闭（接口回 503，与不配置 logSources 的 Agent 恰好对称）
 	logs       *logstore.Store
@@ -128,6 +130,12 @@ func New(s storage.Storage, mgr *node.Manager, auth config.AgentAuthConfig, ngx 
 	sec *security.Store, alerts *alert.Engine, defense *security.DefenseStore) *Receiver {
 	return &Receiver{storage: s, nodeMgr: mgr, auth: auth, ngx: ngx, sec: sec, alerts: alerts, defense: defense}
 }
+
+// SetOps 注入统一下行操作通道（可空：不注入即关闭该能力，与其它可选能力一致）。
+//
+// 用 setter 而不是加构造函数参数：Receiver 的 New 已有 7 个参数，再加一个会让
+// 所有调用点（含测试）都要跟着改，而本能力与 defense 一样是"可开关"的。
+func (r *Receiver) SetOps(svc *ops.Service) { r.ops = svc }
 
 // HandleReport 处理 POST /api/v1/report。
 func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
@@ -357,6 +365,24 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		r.defense.ExpireOverdue()
 	}
 
+	// 统一下行操作通道：能力声明、回执、超时回收，随后在响应里下发待执行指令。
+	//
+	// 与 defense 完全同构（响应体搭车 + 能力协商 + 回执 + 过期），差别只在于动作是
+	// 由 internal/server/ops 的目录定义的白名单，而不是写死的 enable/disable/status。
+	if r.ops != nil {
+		if payload.Capabilities != nil {
+			r.ops.SaveCaps(payload.Node, payload.Capabilities.Ops)
+		}
+		if payload.OpsResult != nil && payload.OpsResult.CommandID != "" {
+			r.ops.ApplyResult(*payload.OpsResult)
+			slog.Info("操作任务结果回执", "node", payload.Node,
+				"commandId", payload.OpsResult.CommandID,
+				"state", payload.OpsResult.State,
+				"msg", payload.OpsResult.Message)
+		}
+		r.ops.ExpireOverdue()
+	}
+
 	// 响应：若节点仍需升级（agent 版本未达标），持续下发 upgrade 指令
 	resp := map[string]interface{}{"status": "ok"}
 	if r.nodeMgr.ConsumeUpgrade(payload.Node, payload.Version, payload.BinSHA256) {
@@ -370,6 +396,15 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		if cmd := r.defense.Take(payload.Node); cmd != nil {
 			resp["defense"] = cmd
 			slog.Info("已下发防护指令", "node", payload.Node, "type", cmd.Type, "id", cmd.ID)
+		}
+	}
+
+	// 统一下行操作通道：仅当 Agent 声明了 ops 能力（且该节点确实在等某条它支持的动作）时下发。
+	// 旧 Agent 不上报 Capabilities.Ops，因此永远收不到 ops 字段，保持双向兼容。
+	if r.ops != nil && payload.Capabilities != nil && len(payload.Capabilities.Ops) > 0 {
+		if cmd := r.ops.Take(payload.Node, payload.Capabilities.Ops); cmd != nil {
+			resp["ops"] = cmd
+			slog.Info("已下发操作任务", "node", payload.Node, "kind", cmd.Kind, "id", cmd.ID)
 		}
 	}
 

@@ -34,6 +34,7 @@ import (
 	"github.com/nebula/monitor/internal/server/nginxaccess"
 	"github.com/nebula/monitor/internal/server/node"
 	"github.com/nebula/monitor/internal/server/notify"
+	"github.com/nebula/monitor/internal/server/ops"
 	"github.com/nebula/monitor/internal/server/receiver"
 	"github.com/nebula/monitor/internal/server/report"
 	"github.com/nebula/monitor/internal/server/retention"
@@ -186,6 +187,11 @@ func main() {
 	defenseStore := security.NewDefenseStore(filepath.Join(filepath.Dir(cfg.SecurityStoreFile), "defense_tasks.json"))
 	recv := receiver.New(store, nodeMgr, cfg.AgentAuth, ngxWin, securityStore, engine, defenseStore)
 
+	// 统一下行操作通道：任务落盘在数据目录（与防护任务同处），receiver 用它领取/回执/回收，
+	// API 用它创建与查询。两端都注入同一份实例——分开注入会得到"创建了却永远不下发"的哑功能。
+	opsSvc := ops.NewService(ops.NewStore(filepath.Join(filepath.Dir(cfg.SecurityStoreFile), "ops_tasks.json")))
+	recv.SetOps(opsSvc)
+
 	// 集中日志（C2）：目录留空时取 <DataDir>/logs；未配置时该能力关闭（接口回 503）。
 	// 三个上限都必须有值——「开了日志把盘写满」不是会不会的问题，只是时间问题。
 	logDir := cfg.LogDir
@@ -305,6 +311,8 @@ func main() {
 	retentionMgr.SetLogStore(logStore)
 	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath, securityStore, defenseStore, auditStore, authStore)
 	rest.SetDashboardManager(dashMgr)
+	// 下行操作通道：与 receiver 共用同一个 service 实例（见上面 opsSvc 的说明）
+	rest.SetOpsService(opsSvc)
 	rest.SetAnalyzer(analyzer)
 	rest.SetPipelineStore(pipelineStore)
 	rest.SetSelfMon(mon)

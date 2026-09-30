@@ -13,12 +13,13 @@ import (
 )
 
 // ReportResponse 是 Server 对上报的响应。command 非空时表示有待执行指令（如 upgrade）。
-// Defense 为结构化防护指令（受控 fail2ban 入侵防御）。
+// Defense 为结构化防护指令（受控 fail2ban 入侵防御）；Ops 为统一下行操作任务。
 // 旧 Agent 不消费这些字段、旧 Server 不返回这些字段，双向兼容。
 type ReportResponse struct {
 	Status  string                `json:"status"`
 	Command string                `json:"command,omitempty"`
 	Defense *model.DefenseCommand `json:"defense,omitempty"`
+	Ops     *model.OpsCommand     `json:"ops,omitempty"`
 }
 
 // Reporter 发送上报请求到 Server。
