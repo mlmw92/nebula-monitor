@@ -192,3 +192,24 @@ GET    /api/v1/inspect/runs/{id}/findings       # 差异项
 
 **验证方式**：`go test ./internal/server/{asset,receiver,api,auth}/`（含 8 个资产领域用例、上报→台账的幂等与关联用例、范围裁剪与真实路由权限负例）；`go vet`、`gofmt -l` 干净；`go build ./...` 通过。
 
+### 批次 2（2026-09-30）：人工维护写接口
+
+**已落地**：
+
+| 设计项 | 实现状态 | 证据 |
+|---|---|---|
+| 写权限点 | ✅ | `assets:write`（目录「资产」域），默认仅授予运维管理员；按设计**纳入 `auth/policy.go:HighRiskPermissions`**（二次确认 + 审计） |
+| 手工新建资产 | ✅ | `POST /api/v1/assets`：以 `source=manual` 建档；对已存在的（类型 + 自然键）返回 **409**，避免"以为是新建、实际覆盖既有台账"；成功写回 `201` |
+| 人工维护属性/名称 | ✅ | `PUT /api/v1/assets/{id}`：只写 `manual` 来源，**采集值原样保留**（两者并存、差异可见）；字段级 diff 与操作人进变更历史 |
+| 写操作的资源范围 | ✅ | 更新：范围外资产按 **404**（复用 `assetInScope`）；新建：归属节点必须在范围内，范围外走既有 `denyScope`（403 + 拒绝审计）；**受限用户不允许创建无归属资产**（否则造出自己都看不见的脏数据） |
+| 归属节点不可改 | ✅ | 更新接口显式拒绝变更 `node`（400）：节点是范围锚点，可改等于可把资产移出/移入他人可见范围 |
+| 审计 | ✅ | 管理写请求由 `AuditMiddleware` 自动留痕；并把 `/assets` 并入 `enrichChangeDetail` 的路径集合，审计摘要带上 `change=update /api/v1/assets/{id}` |
+| 操作人取值 | ✅ | `assetActor`：认证中间件写入的用户名优先 → Principal.Username → `anonymous`（与告警处置约定一致），避免变更历史出现空操作人 |
+
+**与设计的差异**：
+
+1. **未实现 `DELETE /api/v1/assets/{id}`**：删除语义（级联关系、变更历史留存、软删还是硬删）尚未定，贸然开放会让台账出现"消失的资产"且无法追溯。待明确后单独设计。
+2. **未实现关联的增删接口**（`POST/DELETE /api/v1/assets/{id}/links`）：当前 `runs_on` 由采集自动维护，手工建关系需要先确定"人工关系 vs 采集关系"的优先级与冲突处理。
+
+**验证方式**：`go test ./internal/server/api/ -run Asset`（12 个用例：新建/冲突/范围三态、更新保留采集值、归属节点拒绝、写权限负例等）；全量 `go test ./internal/...` 通过。
+

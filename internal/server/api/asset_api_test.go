@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -206,5 +207,181 @@ func TestAssetsRouteRequiresPermission(t *testing.T) {
 	mux.ServeHTTP(allowed, assetReq(restrictedPrincipal([]string{"assets:read"}, "g1"), "/api/v1/assets"))
 	if allowed.Code != http.StatusOK {
 		t.Fatalf("拥有 assets:read 应返回 200，实际 %d，响应 %s", allowed.Code, allowed.Body.String())
+	}
+}
+
+// assetWriteReq 构造带 JSON 体与授权身份的写请求。
+func assetWriteReq(p *auth.Principal, method, target string, body interface{}) *http.Request {
+	var buf bytes.Buffer
+	if body != nil {
+		_ = json.NewEncoder(&buf).Encode(body)
+	}
+	req := httptest.NewRequest(method, target, &buf)
+	return req.WithContext(context.WithValue(req.Context(), principalContextKey{}, p))
+}
+
+// 手工新建：以人工来源建档，建档记录带操作人；采集值不受影响。
+func TestHandleAssetCreateStoresManualSourceAndActor(t *testing.T) {
+	a, svc := assetTestAPI(t)
+
+	req := assetWriteReq(globalPrincipal("assets:write"), http.MethodPost, "/api/v1/assets", assetWriteBody{
+		TypeKey: asset.TypeMiddlewareInst, NaturalKey: "nginx:10.0.0.9:80", Name: "外部 nginx",
+		Node: "web-01", Attrs: map[string]string{"owner": "alice", "": "ignored"},
+	})
+	w := httptest.NewRecorder()
+	a.handleAssetCreate(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("新建应返回 201，实际 %d，响应 %s", w.Code, w.Body.String())
+	}
+
+	created, ok, err := svc.Get(asset.Ref{TypeKey: asset.TypeMiddlewareInst, NaturalKey: "nginx:10.0.0.9:80"})
+	if err != nil || !ok {
+		t.Fatalf("新建的资产应可查到: ok=%v err=%v", ok, err)
+	}
+	if v, _ := created.ValueFrom("owner", asset.SourceManual); v != "alice" {
+		t.Fatalf("人工属性应为 manual 来源，实际 %q", v)
+	}
+	if _, ok := created.Attrs["@manual"]; ok {
+		t.Fatal("空属性键不应入库")
+	}
+	history, err := svc.History(asset.Ref{TypeKey: created.TypeKey, NaturalKey: created.NaturalKey}, 0)
+	if err != nil {
+		t.Fatalf("查询变更历史失败: %v", err)
+	}
+	if len(history) != 1 || history[0].Kind != asset.ChangeInitial || history[0].Source != asset.SourceManual {
+		t.Fatalf("建档记录应为 manual 来源的 initial，实际 %+v", history)
+	}
+	if history[0].Actor != "admin" {
+		t.Fatalf("建档记录应带操作人，实际 %q", history[0].Actor)
+	}
+}
+
+// 重复新建返回 409：避免「以为是新建、其实覆盖了既有台账」。
+func TestHandleAssetCreateConflictWhenExists(t *testing.T) {
+	a, _ := assetTestAPI(t)
+	req := assetWriteReq(globalPrincipal("assets:write"), http.MethodPost, "/api/v1/assets", assetWriteBody{
+		TypeKey: asset.TypeHost, NaturalKey: "web-01", Node: "web-01",
+	})
+	w := httptest.NewRecorder()
+	a.handleAssetCreate(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("已存在的资产应返回 409，实际 %d", w.Code)
+	}
+}
+
+// 新建时的资源范围：范围外节点被拒；受限用户不能造「自己也看不见」的无归属资产。
+func TestHandleAssetCreateScopeRules(t *testing.T) {
+	a, _ := assetTestAPI(t)
+	restricted := restrictedPrincipal([]string{"assets:write"}, "g1")
+
+	outOfScope := assetWriteReq(restricted, http.MethodPost, "/api/v1/assets", assetWriteBody{
+		TypeKey: asset.TypeHost, NaturalKey: "db-02", Node: "db-01",
+	})
+	w := httptest.NewRecorder()
+	a.handleAssetCreate(w, outOfScope)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("范围外节点应返回 403，实际 %d", w.Code)
+	}
+
+	noNode := assetWriteReq(restricted, http.MethodPost, "/api/v1/assets", assetWriteBody{
+		TypeKey: asset.TypeHost, NaturalKey: "web-09",
+	})
+	w = httptest.NewRecorder()
+	a.handleAssetCreate(w, noNode)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("受限用户未指定归属节点应返回 403，实际 %d", w.Code)
+	}
+
+	inScope := assetWriteReq(restricted, http.MethodPost, "/api/v1/assets", assetWriteBody{
+		TypeKey: asset.TypeHost, NaturalKey: "web-09", Node: "web-02",
+	})
+	w = httptest.NewRecorder()
+	a.handleAssetCreate(w, inScope)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("范围内新建应返回 201，实际 %d，响应 %s", w.Code, w.Body.String())
+	}
+}
+
+// 更新人工值：采集值保留、生效值取人工值、变更记录带字段级 diff。
+func TestHandleAssetUpdateKeepsDiscoveryValue(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	host, ok, err := svc.Get(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"})
+	if err != nil || !ok {
+		t.Fatalf("准备 web-01 失败: ok=%v err=%v", ok, err)
+	}
+
+	req := assetWriteReq(globalPrincipal("assets:write"), http.MethodPut, "/api/v1/assets", assetWriteBody{
+		Name: "web-01（主站）", Attrs: map[string]string{"cpuCores": "16"},
+	})
+	req.SetPathValue("id", strconv.FormatInt(host.ID, 10))
+	w := httptest.NewRecorder()
+	a.handleAssetUpdate(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("更新应返回 200，实际 %d，响应 %s", w.Code, w.Body.String())
+	}
+
+	updated, _, err := svc.Get(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"})
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if v, _ := updated.Value("cpuCores"); v != "16" {
+		t.Fatalf("生效值应为人工值 16，实际 %q", v)
+	}
+	if v, _ := updated.ValueFrom("cpuCores", asset.SourceDiscovery); v != "4" {
+		t.Fatalf("采集值应保留为 4，实际 %q", v)
+	}
+	if updated.Name != "web-01（主站）" {
+		t.Fatalf("名称应更新，实际 %q", updated.Name)
+	}
+
+	history, err := svc.History(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"}, 0)
+	if err != nil {
+		t.Fatalf("查询变更历史失败: %v", err)
+	}
+	if history[0].Field == "" || history[0].Source != asset.SourceManual || history[0].Actor != "admin" {
+		t.Fatalf("最新变更应为人工来源且带操作人，实际 %+v", history[0])
+	}
+}
+
+// 更新接口不接受节点变更（范围锚点不可改），范围外资产按 404 返回。
+func TestHandleAssetUpdateRejectsNodeChangeAndOutOfScope(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	host, _, _ := svc.Get(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"})
+	dbHost, _, _ := svc.Get(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "db-01"})
+
+	w := httptest.NewRecorder()
+	req := assetWriteReq(globalPrincipal("assets:write"), http.MethodPut, "/api/v1/assets", assetWriteBody{
+		Node: "web-02", Attrs: map[string]string{"cpuCores": "32"},
+	})
+	req.SetPathValue("id", strconv.FormatInt(host.ID, 10))
+	a.handleAssetUpdate(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("变更归属节点应返回 400，实际 %d", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	req = assetWriteReq(restrictedPrincipal([]string{"assets:write"}, "g1"), http.MethodPut, "/api/v1/assets", assetWriteBody{
+		Attrs: map[string]string{"cpuCores": "32"},
+	})
+	req.SetPathValue("id", strconv.FormatInt(dbHost.ID, 10))
+	a.handleAssetUpdate(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("范围外资产更新应返回 404，实际 %d", w.Code)
+	}
+}
+
+// 真实路由的写权限负例：只有 assets:read 的用户不能改资产。
+func TestAssetsWriteRouteRequiresWritePermission(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	mux := http.NewServeMux()
+	a.RegisterRoutes(mux)
+	host, _, _ := svc.Get(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"})
+
+	req := assetWriteReq(restrictedPrincipal([]string{"assets:read"}, "g1"), http.MethodPut,
+		"/api/v1/assets/"+strconv.FormatInt(host.ID, 10), assetWriteBody{Attrs: map[string]string{"cpuCores": "32"}})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("缺 assets:write 应返回 403，实际 %d", w.Code)
 	}
 }

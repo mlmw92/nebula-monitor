@@ -121,7 +121,8 @@ func RecordChangeAudit(store *audit.Store, r *http.Request, action string, befor
 }
 
 func enrichChangeDetail(r *http.Request, detail string) string {
-	if !strings.Contains(r.URL.Path, "/rules") && !strings.Contains(r.URL.Path, "/nodes") && !strings.Contains(r.URL.Path, "/config") {
+	if !strings.Contains(r.URL.Path, "/rules") && !strings.Contains(r.URL.Path, "/nodes") &&
+		!strings.Contains(r.URL.Path, "/config") && !strings.Contains(r.URL.Path, "/assets") {
 		return detail
 	}
 	if detail == "" {

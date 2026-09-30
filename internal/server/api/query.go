@@ -202,6 +202,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/assets", a.permit(a.handleAssets, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}", a.permit(a.handleAssetDetail, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}/history", a.permit(a.handleAssetHistory, "assets:read"))
+	// 人工维护：写接口在 handler 内自行做资源范围判定（新建时目标节点可能还不存在资产）。
+	mux.HandleFunc("POST /api/v1/assets", a.permit(a.handleAssetCreate, "assets:write"))
+	mux.HandleFunc("PUT /api/v1/assets/{id}", a.permit(a.handleAssetUpdate, "assets:write"))
 	// 中间件类型展示开关：读 middleware:read，写 system:config（与品牌/大屏展示配置同级）
 	mux.HandleFunc("GET /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigGET, "middleware:read"))
 	mux.HandleFunc("PUT /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigPUT, "system:config"))

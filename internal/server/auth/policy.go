@@ -78,14 +78,17 @@ func ExpandPrincipal(u User, roleLookup func(name string) (Role, bool)) *Princip
 
 // HighRiskPermissions 为需要二次确认 + 审计的高风险权限点。
 var HighRiskPermissions = map[string]struct{}{
-	"system:upgrade":     {},
-	"agent:secret:read":  {},
-	"agent:upgrade":      {},
-	"security:write":     {},
-	"notify:write":       {},
-	"users:manage":       {},
-	"roles:manage":       {},
-	"audit:export":       {},
+	"system:upgrade":    {},
+	"agent:secret:read": {},
+	"agent:upgrade":     {},
+	"security:write":    {},
+	"notify:write":      {},
+	"users:manage":      {},
+	"roles:manage":      {},
+	"audit:export":      {},
+	// 资产属性的人工维护会改变运维判断所依赖的台账数据（虽然不是执行动作），
+	// 按设计纳入高风险：需要二次确认 + 审计留痕。
+	"assets:write": {},
 }
 
 // IsHighRisk 判断权限点是否属于高风险操作。

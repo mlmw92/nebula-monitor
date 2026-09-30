@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -16,7 +17,9 @@ import (
 // 而不是把某个具体实现类型引进本包。
 type AssetProvider interface {
 	List(f asset.ListFilter) ([]asset.Asset, error)
+	Get(ref asset.Ref) (asset.Asset, bool, error)
 	GetByID(id int64) (asset.Asset, bool, error)
+	Apply(ob asset.Observation) (asset.Asset, bool, error)
 	History(ref asset.Ref, limit int) ([]asset.ChangeRecord, error)
 }
 
@@ -178,6 +181,20 @@ func (a *API) assetInScope(w http.ResponseWriter, r *http.Request) (asset.Asset,
 	return item, true
 }
 
+// assetActor 取变更记录的操作人。
+//
+// 认证中间件写入的用户名是首选；再回退到 Principal（有些路径只注入身份、不写用户名），
+// 都取不到时记 anonymous——与告警处置的既有约定一致，避免变更历史里出现空操作人。
+func assetActor(r *http.Request) string {
+	if user := AuthenticatedUser(r); user != "" {
+		return user
+	}
+	if p := Principal(r); p != nil && p.Username != "" {
+		return p.Username
+	}
+	return "anonymous"
+}
+
 // assetIntParam 解析非负整数查询参数；非法值按默认值处理（不因一个坏参数把整个列表打成 400）。
 func assetIntParam(raw string, def int) int {
 	raw = strings.TrimSpace(raw)
@@ -189,4 +206,128 @@ func assetIntParam(raw string, def int) int {
 		return def
 	}
 	return n
+}
+
+// assetWriteBody 是人工维护请求体。
+//
+// 关于 node：**新建**时必须给出归属节点（范围锚点，受限用户尤其不能漏）；
+// **更新**时不允许改节点——否则等于允许把资产移出/移入别人的可见范围，
+// 影响现有的分组与范围语义。要变更归属请用节点侧既有能力。
+type assetWriteBody struct {
+	TypeKey    string            `json:"typeKey"`
+	NaturalKey string            `json:"naturalKey"`
+	Name       string            `json:"name"`
+	Node       string            `json:"node"`
+	Attrs      map[string]string `json:"attrs"`
+}
+
+// handleAssetCreate 手工新建资产（以人工来源提交，不会覆盖任何采集值）。
+//
+// 与更新接口的分工：本接口只负责建档；对已存在的（类型 + 自然键）返回 409，
+// 避免「以为是新建，实际覆盖了既有台账」。
+func (a *API) handleAssetCreate(w http.ResponseWriter, r *http.Request) {
+	if a.assets == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "资产台账未启用"})
+		return
+	}
+	var body assetWriteBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体不是合法 JSON"})
+		return
+	}
+	body.TypeKey = strings.TrimSpace(body.TypeKey)
+	body.NaturalKey = strings.TrimSpace(body.NaturalKey)
+	if body.TypeKey == "" || body.NaturalKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "typeKey、naturalKey 为必填项"})
+		return
+	}
+
+	ref := asset.Ref{TypeKey: body.TypeKey, NaturalKey: body.NaturalKey}
+	if _, exists, err := a.assets.Get(ref); err != nil {
+		slog.Error("查询资产失败", "asset", body.NaturalKey, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询资产失败"})
+		return
+	} else if exists {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "该资产已存在，请改用更新接口"})
+		return
+	}
+
+	node := strings.TrimSpace(body.Node)
+	p := Principal(r)
+	if node == "" {
+		// 无归属资产的资源范围判定为不可归属，创建者自己也会看不见——与其造脏数据，不如直接拒绝。
+		if p != nil && !p.Scope.IsGlobal() {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "受限用户必须为资产指定归属节点"})
+			return
+		}
+	} else if !a.nodeInScope(p, node) {
+		a.denyScope(w, r, "assets:write", a.nodeGroup(node))
+		return
+	}
+
+	created, _, err := a.assets.Apply(asset.Observation{
+		TypeKey: ref.TypeKey, NaturalKey: ref.NaturalKey, Name: strings.TrimSpace(body.Name), Node: node,
+		Source: asset.SourceManual, Actor: assetActor(r), Attrs: cleanAssetAttrs(body.Attrs),
+	})
+	if err != nil {
+		slog.Error("新建资产失败", "asset", ref.NaturalKey, "err", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, toAssetView(created))
+}
+
+// handleAssetUpdate 维护已有资产的人工值（名称与属性）。
+//
+// 只写入 manual 来源：采集值原样保留，两者差异在详情里可见（与节点 DisplayName 的既有语义一致）。
+func (a *API) handleAssetUpdate(w http.ResponseWriter, r *http.Request) {
+	item, ok := a.assetInScope(w, r)
+	if !ok {
+		return
+	}
+	var body assetWriteBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体不是合法 JSON"})
+		return
+	}
+	if node := strings.TrimSpace(body.Node); node != "" && node != item.Node {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "不支持通过本接口变更资产归属节点"})
+		return
+	}
+
+	name := item.Name
+	if n := strings.TrimSpace(body.Name); n != "" {
+		name = n
+	}
+	attrs := cleanAssetAttrs(body.Attrs)
+	if len(attrs) == 0 && name == item.Name {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "没有需要更新的内容"})
+		return
+	}
+
+	updated, _, err := a.assets.Apply(asset.Observation{
+		TypeKey: item.TypeKey, NaturalKey: item.NaturalKey, Name: name, Node: item.Node,
+		Source: asset.SourceManual, Actor: assetActor(r), Attrs: attrs,
+	})
+	if err != nil {
+		slog.Error("更新资产失败", "asset", item.NaturalKey, "err", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, toAssetView(updated))
+}
+
+// cleanAssetAttrs 过滤掉空键与空白键：属性键会进库并成为查询维度，
+// 放一个空键进去只会得到一条谁也查不到的脏数据。
+func cleanAssetAttrs(attrs map[string]string) map[string]string {
+	if len(attrs) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(attrs))
+	for key, value := range attrs {
+		if key = strings.TrimSpace(key); key != "" {
+			out[key] = value
+		}
+	}
+	return out
 }

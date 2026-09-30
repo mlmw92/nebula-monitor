@@ -207,7 +207,8 @@ Agent(linux/amd64|arm64|arm) --HTTP 上报--> Server(二进制+systemd / Docker)
 - **自动发现（复用既有采集，不新增采集器）**：Agent 每轮上报时，Server 把**主机**（自然键 = 主机名，与节点标识一致）与**15 类中间件实例**（自然键 = `<类型>:<地址>`）幂等写入资产台账；实例自动建立 `runs_on` 关系指向其宿主主机。台账是**次要数据**：写入失败只记日志，不影响指标上报主链路。
 - **属性区分采集值与人工值**：同一属性可同时存在 `discovery` 与 `manual` 两个值，**人工值不覆盖采集值**，接口同时返回两者（`attrs`）与生效值（`values`，人工优先）。
 - **变更历史**：字段级 diff（哪个字段从什么变成什么），**只在值真的变化时**记录；资产首次建档只写一条 `initial` 记录，不产生逐条噪声。
-- **只读接口与权限**：`GET /api/v1/assets`（支持 `type`/`node`/`keyword`/`limit`/`offset`）、`GET /api/v1/assets/{id}`、`GET /api/v1/assets/{id}/history`；权限点 `assets:read`（目录「资产」，默认授予运维管理员与只读角色）。资源范围按资产所属节点裁剪，**范围外资产按 404 返回**（不区分 403，避免用状态码探测范围外资源），且先过滤再计数。
+- **接口与权限**：`GET /api/v1/assets`（支持 `type`/`node`/`keyword`/`limit`/`offset`）、`GET /api/v1/assets/{id}`、`GET /api/v1/assets/{id}/history`，以及人工维护的 `POST /api/v1/assets`、`PUT /api/v1/assets/{id}`。权限点：`assets:read`（默认授予运维管理员与只读角色）、`assets:write`（仅运维管理员，且属**高风险权限**，需二次确认）。资源范围按资产所属节点裁剪，**范围外资产按 404 返回**（不区分 403，避免用状态码探测范围外资源），且先过滤再计数。
+- **人工维护规则**：新建时归属节点必须在调用者范围内（受限用户不允许创建无归属资产）；**不支持通过接口变更归属节点**（节点是范围锚点，可改等于可把资产移出/移入他人可见范围）；更新只写 `manual` 来源，采集值原样保留，变更进入历史并记录操作人。
 - **存储**：内嵌 SQLite 单文件（`server.yaml` 的 `assetStoreFile`，默认 `/var/lib/monitor-server/assets.db`），纯 Go 驱动、无 CGO，三架构离线包不受影响；决策见 `docs/adr/0001-cmdb-relational-store.md`。
 - 设计与实施记录见 `docs/superpowers/specs/2026-09-30-asset-cmdb-design.md`（含已落地项与有意差异）。
 

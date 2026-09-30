@@ -85,7 +85,7 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 | 功能点 | 状态 | 现状与依据 | 优先级 | 复杂度 | 前置依赖 | 归属 |
 |---|---|---|---|---|---|---|
 | 资产自动发现（主机信息/分区/进程/中间件实例/容器清单） | **已实现** | 上报链路已接入：`internal/server/receiver/assets.go:applyAssets`（主机 + 15 类中间件实例，幂等）；测试 `internal/server/receiver/assets_test.go` | **P0** | M | — | D2 |
-| 资产台账（资产类型 / 资产实例 / 属性/标签 / 负责人） | 部分实现 | 台账读写已落地：`internal/server/asset`（SQLite）、`GET /api/v1/assets`；**缺人工维护写接口与负责人/标签字段**（`assets:write` 未设）；前端未做 | **P0** | M | 关系型持久化（ADR-0001，已完成） | D2 |
+| 资产台账（资产类型 / 资产实例 / 属性/标签 / 负责人） | 部分实现 | 后端读写已落地：`internal/server/asset`（SQLite）、`GET /api/v1/assets`、`POST /api/v1/assets`、`PUT /api/v1/assets/{id}`（人工值，`assets:write` 已设并入高风险）；**缺负责人/标签字段、删除接口与前端页面** | **P0** | M | 关系型持久化（ADR-0001，已完成） | D2 |
 | 资产关系与拓扑（依赖 / 归属 / 影响传播） | 部分实现 | `runs_on`（实例 → 主机）已随上报自动建立且幂等（`asset.Service.Link`）；`member_of/depends_on/exposes` 与拓扑视图未做 | **P0** | L | 资产台账 | D2 |
 | 变更历史与审计（字段级 diff / 操作留痕） | 部分实现 | 字段级 diff 已落地：`asset_changes` + `asset.Service.History` + `GET /api/v1/assets/{id}/history`（**仅真变化才记录**，首建只写一条 initial）；缺前端时间线与人工写操作的审计联动 | **P0** | M | 资产台账 | D2 |
 | 采集值与人工值分离（来源标记 / 冲突可见） | **已实现** | 属性联合主键含 `source`，`Asset.Value` 取生效值（人工优先），接口返回 `values` + `attrs`（两来源并存） | P1 | M | 资产台账 | D2 |
