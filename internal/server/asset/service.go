@@ -3,6 +3,7 @@ package asset
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -55,8 +56,30 @@ type ListFilter struct {
 	OwnerMissing bool
 	// HasConflict 只返回存在「同字段人工值与采集值并存」的资产（摘要「冲突」下钻用）。
 	HasConflict bool
-	Limit       int
-	Offset      int
+	// Ignored 控制**已忽略资产**的可见性（取值见 IgnoreFilter*）：
+	//   ""（默认） 不返回已忽略资产——台账是"该关心的东西"的清单
+	//   with      连同已忽略一起返回（界面上"含已忽略"开关）
+	//   only      只返回已忽略（摘要「已忽略」下钻用）
+	Ignored string
+	// Label 按标签过滤：`key` 表示"存在该标签键"，`key:value` 表示精确匹配键值。
+	Label  string
+	Limit  int
+	Offset int
+}
+
+// 已忽略资产的可见性取值。
+const (
+	IgnoreFilterWith = "with"
+	IgnoreFilterOnly = "only"
+)
+
+// ValidIgnoredFilter 判断已忽略可见性取值是否受支持（空串表示默认隐藏）。
+func ValidIgnoredFilter(v string) bool {
+	switch v {
+	case "", IgnoreFilterWith, IgnoreFilterOnly:
+		return true
+	}
+	return false
 }
 
 // 来源过滤取值：与前端「来源」下拉、摘要下钻保持一致。
@@ -89,6 +112,10 @@ type Stats struct {
 	Conflict int `json:"conflict"`
 	// Changes 是窗口内发生变更的字段数（含采集与人工）。窗口由调用方给出（默认近 7 天）。
 	Changes int `json:"changes"`
+	// Ignored 是「已忽略」的资产数（同样按当前筛选条件统计）。
+	// 单独给出它，是因为已忽略资产默认不出现在 Total 里——不显示这个数字，
+	// 用户会以为自己忽略过的东西"找不回来了"。
+	Ignored int `json:"ignored"`
 }
 
 // ValidSourceFilter 判断来源过滤取值是否受支持（空串表示不过滤）。
@@ -596,6 +623,145 @@ func (s *Service) ClearBaseline(typeKey string) error {
 		return errors.New("资产类型不能为空")
 	}
 	return s.store.clearBaseline(typeKey)
+}
+
+// ---- 忽略（隐藏）与彻底删除 ----
+
+// Ignore 把资产从台账隐藏（忽略），返回更新后的资产。
+//
+// 与删除的区别（重要）：忽略**不停止采集**，属性仍会继续刷新，因此恢复后看到的是最新状态；
+// 而采集资产一旦删除会被下一轮上报重建——对它们正确的动作是忽略，不是删除。
+// 忽略/恢复属管理动作，只记入操作审计（谁在什么时候隐藏了什么），不写字段级变更历史
+// ——后者只记属性值的变化，混进来会让"这个字段从什么变成什么"的时间线失真。
+func (s *Service) Ignore(ref Ref, actor, reason string) (Asset, error) {
+	a, err := s.resolve(ref)
+	if err != nil {
+		return Asset{}, err
+	}
+	if err := s.store.ignoreAsset(a.ID, strings.TrimSpace(reason), actor, s.now()); err != nil {
+		return Asset{}, err
+	}
+	return s.resolve(ref)
+}
+
+// Restore 解除忽略（幂等：本来没被忽略也返回成功），返回更新后的资产。
+func (s *Service) Restore(ref Ref, actor string) (Asset, error) {
+	a, err := s.resolve(ref)
+	if err != nil {
+		return Asset{}, err
+	}
+	if err := s.store.restoreAsset(a.ID); err != nil {
+		return Asset{}, err
+	}
+	return s.resolve(ref)
+}
+
+// Purge 彻底删除资产（属性 / 关系 / 变更历史 / 快照一并删除，**不可恢复**）。
+//
+// 只允许「纯人工建档」资产：采集资产删掉后会被下一轮上报重建，表现为"删了又回来"，
+// 会让人以为删除没生效——对它们应当用 Ignore。
+// 返回值 baselineCleared 表示该资产原本是某资产类型的巡检标杆、已随之清除
+// （否则标杆会指向一个不存在的资产，巡检时静默无结论）。
+func (s *Service) Purge(ref Ref) (baselineCleared bool, err error) {
+	a, err := s.resolve(ref)
+	if err != nil {
+		return false, err
+	}
+	if a.HasDiscovery() {
+		return false, fmt.Errorf(
+			"该资产由采集自动发现（%s），删除后会被下一轮上报重建；如需从台账隐藏请改用「忽略」",
+			a.NaturalKey)
+	}
+	if bl, ok, err := s.store.baselineOf(a.TypeKey); err != nil {
+		return false, err
+	} else if ok && bl.AssetID == a.ID {
+		if err := s.store.clearBaseline(a.TypeKey); err != nil {
+			return false, err
+		}
+		baselineCleared = true
+	}
+	if err := s.store.deleteAsset(a.ID); err != nil {
+		return false, err
+	}
+	return baselineCleared, nil
+}
+
+// labelField 是标签变更在变更历史里的字段名（`label:<key>`）：与属性变更共用一条时间线，
+// "谁把这个资产的 env 从 test 改成 prod" 是配置问题里最常被追问的一句。
+func labelField(key string) string { return "label:" + key }
+
+// SetLabels 写入/覆盖标签，并删除 remove 中列出的键；返回更新后的资产。
+func (s *Service) SetLabels(ref Ref, labels map[string]string, remove []string, actor string) (Asset, error) {
+	a, err := s.resolve(ref)
+	if err != nil {
+		return Asset{}, err
+	}
+	clean := map[string]string{}
+	for k, v := range labels {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			// 空键名会产出无法按值筛选的标签，而症状是"筛不出来"不是报错，必须在入口拦下
+			return Asset{}, errors.New("标签键不能为空")
+		}
+		clean[k] = strings.TrimSpace(v)
+	}
+	for _, k := range remove {
+		if _, dup := clean[strings.TrimSpace(k)]; dup {
+			return Asset{}, fmt.Errorf("标签 %s 同时出现在写入与删除中", strings.TrimSpace(k))
+		}
+	}
+	at := s.now()
+
+	// 键名排序后再落库：map 遍历顺序随机，不排序会让同一批变更在时间线里顺序不定（测试也无法断言）。
+	removeKeys := make([]string, 0, len(remove))
+	for _, k := range remove {
+		if k = strings.TrimSpace(k); k != "" {
+			removeKeys = append(removeKeys, k)
+		}
+	}
+	sort.Strings(removeKeys)
+	for _, k := range removeKeys {
+		old, exists := a.Labels[k]
+		if !exists {
+			continue // 本来就没有：不写变更记录（否则时间线会出现"从空到空"的噪声）
+		}
+		if err := s.store.removeLabel(a.ID, k); err != nil {
+			return Asset{}, err
+		}
+		if err := s.store.appendChange(ChangeRecord{
+			AssetID: a.ID, Field: labelField(k), Old: old, New: "",
+			Source: SourceManual, Actor: actor, Kind: ChangeUpdate, At: at,
+		}); err != nil {
+			return Asset{}, err
+		}
+	}
+
+	setKeys := make([]string, 0, len(clean))
+	for k := range clean {
+		setKeys = append(setKeys, k)
+	}
+	sort.Strings(setKeys)
+	for _, k := range setKeys {
+		value := clean[k]
+		old, exists := a.Labels[k]
+		if exists && sameValue(old, value) {
+			continue // 值没变：不写库、不写变更记录
+		}
+		if err := s.store.setLabel(a.ID, k, value, at, actor); err != nil {
+			return Asset{}, err
+		}
+		oldValue := ""
+		if exists {
+			oldValue = old
+		}
+		if err := s.store.appendChange(ChangeRecord{
+			AssetID: a.ID, Field: labelField(k), Old: oldValue, New: value,
+			Source: SourceManual, Actor: actor, Kind: ChangeUpdate, At: at,
+		}); err != nil {
+			return Asset{}, err
+		}
+	}
+	return s.resolve(ref)
 }
 
 // focusFields 抽取资产的「关注字段集合」（生效值，人工优先）。

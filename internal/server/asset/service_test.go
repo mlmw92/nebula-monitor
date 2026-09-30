@@ -3,6 +3,7 @@ package asset
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -787,6 +788,231 @@ func hasFinding(fs []InspectFinding, field string, kind FindingKind, level Findi
 		}
 	}
 	return false
+}
+
+// 忽略必须「只隐藏、不停止采集」：列表与摘要默认不计入，但恢复后能看到最新状态；
+// 采集上报也不能把它"复活"（忽略是用户的决定，不该被下一轮上报冲掉）。
+func TestIgnoreHidesButKeepsCollecting(t *testing.T) {
+	svc, _ := newTestService(t)
+	now := int64(1_700_000_500_000)
+	svc.now = func() int64 { return now }
+	for _, name := range []string{"web-01", "db-01"} {
+		if _, _, err := svc.Apply(hostObservation(name, map[string]string{"cpu": "8"})); err != nil {
+			t.Fatalf("写入 %s 失败: %v", name, err)
+		}
+	}
+
+	ref := Ref{TypeKey: TypeHost, NaturalKey: "web-01"}
+	ignored, err := svc.Ignore(ref, "alice", "已下线，采集配置未清理")
+	if err != nil {
+		t.Fatalf("忽略失败: %v", err)
+	}
+	if !ignored.Ignored || ignored.IgnoredBy != "alice" || ignored.IgnoreReason == "" {
+		t.Fatalf("忽略标记与理由应落库：%+v", ignored)
+	}
+
+	// 默认列表隐藏；with 可见；only 只剩它
+	def, err := svc.List(ListFilter{})
+	if err != nil || len(def) != 1 || def[0].NaturalKey != "db-01" {
+		t.Fatalf("默认列表应隐藏已忽略资产：%+v err=%v", def, err)
+	}
+	with, err := svc.List(ListFilter{Ignored: IgnoreFilterWith})
+	if err != nil || len(with) != 2 {
+		t.Fatalf("含已忽略应返回 2 条：%d err=%v", len(with), err)
+	}
+	only, err := svc.List(ListFilter{Ignored: IgnoreFilterOnly})
+	if err != nil || len(only) != 1 || only[0].NaturalKey != "web-01" || !only[0].Ignored {
+		t.Fatalf("只看已忽略应只剩 web-01：%+v err=%v", only, err)
+	}
+
+	stats, err := svc.Stats(ListFilter{}, now)
+	if err != nil {
+		t.Fatalf("统计失败: %v", err)
+	}
+	if stats.Total != 1 || stats.Ignored != 1 {
+		t.Fatalf("摘要应 total=1 ignored=1（已忽略不计入总数）：%+v", stats)
+	}
+
+	// 采集继续：属性照常刷新，但忽略标记不被冲掉
+	now += 60_000
+	if _, _, err := svc.Apply(hostObservation("web-01", map[string]string{"cpu": "16"})); err != nil {
+		t.Fatalf("上报失败: %v", err)
+	}
+	got, ok, err := svc.Get(ref)
+	if err != nil || !ok {
+		t.Fatalf("读取失败: ok=%v err=%v", ok, err)
+	}
+	if !got.Ignored {
+		t.Fatal("采集上报不得把已忽略资产复活（忽略是用户的决定）")
+	}
+	if v, _ := got.ValueFrom("cpu", SourceDiscovery); v != "16" {
+		t.Fatalf("已忽略资产的属性仍应继续刷新，实际 cpu=%q", v)
+	}
+
+	// 恢复：回到默认列表，摘要的已忽略数归零
+	restored, err := svc.Restore(ref, "alice")
+	if err != nil || restored.Ignored {
+		t.Fatalf("恢复失败: %+v err=%v", restored, err)
+	}
+	after, err := svc.List(ListFilter{})
+	if err != nil || len(after) != 2 {
+		t.Fatalf("恢复后应回到列表里：%d err=%v", len(after), err)
+	}
+	stats2, _ := svc.Stats(ListFilter{}, now)
+	if stats2.Ignored != 0 {
+		t.Fatalf("恢复后不应还有已忽略资产：%+v", stats2)
+	}
+	// 幂等：重复恢复不报错
+	if _, err := svc.Restore(ref, "alice"); err != nil {
+		t.Fatalf("重复恢复应幂等成功: %v", err)
+	}
+}
+
+// 彻底删除只对「纯人工建档」资产开放：采集资产删了会被下一轮上报重建（表现为"删了又回来"）。
+func TestPurgeOnlyManualAssets(t *testing.T) {
+	svc, _ := newTestService(t)
+	svc.now = func() int64 { return 1_700_000_600_000 }
+
+	if _, _, err := svc.Apply(hostObservation("web-01", map[string]string{"cpu": "8"})); err != nil {
+		t.Fatalf("写入采集资产失败: %v", err)
+	}
+	manual := Observation{
+		TypeKey: TypeHost, NaturalKey: "manual-01", Name: "手工台账设备", Node: "web-01",
+		Source: SourceManual, Attrs: map[string]string{"vendor": "Dell"},
+	}
+	if _, _, err := svc.Apply(manual); err != nil {
+		t.Fatalf("写入人工资产失败: %v", err)
+	}
+	// 把它设为该类型标杆，验证删除时标杆会被一并清除（否则标杆指向不存在的资产）
+	if _, err := svc.SetBaseline(Ref{TypeKey: TypeHost, NaturalKey: "manual-01"}, "alice"); err != nil {
+		t.Fatalf("设置标杆失败: %v", err)
+	}
+
+	if _, err := svc.Purge(Ref{TypeKey: TypeHost, NaturalKey: "web-01"}); err == nil {
+		t.Fatal("采集资产不应允许彻底删除（应提示改用忽略）")
+	}
+	cleared, err := svc.Purge(Ref{TypeKey: TypeHost, NaturalKey: "manual-01"})
+	if err != nil {
+		t.Fatalf("人工资产应可彻底删除: %v", err)
+	}
+	if !cleared {
+		t.Fatal("该资产是标杆，删除时应报告已清除标杆")
+	}
+	if _, ok, err := svc.Get(Ref{TypeKey: TypeHost, NaturalKey: "manual-01"}); err != nil || ok {
+		t.Fatalf("删除后应查不到: ok=%v err=%v", ok, err)
+	}
+	bl, err := svc.Baselines()
+	if err != nil || len(bl) != 0 {
+		t.Fatalf("标杆应随资产删除被清除：%+v err=%v", bl, err)
+	}
+}
+
+// 标签：与属性分开管理，可筛选、进变更历史，且不参与巡检比对。
+func TestLabelsSetFilterHistory(t *testing.T) {
+	svc, _ := newTestService(t)
+	now := int64(1_700_000_700_000)
+	svc.now = func() int64 { return now }
+	ref := Ref{TypeKey: TypeHost, NaturalKey: "web-01"}
+	if _, _, err := svc.Apply(hostObservation("web-01", map[string]string{"cpu": "8"})); err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+
+	got, err := svc.SetLabels(ref, map[string]string{"env": "prod", "team": "sre"}, nil, "alice")
+	if err != nil {
+		t.Fatalf("写标签失败: %v", err)
+	}
+	if got.Labels["env"] != "prod" || got.Labels["team"] != "sre" {
+		t.Fatalf("标签未落库：%+v", got.Labels)
+	}
+
+	// 筛选：key:value 精确匹配；只给 key 表示"存在该标签"
+	if n, err := svc.Count(ListFilter{Label: "env:prod"}); err != nil || n != 1 {
+		t.Fatalf("按 env:prod 应筛出 1 条：n=%d err=%v", n, err)
+	}
+	if n, err := svc.Count(ListFilter{Label: "env:test"}); err != nil || n != 0 {
+		t.Fatalf("按 env:test 应筛出 0 条：n=%d err=%v", n, err)
+	}
+	if n, err := svc.Count(ListFilter{Label: "team"}); err != nil || n != 1 {
+		t.Fatalf("按 team 应筛出 1 条：n=%d err=%v", n, err)
+	}
+
+	// 变更历史：值与原先相同不写记录，改了才写（字段名带 label: 前缀）
+	now += 1000
+	if _, err := svc.SetLabels(ref, map[string]string{"env": "prod"}, nil, "alice"); err != nil {
+		t.Fatalf("重复写同值失败: %v", err)
+	}
+	hist, err := svc.History(ref, 0)
+	if err != nil {
+		t.Fatalf("查询历史失败: %v", err)
+	}
+	countLabel := func(field string) int {
+		n := 0
+		for _, h := range hist {
+			if h.Field == field {
+				n++
+			}
+		}
+		return n
+	}
+	if n := countLabel("label:env"); n != 1 {
+		t.Fatalf("同值重复写入不应产生新记录，label:env 记录数=%d", n)
+	}
+
+	now += 1000
+	if _, err := svc.SetLabels(ref, map[string]string{"env": "test"}, []string{"team"}, "alice"); err != nil {
+		t.Fatalf("改标签失败: %v", err)
+	}
+	hist, _ = svc.History(ref, 0)
+	// 历史按时间倒序（at DESC, id DESC），因此同一字段的**首次出现即最新一条**。
+	newest := func(field string) *ChangeRecord {
+		for i := range hist {
+			if hist[i].Field == field {
+				return &hist[i]
+			}
+		}
+		return nil
+	}
+	envChange := newest("label:env")
+	if envChange == nil || envChange.Old != "prod" || envChange.New != "test" || envChange.Actor != "alice" {
+		t.Fatalf("标签变更应进历史（含旧值/新值与操作人）：%+v", envChange)
+	}
+	teamChange := newest("label:team")
+	if teamChange == nil || teamChange.New != "" {
+		t.Fatalf("删除标签应记一条新值为空的记录：%+v", teamChange)
+	}
+	got, _, _ = svc.Get(ref)
+	if _, exists := got.Labels["team"]; exists {
+		t.Fatal("删除的标签不应还在")
+	}
+
+	// 非法输入：空键名、同时写入与删除
+	if _, err := svc.SetLabels(ref, map[string]string{"  ": "x"}, nil, "alice"); err == nil {
+		t.Fatal("空标签键应报错")
+	}
+	if _, err := svc.SetLabels(ref, map[string]string{"env": "x"}, []string{"env"}, "alice"); err == nil {
+		t.Fatal("同一键同时写入与删除应报错")
+	}
+
+	// 巡检不受标签影响：标签不是配置项，不该出现在差异项里
+	if _, _, err := svc.Apply(hostObservation("web-01", map[string]string{"cpu": "8"})); err != nil {
+		t.Fatalf("上报失败: %v", err)
+	}
+	if _, err := svc.RunInspect(InspectScope{}, "alice"); err != nil {
+		t.Fatalf("巡检失败: %v", err)
+	}
+	now += 1000
+	if _, err := svc.SetLabels(ref, map[string]string{"env": "prod"}, nil, "alice"); err != nil {
+		t.Fatalf("改标签失败: %v", err)
+	}
+	run, err := svc.RunInspect(InspectScope{}, "alice")
+	if err != nil {
+		t.Fatalf("巡检失败: %v", err)
+	}
+	for _, f := range mustFindings(t, svc, run.ID) {
+		if strings.HasPrefix(f.Field, "label:") {
+			t.Fatalf("标签不是配置项，不应产出差异项：%+v", f)
+		}
+	}
 }
 
 // 迁移幂等：同一路径重复打开不应报错，也不应丢数据。

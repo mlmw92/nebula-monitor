@@ -213,6 +213,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/assets/{id}/snapshots", a.permit(a.handleAssetSnapshots, "assets:read"))
 	mux.HandleFunc("POST /api/v1/assets/{id}/baseline", a.permit(a.handleAssetBaselineSet, "assets:write"))
 	mux.HandleFunc("DELETE /api/v1/assets/{id}/baseline", a.permit(a.handleAssetBaselineDelete, "assets:write"))
+	// 生命周期与标签：忽略（可恢复的隐藏）/ 恢复 / 彻底删除（仅纯人工资产）/ 标签维护
+	mux.HandleFunc("POST /api/v1/assets/{id}/ignore", a.permit(a.handleAssetIgnore, "assets:write"))
+	mux.HandleFunc("POST /api/v1/assets/{id}/restore", a.permit(a.handleAssetRestore, "assets:write"))
+	mux.HandleFunc("POST /api/v1/assets/{id}/purge", a.permit(a.handleAssetPurge, "assets:write"))
+	mux.HandleFunc("PUT /api/v1/assets/{id}/labels", a.permit(a.handleAssetLabels, "assets:write"))
 	// 配置巡检（inspect）：只给结论、不改配置，因此「跑」与「改」分成两个权限点
 	mux.HandleFunc("POST /api/v1/inspect/runs", a.permit(a.handleInspectRunCreate, "inspect:run"))
 	mux.HandleFunc("GET /api/v1/inspect/runs", a.permit(a.handleInspectRuns, "inspect:read"))

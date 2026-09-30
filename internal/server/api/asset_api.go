@@ -41,6 +41,13 @@ type AssetProvider interface {
 	ClearBaseline(typeKey string) error
 	// Links 返回资产的直接关联（出边与入边）。
 	Links(ref asset.Ref) ([]asset.Link, error)
+	// 忽略（隐藏）与彻底删除：忽略是管理动作（可恢复、不停止采集），
+	// 彻底删除仅限纯人工建档资产（采集资产删了会被重建）。
+	Ignore(ref asset.Ref, actor, reason string) (asset.Asset, error)
+	Restore(ref asset.Ref, actor string) (asset.Asset, error)
+	Purge(ref asset.Ref) (baselineCleared bool, err error)
+	// SetLabels 写入/覆盖标签，并删除 remove 中列出的键。
+	SetLabels(ref asset.Ref, labels map[string]string, remove []string, actor string) (asset.Asset, error)
 }
 
 // SetAssetService 注入资产台账服务（可选；未注入时资产接口返回 503，与其它可选能力一致）。
@@ -80,6 +87,13 @@ type assetView struct {
 	ConflictKeys  []string          `json:"conflictKeys"`
 	Values        map[string]string `json:"values"`
 	Attrs         []assetAttrView   `json:"attrs"`
+	// Labels 是管理标签（分类维度），与属性分开：属性是采集/人工的值，标签用于筛选与展示。
+	Labels map[string]string `json:"labels"`
+	// Ignored 表示该资产已从台账隐藏；列表默认不返回它们，但会返回 ignored 计数。
+	Ignored      bool   `json:"ignored"`
+	IgnoreReason string `json:"ignoreReason,omitempty"`
+	IgnoredBy    string `json:"ignoredBy,omitempty"`
+	IgnoredAt    int64  `json:"ignoredAt,omitempty"`
 }
 
 // assetLinkView 是关联关系的对外形态。
@@ -160,6 +174,11 @@ func toAssetView(a asset.Asset, staleBefore int64) assetView {
 		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, LastSeenAt: a.LastSeenAt(),
 		ManualCount: manual, ConflictCount: conflict, ConflictKeys: a.ConflictKeys(),
 		Values: map[string]string{}, Attrs: make([]assetAttrView, 0, len(a.Attrs)),
+		Labels: map[string]string{},
+		Ignored: a.Ignored, IgnoreReason: a.IgnoreReason, IgnoredBy: a.IgnoredBy, IgnoredAt: a.IgnoredAt,
+	}
+	for k, v := range a.Labels {
+		view.Labels[k] = v
 	}
 	for _, attr := range a.Attrs {
 		view.Attrs = append(view.Attrs, assetAttrView{
@@ -251,6 +270,15 @@ func (a *API) assetListFilter(w http.ResponseWriter, r *http.Request) (asset.Lis
 		return asset.ListFilter{}, false
 	}
 	filter.Source = source
+	// 已忽略资产的可见性：默认隐藏（台账是"该关心的东西"的清单）。
+	ignored := strings.TrimSpace(q.Get("ignored"))
+	if !asset.ValidIgnoredFilter(ignored) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ignored 取值不支持（可选 with / only）"})
+		return asset.ListFilter{}, false
+	}
+	filter.Ignored = ignored
+	// 标签筛选：`key` 或 `key:value`
+	filter.Label = strings.TrimSpace(q.Get("label"))
 	return filter, true
 }
 

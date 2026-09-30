@@ -135,6 +135,29 @@ var schemaStatements = []string{
 		set_by      TEXT NOT NULL DEFAULT '',
 		set_at      INTEGER NOT NULL
 	)`,
+	// asset_ignored 记「已从台账隐藏」的资产（每个资产最多一行）。
+	//
+	// 为什么是独立表而不是 assets 上的一个列：与 asset_seen 同理——纯附加表，
+	// 老版本程序不读它，因此**不提升 schemaVersion**，保留「回滚旧版本时 assets.db 可直接沿用」。
+	// 语义上也更贴切：忽略是一个**动作与理由**（谁、什么时候、为什么），不是资产本身的属性。
+	`CREATE TABLE IF NOT EXISTS asset_ignored(
+		asset_id   INTEGER PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
+		reason     TEXT NOT NULL DEFAULT '',
+		ignored_by TEXT NOT NULL DEFAULT '',
+		ignored_at INTEGER NOT NULL
+	)`,
+	// asset_labels 是资产的管理标签（分类维度），与 asset_attrs 职责分开：
+	// attrs 是采集值/人工值（参与变更与巡检语义），labels 只用于展示与筛选。
+	// 单独建表而不是塞进 attrs：标签要能按 key/value 索引筛选，且不该混进巡检快照。
+	`CREATE TABLE IF NOT EXISTS asset_labels(
+		asset_id   INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+		key        TEXT NOT NULL,
+		value      TEXT NOT NULL DEFAULT '',
+		updated_at INTEGER NOT NULL,
+		updated_by TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY(asset_id, key)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_asset_labels_kv ON asset_labels(key, value)`,
 }
 
 // Store 是资产领域的 SQLite 持久化适配器。
@@ -233,7 +256,11 @@ func (s *Store) assetByNatural(typeKey, naturalKey string) (Asset, bool, error) 
 	if err := s.seenOf(a.ID, &a); err != nil {
 		return Asset{}, false, err
 	}
-	return a, true, nil
+	one := []Asset{a}
+	if err := s.loadMeta(one); err != nil {
+		return Asset{}, false, err
+	}
+	return one[0], true, nil
 }
 
 // seenOf 读取资产的「最近上报」时刻并写入 a.SeenAt（无记录时保持 0）。
@@ -394,6 +421,25 @@ func assetWhere(alias string, f ListFilter) (string, []any) {
 		like := "%" + kw + "%"
 		args = append(args, like, like, like)
 	}
+	// 已忽略资产的可见性：默认隐藏（台账是"该关心的东西"的清单）。
+	switch f.Ignored {
+	case IgnoreFilterWith:
+		// 不过滤
+	case IgnoreFilterOnly:
+		q += " AND EXISTS (SELECT 1 FROM asset_ignored ig WHERE ig.asset_id=" + alias + ".id)"
+	default:
+		q += " AND NOT EXISTS (SELECT 1 FROM asset_ignored ig WHERE ig.asset_id=" + alias + ".id)"
+	}
+	if lb := strings.TrimSpace(f.Label); lb != "" {
+		// 支持 `key` 与 `key:value` 两种写法；只按 key 过滤时也走索引前缀。
+		if key, value, ok := strings.Cut(lb, ":"); ok && strings.TrimSpace(value) != "" {
+			q += " AND EXISTS (SELECT 1 FROM asset_labels l WHERE l.asset_id=" + alias + ".id AND l.key=? AND l.value=?)"
+			args = append(args, strings.TrimSpace(key), strings.TrimSpace(value))
+		} else {
+			q += " AND EXISTS (SELECT 1 FROM asset_labels l WHERE l.asset_id=" + alias + ".id AND l.key=?)"
+			args = append(args, strings.TrimSpace(key))
+		}
+	}
 	switch f.Status {
 	case StatusArchived:
 		q += " AND NOT " + hasDiscoveryCond(alias)
@@ -523,6 +569,133 @@ func scanAssets(rows *sql.Rows) ([]Asset, error) {
 	return out, nil
 }
 
+// anyIDs 把资产 ID 切片转成切片参数（供 IN 查询使用）。
+func anyIDs(ids []int64) []any {
+	out := make([]any, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id)
+	}
+	return out
+}
+
+// loadMeta 批量补齐资产的「忽略标记」与「标签」。
+//
+// 用两条 IN 查询而不是把它们拼进主查询：标签是一对多，塞进主查询会让 scanAssets 的
+// 「一个资产多行合并」逻辑再复杂一层（属性行已经在合并了）。两条额外查询的代价只与
+// 本页资产数相关，与台账总量无关。
+func (s *Store) loadMeta(assets []Asset) error {
+	if len(assets) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(assets))
+	index := make(map[int64]int, len(assets))
+	for i := range assets {
+		ids = append(ids, assets[i].ID)
+		index[assets[i].ID] = i
+	}
+	args := anyIDs(ids)
+	ph := placeholders(len(ids))
+
+	rows, err := s.db.Query(
+		`SELECT asset_id,reason,ignored_by,ignored_at FROM asset_ignored WHERE asset_id IN (`+ph+`)`, args...)
+	if err != nil {
+		return fmt.Errorf("查询资产忽略标记失败: %w", err)
+	}
+	for rows.Next() {
+		var id, at int64
+		var reason, by string
+		if err := rows.Scan(&id, &reason, &by, &at); err != nil {
+			rows.Close()
+			return fmt.Errorf("读取资产忽略标记失败: %w", err)
+		}
+		if i, ok := index[id]; ok {
+			assets[i].Ignored = true
+			assets[i].IgnoreReason = reason
+			assets[i].IgnoredBy = by
+			assets[i].IgnoredAt = at
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("读取资产忽略标记失败: %w", err)
+	}
+	rows.Close()
+
+	lrows, err := s.db.Query(
+		`SELECT asset_id,key,value FROM asset_labels WHERE asset_id IN (`+ph+`) ORDER BY key`, args...)
+	if err != nil {
+		return fmt.Errorf("查询资产标签失败: %w", err)
+	}
+	defer lrows.Close()
+	for lrows.Next() {
+		var id int64
+		var key, value string
+		if err := lrows.Scan(&id, &key, &value); err != nil {
+			return fmt.Errorf("读取资产标签失败: %w", err)
+		}
+		i, ok := index[id]
+		if !ok {
+			continue
+		}
+		if assets[i].Labels == nil {
+			assets[i].Labels = map[string]string{}
+		}
+		assets[i].Labels[key] = value
+	}
+	return lrows.Err()
+}
+
+// ignoreAsset 标记资产为已忽略（重复忽略按最后一次的理由与操作人覆盖）。
+func (s *Store) ignoreAsset(assetID int64, reason, actor string, at int64) error {
+	if _, err := s.db.Exec(
+		`INSERT INTO asset_ignored(asset_id,reason,ignored_by,ignored_at) VALUES(?,?,?,?)
+		 ON CONFLICT(asset_id) DO UPDATE SET reason=excluded.reason, ignored_by=excluded.ignored_by, ignored_at=excluded.ignored_at`,
+		assetID, reason, actor, at,
+	); err != nil {
+		return fmt.Errorf("忽略资产失败: %w", err)
+	}
+	return nil
+}
+
+// restoreAsset 解除忽略；本来就没被忽略时也返回成功（幂等）。
+func (s *Store) restoreAsset(assetID int64) error {
+	if _, err := s.db.Exec(`DELETE FROM asset_ignored WHERE asset_id=?`, assetID); err != nil {
+		return fmt.Errorf("恢复资产失败: %w", err)
+	}
+	return nil
+}
+
+// deleteAsset 彻底删除资产（属性 / 关系 / 变更历史 / 快照 / 忽略标记随之级联删除）。
+//
+// 只应由「纯人工建档」资产调用：调用方（Service.Purge）负责把关，因为采集资产删掉后
+// 会被下一轮上报重建——那种"删了又回来"的行为会让人以为删除没生效。
+func (s *Store) deleteAsset(assetID int64) error {
+	if _, err := s.db.Exec(`DELETE FROM assets WHERE id=?`, assetID); err != nil {
+		return fmt.Errorf("删除资产失败: %w", err)
+	}
+	return nil
+}
+
+// setLabel 写入/覆盖一条标签。
+func (s *Store) setLabel(assetID int64, key, value string, at int64, actor string) error {
+	if _, err := s.db.Exec(
+		`INSERT INTO asset_labels(asset_id,key,value,updated_at,updated_by) VALUES(?,?,?,?,?)
+		 ON CONFLICT(asset_id,key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by`,
+		assetID, key, value, at, actor,
+	); err != nil {
+		return fmt.Errorf("写入资产标签失败: %w", err)
+	}
+	return nil
+}
+
+// removeLabel 删除一条标签；不存在也返回成功（幂等）。
+func (s *Store) removeLabel(assetID int64, key string) error {
+	if _, err := s.db.Exec(`DELETE FROM asset_labels WHERE asset_id=? AND key=?`, assetID, key); err != nil {
+		return fmt.Errorf("删除资产标签失败: %w", err)
+	}
+	return nil
+}
+
 // listAssets 按条件分页列出资产（含属性），按「类型 + 自然键」稳定排序。
 func (s *Store) listAssets(f ListFilter) ([]Asset, error) {
 	sub, args := assetWhere("a2", f)
@@ -545,6 +718,10 @@ func (s *Store) listAssets(f ListFilter) ([]Asset, error) {
 	if err != nil {
 		return nil, fmt.Errorf("读取资产列表失败: %w", err)
 	}
+	// 忽略标记与标签单独补齐（分页只影响本条查询的代价，与台账总量无关）
+	if err := s.loadMeta(out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -566,6 +743,10 @@ func (s *Store) listAssetsAll(f ListFilter) ([]Asset, error) {
 	out, err := scanAssets(rows)
 	if err != nil {
 		return nil, fmt.Errorf("读取资产列表失败: %w", err)
+	}
+	// 忽略标记与标签单独补齐（分页只影响本条查询的代价，与台账总量无关）
+	if err := s.loadMeta(out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -613,6 +794,17 @@ func (s *Store) assetStats(f ListFilter, changesSince int64) (Stats, error) {
 	if out.Conflict, err = count(" AND " + conflictCond("a")); err != nil {
 		return Stats{}, fmt.Errorf("统计冲突资产失败: %w", err)
 	}
+	// 已忽略：用同一套筛选但强制「只看已忽略」，因此这个数字与点进去看到的列表一致。
+	// 它必须由这条查询给出——已忽略资产默认不在 Total 里，不显示这个数字，
+	// 用户会以为自己忽略过的东西"找不回来了"。
+	forced := f
+	forced.Ignored = IgnoreFilterOnly
+	forced.Limit, forced.Offset = 0, 0
+	if out.Ignored, err = s.countAssets(forced); err != nil {
+		return Stats{}, fmt.Errorf("统计已忽略资产失败: %w", err)
+	}
+	// 反向修正：Total 若在「只看已忽略」筛选下，含义应是"已忽略总数"，两者一致即可。
+	// （默认筛选下 Total 不含已忽略，这正是台账的预期语义。）
 	if changesSince > 0 {
 		// 变更数要 join asset_changes，单独走一条查询（where 仍是同一套，含资源范围）。
 		var n int

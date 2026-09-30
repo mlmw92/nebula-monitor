@@ -116,6 +116,19 @@ type Asset struct {
 	// 不做第二套范围判定（设计件 §3.2）。非主机类资产可为空。
 	Node  string
 	Attrs map[string]Attr
+	// Labels 是资产的管理标签（key → value），与 Attrs **职责分开**：
+	// Attrs 是采集值 / 人工值（含责任人 owner），参与巡检与变更语义；
+	// Labels 是分类维度（业务系统 / 环境 / 机房…），用于展示与筛选，不参与巡检比对。
+	Labels map[string]string
+	// Ignored 为 true 表示该资产已从台账隐藏（忽略）。
+	//
+	// 它是「隐藏」而不是「删除」：采集仍会继续刷新其属性（因此恢复后看到的是最新状态），
+	// 但列表 / 摘要 / 巡检默认都不再计入它。采集资产一旦删除会被下一轮上报重建，
+	// 所以对它们正确的动作是忽略，而不是删除。
+	Ignored      bool
+	IgnoreReason string
+	IgnoredBy    string
+	IgnoredAt    int64
 	// CreatedAt / UpdatedAt 单位为毫秒。
 	CreatedAt int64
 	UpdatedAt int64
