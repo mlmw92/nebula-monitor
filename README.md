@@ -1677,6 +1677,22 @@ journalctl -u monitor-proxy-hub -f
 - **阈值怎么填**：`docs/configuration-cookbook.md` §三 给出了各中间件的建议阈值、方向与理由，
   规则表单的「新建规则」下拉里也能直接套用这 60 条模板（自动创建的只有其中 20 条跨环境通用的）。
 
+### 节点操作（统一下行通道）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/ops/actions?node=` | 动作目录；带 node 时附带该节点**本机放行**的动作清单（`ops:read`） |
+| GET | `/api/v1/ops/tasks?node=&state=&kind=&limit=` | 操作任务列表（按资源范围过滤，`ops:read`） |
+| GET | `/api/v1/ops/tasks/{id}` | 任务详情（含执行输出，`ops:read`） |
+| POST | `/api/v1/ops/tasks` | 下发一条操作任务 `{node,kind,params,reason}`（`ops:exec`，**高风险**） |
+
+> **四道护栏**：① Agent 本机护栏 `guards.ops`（默认只读，写操作需 `write: true` **且**单元在 `units` 清单）；
+> ② 能力协商（Agent 只声明本机放行的动作，Server 只下发声明过的）；③ 中心授权 + 参数校验 + 审计
+> （`ops:exec` 已入 `HighRiskPermissions`）；④ 首批动作默认只读。
+> 指令走「上报响应搭车」（与 defense/upgrade 同构，ADR-0003），**不新增长连接与入站端口**，
+> 代价是指令延迟 = 一个采集周期（默认 15s）。节点离线时下发会被直接拒绝（409），
+> 因为它不可能被领取。配置与排障见 `docs/configuration-cookbook.md` §四。
+
 ### 安全中心与审计
 
 | 方法 | 路径 | 说明 |
