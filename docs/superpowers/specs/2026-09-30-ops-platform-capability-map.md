@@ -85,9 +85,9 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 | 功能点 | 状态 | 现状与依据 | 优先级 | 复杂度 | 前置依赖 | 归属 |
 |---|---|---|---|---|---|---|
 | 资产自动发现（主机信息/分区/进程/中间件实例/容器清单） | **已实现** | 上报链路已接入：`internal/server/receiver/assets.go:applyAssets`（主机 + 15 类中间件实例，幂等）；测试 `internal/server/receiver/assets_test.go` | **P0** | M | — | D2 |
-| 资产台账（资产类型 / 资产实例 / 属性/标签 / 负责人） | 部分实现 | 后端读写已落地：`internal/server/asset`（SQLite）、`GET /api/v1/assets`、`POST /api/v1/assets`、`PUT /api/v1/assets/{id}`（人工值，`assets:write` 已设并入高风险）；**缺负责人/标签字段、删除接口与前端页面** | **P0** | M | 关系型持久化（ADR-0001，已完成） | D2 |
+| 资产台账（资产类型 / 资产实例 / 属性/标签 / 负责人） | 部分实现 | 后端读写已落地：`internal/server/asset`（SQLite）、`GET /api/v1/assets`、`POST /api/v1/assets`、`PUT /api/v1/assets/{id}`（人工值，`assets:write` 已设并入高风险）；**负责人已落地**（约定人工属性键 `owner`，列表/摘要/筛选均消费）、**前端台账页已落地**（见下「资产台账页」）；**仍缺标签字段与删除接口** | **P0** | M | 关系型持久化（ADR-0001，已完成） | D2 |
 | 资产关系与拓扑（依赖 / 归属 / 影响传播） | 部分实现 | `runs_on`（实例 → 主机）已随上报自动建立且幂等（`asset.Service.Link`）；`member_of/depends_on/exposes` 与拓扑视图未做 | **P0** | L | 资产台账 | D2 |
-| 变更历史与审计（字段级 diff / 操作留痕） | 部分实现 | 字段级 diff 已落地：`asset_changes` + `asset.Service.History` + `GET /api/v1/assets/{id}/history`（**仅真变化才记录**，首建只写一条 initial）；缺前端时间线与人工写操作的审计联动 | **P0** | M | 资产台账 | D2 |
+| 变更历史与审计（字段级 diff / 操作留痕） | 部分实现 | 字段级 diff 已落地：`asset_changes` + `asset.Service.History` + `GET /api/v1/assets/{id}/history`（**仅真变化才记录**，首建只写一条 initial）；**前端时间线已落地**（详情抽屉「变更历史」Tab，含旧值→新值 / 来源 / 操作人）；仍缺与操作审计（`audit`）的显式交叉链接 | **P0** | M | 资产台账 | D2 |
 | 采集值与人工值分离（来源标记 / 冲突可见） | **已实现** | 属性联合主键含 `source`，`Asset.Value` 取生效值（人工优先），接口返回 `values` + `attrs`（两来源并存） | P1 | M | 资产台账 | D2 |
 | 资产生命周期（上线/下线/退役/成本/维保） | 未实现 | `README.md` 路线图「CMDB（P2）：资产台账、生命周期与变更记录」 | P2 | M | 资产台账 | D2 |
 | 资产与资源范围的映射/迁移 | **已实现** | 接口按资产所属节点走既有范围判定（`api/nodeInScope`）：范围外资产按 404 返回、先过滤再计数；权限点 `assets:read` 已注册并授予运维/只读角色 | **P0** | M | 资产台账 | D2 |
@@ -156,7 +156,7 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 | Docker 容器指标采集 | 已实现 | `internal/agent/collector/docker.go`（Docker Engine API） | — | — | — | — |
 | 工作负载列表 / 详情 / YAML 只读视图 | 未实现 | Server 侧无 `*k8s*` handler；仅有指标读取 `GET /api/v1/middleware/k8s/instances` | **P0** | L | 下行通道（ADR-0003）+ 凭据只在 Agent | D3 |
 | 事件（Event）查看 | 未实现 | — | **P0** | S | 同上 | D3 |
-| 容器/Pod 日志拉取 | 未实现 | Agent 侧 `logship` 只能采文件，不能拉 Pod 日志 | **P0** | M | 同上 | D3 |
+| 容器/Pod 日志拉取 | 未实现 | Agent 侧 `logship` 只能采**本机文件**（`paths` 不支持通配符），不能拉 Pod 日志；K8s 采集器只拉指标不拉日志。**2026-09-30 补充（用户要求列为待办，后面再考虑）**：在平台实现本项（方案 C：用 `k8sInstances` 凭据调 apiserver `/api/v1/namespaces/{ns}/pods/{pod}/log?sinceTime=` 拉取）之前，短期有两条绕过路径——**A** 集群侧采集器按 `POST /api/v1/logs` 契约直接投递（`receiver/logs.go:HandleLogs`：`X-Agent-Secret` + `{node,group,source,lines[{ts,pattern,text}]}`，4 MiB/请求、1 MiB/s/节点、每来源每日 1 GiB；注意**节点未声明来源清单时放行任意来源、已声明则清单外 403**，故需用一个不与 Agent 撞名的专用节点名，且外部来源不会出现在页面「来源」下拉里）；**B** 把 Pod 日志转写成节点固定文件再由 Agent 采（能力最全：有模式计数指标可告警）。方案 A 若要做到"来源可声明可筛选"，需补一个小的"外部日志来源声明"能力 | **P0** | M | 同上 | D3 |
 | exec 终端（默认关闭、按权限开放） | 未实现 | 需三道门控 + 审计；凭据永不上行 | P2 | L | 只读管理面先落地 | D3 |
 | 容器 → 日志/资产联动（Pod 打标回到资产与日志检索） | 未实现 | — | P1 | M | 资产台账 + 日志标签注入 | D2/D3 |
 | 镜像/配置安全扫描 | 未实现 | 可选参考 `aquasecurity/trivy`（Apache-2.0） | P3 | M | — | — |
@@ -285,4 +285,5 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 - **本次已发现并需修订的文档滞后项**（1 项，已列为待办）：
   - **采集项模板（Collector Template）与取数护栏（templateGuards）**：功能已在 `1e25239 refactor!: 移除采集项模板功能全链路` 移除，代码中 `internal/template` 不存在、`/api/v1/middleware/templates*` 路由未注册；但 `CONTEXT.md` 仍以现役术语描述（**7 处**），`docs/c1-collector-templates.md`、`docs/refactor-plan.md`、`docs/permission-matrix.md` 亦仍按已交付描述。处置：在术语与路线图同步时修订（见计划最后一步）。
 - **未纳入本次对照的文档**：`docs/refactor-plan.md`（109 KB，历史重构计划）、`docs/system-audit/`、`docs/testing/` 作为线索使用，不作为状态依据。
+- **配置模板手册**：`docs/configuration-cookbook.md`（2026-09-30 新增）——告警事件管道与集中日志的**可复制模板**（页面亦内置「示例模板 / 配置示例」入口）。本表只统计"功能有没有"，"怎么配"集中在手册里，避免两处重复维护。
 - **复核清单**：①每行依据可跳转命中；②对账表覆盖 README 全部 21 条路线图项；③新增项均标注来源设计件；④P2→P3 的降档建议经确认后再写入 `README.md`。
