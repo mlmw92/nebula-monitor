@@ -256,7 +256,7 @@ GET    /api/v1/inspect/runs/{id}/findings       # 差异项
 
 | 待定义 | 采用口径 | 理由 |
 |---|---|---|
-| 状态 `online / missing / archived` | 有采集值且最近采集在阈值（`assetStaleThreshold = 5min`）内 → online；超阈值 → missing；**从无采集值**（纯人工建档）→ archived | 归档与失联必须分开：台账里补录的资产从来不上报，算成"失联"会让运维每天追一批本就不该上报的对象。阈值取采集周期的 20 倍，容忍抖动又不掩盖真掉线 |
+| 状态 `online / missing / archived` | 有采集值且最近采集在阈值（`assetStaleThreshold = 30min`）内 → online；超阈值 → missing；**从无采集值**（纯人工建档）→ archived。阈值取 30 分钟（见批次 7），判定基准是 `asset_seen.last_seen_at`（见批次 9） | 归档与失联必须分开：台账里补录的资产从来不上报，算成"失联"会让运维每天追一批本就不该上报的对象。判定基准必须是「最后一次上报时刻」而非「最后一次值变化时刻」，否则值长期不变的资产会被整批误判 |
 | 来源 `auto / manual / mixed` | 无人工值 → auto；有字段同时存在人工值与采集值 → mixed；其余有人工值 → manual | 与「冲突」共用同一判定，列表一个列就能说清"这台机器有没有人插手、插手得对不对" |
 | 责任人 | 约定人工属性键 **`owner`**（`asset.OwnerKey`），不新增库列 | 目前只有它被列表/摘要/筛选直接消费；其余管理属性（业务系统/环境/维保到期…）保持自由键，等字典枚举能力上线再固化 |
 | 关联关系 | 只用既有自动关系（`runs_on`），**范围外的对端不返回** | 一条边足以暴露范围外资产的名字；关系宁少而准，人工关系与上层依赖留待后续批次 |
@@ -321,4 +321,39 @@ GET    /api/v1/inspect/runs/{id}/findings       # 差异项
 | 操作 | 按钮、权限徽标与一长串说明挤在一行且未对齐 | `.action-bar`：左侧「新建资产 + `assets:write` 徽标」，右侧（`margin-left:auto`）一行 muted 说明；说明合并了两句原先分散的文案 |
 
 **验证方式**：`npm test` 6 个文件 + `npm run build` 通过（`KpiCard` 独立分包 0.75 kB，`AssetListView` 23.55 kB / gzip 8.54 kB）。
+
+### 批次 9（2026-09-30）：修复「资产全部显示失联」+ 补齐编辑入口（1.30.4）
+
+**故障**：升级后用户反馈「中间件资产都显示失联」。
+
+**根因**：`LastSeenAt` 取自资产属性行的 `updated_at`，而 `Apply` 为了不制造变更记录噪声，
+**只在值真正变化时才写属性行**（`if ok && normalizeValue(prev) == normalizeValue(value) { continue }`）。
+主机的 `os`/`cpuCores`/`memoryMB` 与中间件的 `version`/`topology`/`up` 长期不变，
+于是这些资产的「最近上报」永久冻结在最后一次变更时刻，超过失联阈值后**整批**被判为 `missing`。
+换句话说：把「值变了没有」当成了「还在不在」。
+
+**修法**：把「最近见到」与「值变没变」拆成两个维度——新增 `asset_seen(asset_id PK, last_seen_at)`，
+每次采集上报（`SourceDiscovery`）都 `UPSERT`（用 `MAX` 防止乱序上报把时间往回拨），
+`LastSeenAt()` 改读它；列表/摘要/筛选的 `lastSeenExpr` 一并改读该表。
+
+| 决策 | 理由 |
+|---|---|
+| 不提升 `schemaVersion` | 纯附加表，旧版本程序不读它；保留「回滚旧版本时 `assets.db` 可直接沿用」这一既定运维性质 |
+| 不复用 `assets.updated_at` | 人工维护也会刷新它，「最近上报」会变成人工改动时间 |
+| 不在属性行上刷新时间戳 | 那会让属性行的 `updated_at` 失去「值何时变过」的含义，且每轮对每个属性多一次写 |
+| `MAX(last_seen_at, excluded)` | 多 Agent / 网络重试导致的乱序上报不应把时间往回拨（否则凭空出现失联资产） |
+
+**升级后注意**：`asset_seen` 为空的历史资产在**下一次上报前**仍会显示失联（主机与实例都会有新行），
+一轮采集周期（默认 15s）后自愈；这是预期行为，不是残留故障。
+
+**同时补齐编辑入口**（用户反馈「缺少编辑功能」）：列表行操作与抽屉按钮由「维护人工值」改为
+**「编辑」/「编辑资产」**；编辑对话框**预填当前名称**（此前名称框为空，看起来像不能改），
+并只提交真正改过的名称（服务端把空名称视为不修改）；补充只读的「归属节点」字段，
+明确自然键 / 归属节点是资源范围锚点、不可修改。删除资产仍无后端接口，故不放置无效入口。
+
+**验证方式**：新增 `TestApplyRefreshesLastSeenEvenWhenValuesUnchanged`（值不变也必须刷新最近上报，
+且不得产生变更记录）、`TestListStatusUsesLastSeenNotValueChange`（40 分钟未变仍为在线，
+列表与摘要同为 0 条失联）；改写 `TestAssetDerivedFieldsAreComputedNotStored` 覆盖
+「属性时间戳很旧但 `SeenAt` 新鲜 → online」。`go test ./internal/server/{asset,api,receiver}` 通过；
+`npm test` 6 个文件 + `npm run build` 通过。
 

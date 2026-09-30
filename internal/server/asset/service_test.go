@@ -583,3 +583,77 @@ func TestOpenIsIdempotentOnSamePath(t *testing.T) {
 		t.Fatalf("重新打开后应读到既有资产，实际 ok=%v %+v", ok, got)
 	}
 }
+
+// 值长期不变的资产也必须刷新「最近上报」。
+//
+// 依据：真实反馈「中间件资产全部显示失联」。中间件的 version / topology / up 等属性几乎不变，
+// 而 Apply 只在值变化时才写属性行——若「最近上报」取自属性行的 updated_at，它就会永久冻结在
+// 最后一次变更时刻，超阈值后整批资产被误判为失联（主机同样如此：os / cpuCores 也不变）。
+func TestApplyRefreshesLastSeenEvenWhenValuesUnchanged(t *testing.T) {
+	svc, _ := newTestService(t)
+	now := int64(1_700_000_000_000)
+	svc.now = func() int64 { return now }
+
+	ob := Observation{
+		TypeKey: TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6379", Name: "dev-redis",
+		Node: "web-01", Attrs: map[string]string{"version": "6.2.6", "topology": "standalone"},
+	}
+	first, created, err := svc.Apply(ob)
+	if err != nil || !created {
+		t.Fatalf("首次上报失败: created=%v err=%v", created, err)
+	}
+	if first.LastSeenAt() != now {
+		t.Fatalf("首次上报后最近上报应为 %d，实际 %d", now, first.LastSeenAt())
+	}
+
+	// 一小时后再上报，值完全没变。
+	now += 3600_000
+	second, created, err := svc.Apply(ob)
+	if err != nil || created {
+		t.Fatalf("重复上报失败: created=%v err=%v", created, err)
+	}
+	if second.LastSeenAt() != now {
+		t.Fatalf("值没变也必须刷新最近上报：期望 %d，实际 %d", now, second.LastSeenAt())
+	}
+
+	// 但不能因为刷新时间而制造变更记录噪声：仍然只有一条建档记录。
+	hist, err := svc.History(Ref{TypeKey: TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6379"}, 0)
+	if err != nil {
+		t.Fatalf("查询变更历史失败: %v", err)
+	}
+	if len(hist) != 1 || hist[0].Kind != ChangeInitial {
+		t.Fatalf("值没变不应产生变更记录，实际 %+v", hist)
+	}
+}
+
+// 失联判定必须基于「最近上报」，而不是属性的最后变更时刻。
+func TestListStatusUsesLastSeenNotValueChange(t *testing.T) {
+	svc, _ := newTestService(t)
+	now := int64(1_700_000_000_000)
+	svc.now = func() int64 { return now }
+	attrs := map[string]string{"os": "Ubuntu 24.04"}
+	if _, _, err := svc.Apply(hostObservation("web-01", attrs)); err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	// 40 分钟后再上报（值没变）；失联阈值为 30 分钟 → 仍应算在线。
+	now += 40 * 60_000
+	if _, _, err := svc.Apply(hostObservation("web-01", attrs)); err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	staleBefore := now - 30*60_000
+
+	if n, err := svc.Count(ListFilter{Status: StatusMissing, StaleBefore: staleBefore}); err != nil || n != 0 {
+		t.Fatalf("值长期不变的资产不应被判失联：n=%d err=%v", n, err)
+	}
+	if n, err := svc.Count(ListFilter{Status: StatusOnline, StaleBefore: staleBefore}); err != nil || n != 1 {
+		t.Fatalf("应为在线 1 条：n=%d err=%v", n, err)
+	}
+	// 摘要的「失联」必须与列表同源：这里是 0。
+	stats, err := svc.Stats(ListFilter{StaleBefore: staleBefore}, 0)
+	if err != nil {
+		t.Fatalf("统计摘要失败: %v", err)
+	}
+	if stats.Missing != 0 || stats.Total != 1 {
+		t.Fatalf("摘要应为 total=1 missing=0，实际 %+v", stats)
+	}
+}

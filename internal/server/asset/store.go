@@ -81,6 +81,19 @@ var schemaStatements = []string{
 		value       TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY(snapshot_id, key)
 	)`,
+	// asset_seen 只记「最后一次采集上报是什么时候」，每个资产一行，每轮上报覆盖写。
+	//
+	// 为什么不能复用资产属性行的 updated_at：Apply 只在值发生变化时写属性行，
+	// 而主机的 os/cpuCores、中间件的 version/topology 长期不变，于是"最近上报"会永久冻结在
+	// 最后一次变更时刻——超过阈值后这些资产会被整批误判为失联（真实故障）。
+	// 本表与「值是否变化」无关，因此必须独立存在。
+	//
+	// 纯附加表：老版本程序不会读它，所以 **不** 提升 schemaVersion——保留「回滚旧版本时
+	// assets.db 可直接沿用」这一既定运维性质。
+	`CREATE TABLE IF NOT EXISTS asset_seen(
+		asset_id     INTEGER PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
+		last_seen_at INTEGER NOT NULL
+	)`,
 }
 
 // Store 是资产领域的 SQLite 持久化适配器。
@@ -176,7 +189,39 @@ func (s *Store) assetByNatural(typeKey, naturalKey string) (Asset, bool, error) 
 		return Asset{}, false, err
 	}
 	a.Attrs = attrs
+	if err := s.seenOf(a.ID, &a); err != nil {
+		return Asset{}, false, err
+	}
 	return a, true, nil
+}
+
+// seenOf 读取资产的「最近上报」时刻并写入 a.SeenAt（无记录时保持 0）。
+func (s *Store) seenOf(assetID int64, a *Asset) error {
+	var seen sql.NullInt64
+	err := s.db.QueryRow(`SELECT last_seen_at FROM asset_seen WHERE asset_id=?`, assetID).Scan(&seen)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("查询资产最近上报时间失败: %w", err)
+	}
+	a.SeenAt = seen.Int64
+	return nil
+}
+
+// markSeen 记录一次采集上报。
+//
+// 用 MAX 取较大值而不是直接覆盖：乱序到达的上报（多 Agent、网络重试）不应把"最近见到"
+// 往回拨，否则台账会凭空出现一批失联资产。
+func (s *Store) markSeen(assetID int64, at int64) error {
+	if _, err := s.db.Exec(
+		`INSERT INTO asset_seen(asset_id,last_seen_at) VALUES(?,?)
+		 ON CONFLICT(asset_id) DO UPDATE SET last_seen_at=MAX(last_seen_at, excluded.last_seen_at)`,
+		assetID, at,
+	); err != nil {
+		return fmt.Errorf("记录资产最近上报时间失败: %w", err)
+	}
+	return nil
 }
 
 // assetByID 按主键取资产。
@@ -365,9 +410,13 @@ func hasDiscoveryCond(alias string) string {
 	return `EXISTS (SELECT 1 FROM asset_attrs d WHERE d.asset_id=` + alias + `.id AND d.source='discovery')`
 }
 
-// lastSeenExpr 取最近的采集写入时刻（毫秒）；从未采集时为 NULL。
+// lastSeenExpr 取最近的**采集上报**时刻（毫秒）；从未上报时为 NULL。
+//
+// 取自 asset_seen 而非属性行的 MAX(updated_at)：属性行只在值变化时才更新，
+// 用它会把"值长期不变"的资产（主机、中间件实例都如此）算成失联。
+// NULL 的语义仍与旧实现一致：从未上报 → 任何比较都为假 → 不会落进 online / missing。
 func lastSeenExpr(alias string) string {
-	return `(SELECT MAX(d.updated_at) FROM asset_attrs d WHERE d.asset_id=` + alias + `.id AND d.source='discovery')`
+	return `(SELECT se.last_seen_at FROM asset_seen se WHERE se.asset_id=` + alias + `.id)`
 }
 
 // hasManualCond 判断资产是否存在人工值。
@@ -395,6 +444,7 @@ func (s *Store) listAssets(f ListFilter) ([]Asset, error) {
 	// 会挤占同页额度（10 条属性就吃掉一页的 1/5），OFFSET 也随之漂移。
 	// 因此先用子查询选出本页的资产 ID，再取这些资产的属性。
 	q := `SELECT a.id,a.type_key,a.natural_key,a.name,a.node,a.created_at,a.updated_at,
+	             (SELECT se.last_seen_at FROM asset_seen se WHERE se.asset_id=a.id),
 	             t.key,t.value,t.source,t.updated_at,t.updated_by
 	      FROM assets a LEFT JOIN asset_attrs t ON t.asset_id=a.id
 	      WHERE a.id IN (SELECT a2.id FROM assets a2` + sub + ` ORDER BY a2.type_key,a2.natural_key LIMIT ? OFFSET ?)
@@ -412,11 +462,12 @@ func (s *Store) listAssets(f ListFilter) ([]Asset, error) {
 	for rows.Next() {
 		var a Asset
 		var key, value, source, by sql.NullString
-		var attrAt sql.NullInt64
+		var attrAt, seenAt sql.NullInt64
 		if err := rows.Scan(&a.ID, &a.TypeKey, &a.NaturalKey, &a.Name, &a.Node,
-			&a.CreatedAt, &a.UpdatedAt, &key, &value, &source, &attrAt, &by); err != nil {
+			&a.CreatedAt, &a.UpdatedAt, &seenAt, &key, &value, &source, &attrAt, &by); err != nil {
 			return nil, fmt.Errorf("读取资产列表失败: %w", err)
 		}
+		a.SeenAt = seenAt.Int64
 		cur, ok := byID[a.ID]
 		if !ok {
 			a.Attrs = map[string]Attr{}

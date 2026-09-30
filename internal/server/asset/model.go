@@ -119,6 +119,9 @@ type Asset struct {
 	// CreatedAt / UpdatedAt 单位为毫秒。
 	CreatedAt int64
 	UpdatedAt int64
+	// SeenAt 是最近一次**采集上报**的时刻（毫秒），由 asset_seen 表维护；0 表示从未上报。
+	// 与 UpdatedAt / 属性行的 updated_at 都不同：后两者只在"值发生变化"时前进。
+	SeenAt int64
 }
 
 // Value 返回属性的**生效值**：人工值优先，其次采集值。
@@ -209,19 +212,14 @@ func (a Asset) HasDiscovery() bool {
 	return false
 }
 
-// LastSeenAt 返回最近一次**采集**写入的时间（毫秒）；从未被采集时返回 0。
+// LastSeenAt 返回最近一次**采集上报**的时间（毫秒）；从未被采集时返回 0。
 //
-// 不能用 Asset.UpdatedAt：人工维护也会刷新它，于是"最近上报"会显示成人工改动的时间，
-// 失联判定随之失真（这正是原型里「最近上报」与「最近更新」要分开的原因）。
-func (a Asset) LastSeenAt() int64 {
-	var latest int64
-	for _, attr := range a.Attrs {
-		if attr.Source == SourceDiscovery && attr.UpdatedAt > latest {
-			latest = attr.UpdatedAt
-		}
-	}
-	return latest
-}
+// 不能用 Asset.UpdatedAt：人工维护也会刷新它，于是"最近上报"会显示成人工改动的时间。
+// 也**不能**用属性行的 updated_at：Apply 只在值真正变化时才写属性行（避免每轮制造无意义的
+// 变更记录），而主机的 os/cpuCores、中间件的 version/topology 长期不变——这些资产的
+// "最近上报"会永久冻结在最后一次变更时刻，超过阈值后整页资产被误判为失联。
+// 因此单独维护 asset_seen：它只回答「最后一次见到它是什么时候」，与值是否变化无关。
+func (a Asset) LastSeenAt() int64 { return a.SeenAt }
 
 // attrID 是属性在 map 中的键：同一 key 的来源不同则是不同条目。
 func attrID(key string, src Source) string {

@@ -180,6 +180,12 @@ func (s *Service) Apply(ob Observation) (Asset, bool, error) {
 				return Asset{}, false, err
 			}
 		}
+		if src == SourceDiscovery {
+			// 采集上报也刷新「最近上报」：它回答的是"最后一次见到它"，与值是否变化无关。
+			if err := s.store.markSeen(id, at); err != nil {
+				return Asset{}, false, err
+			}
+		}
 		// 建档记录只有一条：首次导入不能产生逐条变更噪声。
 		if err := s.store.appendChange(ChangeRecord{
 			AssetID: id, Field: "asset", New: naturalKey,
@@ -230,6 +236,14 @@ func (s *Service) Apply(ob Observation) (Asset, bool, error) {
 			return Asset{}, false, err
 		}
 		changed = true
+	}
+	if src == SourceDiscovery {
+		// 关键：即使上面一个字段都没变（上面 `continue` 了），也必须在**每次上报**都刷新
+		// 「最近上报」。资产属性长期不变是常态（主机的 os/cpuCores、中间件的 version/topology），
+		// 若只在值变化时刷新，这些资产会在阈值后被整批误判为失联。
+		if err := s.store.markSeen(cur.ID, at); err != nil {
+			return Asset{}, false, err
+		}
 	}
 	if changed {
 		if err := s.store.touchAsset(cur.ID, name, node, at); err != nil {

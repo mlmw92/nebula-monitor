@@ -481,22 +481,37 @@ func TestHandleAssetsScopedPaginationFillsEveryPage(t *testing.T) {
 // 状态三态在接口层测试里用纯函数覆盖：夹具的资产都是刚写入的，构造不出「失联」。
 func TestAssetDerivedFieldsAreComputedNotStored(t *testing.T) {
 	staleBefore := int64(1000)
-	// 只带采集值的资产（属性 map 的键遵循 asset 包 key@source 的约定，这里只为 ValueFrom 用）
-	withDiscovery := func(at int64) asset.Asset {
+	// 只带采集值的资产（属性 map 的键遵循 asset 包 key@source 的约定，这里只为 ValueFrom 用）。
+	// 注意 SeenAt 与属性时间戳是**两个维度**：属性 UpdatedAt 只在值变化时前进，
+	// 而 SeenAt 每轮上报都前进——失联判定必须用后者（否则值长期不变的资产会被误判失联）。
+	withSeen := func(seen int64) asset.Asset {
 		return asset.Asset{
-			ID: 7, TypeKey: asset.TypeHost, NaturalKey: "srv-01",
+			ID: 7, TypeKey: asset.TypeHost, NaturalKey: "srv-01", SeenAt: seen,
 			Attrs: map[string]asset.Attr{
 				"os@" + string(asset.SourceDiscovery): {
-					Key: "os", Value: "CentOS 7.9", Source: asset.SourceDiscovery, UpdatedAt: at,
+					Key: "os", Value: "CentOS 7.9", Source: asset.SourceDiscovery, UpdatedAt: 2000,
 				},
 			},
 		}
 	}
-	if got := assetStatusOf(withDiscovery(2000), staleBefore); got != asset.StatusOnline {
+	if got := assetStatusOf(withSeen(2000), staleBefore); got != asset.StatusOnline {
 		t.Fatalf("刚上报应为 online，实际 %q", got)
 	}
-	if got := assetStatusOf(withDiscovery(500), staleBefore); got != asset.StatusMissing {
+	if got := assetStatusOf(withSeen(500), staleBefore); got != asset.StatusMissing {
 		t.Fatalf("超阈值未上报应为 missing，实际 %q", got)
+	}
+	// 属性时间戳停在 100（值很久没变），但 SeenAt 新鲜 → 仍应在线。
+	// 这正是「中间件资产全部显示失联」那个故障的判定：不能拿属性时间戳当最近上报。
+	staleAttrsFreshSeen := asset.Asset{
+		ID: 8, TypeKey: asset.TypeHost, NaturalKey: "srv-02", SeenAt: 2000,
+		Attrs: map[string]asset.Attr{
+			"os@" + string(asset.SourceDiscovery): {
+				Key: "os", Value: "CentOS 7.9", Source: asset.SourceDiscovery, UpdatedAt: 100,
+			},
+		},
+	}
+	if got := assetStatusOf(staleAttrsFreshSeen, staleBefore); got != asset.StatusOnline {
+		t.Fatalf("值长期不变、但上报新鲜时应为 online，实际 %q", got)
 	}
 	manualOnly := asset.Asset{Attrs: map[string]asset.Attr{
 		asset.OwnerKey + "@" + string(asset.SourceManual): {
@@ -507,12 +522,12 @@ func TestAssetDerivedFieldsAreComputedNotStored(t *testing.T) {
 		t.Fatalf("纯人工建档不应算失联，应为 archived，实际 %q", got)
 	}
 
-	view := toAssetView(withDiscovery(2000), staleBefore)
+	view := toAssetView(withSeen(2000), staleBefore)
 	if view.DisplayID != "ast_7" {
 		t.Fatalf("展示 ID 应为 ast_7，实际 %q", view.DisplayID)
 	}
 	if view.LastSeenAt != 2000 {
-		t.Fatalf("最近上报应取采集时间，实际 %d", view.LastSeenAt)
+		t.Fatalf("最近上报应取 SeenAt，实际 %d", view.LastSeenAt)
 	}
 	if view.Source != asset.SourceFilterAuto || view.Owner != "" || view.ConflictCount != 0 {
 		t.Fatalf("无人工值应为 auto 且无责任人：%+v", view)

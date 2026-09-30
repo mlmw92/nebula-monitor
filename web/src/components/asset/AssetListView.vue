@@ -148,7 +148,7 @@
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="openDetail(row)">详情</el-button>
-            <el-button v-if="canWrite" link type="primary" @click.stop="openEdit(row)">维护人工值</el-button>
+            <el-button v-if="canWrite" link type="primary" @click.stop="openEdit(row)">编辑</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -255,7 +255,7 @@
             </el-descriptions>
 
             <div v-if="canWrite" class="drawer-actions">
-              <el-button type="primary" @click="openEdit(detail)">维护人工值</el-button>
+              <el-button type="primary" @click="openEdit(detail)">编辑资产</el-button>
             </div>
           </el-tab-pane>
 
@@ -376,14 +376,15 @@
       </template>
     </el-dialog>
 
-    <!-- 维护：只更新人工值（采集值不受影响）。与列表对齐：名称 / 责任人 / 其它属性；
-         责任人清空提交 = 恢复「未指派」（走 resetAttrs 删除人工值，而不是写入空值）。 -->
-    <el-dialog v-model="editVisible" title="维护人工值" width="640px">
+    <!-- 编辑：可改资产名称 + 人工属性（采集值不受影响）。与列表对齐：名称 / 责任人 / 其它属性；
+         责任人清空提交 = 恢复「未指派」（走 resetAttrs 删除人工值，而不是写入空值）。
+         名称已预填当前值，未改动则不会提交（避免"提交了就报无内容可改"）。 -->
+    <el-dialog v-model="editVisible" title="编辑资产" width="640px">
       <el-alert
         type="info"
         :closable="false"
         show-icon
-        title="这里写入的是人工值：Agent 采集的值会原样保留，两者差异在详情里可对比。归属节点不可在此修改。"
+        title="这里写入的是人工值：Agent 采集的值会原样保留，两者差异在详情里可对比。归属节点与自然键是资源范围锚点，不可修改。"
         class="alert-gap"
       />
       <el-form label-width="100px">
@@ -391,7 +392,10 @@
           <el-input :model-value="editLabel" disabled />
         </el-form-item>
         <el-form-item label="资产名称">
-          <el-input v-model="form.name" placeholder="留空表示不修改" />
+          <el-input v-model="form.name" placeholder="留空或保持原值表示不修改；清空后列表中回落到自然键" />
+        </el-form-item>
+        <el-form-item label="归属节点">
+          <el-input :model-value="form.node || '（无归属节点）'" disabled />
         </el-form-item>
         <el-form-item label="责任人">
           <el-input v-model="ownerInput" :placeholder="editHadOwner ? '清空并提交 = 恢复未指派' : '选填'" />
@@ -465,6 +469,8 @@ const instanceType = ref('redis')
 const instanceAddr = ref('')
 const ownerInput = ref('')
 const editHadOwner = ref(false)
+// 编辑前的名称：用于判断「名称是否真的被改过」，未改则不提交该字段
+const editOriginalName = ref('')
 
 // 责任人的约定属性键，与服务端 asset.OwnerKey 一致
 const OWNER_KEY = 'owner'
@@ -689,7 +695,9 @@ function openCreate() {
 
 function openEdit(row) {
   editId.value = row.id
-  form.value = { typeKey: row.typeKey, naturalKey: row.naturalKey, name: '', node: row.node || '' }
+  // 名称预填当前值：否则用户看到空框，会以为「名称改不了」或担心提交后名称被清空。
+  editOriginalName.value = row.name || ''
+  form.value = { typeKey: row.typeKey, naturalKey: row.naturalKey, name: row.name || '', node: row.node || '' }
   ownerInput.value = row.owner || ''
   editHadOwner.value = !!row.owner
   // 预填当前人工值：采集值不预填，避免误以为「提交就会覆盖采集值」
@@ -762,14 +770,16 @@ async function submitEdit() {
   if (owner) attrs[OWNER_KEY] = owner
   else if (editHadOwner.value) resetAttrs.push(OWNER_KEY)
   const name = form.value.name.trim()
-  if (!name && !Object.keys(attrs).length && !resetAttrs.length) {
+  // 名称预填的是原值：只有真正改过才提交（服务端把「空名称」视为不修改）
+  const nameChanged = name !== '' && name !== editOriginalName.value.trim()
+  if (!nameChanged && !Object.keys(attrs).length && !resetAttrs.length) {
     ElMessage.warning('没有需要更新的内容')
     return
   }
-  if (!(await confirmWrite('将写入这些人工值；采集值不会被覆盖'))) return
+  if (!(await confirmWrite(nameChanged ? `将资产名称改为「${name}」，并写入这些人工值；采集值不会被覆盖` : '将写入这些人工值；采集值不会被覆盖'))) return
   saving.value = true
   try {
-    await updateAsset(id, { name, attrs, resetAttrs })
+    await updateAsset(id, { name: nameChanged ? name : '', attrs, resetAttrs })
     ElMessage.success('已保存人工值')
     editVisible.value = false
     await afterWrite(id)
