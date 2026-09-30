@@ -80,12 +80,33 @@ func (a *API) handleGenericMWInstances(spec mwGenericSpec) http.HandlerFunc {
 		instances := map[string]*state{}
 		var keys []string
 
-		add := func(key string, info mwGenericInstanceInfo) {
-			if _, ok := instances[key]; ok {
+		// latestTs 记录每个实例已采纳样本的数据点时间戳。
+		// 同一 node|instance 可能存在多条存活序列（指标带 version/role 等
+		// 「仅采集成功时才写入」的标签时，up=0 与 up=1 会落在不同序列上），
+		// 离线期间写入的 up=0 在恢复后仍留在即时查询回看窗口内；只采纳时间戳
+		// 最新的一条，避免已恢复的实例仍被判为离线。
+		latestTs := map[string]int64{}
+		add := func(key string, ts int64, info mwGenericInstanceInfo) {
+			prev, ok := instances[key]
+			if !ok {
+				instances[key] = &state{info: info, key: key}
+				keys = append(keys, key)
+				latestTs[key] = ts
 				return
 			}
-			instances[key] = &state{info: info, key: key}
-			keys = append(keys, key)
+			if ts <= latestTs[key] {
+				return
+			}
+			// 采纳更新的样本：存活状态以新样本为准，元信息保留非空值
+			// （role/version 只在采集成功时才存在）。
+			if info.Role == "" {
+				info.Role = prev.info.Role
+			}
+			if info.Version == "" {
+				info.Version = prev.info.Version
+			}
+			prev.info = info
+			latestTs[key] = ts
 		}
 
 		for _, s := range upSeries {
@@ -98,20 +119,21 @@ func (a *API) handleGenericMWInstances(spec mwGenericSpec) http.HandlerFunc {
 			if name == "" {
 				name = s.Labels["group"]
 			}
-			add(node+"|"+instance, mwGenericInstanceInfo{
+			last := s.Points[len(s.Points)-1]
+			add(node+"|"+instance, last.Timestamp, mwGenericInstanceInfo{
 				Node:     node,
 				Instance: instance,
 				Name:     name,
 				Group:    s.Labels["group"],
 				Role:     s.Labels["role"],
 				Version:  s.Labels["version"],
-				Up:       s.Points[len(s.Points)-1].Value > 0,
+				Up:       last.Value > 0,
 			})
 		}
 
 		// 注册表补充：agent 离线导致 up 指标 stale 时，实例仍以离线状态列出
 		for _, ref := range spec.Registry() {
-			add(ref.Node+"|"+ref.Instance, mwGenericInstanceInfo{
+			add(ref.Node+"|"+ref.Instance, 0, mwGenericInstanceInfo{
 				Node:     ref.Node,
 				Instance: ref.Instance,
 				Name:     ref.Name,

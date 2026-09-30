@@ -29,6 +29,11 @@ func init() {
 	Register(MetricMeta{Name: "mysql_threads_connected", Title: "活跃连接数", Category: CatMySQL, Unit: "个", Chart: ChartLine})
 	Register(MetricMeta{Name: "mysql_slow_queries", Title: "慢查询数", Category: CatMySQL, Unit: "个", Chart: ChartLine})
 	Register(MetricMeta{Name: "mysql_uptime", Title: "运行时长", Category: CatMySQL, Unit: "s", Chart: ChartLine})
+	// Group Replication 健康判定的辅助指标：模式决定「多主」是否正常，
+	// 组视图成员集合用于识别脑裂（各节点看到的成员不一致）。
+	Register(MetricMeta{Name: "mysql_gr_single_primary_mode", Title: "GR 单主模式(1=单主/0=多主)", Category: CatMySQL, Unit: "", Chart: ChartGauge})
+	Register(MetricMeta{Name: "mysql_gr_view_size", Title: "GR 组视图成员数", Category: CatMySQL, Unit: "个", Chart: ChartGauge})
+	Register(MetricMeta{Name: "mysql_gr_view_member", Title: "GR 组视图成员(1=ONLINE/0.5=RECOVERING/0=其他)", Category: CatMySQL, Unit: "", Chart: ChartGauge})
 
 	// —— PostgreSQL ——
 	Register(MetricMeta{Name: "postgres_instance_up", Title: "PostgreSQL 存活", Category: CatPostgres, Unit: "", Chart: ChartGauge})

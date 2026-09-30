@@ -184,10 +184,30 @@ func (c *RocketMQCollector) collectExporter(ctx context.Context, cfg model.Rocke
 			Group: cfg.Name, Role: "nameserver", Up: false,
 		}
 	}
-	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), "rocketmq_", now)
+	instance := normalizeRemoteAddr(cfg.Addr, "")
+	metrics := parsePrometheusTextWithPrefix(string(body), c.node, instance, "rocketmq_", now)
+	// RocketMQ exporter 原生通常不暴露 rocketmq_instance_up；ExporterURL 可成功拉取
+	// 且至少解析到一条 RocketMQ 指标时，补平台统一使用的实例存活指标，否则实例列表
+	// 会因缺少 *_instance_up 而显示离线。
+	hasUp := false
+	for _, m := range metrics {
+		if m.Name == "rocketmq_instance_up" {
+			hasUp = true
+			break
+		}
+	}
+	if len(metrics) > 0 && !hasUp {
+		metrics = append(metrics, model.Metric{
+			Node: c.node, Name: "rocketmq_instance_up", Value: 1, Timestamp: now,
+			Labels: map[string]string{
+				"node": c.node, "instance": instance, "name": cfg.Name,
+				"group": cfg.Name, "role": "nameserver",
+			},
+		})
+	}
 	ri := model.RocketMQInstance{
-		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
-		Group: cfg.Name, Role: "nameserver", Up: true,
+		Instance: instance, Name: cfg.Name, Node: c.node,
+		Group: cfg.Name, Role: "nameserver", Up: len(metrics) > 0,
 	}
 	for _, m := range metrics {
 		if m.Name == "rocketmq_instance_up" && m.Labels != nil {

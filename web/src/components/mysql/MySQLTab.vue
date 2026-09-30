@@ -51,7 +51,8 @@
                 <strong>集群 {{ grp.name || '未命名' }}</strong>
               </span>
               <span class="topo-meta">
-                <span class="badge" :class="clusterHealthClass(grp)">{{ clusterHealthText(grp) }}</span>
+                <span class="badge" :class="clusterHealthClass(grp)" :title="clusterFaultDetail(grp)">{{ clusterHealthText(grp) }}</span>
+                <span v-if="clusterModeText(grp)" class="dim">{{ clusterModeText(grp) }}</span>
                 <span class="dim">节点 {{ (grp.masters.length + grp.slaves.length) || grp.nodes.length }}</span>
               </span>
             </div>
@@ -290,6 +291,10 @@ import {
 
 const loading = ref(true)
 const instances = ref([])
+// 集群健康结论来自后端（/api/v1/middleware/mysql/instances 的 clusters 字段）：
+// 与告警引擎共用 alert.ClassifyClusterFault，页面不再自行判定，避免同实例两种结论。
+// 形如 { 'dev-mysql-gr': { mode: 'single'|'multi'|'unknown', fault: '', members: 3 } }
+const clusterInfo = ref({})
 const drawerVisible = ref(false)
 const selected = ref(null)
 const chartRef = ref(null)
@@ -345,6 +350,9 @@ const topologyGroups = computed(() => {
 })
 
 function clusterHealth(grp) {
+  // 后端已判定集群状态损坏（无主 / 多主脑裂 / 组视图分裂 / 模式不一致）→ 直接判异常。
+  // 判定口径与「MySQL 集群状态损坏」告警规则一致，页面与告警不会再出现两种结论。
+  if (clusterInfo.value[grp.name]?.fault) return 'fault'
   const items = grp.masters.concat(grp.slaves, grp.nodes || [])
   if (!items.length) return 'unknown'
   if (items.some((i) => !i.up)) return 'bad'
@@ -353,11 +361,30 @@ function clusterHealth(grp) {
 }
 function clusterHealthClass(grp) {
   const h = clusterHealth(grp)
-  return h === 'good' ? 'badge-ok' : h === 'warn' ? 'badge-warn' : h === 'bad' ? 'badge-down' : 'badge-unknown'
+  return h === 'good' ? 'badge-ok' : h === 'warn' ? 'badge-warn' : h === 'bad' || h === 'fault' ? 'badge-down' : 'badge-unknown'
 }
 function clusterHealthText(grp) {
+  const info = clusterInfo.value[grp.name]
+  if (info?.fault) return clusterFaultShort(info.fault)
   const h = clusterHealth(grp)
   return h === 'good' ? '运行正常' : h === 'warn' ? '延迟偏高' : h === 'bad' ? '存在离线' : '未知'
+}
+// 徽标只放短语，完整原因放 title 悬浮展示（后端返回的判定说明较长）
+function clusterFaultShort(fault) {
+  if (fault.includes('组视图分裂')) return '组视图分裂'
+  if (fault.includes('无主')) return '无主'
+  if (fault.includes('多主')) return '多主（疑似脑裂）'
+  if (fault.includes('模式配置不一致')) return '模式不一致'
+  if (fault.includes('角色不一致')) return '角色不一致'
+  return '状态损坏'
+}
+function clusterFaultDetail(grp) {
+  return clusterInfo.value[grp.name]?.fault || ''
+}
+// 集群复制模式：单主（多主即脑裂）/ 多主（全部成员可写，属正常形态）/ 未知（旧版 Agent 未上报）
+function clusterModeText(grp) {
+  const mode = clusterInfo.value[grp.name]?.mode
+  return mode === 'single' ? '单主模式' : mode === 'multi' ? '多主模式' : ''
 }
 
 async function load() {
@@ -365,6 +392,9 @@ async function load() {
   try {
     const data = await http.get('/api/v1/middleware/mysql/instances')
     instances.value = data.instances || []
+    const map = {}
+    for (const c of data.clusters || []) map[c.name] = c
+    clusterInfo.value = map
   } catch (e) {
     console.error('加载 MySQL 实例失败', e)
   } finally {

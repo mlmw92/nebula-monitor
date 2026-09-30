@@ -44,10 +44,10 @@ const (
 
 // Engine 阈值告警评估引擎。
 type Engine struct {
-	store              storage.Storage
-	nodeMgr            *node.Manager
-	rules              *RulesStore
-	alerts             *VMAlertStore
+	store   storage.Storage
+	nodeMgr *node.Manager
+	rules   *RulesStore
+	alerts  *VMAlertStore
 	// notifiers 通知器列表，copy-on-write：SetNotifiers 热更新时整体替换快照，
 	// 读方（notify/notifyEscalation 等）无锁加载。不能用 e.mu 保护——notify 的
 	// 部分调用方（fire/resolve）已在 e.mu 锁内，补锁会死锁。
@@ -640,7 +640,7 @@ func (e *Engine) evalServiceDown(r model.AlertRule, nodes []model.Node, now int6
 		if !matchesScope(r.Scope, r.Nodes, n.Hostname) {
 			continue
 		}
-		for _, sample := range e.latestMetricSamples(n.Hostname, metric, upLabels) {
+		for _, sample := range latestPerInstance(e.latestMetricSamplesIn(n.Hostname, metric, upLabels, freshSampleWindow)) {
 			key := r.ID + "|" + n.Hostname + "|" + sample.instance
 			st := e.getState(key)
 			cond := Compare(op, sample.value, thr)
@@ -683,7 +683,7 @@ func (e *Engine) evalRoleChange(r model.AlertRule, nodes []model.Node, now int64
 		if !matchesScope(r.Scope, r.Nodes, n.Hostname) {
 			continue
 		}
-		for _, sample := range e.latestRoleSamples(n.Hostname, metric) {
+		for _, sample := range latestRoleSamples(e.store, n.Hostname, metric, upLabelsFor(r.Service)) {
 			key := r.ID + "|" + n.Hostname + "|" + sample.instance
 			st := e.getState(key)
 			// 仅在 topology 匹配时才判定为主从切换关注对象（未指定则全部）
@@ -725,12 +725,14 @@ func (e *Engine) evalRoleChange(r model.AlertRule, nodes []model.Node, now int64
 	}
 }
 
-// evalClusterFault 集群状态损坏检测：按 group/name 聚合各实例 role，判定无主（0 个 PRIMARY/master）
-// 或多主（>1 个 PRIMARY/master），并向每个相关节点触发。状态型。
+// evalClusterFault 集群状态损坏检测：按分组聚合各实例角色与（MySQL）组视图，
+// 判定无主 / 多主 / 组视图分裂，并向每个相关成员触发。状态型。
+//
+// 判定逻辑集中在 ClassifyClusterFault（与页面展示共用同一实现），避免「页面显示正常、
+// 告警判定异常」这类同实例两种结论的分叉。
 func (e *Engine) evalClusterFault(r model.AlertRule, nodes []model.Node, now int64) {
-	metric := serviceMetric(r.Service)
-	// 收集该中间件全部实例的最新 role（按节点+实例+分组），去重取最新时间戳。
-	byGroup := map[string][]instRole{}
+	// 先按规则的分组/范围过滤出可见节点，再统一加载集群成员。
+	var nodeNames []string
 	for _, n := range nodes {
 		if !matchesGroup(r.Group, n.Group) {
 			continue
@@ -738,24 +740,32 @@ func (e *Engine) evalClusterFault(r model.AlertRule, nodes []model.Node, now int
 		if !matchesScope(r.Scope, r.Nodes, n.Hostname) {
 			continue
 		}
-		for _, sample := range e.latestRoleSamples(n.Hostname, metric) {
-			if r.Topology != "" && r.Topology != sample.topology {
-				continue
-			}
-			grp := sample.group
-			if grp == "" {
-				grp = sample.instance
-			}
-			ir := instRole{node: n.Hostname, instance: sample.instance, group: grp, role: sample.role, topology: sample.topology, value: sample.value, ts: sample.ts}
-			byGroup[grp] = append(byGroup[grp], ir)
-		}
+		nodeNames = append(nodeNames, n.Hostname)
 	}
+
+	byGroup := map[string][]ClusterMember{}
+	var order []string
+	for _, m := range LoadClusterMembers(e.store, r.Service, nodeNames) {
+		if r.Topology != "" && r.Topology != m.Topology {
+			continue
+		}
+		grp := m.Group
+		if grp == "" {
+			grp = m.Instance
+		}
+		if _, ok := byGroup[grp]; !ok {
+			order = append(order, grp)
+		}
+		byGroup[grp] = append(byGroup[grp], m)
+	}
+
 	// 对每个集群分组判定是否存在故障，并触发/恢复每个成员节点上的告警。
-	for grp, members := range byGroup {
-		fault := e.classifyClusterFault(members)
+	for _, grp := range order {
+		members := byGroup[grp]
+		fault := ClassifyClusterFault(members)
 		for _, m := range members {
 			// 状态键与 firingKey 保持一致，避免重启后无法恢复集群告警状态。
-			key := r.ID + "|" + m.node + "|" + m.instance
+			key := r.ID + "|" + m.Node + "|" + m.Instance
 			st := e.getState(key)
 			if fault != "" {
 				if st.aboveSince == 0 {
@@ -768,47 +778,21 @@ func (e *Engine) evalClusterFault(r model.AlertRule, nodes []model.Node, now int
 					st.escalated = false
 					st.lastRepeat = 0
 					msg := "集群 " + grp + "（" + r.Service + "）状态损坏：" + fault +
-						"（实例 " + instanceLabel(m.instance) + " 节点 " + m.node + "）"
-					e.fire(r, m.node, m.instance, m.value, now, msg)
+						"（实例 " + instanceLabel(m.Instance) + " 节点 " + m.Node + "）"
+					e.fire(r, m.Node, m.Instance, m.Value, now, msg)
 				} else {
-					e.maybeEscalate(r, m.node, m.instance, m.value, st, now)
+					e.maybeEscalate(r, m.Node, m.Instance, m.Value, st, now)
 				}
 			} else {
 				if st.firing {
 					st.firing = false
-					msg := "集群 " + grp + "（" + r.Service + "）已恢复正常（单主且多数派存活）"
-					e.resolve(r, m.node, m.instance, m.value, now, msg)
+					msg := "集群 " + grp + "（" + r.Service + "）已恢复正常"
+					e.resolve(r, m.Node, m.Instance, m.Value, now, msg)
 				}
 				st.aboveSince = 0
 			}
 		}
 	}
-}
-
-// classifyClusterFault 根据集群成员角色判断故障类型，返回空字符串表示健康。
-func (e *Engine) classifyClusterFault(members []instRole) string {
-	// 仅考虑 up 的成员（value>0.5）参与角色判定；整体不可达则交由 service_down 规则处理。
-	primaries := 0
-	alive := 0
-	for _, m := range members {
-		if m.value <= 0.5 {
-			continue
-		}
-		alive++
-		if isPrimaryRole(m.role) {
-			primaries++
-		}
-	}
-	if alive == 0 {
-		return ""
-	}
-	if primaries == 0 {
-		return "无主（缺少 PRIMARY/主库），集群无法写入"
-	}
-	if primaries > 1 {
-		return "多主（检测到 " + strconv.Itoa(primaries) + " 个 PRIMARY/主库），疑似脑裂"
-	}
-	return ""
 }
 
 // maybeEscalate 对已 firing 且配置了升级策略的告警，按 AfterMinutes 执行一次升级通知，
@@ -1727,23 +1711,49 @@ func genEventID() string {
 type metricSample struct {
 	instance string
 	value    float64
+	// ts 为该样本的数据点时间戳（毫秒）。同一 node|instance 可能同时存在多条
+	// series（如实例离线/恢复期间 up=0 与 up=1 的标签集不同），评估前需按
+	// instance 取最新者，否则同一轮里会既满足「离线」又满足「在线」而反复触发/恢复。
+	ts int64
 }
 
-// latestMetricSamples 返回节点某指标的全部最新时序样本。
-// 普通主机指标通常只有一个无 instance 标签的样本；Redis 等多实例指标按 instance 分别评估。
-// 对于 disk_used_percent，保持全部真实磁盘汇总的既有语义。
-// latestMetricSamples 取某节点上某指标的最新样本。
+// freshSampleWindow 是「样本仍属新鲜」的判定窗口（约 6 个采集周期）。
+//
+// 为什么必须显式限定窗口：VictoriaMetrics 的即时查询把返回时间戳设成**求值时刻**，
+// 而不是样本自身时间（PromQL 生态的已知差异，仓库里 QueryInstantWithLookback 的注释
+// 也记录了同一个坑）。于是同一实例的两条序列（如恢复前的 up=0 与恢复后的 up=1）
+// 会拿到完全相同的时间戳，谁先返回谁生效——表现为「实例已恢复，告警却一直不消／
+// 看板仍判离线」。
+//
+// 对策：用 range-vector 查询（QueryInstantWithLookback）拿真实样本时间戳，
+// 并只保留窗口内的样本。已经停止上报的陈旧序列会被窗口排除，时间戳比较才真正生效。
+// 存活指标每个采集周期（默认 15s）都会上报，90s 窗口足以容忍抖动。
+const freshSampleWindow = 90 * time.Second
+
+// latestMetricSamples 返回节点某指标的全部最新时序样本（默认回看窗口，用于阈值规则）。
+func (e *Engine) latestMetricSamples(node, metric string, labels map[string]string) []metricSample {
+	return e.latestMetricSamplesIn(node, metric, labels, 0)
+}
+
+// latestMetricSamplesIn 取某节点上某指标的最新样本，lookback>0 时只取该窗口内的样本
+// （并保留真实样本时间戳，见 freshSampleWindow 的说明）。
 //
 // labels 为附加过滤条件：模板派生类型的存活指标是所有模板共用的 template_target_up，
 // 必须按 template 标签过滤，否则「A 模板离线」会被 B 模板的实例误触发。
-func (e *Engine) latestMetricSamples(node, metric string, labels map[string]string) []metricSample {
+func (e *Engine) latestMetricSamplesIn(node, metric string, labels map[string]string, lookback time.Duration) []metricSample {
 	if metric == "disk_used_percent" {
 		if value, ok := aggregatedDiskUsage(e.store, node); ok {
 			return []metricSample{{value: value}}
 		}
 		return nil
 	}
-	series, err := e.store.QueryInstant(node, metric, labels)
+	var series []model.Series
+	var err error
+	if lookback > 0 {
+		series, err = e.store.QueryInstantWithLookback(node, metric, labels, lookback)
+	} else {
+		series, err = e.store.QueryInstant(node, metric, labels)
+	}
 	if err != nil {
 		return nil
 	}
@@ -1752,12 +1762,48 @@ func (e *Engine) latestMetricSamples(node, metric string, labels map[string]stri
 		if len(s.Points) == 0 {
 			continue
 		}
+		// range 查询会返回窗口内多个样本点，取时间戳最大者（不依赖返回顺序）。
+		last := s.Points[0]
+		for _, p := range s.Points[1:] {
+			if p.Timestamp > last.Timestamp {
+				last = p
+			}
+		}
 		samples = append(samples, metricSample{
 			instance: s.Labels["instance"],
-			value:    s.Points[len(s.Points)-1].Value,
+			value:    last.Value,
+			ts:       last.Timestamp,
 		})
 	}
 	return samples
+}
+
+// latestPerInstance 对同一 instance 的多条样本只保留数据点时间戳最新的一条。
+//
+// 存在多条的原因：实例的存活指标上带了「仅采集成功时才有」的标签（如 version/role/status），
+// Prometheus 会把它视为两条不同序列——离线期间写的那条（up=0）在实例恢复后仍位于
+// 即时查询的回看窗口内，与恢复后写的 up=1 并存。若两条都参与评估，同一轮里会先判离线
+// 触发、再判在线恢复（顺序取决于遍历顺序），表现为「实例已恢复但告警一直不消」或反复抖动。
+// 取时间戳最新者与实例接口（Redis / role 聚合）的处理约定一致。
+func latestPerInstance(samples []metricSample) []metricSample {
+	best := make(map[string]metricSample, len(samples))
+	order := make([]string, 0, len(samples))
+	for _, s := range samples {
+		prev, ok := best[s.instance]
+		if !ok {
+			best[s.instance] = s
+			order = append(order, s.instance)
+			continue
+		}
+		if s.ts > prev.ts {
+			best[s.instance] = s
+		}
+	}
+	out := make([]metricSample, 0, len(order))
+	for _, k := range order {
+		out = append(out, best[k])
+	}
+	return out
 }
 
 // roleSample 携带 role/group/topology 标签与最新时间戳的实例样本。
@@ -1770,18 +1816,14 @@ type roleSample struct {
 	ts       int64
 }
 
-// instRole 集群成员角色聚合的中间结构（用于集群状态损坏判定）。
-type instRole struct {
-	node, instance, group, role, topology string
-	value                                 float64
-	ts                                    int64
-}
-
 // latestRoleSamples 返回某节点某中间件指标的最新实例状态，提取 role/group/topology 标签。
 // 对同一 node|instance 若存在多条 series（如 GR 切主 staleness 期内新旧 role 并存），
 // 取数据点时间戳最新者，避免旧 role 残留造成误判。
-func (e *Engine) latestRoleSamples(node, metric string) []roleSample {
-	series, err := e.store.QueryInstant(node, metric, nil)
+func latestRoleSamples(store storage.Storage, node, metric string, labels map[string]string) []roleSample {
+	// 用 range 查询取真实样本时间戳，并把窗口限定为新鲜样本：
+	// 否则角色已变更/节点已恢复时，回看窗口内新旧两条序列时间戳相同（见 freshSampleWindow），
+	// 取到哪条全凭返回顺序，会出现「角色判定/集群判定随机」的问题。
+	series, err := store.QueryInstantWithLookback(node, metric, labels, freshSampleWindow)
 	if err != nil {
 		return nil
 	}
@@ -1792,8 +1834,15 @@ func (e *Engine) latestRoleSamples(node, metric string) []roleSample {
 		var ts int64
 		var val float64
 		if len(s.Points) > 0 {
-			ts = s.Points[len(s.Points)-1].Timestamp
-			val = s.Points[len(s.Points)-1].Value
+			// range 查询返回窗口内多个样本，取时间戳最大者（不依赖返回顺序）
+			last := s.Points[0]
+			for _, p := range s.Points[1:] {
+				if p.Timestamp > last.Timestamp {
+					last = p
+				}
+			}
+			ts = last.Timestamp
+			val = last.Value
 		}
 		rs := roleSample{
 			instance: inst,

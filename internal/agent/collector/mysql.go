@@ -96,12 +96,12 @@ func (c *MySQLCollector) collectDirect(ctx context.Context, cfg model.MySQLInsta
 	}
 
 	labels := map[string]string{
-		"node":      c.node,
-		"instance":  realAddr,
-		"topology":  cfg.Topology,
-		"group":     labelName,
-		"name":      labelName,
-		"version":   vars["version"],
+		"node":     c.node,
+		"instance": realAddr,
+		"topology": cfg.Topology,
+		"group":    labelName,
+		"name":     labelName,
+		"version":  vars["version"],
 	}
 	role := "master"
 	replicaOf := ""
@@ -117,11 +117,24 @@ func (c *MySQLCollector) collectDirect(ctx context.Context, cfg model.MySQLInsta
 			}
 		}
 	}
-	// Group Replication：优先使用成员真实角色（cluster 拓扑）。
-	// 非 GR 实例无本机记录或权限不足，queryGroupReplicationRole 返回空，不影响主从判定。
-	if grRole := queryGroupReplicationRole(ctx, db); grRole != "" {
-		role = grRole
+	// Group Replication：cluster 拓扑下角色只能来自组复制成员表。
+	var gr grInfo
+	if strings.EqualFold(cfg.Topology, "cluster") {
+		// 模式与组视图先取：它决定「是否在组内」「成员是否就绪」，与角色查询相互独立。
+		gr = queryGroupReplicationInfo(ctx, db)
+		if grRole := queryGroupReplicationRole(ctx, db); grRole != "" {
+			role = grRole
+		} else {
+			// 角色查询失败/无本机记录时，**不能**沿用主从回退（master）：
+			// 节点刚入组、组复制重启、查询抖动等时刻会被当成"主库"，平台集群判定
+			// 会因此瞬时误报「多主（疑似脑裂）」。未知就报未知（空角色）。
+			role = ""
+		}
 		replicaOf = "" // GR 由前端 group 视图呈现，不依赖 replicaOf
+	} else if grRole := queryGroupReplicationRole(ctx, db); grRole != "" {
+		// 非 cluster 拓扑但实际在 GR 组里（配置未及时更新）：仍以真实角色为准。
+		role = grRole
+		replicaOf = ""
 	}
 	labels["role"] = role
 	if replicaOf != "" {
@@ -187,6 +200,43 @@ func (c *MySQLCollector) collectDirect(ctx context.Context, cfg model.MySQLInsta
 	// 反映实例处理 SQL 的真实时延，用于巡检报告「响应时间」维度。
 	if lat, ok := queryMySQLStmtLatencyMs(ctx, db); ok {
 		out = append(out, mk("mysql_query_latency_ms", round2(lat)))
+	}
+
+	// Group Replication 健康判定所需的附加信息。
+	// 刻意不把 role/version 放进这些指标的标签里：存活指标上「仅采集成功时才存在」的标签会
+	// 让 up=0/up=1 落到不同序列（已踩过坑），这里用固定的标签集 + member 维度表达组视图。
+	if gr.SinglePrimaryMode != nil || gr.View != nil {
+		grBase := map[string]string{
+			"node":     c.node,
+			"instance": realAddr,
+			"topology": cfg.Topology,
+			"group":    labelName,
+			"name":     labelName,
+			"version":  vars["version"],
+		}
+		grmk := func(name string, val float64, extra map[string]string) model.Metric {
+			ls := make(map[string]string, len(grBase)+len(extra))
+			for k, v := range grBase {
+				ls[k] = v
+			}
+			for k, v := range extra {
+				ls[k] = v
+			}
+			return model.Metric{Node: c.node, Name: name, Labels: ls, Value: val, Timestamp: now}
+		}
+		if gr.SinglePrimaryMode != nil {
+			v := 0.0
+			if *gr.SinglePrimaryMode {
+				v = 1
+			}
+			out = append(out, grmk("mysql_gr_single_primary_mode", v, nil))
+		}
+		if gr.View != nil {
+			out = append(out, grmk("mysql_gr_view_size", float64(len(gr.View)), nil))
+			for host, state := range gr.View {
+				out = append(out, grmk("mysql_gr_view_member", grMemberStateValue(state), map[string]string{"member": host}))
+			}
+		}
 	}
 
 	mi := model.MySQLInstance{
@@ -279,6 +329,74 @@ func queryGroupReplicationRole(ctx context.Context, db *sql.DB) string {
 	return ""
 }
 
+// grInfo 是本节点视角的 Group Replication 附加信息。
+//
+// 为什么需要它：仅凭「角色」无法判断集群是否健康——单主模式下出现多个 PRIMARY 是脑裂，
+// 而多主模式（group_replication_single_primary_mode=OFF）下全部成员都是 PRIMARY 是**正常**形态，
+// 必须结合模式才能下结论；另外「各节点看到的成员集合是否一致」是比数主库个数更直接的脑裂信号
+// （全量重启时每个节点各自 bootstrap 成单成员组，角色看都是 PRIMARY，但视图各不相同）。
+type grInfo struct {
+	// SinglePrimaryMode 为单主模式时为 true，多主模式为 false，nil 表示未知（未启用 GR 或无权限）。
+	SinglePrimaryMode *bool
+	// View 是本节点在 replication_group_members 中看到的成员集合：MEMBER_HOST -> MEMBER_STATE。
+	View map[string]string
+}
+
+// queryGroupReplicationInfo 采集 GR 模式与组视图。
+// 非 GR 实例（插件未装/权限不足）各项为空，调用方不应上报相关指标。
+func queryGroupReplicationInfo(ctx context.Context, db *sql.DB) grInfo {
+	var info grInfo
+
+	// 单主/多主模式：插件未加载时该变量不存在，查询报错即视为未知。
+	var mode string
+	if err := db.QueryRowContext(ctx, `SELECT @@group_replication_single_primary_mode`).Scan(&mode); err == nil {
+		switch strings.ToUpper(strings.TrimSpace(mode)) {
+		case "ON", "1":
+			v := true
+			info.SinglePrimaryMode = &v
+		case "OFF", "0":
+			v := false
+			info.SinglePrimaryMode = &v
+		}
+	}
+
+	// 组视图：本节点看到的有哪些成员、各自什么状态。
+	rows, err := db.QueryContext(ctx, `SELECT MEMBER_HOST, MEMBER_STATE FROM performance_schema.replication_group_members`)
+	if err != nil {
+		return info
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var host, state string
+		if err := rows.Scan(&host, &state); err != nil {
+			continue
+		}
+		host = strings.TrimSpace(host)
+		if host == "" {
+			continue
+		}
+		if info.View == nil {
+			info.View = map[string]string{}
+		}
+		info.View[host] = strings.ToUpper(strings.TrimSpace(state))
+	}
+	return info
+}
+
+// grMemberStateValue 把 GR 成员状态映射为数值，便于用时序指标表达「成员集合 + 状态」：
+// ONLINE=1、RECOVERING=0.5、其余（OFFLINE/ERROR/UNREACHABLE 等）=0。
+// 映射表与「指标目录」中的说明保持一致。
+func grMemberStateValue(state string) float64 {
+	switch state {
+	case "ONLINE":
+		return 1
+	case "RECOVERING":
+		return 0.5
+	default:
+		return 0
+	}
+}
+
 // queryGlobalStatus 执行 SHOW GLOBAL STATUS，返回 Variable_name→Value 映射。
 func queryGlobalStatus(ctx context.Context, db *sql.DB) (map[string]string, error) {
 	rows, err := db.QueryContext(ctx, "SHOW GLOBAL STATUS")
@@ -366,9 +484,9 @@ func parsePrometheusTextWithPrefix(text, node, instance, prefix string, now int6
 		if _, exists := labels["instance"]; !exists {
 			labels["instance"] = instance
 		}
-	out = append(out, model.Metric{
-		Node: node, Name: name, Labels: labels, Value: value, Timestamp: now,
-	})
+		out = append(out, model.Metric{
+			Node: node, Name: name, Labels: labels, Value: value, Timestamp: now,
+		})
 	}
 	return out
 }
@@ -376,6 +494,7 @@ func parsePrometheusTextWithPrefix(text, node, instance, prefix string, now int6
 // normalizeInstanceAddr 规范化 MySQL 实例地址：
 //   - host 为回环地址（127.0.0.1/localhost/::1 等）时，替换为 Agent 本机真实 IP，保留端口；
 //   - 非回环地址（用户配置的真实 IP/域名）原样保留，与 Redis/Nginx 行为一致。
+//
 // 这样即使 Agent 用 127.0.0.1 连接本机 MySQL，监控面板也展示可识别的真实地址。
 // normalizeInstanceAddr 规范化 MySQL 实例地址，默认端口 3306。
 func normalizeInstanceAddr(addr string) string {

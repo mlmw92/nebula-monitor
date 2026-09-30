@@ -8,12 +8,40 @@ import (
 	"strings"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/alert"
 	"github.com/nebula/monitor/internal/server/dialtest"
 	"github.com/nebula/monitor/internal/server/instancereg"
 	"github.com/nebula/monitor/internal/server/report"
 )
 
 // ---- MySQL ----
+
+// mysqlInstanceInfo 是 MySQL 实例接口的响应行（包级定义：集群摘要也需要按实例聚合）。
+type mysqlInstanceInfo struct {
+	Node                string  `json:"node"`
+	Instance            string  `json:"instance"`
+	Name                string  `json:"name"`
+	Role                string  `json:"role"`
+	Topology            string  `json:"topology"`
+	Version             string  `json:"version"`
+	Up                  bool    `json:"up"`
+	Group               string  `json:"group"`
+	ReplicaOf           string  `json:"replicaOf,omitempty"`
+	ThreadsConnected    float64 `json:"threadsConnected"`
+	ThreadsRunning      float64 `json:"threadsRunning"`
+	MaxConnections      float64 `json:"maxConnections"`
+	QueriesPerSec       float64 `json:"queriesPerSec"`
+	SlowQueries         float64 `json:"slowQueries"`
+	BufferPoolHitRate   float64 `json:"bufferPoolHitRate"`
+	RowLockWaits        float64 `json:"rowLockWaits"`
+	Deadlocks           float64 `json:"deadlocks"`
+	SecondsBehindMaster float64 `json:"secondsBehindMaster"`
+	ComCommit           float64 `json:"comCommit"`
+	ComRollback         float64 `json:"comRollback"`
+	BytesReceived       float64 `json:"bytesReceived"`
+	BytesSent           float64 `json:"bytesSent"`
+	Uptime              float64 `json:"uptime"`
+}
 
 func (a *API) handleMySQLInstances(w http.ResponseWriter, r *http.Request) {
 	upSeries, err := a.store.QueryAllLatest("mysql_instance_up", nil)
@@ -23,43 +51,23 @@ func (a *API) handleMySQLInstances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type mysqlInstanceInfo struct {
-		Node                string  `json:"node"`
-		Instance            string  `json:"instance"`
-		Name                string  `json:"name"`
-		Role                string  `json:"role"`
-		Topology            string  `json:"topology"`
-		Version             string  `json:"version"`
-		Up                  bool    `json:"up"`
-		Group               string  `json:"group"`
-		ReplicaOf           string  `json:"replicaOf,omitempty"`
-		ThreadsConnected    float64 `json:"threadsConnected"`
-		ThreadsRunning      float64 `json:"threadsRunning"`
-		MaxConnections      float64 `json:"maxConnections"`
-		QueriesPerSec       float64 `json:"queriesPerSec"`
-		SlowQueries         float64 `json:"slowQueries"`
-		BufferPoolHitRate   float64 `json:"bufferPoolHitRate"`
-		RowLockWaits        float64 `json:"rowLockWaits"`
-		Deadlocks           float64 `json:"deadlocks"`
-		SecondsBehindMaster float64 `json:"secondsBehindMaster"`
-		ComCommit           float64 `json:"comCommit"`
-		ComRollback         float64 `json:"comRollback"`
-		BytesReceived       float64 `json:"bytesReceived"`
-		BytesSent           float64 `json:"bytesSent"`
-		Uptime              float64 `json:"uptime"`
-	}
-
 	// 实时在线状态：以 node|instance 为键记录最新 up 值（>0 为在线）。
 	// 注意即时查询对超过 lookback-delta 的旧样本视为 stale 返回空，
 	// 因此离线的 Agent 不会出现在 liveUp 中——这正是需要注册表补充的部分。
 	liveUp := map[string]bool{}
+	liveUpTs := map[string]int64{}
 	for _, s := range upSeries {
 		node := s.Labels["node"]
 		instance := s.Labels["instance"]
 		if node == "" || instance == "" || len(s.Points) == 0 {
 			continue
 		}
-		liveUp[node+"|"+instance] = s.Points[len(s.Points)-1].Value > 0
+		key := node + "|" + instance
+		last := s.Points[len(s.Points)-1]
+		if !newestSampleKept(liveUpTs, key, last.Timestamp) {
+			continue
+		}
+		liveUp[key] = last.Value > 0
 	}
 
 	// 配置清单（含离线实例）：来自实例注册表，保证 Agent 宕机后仍可枚举，
@@ -133,7 +141,99 @@ func (a *API) handleMySQLInstances(w http.ResponseWriter, r *http.Request) {
 	for _, k := range keys {
 		out = append(out, *instances[k])
 	}
-	writeJSON(w, 200, map[string]interface{}{"instances": out})
+	writeJSON(w, 200, map[string]interface{}{
+		"instances": out,
+		"clusters":  a.buildMySQLClusters(out),
+	})
+}
+
+// mysqlClusterInfo 是 MySQL 集群组（Group Replication / InnoDB Cluster）的健康摘要，
+// 供页面状态徽标直接渲染。
+//
+// 判定复用告警引擎同一实现（alert.ClassifyClusterFault）：此前页面自己按「有无离线 + 主从延迟」
+// 算健康、从不数主库个数，导致同一实例在页面显示「运行正常」、在告警里被判「多主/脑裂」。
+type mysqlClusterInfo struct {
+	Name    string `json:"name"`
+	Mode    string `json:"mode"`    // single=单主模式，multi=多主模式，unknown=未知（需升级 Agent）
+	Fault   string `json:"fault"`   // 空字符串表示健康；非空为「集群状态损坏」的具体原因
+	Members int    `json:"members"` // 组内成员数
+}
+
+// buildMySQLClusters 汇总各集群组状态：仅对 cluster 拓扑（Group Replication / InnoDB Cluster）出结论。
+// visible 为已按用户资源范围过滤后的实例列表，保证结论不越权。
+func (a *API) buildMySQLClusters(visible []mysqlInstanceInfo) []mysqlClusterInfo {
+	nodeSeen, nameSeen := map[string]bool{}, map[string]bool{}
+	var nodes, names []string
+	visibleCount := map[string]int{}
+	for _, i := range visible {
+		if !strings.EqualFold(i.Topology, "cluster") {
+			continue
+		}
+		if !nodeSeen[i.Node] {
+			nodeSeen[i.Node] = true
+			nodes = append(nodes, i.Node)
+		}
+		grp := i.Group
+		if grp == "" {
+			grp = i.Name
+		}
+		if grp == "" {
+			grp = i.Instance
+		}
+		if !nameSeen[grp] {
+			nameSeen[grp] = true
+			names = append(names, grp)
+		}
+		visibleCount[grp]++
+	}
+	if len(names) == 0 {
+		return nil
+	}
+
+	byGroup := map[string][]alert.ClusterMember{}
+	for _, m := range alert.LoadClusterMembers(a.store, "mysql", nodes) {
+		if !strings.EqualFold(m.Topology, "cluster") {
+			continue
+		}
+		grp := m.Group
+		if grp == "" {
+			grp = m.Instance
+		}
+		byGroup[grp] = append(byGroup[grp], m)
+	}
+
+	out := make([]mysqlClusterInfo, 0, len(names))
+	for _, grp := range names {
+		members := byGroup[grp]
+		info := mysqlClusterInfo{
+			Name:    grp,
+			Mode:    "unknown",
+			Fault:   alert.ClassifyClusterFault(members),
+			Members: len(members),
+		}
+		if info.Members == 0 {
+			info.Members = visibleCount[grp]
+		}
+		single, multi := 0, 0
+		for _, m := range members {
+			if m.SinglePrimary == nil {
+				continue
+			}
+			if *m.SinglePrimary {
+				single++
+			} else {
+				multi++
+			}
+		}
+		switch {
+		case single > 0 && multi == 0:
+			info.Mode = "single"
+		case multi > 0 && single == 0:
+			info.Mode = "multi"
+		}
+		out = append(out, info)
+	}
+	return out
 }
 
 // ---- PostgreSQL ----
@@ -168,6 +268,7 @@ func (a *API) handlePostgresInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	instances := map[string]*postgresInstanceInfo{}
+	latestTs := map[string]int64{}
 	var keys []string
 	for _, s := range upSeries {
 		node := s.Labels["node"]
@@ -176,13 +277,22 @@ func (a *API) handlePostgresInstances(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		key := node + "|" + instance
+		last := s.Points[len(s.Points)-1]
+		if !newestSampleKept(latestTs, key, last.Timestamp) {
+			continue
+		}
 		if ri, exists := instances[key]; exists {
-			ri.Role = s.Labels["role"]
-			ri.Topology = s.Labels["topology"]
-			ri.Version = s.Labels["version"]
-			ri.Database = s.Labels["database"]
-			ri.Group = s.Labels["group"]
-			ri.Up = s.Points[len(s.Points)-1].Value > 0
+			ri.Up = last.Value > 0
+			// 元信息只在采集成功时才存在，保留已有非空值
+			if v := s.Labels["role"]; v != "" {
+				ri.Role = v
+			}
+			if v := s.Labels["topology"]; v != "" {
+				ri.Topology = v
+			}
+			if v := s.Labels["version"]; v != "" {
+				ri.Version = v
+			}
 		} else {
 			instances[key] = &postgresInstanceInfo{
 				Node:     node,
@@ -193,7 +303,7 @@ func (a *API) handlePostgresInstances(w http.ResponseWriter, r *http.Request) {
 				Version:  s.Labels["version"],
 				Database: s.Labels["database"],
 				Group:    s.Labels["group"],
-				Up:       s.Points[len(s.Points)-1].Value > 0,
+				Up:       last.Value > 0,
 			}
 			keys = append(keys, key)
 		}
@@ -299,6 +409,7 @@ func (a *API) handleMongoDBInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	instances := map[string]*mongoInstanceInfo{}
+	latestTs := map[string]int64{}
 	var keys []string
 	for _, s := range upSeries {
 		node := s.Labels["node"]
@@ -307,12 +418,22 @@ func (a *API) handleMongoDBInstances(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		key := node + "|" + instance
+		last := s.Points[len(s.Points)-1]
+		if !newestSampleKept(latestTs, key, last.Timestamp) {
+			continue
+		}
 		if ri, exists := instances[key]; exists {
-			ri.Role = s.Labels["role"]
-			ri.Topology = s.Labels["topology"]
-			ri.Version = s.Labels["version"]
-			ri.Group = s.Labels["group"]
-			ri.Up = s.Points[len(s.Points)-1].Value > 0
+			ri.Up = last.Value > 0
+			// 角色/版本只在采集成功时存在（副本集角色 PRIMARY/SECONDARY），保留非空值
+			if v := s.Labels["role"]; v != "" {
+				ri.Role = v
+			}
+			if v := s.Labels["topology"]; v != "" {
+				ri.Topology = v
+			}
+			if v := s.Labels["version"]; v != "" {
+				ri.Version = v
+			}
 		} else {
 			instances[key] = &mongoInstanceInfo{
 				Node:     node,
@@ -322,7 +443,7 @@ func (a *API) handleMongoDBInstances(w http.ResponseWriter, r *http.Request) {
 				Topology: s.Labels["topology"],
 				Version:  s.Labels["version"],
 				Group:    s.Labels["group"],
-				Up:       s.Points[len(s.Points)-1].Value > 0,
+				Up:       last.Value > 0,
 			}
 			keys = append(keys, key)
 		}
@@ -539,6 +660,7 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	instances := map[string]*nginxInstanceInfo{}
+	latestTs := map[string]int64{}
 	var keys []string
 	for _, s := range upSeries {
 		node := s.Labels["node"]
@@ -547,10 +669,16 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		key := node + "|" + instance
+		last := s.Points[len(s.Points)-1]
+		if !newestSampleKept(latestTs, key, last.Timestamp) {
+			continue
+		}
 		if ri, exists := instances[key]; exists {
-			ri.Version = s.Labels["version"]
-			ri.Group = s.Labels["group"]
-			ri.Up = s.Points[len(s.Points)-1].Value > 0
+			ri.Up = last.Value > 0
+			// version 来自 stub_status 响应头，仅采集成功时存在，保留非空值
+			if v := s.Labels["version"]; v != "" {
+				ri.Version = v
+			}
 		} else {
 			instances[key] = &nginxInstanceInfo{
 				Node:     node,
@@ -559,7 +687,7 @@ func (a *API) handleNginxInstances(w http.ResponseWriter, r *http.Request) {
 				Name:     s.Labels["name"],
 				Version:  s.Labels["version"],
 				Group:    s.Labels["group"],
-				Up:       s.Points[len(s.Points)-1].Value > 0,
+				Up:       last.Value > 0,
 			}
 			keys = append(keys, key)
 		}
@@ -958,6 +1086,7 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	instances := map[string]*dockerContainerInfo{}
+	latestTs := map[string]int64{}
 	var keys []string
 	for _, s := range upSeries {
 		node := s.Labels["node"]
@@ -966,19 +1095,31 @@ func (a *API) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		key := node + "|" + instance
-		if _, exists := instances[key]; !exists {
-			ri := &dockerContainerInfo{
-				Node:     node,
-				Instance: instance,
-				Name:     s.Labels["container_name"],
-				Image:    s.Labels["image"],
-				Status:   s.Labels["status"],
-				Group:    s.Labels["group"],
-				Up:       s.Points[len(s.Points)-1].Value > 0,
-			}
+		last := s.Points[len(s.Points)-1]
+		// status 标签随容器启停变化（running/exited），容器重启后同一容器 ID 会
+		// 同时存在旧 status 的 up=0 与新 status 的 up=1 两条序列，只取最新者。
+		if !newestSampleKept(latestTs, key, last.Timestamp) {
+			continue
+		}
+		ri, exists := instances[key]
+		if !exists {
+			ri = &dockerContainerInfo{Node: node, Instance: instance}
 			instances[key] = ri
 			keys = append(keys, key)
 		}
+		if v := s.Labels["container_name"]; v != "" {
+			ri.Name = v
+		}
+		if v := s.Labels["image"]; v != "" {
+			ri.Image = v
+		}
+		if v := s.Labels["status"]; v != "" {
+			ri.Status = v
+		}
+		if v := s.Labels["group"]; v != "" {
+			ri.Group = v
+		}
+		ri.Up = last.Value > 0
 	}
 
 	// 配置清单补充：对已在注册表中但当前 up 指标因 agent 离线而缺失的容器，

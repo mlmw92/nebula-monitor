@@ -156,8 +156,20 @@ func zookeeperMntr(ctx context.Context, addr string) (map[string]string, error) 
 		if line == "" || !strings.HasPrefix(line, "zk_") {
 			continue
 		}
-		if eq := strings.Index(line, "="); eq > 0 {
-			info[line[:eq]] = line[eq+1:]
+		// ZooKeeper 的 mntr 输出是**制表符分隔**（`zk_avg_latency\t0`），
+		// 而非 key=value——早期实现只按 "=" 解析，导致所有实例恒判离线。
+		// 这里同时兼容两种分隔符（后者用于测试替身或经代理改写的输出）。
+		sep := strings.IndexByte(line, '\t')
+		if sep < 0 {
+			sep = strings.IndexByte(line, '=')
+		}
+		if sep <= 0 || sep == len(line)-1 {
+			continue
+		}
+		key := strings.TrimSpace(line[:sep])
+		val := strings.TrimSpace(line[sep+1:])
+		if key != "" {
+			info[key] = val
 		}
 	}
 	if err := scanner.Err(); err != nil {
