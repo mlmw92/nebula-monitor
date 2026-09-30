@@ -265,6 +265,10 @@ func BuiltinRoles() []Role {
 				// 集中日志（C2）：运维是排查问题的人，默认给全局运维角色；
 				// 刻意不给只读/告警/安全/审计角色——日志内容可能含敏感数据，按需单独授予。
 				"logs:read",
+				// 下行操作：运维是执行动作的人，默认给全局运维角色（与 assets:write 同一取舍）。
+				// 这不等于"能随便改机器"——目标机器自己的 guards.ops 还要再放行一次，
+				// 而写动作默认是被那台机器拒绝的。
+				"ops:read", "ops:exec",
 				"report:read", "report:export", "metrics:export", "agent:read", "agent:upgrade",
 				"alerts:read", "roles:read", "system:config",
 			},

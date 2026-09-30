@@ -66,10 +66,50 @@ func TestBuiltinRoles_AlertAdminCanReadNodes(t *testing.T) {
 	t.Fatal("缺少告警管理员角色")
 }
 
+// superAdminOnlyKeys 是**刻意只授予超级管理员**的权限点：用户与角色管理权本身不该下放，
+// 否则被授予「运维管理员」的账号可以给自己加权限（自提权）。
+// 新增例外必须写明理由，否则就退回"漏了也没人发现"的状态。
+var superAdminOnlyKeys = map[string]bool{
+	"users:manage": true,
+	"roles:manage": true,
+	// 系统升级会替换 Server 二进制（换来的是"升完起不来"这类不可自愈的故障），
+	// 刻意只给超级管理员：它不是日常运维动作，而是"改平台自身"的动作。
+	"system:upgrade": true,
+}
+
+// TestEveryCatalogKeyIsGrantedBySomeRole 目录里的每个权限点都必须至少被一个**非超级管理员**的
+// 内置角色覆盖（例外见 superAdminOnlyKeys）。
+//
+// 为什么把这条从"手工清单"改成"遍历目录"：此前这里写的是
+// `want := []string{"dashboard:write", "system:config"}`，每加一个新权限点都得记得回来补一行；
+// 漏了不会报错，症状是**功能装了却没人看得到**——路由 meta 与侧边栏都按权限点门控，
+// 而内置角色里根本没有它，于是只有超级管理员能用。`ops:read` / `ops:exec` 就是这样漏掉的
+// （2026-09-30 在 dev-server 上实机验证时才发现）。
+func TestEveryCatalogKeyIsGrantedBySomeRole(t *testing.T) {
+	granted := map[string]bool{}
+	for _, r := range BuiltinRoles() {
+		if r.Name == RoleSuperAdmin {
+			continue // 超级管理员走 allKeys() 覆盖全部，不能作为"有人能用"的证明
+		}
+		for _, p := range r.Permissions {
+			granted[p] = true
+		}
+	}
+	for _, d := range PermissionCatalog() {
+		for _, it := range d.Items {
+			if granted[it.Key] || superAdminOnlyKeys[it.Key] {
+				continue
+			}
+			t.Errorf("权限点 %s（%s）没有被任何非超级管理员的内置角色覆盖：页面会被路由/菜单挡掉，"+
+				"只有超级管理员能用（若确实只该给超级管理员，请加入 superAdminOnlyKeys 并写明理由）", it.Key, it.Description)
+		}
+	}
+}
+
 // TestBuiltinRolesCoverAddedKeys 新增权限点必须有内置角色可用：
 // 超级管理员走 allKeys() 自动覆盖；运维管理员需显式补齐，否则新权限无角色可选。
 func TestBuiltinRolesCoverAddedKeys(t *testing.T) {
-	want := []string{"dashboard:write", "system:config"}
+	want := []string{"dashboard:write", "system:config", "ops:read", "ops:exec"}
 
 	byName := map[string]Role{}
 	for _, r := range BuiltinRoles() {

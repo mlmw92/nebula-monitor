@@ -67,9 +67,26 @@
 | `dashboard:write` | 管理自定义仪表盘 | 现目录仅有 `dashboard:read`；若允许多用户编辑看板，`dashboard:read` 会把「查看」与「增删改」绑成同一权限，违反最小权限 |
 | `system:config` | 系统配置（IP 地理库、数据大屏配置、品牌配置） | 现目录中系统级配置无对应权限点；若复用 `system:upgrade`，会把「上传地理库」与「升级 Server 二进制」绑成同一权限，且 `system:upgrade` 已列入高风险 |
 
+### 3.3 后续批次新增（已实施）
+
+| 域 | 权限点 | 授予的内置角色 | 备注 |
+|---|---|---|---|
+| 资产 | `assets:read`、`assets:write`、`inspect:read`、`inspect:run` | 运维管理员（全）；只读角色按需 | `assets:write` 入高风险（人工维护会改变运维判断依赖的台账）；`inspect:run` 与 `assets:write` 刻意分开 |
+| 集中日志 | `logs:read` | 运维管理员 | 日志含敏感内容，不默认给只读/告警/安全/审计角色 |
+| 节点操作 | `ops:read`、`ops:exec` | 运维管理员 | `ops:exec` 入高风险（可在一批机器上执行东西）；**执行还须目标机器 `guards.ops` 放行**，权限只是四道护栏之一 |
+
+**刻意只授予超级管理员的权限点**（`superAdminOnlyKeys`）：`users:manage`、`roles:manage`、
+`system:upgrade`——前两者防自提权，后者是"改平台自身"的动作。
+
 > 新增权限点必须同步两处，否则**超级管理员也拿不到该权限**：
 > ① `auth.PermissionCatalog()`；② `auth.BuiltinRoles()` 中对应内置角色（至少超级管理员、运维管理员）。
 > 这是批次 A 的第一个检查项。
+>
+> **2026-09-30 实机验证的教训**：`ops:read` / `ops:exec` 只加了 ①（目录）而漏了 ②（运维管理员角色），
+> 后果是**功能装了却没人看得到**——路由 `meta.perm` 与侧边栏都按权限点门控，内置角色里没有它，
+> 于是只有超级管理员能用，而这类遗漏不会报错。现已把守卫从"手工清单"改为**遍历目录**
+> （`TestEveryCatalogKeyIsGrantedBySomeRole`）：目录里每个权限点都必须被某个非超级管理员的内置角色覆盖，
+> 例外必须写进 `superAdminOnlyKeys` 并注明理由。该守卫上线时顺带发现了 `system:upgrade` 属未记录的例外。
 
 ## 4. 路由 → 权限点 → 资源范围
 
