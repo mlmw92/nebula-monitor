@@ -62,6 +62,9 @@ func (r *Receiver) applyAssets(p *model.ReportPayload) {
 		putIfNotEmpty(attrs, "role", ob.Role)
 		putIfNotEmpty(attrs, "topology", ob.Topology)
 		putIfNotEmpty(attrs, "version", ob.Version)
+		// 容器/实例自身的运行状态与镜像：台账里"为什么不可达"要靠它们才说得清。
+		putIfNotEmpty(attrs, "status", ob.Status)
+		putIfNotEmpty(attrs, "image", ob.Image)
 		if ob.HasUp {
 			attrs["up"] = strconv.FormatBool(ob.Up)
 		}
@@ -103,6 +106,12 @@ type assetObs struct {
 	Version  string
 	Up       bool
 	HasUp    bool
+	// Status 是「服务自身的运行状态」原文（目前只有 Docker 容器用：running / exited / paused…）。
+	// 单独带出来是为了让台账能说清"为什么不可达"：只给 up=false，用户只能看到「离线」，
+	// 看不出是容器退出了还是一直没起来。
+	Status string
+	// Image 是容器镜像名（同样只有 Docker 用），用于台账里辨认这个实例到底是哪个镜像跑起来的。
+	Image string
 }
 
 func collectObs[T any](items []T, pick func(T) assetObs) []assetObs {
@@ -138,7 +147,7 @@ func instanceObservations(p *model.ReportPayload) []assetObs {
 	})...)
 	out = append(out, collectObs(p.DockerInstances, func(i model.DockerInstance) assetObs {
 		return assetObs{Type: "docker", Addr: i.Instance, Name: i.Name, Group: i.Group,
-			Up: i.Up, HasUp: true}
+			Up: i.Up, HasUp: true, Status: i.Status, Image: i.Image}
 	})...)
 	out = append(out, collectObs(p.RocketMQInstances, func(i model.RocketMQInstance) assetObs {
 		return assetObs{Type: "rocketmq", Addr: i.Instance, Name: i.Name, Group: i.Group, Role: i.Role,

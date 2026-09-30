@@ -49,8 +49,8 @@
         </div>
         <div class="field">
           <span class="field-label">状态</span>
-          <el-select v-model="filter.status" placeholder="全部状态" clearable style="width: 130px">
-            <el-option label="在线" value="online" />
+          <el-select v-model="filter.status" placeholder="全部上报状态" clearable style="width: 150px">
+            <el-option label="上报正常" value="online" />
             <el-option label="失联" value="missing" />
             <el-option label="归档" value="archived" />
           </el-select>
@@ -122,10 +122,17 @@
         <el-table-column label="归属节点" width="140">
           <template #default="{ row }">{{ row.node || '—' }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="110">
+        <el-table-column label="上报状态" width="120">
           <template #default="{ row }">
-            <span class="dot" :class="row.status" />
-            <span :class="'st-' + row.status">{{ statusLabel(row.status) }}</span>
+            <!-- 列名与措辞刻意与「实例是否可达」区分开：两者是不同维度，同用"在线"会让人以为自相矛盾 -->
+            <span
+              class="dot"
+              :class="row.status"
+              title="上报正常 = 最近一次采集上报在 30 分钟内。它只表示 Agent 还在上报这条资产，不表示实例/容器本身可用（后者见名称下的副标题）"
+            />
+            <span :class="'st-' + row.status" :title="`最近上报 ${row.lastSeenAt ? relTime(row.lastSeenAt) : '从未'}`">
+              {{ statusLabel(row.status) }}
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="最近上报" width="130">
@@ -202,19 +209,19 @@
               </el-table-column>
               <el-table-column label="采集值" min-width="150">
                 <template #default="{ row }">
-                  <span v-if="row.discovery !== undefined" :class="{ struck: row.conflict }">{{ row.discovery }}</span>
+                  <span v-if="row.discovery !== undefined" :class="{ struck: row.conflict }">{{ attrText(row.key, row.discovery) }}</span>
                   <span v-else class="muted">—</span>
                 </template>
               </el-table-column>
               <el-table-column label="人工值" min-width="150">
                 <template #default="{ row }">
-                  <span v-if="row.manual !== undefined">{{ row.manual }}</span>
+                  <span v-if="row.manual !== undefined">{{ attrText(row.key, row.manual) }}</span>
                   <span v-else class="muted">—</span>
                 </template>
               </el-table-column>
               <el-table-column label="生效值" min-width="200">
                 <template #default="{ row }">
-                  <span>{{ row.effective }}</span>
+                  <span>{{ attrText(row.key, row.effective) }}</span>
                   <span class="srcpill" :class="row.manual !== undefined ? 'man' : 'auto'">
                     {{ row.manual !== undefined ? '人工' : '自动' }}
                   </span>
@@ -237,7 +244,7 @@
                 <template #default="{ row }"><span class="mono">{{ row.key }}</span></template>
               </el-table-column>
               <el-table-column label="人工值" min-width="200">
-                <template #default="{ row }">{{ row.manual }}</template>
+                <template #default="{ row }">{{ attrText(row.key, row.manual) }}</template>
               </el-table-column>
               <el-table-column label="维护人 / 时间" min-width="200">
                 <template #default="{ row }">
@@ -498,8 +505,24 @@ function typeLabel(row) {
   const prefix = String(row.naturalKey || '').split(':')[0]
   return INSTANCE_LABELS[prefix] || prefix || '实例'
 }
-const STATUS_LABELS = { online: '在线', missing: '失联', archived: '归档' }
+// 「上报状态」：描述 Agent 是否还在上报这条资产，与实例/容器自身是否可用无关。
+// 措辞刻意避开"在线/离线"——那是采集侧的探活结果，两者同词会让人觉得自相矛盾。
+const STATUS_LABELS = { online: '上报正常', missing: '失联', archived: '归档' }
 const statusLabel = (s) => STATUS_LABELS[s] || s
+// 容器状态（Docker 采集上报的原始值）中文化：台账里"为什么不可达"要靠它说清
+const CONTAINER_STATUS_LABELS = {
+  running: '运行中', exited: '已退出', paused: '已暂停', created: '已创建',
+  restarting: '重启中', removing: '删除中', dead: '异常退出',
+}
+const containerStatusLabel = (s) => CONTAINER_STATUS_LABELS[s] || `容器 ${s}`
+// 属性值的展示形式：原始布尔/状态码对运维没有阅读价值
+function attrText(key, value) {
+  if (value === undefined || value === null || value === '') return ''
+  const s = String(value)
+  if (key === 'up') return s === 'true' ? '可达' : '不可达'
+  if (key === 'status') return containerStatusLabel(s)
+  return s
+}
 const SOURCE_LABELS = { auto: '自动', manual: '人工', mixed: '混合' }
 const sourceLabel = (s) => SOURCE_LABELS[s] || s
 const KIND_LABELS = { runs_on: 'runs_on 宿主机', member_of: 'member_of 集群', depends_on: 'depends_on 依赖', exposes: 'exposes 暴露' }
@@ -536,8 +559,12 @@ function subtitle(row) {
   const parts = []
   if (v.topology) parts.push(v.topology)
   else if (v.role) parts.push(v.role)
-  if (v.up) parts.push(v.up === 'true' ? '在线' : '离线')
+  // 这里是「实例/容器自身是否可用」——采集侧的结论，与「上报状态」列是两个维度：
+  // 容器退出了，Agent 仍然会把它（连 up=false 一起）每轮上报，于是上报状态依旧是"上报正常"。
+  if (v.status) parts.push(containerStatusLabel(v.status))
+  else if (v.up) parts.push(v.up === 'true' ? '实例可达' : '实例不可达')
   if (v.version) parts.push(v.version)
+  else if (v.image) parts.push(v.image)
   return parts.length ? parts.join(' · ') : row.naturalKey
 }
 

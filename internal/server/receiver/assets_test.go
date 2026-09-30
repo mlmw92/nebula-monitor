@@ -72,6 +72,12 @@ func TestHandleReportWritesAssetLedger(t *testing.T) {
 		HostInfo:       model.HostInfo{CPUModel: "EPYC 7K62", CPUCores: 4, MemoryTotal: 8 << 30, DiskTotal: 100 << 30},
 		RedisInstances: []model.RedisInstance{{Instance: "127.0.0.1:6379", Name: "dev-redis", Group: "dev", Role: "master", Up: true}},
 		K8sInstances:   []model.K8sInstance{{Instance: "https://127.0.0.1:6443", Name: "dev-k8s", Version: "v1.30", Up: true}},
+		// 已退出的容器：up=false，但容器自身的 status/image 必须落到台账——
+		// 否则列表里只能看到"离线"，说不清是退出了还是没起来（真实反馈）。
+		DockerInstances: []model.DockerInstance{{
+			Instance: "abc123def456", Name: "mw-es", Group: "default",
+			Image: "elasticsearch:8.13", Status: "exited", Up: false,
+		}},
 	}
 	postReport(t, rec, payload)
 	postReport(t, rec, payload) // 第二轮：验证幂等
@@ -98,8 +104,23 @@ func TestHandleReportWritesAssetLedger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("查询实例资产失败: %v", err)
 	}
-	if len(instances) != 2 {
-		t.Fatalf("实例资产应为 2 个（redis + kubernetes），实际 %d", len(instances))
+	if len(instances) != 3 {
+		t.Fatalf("实例资产应为 3 个（redis + kubernetes + docker），实际 %d", len(instances))
+	}
+
+	// 容器的运行状态与镜像要能读到：台账靠它们回答"为什么不可达"
+	container, ok, err := svc.Get(asset.Ref{TypeKey: asset.TypeMiddlewareInst, NaturalKey: "docker:abc123def456"})
+	if err != nil || !ok {
+		t.Fatalf("查询容器资产失败: ok=%v err=%v", ok, err)
+	}
+	if v, _ := container.ValueFrom("status", asset.SourceDiscovery); v != "exited" {
+		t.Fatalf("容器 status 应为 exited，实际 %q", v)
+	}
+	if v, _ := container.ValueFrom("image", asset.SourceDiscovery); v != "elasticsearch:8.13" {
+		t.Fatalf("容器 image 应落到台账，实际 %q", v)
+	}
+	if v, _ := container.ValueFrom("up", asset.SourceDiscovery); v != "false" {
+		t.Fatalf("已退出容器 up 应为 false，实际 %q", v)
 	}
 
 	redisRef := asset.Ref{TypeKey: asset.TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6379"}
