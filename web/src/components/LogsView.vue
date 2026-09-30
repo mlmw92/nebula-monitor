@@ -56,6 +56,8 @@
           <el-option v-for="s in sourceNames" :key="s" :label="s" :value="s" />
         </el-select>
         <el-button type="primary" size="small" :loading="loading" @click="search">查询</el-button>
+        <!-- 日志来源配在 Agent 侧，页面上看不到任何字段；"没数据"时最缺的就是可复制的模板 -->
+        <el-button size="small" @click="exampleVisible = true">配置示例</el-button>
       </div>
 
       <el-alert
@@ -117,15 +119,51 @@
           加载更多
         </el-button>
         <span v-else-if="lines.length" class="muted">已到末尾（本轮共 {{ lines.length }} 条）</span>
-        <span v-if="!lines.length && !loading" class="muted">{{ emptyHint }}</span>
+        <span v-if="!lines.length && !loading" class="muted">
+          {{ emptyHint }}
+          <el-button link type="primary" @click="exampleVisible = true">查看配置示例</el-button>
+        </span>
       </div>
     </div>
+
+    <!-- 配置示例：logSources 配在 Agent 侧，界面上看不到字段，是"查不到数据"时最需要的东西。
+         复制走 execCommand 兜底：离线部署多为 http 源，navigator.clipboard 在非安全上下文不可用。 -->
+    <el-dialog v-model="exampleVisible" title="Agent 侧 logSources 配置示例" width="760px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="在「被监控节点」的 /etc/monitor-agent/agent.yaml 里添加，改完重启 Agent；不配置则一条日志都不采集。"
+        class="alert-gap"
+      />
+      <div class="ex-row">
+        <el-select v-model="exampleKey" size="small" style="width: 320px">
+          <el-option v-for="ex in LOG_EXAMPLES" :key="ex.key" :label="ex.label" :value="ex.key" />
+        </el-select>
+        <el-button size="small" type="primary" plain @click="copyExample">复制这段配置</el-button>
+        <span class="muted">{{ currentLogExample.hint }}</span>
+      </div>
+      <pre class="ex-box">{{ currentLogExample.yaml }}</pre>
+      <ul class="ex-notes">
+        <li><code>id</code>：小写字母开头，只含小写字母 / 数字 / 下划线（它同时是存储分片名与指标前缀）</li>
+        <li><code>patterns[].name</code>：字母或下划线开头（会拼进指标名 <code>&lt;id&gt;_log_&lt;name&gt;_total</code>）</li>
+        <li><code>paths</code>：必须是绝对路径，<b>不支持通配符</b>，也不能含 <code>..</code></li>
+        <li>不给 <code>patterns</code> 就必须显式写 <code>all: true</code>，否则 Agent 拒绝启动（刻意的隐私默认值）</li>
+        <li>首次见到文件<strong>从末尾开始读，不回溯历史</strong>；想看历史日志请到机器上看</li>
+        <li>单轮超上限会「跳过该文件剩余部分并计数」（<code>&lt;id&gt;_log_dropped_total</code>），不会延后补读</li>
+      </ul>
+      <template #footer>
+        <span class="muted">写错时 Agent 启动会直接拒绝并指出是哪一处</span>
+        <el-button @click="exampleVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import http from '../api/http'
 
 const route = useRoute()
@@ -159,6 +197,120 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const loadError = ref('')
 const expanded = ref(new Set())
+
+// ---------- 配置示例 ----------
+// 为什么放在页面里：logSources 配在 Agent 侧，界面上一个字段都看不到，
+// 而"查不到数据"的头号原因就是"没配"（默认一条都不采集）。给可复制的模板最省事。
+//
+// 用 String.raw：正则里的 \b \d \. 在普通模板字符串里会被 JS 当转义吃掉，
+// 生成出的 YAML 会静默变味（这类错误只有到机器上才会暴露）。
+const LOG_EXAMPLES = [
+  {
+    key: 'nginx_access',
+    label: 'Nginx 访问日志（只看 4xx/5xx）',
+    hint: '状态码前是「引号+空格」，据此避免匹配到 URL 里的数字。',
+    yaml: String.raw`
+logSources:
+  - id: nginx_access
+    paths: ["/var/log/nginx/access.log"]
+    patterns:
+      - { name: http_5xx, regex: '" 5[0-9][0-9] ' }
+      - { name: http_4xx, regex: '" 4[0-9][0-9] ' }
+`.trim(),
+  },
+  {
+    key: 'nginx_error',
+    label: 'Nginx 错误日志',
+    hint: '只收 error 及以上级别。',
+    yaml: String.raw`
+logSources:
+  - id: nginx_error
+    paths: ["/var/log/nginx/error.log"]
+    patterns:
+      - { name: err, regex: '(?i)\[(error|crit|alert|emerg)\]' }
+`.trim(),
+  },
+  {
+    key: 'applog',
+    label: 'Java / Spring 应用日志（堆栈跨行合并）',
+    hint: '行首不匹配「日期开头」的行会并入上一条——这是让堆栈成为一条记录的关键。',
+    yaml: String.raw`
+logSources:
+  - id: applog
+    paths: ["/opt/app/logs/app.log"]
+    patterns:
+      - { name: err, regex: '(?i)\b(ERROR|Exception|Caused by)\b' }
+      - { name: warn, regex: '(?i)\bWARN\b' }
+    multiline:
+      startPattern: '^\d{4}-\d{2}-\d{2}'
+      maxLines: 100
+`.trim(),
+  },
+  {
+    key: 'authlog',
+    label: '系统认证 / sudo 审计',
+    hint: 'CentOS/RHEL 用 /var/log/secure，Debian/Ubuntu 用 /var/log/auth.log——只写实际存在的那个。',
+    yaml: String.raw`
+logSources:
+  - id: authlog
+    paths: ["/var/log/secure"]
+    patterns:
+      - { name: failed, regex: '(?i)(Failed password|authentication failure|Invalid user)' }
+      - { name: sudo, regex: '(?i)sudo:.*COMMAND=' }
+`.trim(),
+  },
+  {
+    key: 'mysql_slow',
+    label: 'MySQL 慢查询日志',
+    hint: '慢查询一条记录跨多行，按 "# Time:" 行首合并。',
+    yaml: String.raw`
+logSources:
+  - id: mysql_slow
+    paths: ["/var/log/mysql/slow.log"]
+    patterns:
+      - { name: slow, regex: '^# Query_time' }
+    multiline:
+      startPattern: '^# Time:'
+      maxLines: 200
+`.trim(),
+  },
+]
+
+const exampleVisible = ref(false)
+const exampleKey = ref(LOG_EXAMPLES[0].key)
+// 模板里无条件引用它，因此必须有默认值（不能是 null）
+const currentLogExample = computed(() => LOG_EXAMPLES.find((e) => e.key === exampleKey.value) || LOG_EXAMPLES[0])
+
+// 离线部署多为 http 源：非安全上下文下 navigator.clipboard 不存在，必须留 execCommand 兜底，
+// 否则「复制」按钮在真实环境里点了没反应——而这类问题只在部署后才发现。
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.top = '-1000px'
+  document.body.appendChild(ta)
+  ta.select()
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } catch (e) {
+    ok = false
+  }
+  document.body.removeChild(ta)
+  if (ok) ElMessage.success('已复制到剪贴板')
+  else ElMessage.warning('复制失败，请手动选中文本复制')
+}
+
+function copyExample() {
+  const text = currentLogExample.value.yaml
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text)
+      .then(() => ElMessage.success('已复制到剪贴板'))
+      .catch(() => fallbackCopy(text))
+    return
+  }
+  fallbackCopy(text)
+}
 
 const hasMore = computed(() => truncated.value && cursor.value !== '')
 
@@ -305,5 +457,24 @@ onMounted(async () => {
 .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; background: var(--tag-bg, rgba(64, 158, 255, 0.12)); font-size: 12px; }
 .logline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; cursor: pointer; }
 .logline.open { white-space: pre-wrap; word-break: break-all; }
-.foot { margin-top: 10px; display: flex; align-items: center; gap: 10px; }
+.foot { margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* 配置示例弹窗 */
+.ex-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+.ex-row .muted { flex: 1; min-width: 200px; }
+.ex-box {
+  margin: 0;
+  padding: 12px;
+  max-height: 300px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre;
+  background: rgba(127, 127, 127, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+}
+.ex-notes { margin: 12px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--text-dim); line-height: 1.9; }
+.ex-notes code { font-family: var(--mono); background: rgba(127, 127, 127, 0.12); padding: 0 4px; border-radius: 3px; }
 </style>

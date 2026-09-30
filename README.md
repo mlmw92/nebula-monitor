@@ -1623,6 +1623,10 @@ journalctl -u monitor-proxy-hub -f
 | GET | `/api/v1/alert-pipeline` | 事件管道配置查询 |
 | PUT | `/api/v1/alert-pipeline` | 事件管道配置保存（热生效） |
 | POST | `/api/v1/alert-pipeline/preview` | 按指定配置试算管道效果（不落盘） |
+
+> 事件管道的**场景化示例模板**与可用变量（内置标签、事件字段、`{{ts .StartsAt}}` 时间格式化）
+> 见 `docs/configuration-cookbook.md`；页面上「站点与品牌 → 告警事件管道」也内置了
+> 「示例模板」下拉，可先预览再一键追加（追加不覆盖已有规则）。
 | GET | `/api/v1/maintenance` | 维护窗口查询 |
 | PUT | `/api/v1/maintenance` | 维护窗口设置 |
 | GET | `/api/v1/notify` | 通知配置查询 |

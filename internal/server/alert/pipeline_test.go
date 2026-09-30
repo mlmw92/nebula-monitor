@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nebula/monitor/internal/model"
 )
@@ -154,6 +155,37 @@ func TestPipelineRenderMessage_SeverityAndRuleFilter(t *testing.T) {
 	ev.RuleID = "rule-mem"
 	if got := s.RenderMessage(ev, "email"); got != "原始描述" {
 		t.Errorf("规则不匹配时应保留原描述，实际 %q", got)
+	}
+}
+
+// TestPipelineRenderMessage_TimeFunc 模板里的时间戳必须能格式化。
+//
+// 依据：事件里的 StartsAt / EndsAt 是**毫秒整数**，直接渲染出来是 1769… 这种没人看得懂的数字，
+// 而通知里「什么时候发生的」恰恰是最常被需要的字段；因此模板注入了 ts 函数。
+func TestPipelineRenderMessage_TimeFunc(t *testing.T) {
+	s := newPipelineTestStore(t)
+	cfg := PipelineConfig{Templates: []TemplateRule{
+		{Name: "带时间", Template: `{{.Node}} 触发于 {{ts .StartsAt}}{{if .EndsAt}} 恢复于 {{ts .EndsAt}}{{end}}`},
+	}}
+	if err := s.Save(cfg); err != nil {
+		t.Fatalf("保存失败: %v", err)
+	}
+
+	ev := pipelineTestEvent()
+	ev.StartsAt = time.Date(2026, 9, 30, 15, 4, 5, 0, time.Local).UnixMilli()
+	if got, want := s.RenderMessage(ev, "email"), "web-01 触发于 2026-09-30 15:04:05"; got != want {
+		t.Errorf("时间格式化不符: 期望 %q，实际 %q", want, got)
+	}
+
+	// 未恢复时 EndsAt 为 0：必须渲染成空串，而不是 1970-01-01。
+	ev.EndsAt = 0
+	if got, want := s.RenderMessage(ev, "email"), "web-01 触发于 2026-09-30 15:04:05"; got != want {
+		t.Errorf("EndsAt 为 0 时不应输出时间: 期望 %q，实际 %q", want, got)
+	}
+
+	// 函数名写错仍然要在保存前被拒（不能因为加了 FuncMap 而放宽校验）。
+	if err := s.Validate(PipelineConfig{Templates: []TemplateRule{{Name: "错", Template: "{{tss .StartsAt}}"}}}); err == nil {
+		t.Fatal("未知函数应在保存前被拒绝")
 	}
 }
 

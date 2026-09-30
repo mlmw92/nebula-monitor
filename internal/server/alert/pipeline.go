@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/config"
@@ -142,6 +143,22 @@ func (s *PipelineStore) Save(cfg PipelineConfig) error {
 	return nil
 }
 
+// templateFuncs 是消息模板可用的辅助函数。
+//
+// 只提供「格式化」类函数：模板的职责是排版，取值与判定逻辑不该藏进模板里。
+// 之所以必须有 ts：事件里的 StartsAt / EndsAt 是**毫秒整数**，直接渲染出来是 1769…
+// 这种没人看得懂的数字，而通知里"什么时候发生的"恰恰是最常被需要的字段。
+//
+//	{{ts .StartsAt}}  →  2026-09-30 15:04:05（本地时区）
+var templateFuncs = template.FuncMap{
+	"ts": func(ms int64) string {
+		if ms <= 0 {
+			return ""
+		}
+		return time.UnixMilli(ms).Local().Format("2006-01-02 15:04:05")
+	},
+}
+
 // compilePipeline 校验配置并编译其中的正则与模板。
 func compilePipeline(cfg *PipelineConfig) error {
 	for i := range cfg.Relabels {
@@ -188,7 +205,7 @@ func compilePipeline(cfg *PipelineConfig) error {
 		if strings.TrimSpace(t.Template) == "" {
 			return fmt.Errorf("templates[%d]: template 不能为空", i)
 		}
-		tpl, err := template.New(t.Name).Parse(t.Template)
+		tpl, err := template.New(t.Name).Funcs(templateFuncs).Parse(t.Template)
 		if err != nil {
 			return fmt.Errorf("templates[%d]: 模板解析失败: %w", i, err)
 		}

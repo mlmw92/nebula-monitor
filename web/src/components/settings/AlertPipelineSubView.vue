@@ -19,6 +19,35 @@
       一律回退系统内置描述，不会丢失告警。
     </el-alert>
 
+    <!-- 示例模板：三个段的字段语义（四种 op、when 条件、模板可用变量）不直观，
+         而配错的症状是「不报错、通知只是没按预期」——给可直接套用的场景化模板最省事。
+         追加而非覆盖：不清掉用户已有的规则。 -->
+    <div class="examples">
+      <div class="section-head">
+        <span class="section-title">示例模板</span>
+        <div class="head-actions">
+          <el-select v-model="exampleKey" placeholder="选择一个场景" size="small" style="width: 320px">
+            <el-option-group v-for="g in EXAMPLE_GROUPS" :key="g.label" :label="g.label">
+              <el-option v-for="ex in g.items" :key="ex.key" :label="ex.label" :value="ex.key" />
+            </el-option-group>
+          </el-select>
+          <el-button size="small" type="primary" plain :disabled="!currentExample" @click="applyExample">
+            追加到下方
+          </el-button>
+        </div>
+      </div>
+      <template v-if="currentExample">
+        <div class="field-hint">{{ currentExample.hint }}</div>
+        <pre class="preview-box">{{ currentExamplePreview }}</pre>
+      </template>
+      <div v-else class="field-hint">
+        这些示例的条件只用「内置标签」（一定存在），避免出现「看着对、永远不生效」。
+        追加只会往对应表格末尾加规则，不会覆盖你已有的配置；加完记得点右上角「保存」。
+      </div>
+    </div>
+
+    <el-divider />
+
     <!-- 1. 标签重写 -->
     <div class="section">
       <div class="section-head">
@@ -132,8 +161,9 @@
       </div>
       <div class="field-hint">
         模板为 Go text/template 语法，可访问事件字段（<code v-pre>{{.RuleName}}</code>、
-        <code v-pre>{{.Node}}</code>、<code v-pre>{{.Value}}</code>）与标签
-        （<code v-pre>{{index .Labels "team"}}</code>）。渠道专属模板优先于「全部渠道」。
+        <code v-pre>{{.Node}}</code>、<code v-pre>{{.Value}}</code>、<code v-pre>{{.State}}</code>）与标签
+        （<code v-pre>{{index .Labels "team"}}</code>）；时间戳用
+        <code v-pre>{{ts .StartsAt}}</code> 格式化（毫秒 → 本地时间）。渠道专属模板优先于「全部渠道」。
       </div>
       <el-table :data="form.templates" size="small" border empty-text="暂无模板（使用系统内置描述）">
         <el-table-column label="名称" width="150">
@@ -240,7 +270,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 // js-yaml v4 的 ESM 构建只提供具名导出，无 default
@@ -286,6 +316,148 @@ const SAMPLE_EVENT = {
 
 // 模板输入框占位示例（字面量放在脚本里，避免与 Vue 插值定界符冲突）
 const templatePlaceholder = '【{{.Severity}}】{{.RuleName}} | {{.Node}}'
+
+// ---------- 示例模板 ----------
+// 为什么内置示例：管道三个段的字段语义（四种 op、when 条件、模板可用变量）不直观，
+// 而配错的症状是「不报错、通知只是没按预期」，很难自查。
+//
+// 两条自我约束：
+//   1. 示例的 when 条件只用**内置标签**（name/rule/node/instance/severity/metric）——
+//      自定义标签（env/team 等）只在事件本身带出来时才存在，条件写成它们会"看着对、永不生效"；
+//   2. 不覆盖用户已有规则：只往对应表格末尾追加。
+const emptyWhen = null
+const relabelPayload = (op, source, target = '', extra = {}) => ({
+  op, source, target, pattern: '', replace: '', value: '', when: emptyWhen, ...extra,
+})
+const enrichPayload = (target, value, when = null) => ({ target, value, when })
+const templatePayload = (name, channel, template) => ({ name, channel, severity: [], ruleIds: [], template })
+
+const EXAMPLE_GROUPS = [
+  {
+    label: '标签重写（relabel）',
+    items: [
+      {
+        key: 'rl-hide-instance',
+        kind: 'relabel',
+        label: '删除 instance 标签（不把内部实例地址带出去）',
+        hint: '通知里通常不需要实例地址；删掉既少一行噪声，也避免内部地址外泄到外部渠道。',
+        payload: relabelPayload('delete', 'instance'),
+      },
+      {
+        key: 'rl-name',
+        kind: 'relabel',
+        label: '规则名标签改名：name → alertname',
+        hint: '对接外部平台（Alertmanager 风格的 alertname）时统一标签名。',
+        payload: relabelPayload('rename', 'name', 'alertname'),
+      },
+      {
+        key: 'rl-node',
+        kind: 'relabel',
+        label: '节点标签改名：node → host',
+        hint: '部分工单/外部平台认 host。注意：若事件本身已带 host 标签，本规则会用它覆盖。',
+        payload: relabelPayload('rename', 'node', 'host'),
+      },
+      {
+        key: 'rl-sev-cn',
+        kind: 'relabel',
+        label: '级别本地化：新增 severity_cn = 紧急 / 警告 / 信息',
+        hint: '三条规则，只在对应级别时生效；写进新标签而不是改写 severity——原始级别仍供抑制、路由等既有逻辑使用，模板里引用 severity_cn 即可。',
+        payload: [
+          relabelPayload('set', '', 'severity_cn', { value: '紧急', when: { match: { severity: 'critical' } } }),
+          relabelPayload('set', '', 'severity_cn', { value: '警告', when: { match: { severity: 'warning' } } }),
+          relabelPayload('set', '', 'severity_cn', { value: '信息', when: { match: { severity: 'info' } } }),
+        ],
+      },
+    ],
+  },
+  {
+    label: '标签增补（enrich）',
+    items: [
+      {
+        key: 'en-critical-team',
+        kind: 'enrich',
+        label: '给紧急告警补归属：team=sre',
+        hint: '条件用内置标签 severity（一定存在）；value 请改成你们实际的团队名。',
+        payload: enrichPayload('team', 'sre', { match: { severity: 'critical' } }),
+      },
+      {
+        key: 'en-action',
+        kind: 'enrich',
+        label: '按级别打处理动作：action=page / action=ticket',
+        hint: '紧急走电话/值班（page）、警告走工单（ticket）；通知模板里可用 {{index .Labels "action"}} 展示。',
+        payload: [
+          enrichPayload('action', 'page', { match: { severity: 'critical' } }),
+          enrichPayload('action', 'ticket', { match: { severity: 'warning' } }),
+        ],
+      },
+      {
+        key: 'en-env',
+        kind: 'enrich',
+        label: '给全部告警补环境：env=prod',
+        hint: '条件留空＝无条件生效。只有一个生产环境时，让通知里始终带 env 最省心。',
+        payload: enrichPayload('env', 'prod'),
+      },
+    ],
+  },
+  {
+    label: '消息模板（template）',
+    items: [
+      {
+        key: 'tpl-im',
+        kind: 'template',
+        label: '通用模板：单行精简版（适合钉钉/飞书/企微）',
+        hint: '渠道留空＝全部渠道兜底。单行排版在 IM 里最清楚，邮件则由下面那条渠道专属模板接管。',
+        payload: templatePayload(
+          '单行精简版',
+          '',
+          '{{if eq .State "resolved"}}✅ 已恢复{{else}}🔥 {{.Severity}}{{end}} | {{.RuleName}} | {{.Node}} | {{.Metric}}={{.Value}}（阈值 {{.Threshold}}）',
+        ),
+      },
+      {
+        key: 'tpl-email',
+        kind: 'template',
+        label: '邮件详细版（多行，含实例与恢复时间）',
+        hint: '渠道专属模板优先于通用模板：邮件会用它，IM 继续用上面的单行版。',
+        payload: templatePayload(
+          '邮件详细版',
+          'email',
+          '{{if eq .State "resolved"}}告警已恢复{{else}}告警触发{{end}}\n' +
+            '规则：{{.RuleName}}（{{.RuleID}}）\n' +
+            '级别：{{.Severity}}{{if .Labels.severity_cn}}（{{index .Labels "severity_cn"}}）{{end}}\n' +
+            '节点：{{.Node}}{{if .NodeIP}}（{{.NodeIP}}）{{end}}\n' +
+            '{{if .Instance}}实例：{{.Instance}}\n{{end}}' +
+            '指标：{{.Metric}}\n' +
+            '当前值：{{.Value}} {{.Operator}} 阈值 {{.Threshold}}\n' +
+            '描述：{{.Message}}\n' +
+            '触发时间：{{ts .StartsAt}}{{if .EndsAt}}\n恢复时间：{{ts .EndsAt}}{{end}}\n' +
+            '{{if .Labels.action}}处理动作：{{index .Labels "action"}}\n{{end}}',
+        ),
+      },
+    ],
+  },
+]
+
+const ALL_EXAMPLES = EXAMPLE_GROUPS.flatMap((g) => g.items)
+const exampleKey = ref('')
+const currentExample = computed(() => ALL_EXAMPLES.find((e) => e.key === exampleKey.value) || null)
+const currentExamplePreview = computed(() => {
+  const ex = currentExample.value
+  if (!ex) return ''
+  const payloads = Array.isArray(ex.payload) ? ex.payload : [ex.payload]
+  return payloads.map((p) => JSON.stringify(p, null, 2)).join('\n')
+})
+
+function applyExample() {
+  const ex = currentExample.value
+  if (!ex) return
+  const target =
+    ex.kind === 'relabel' ? form.value.relabels
+      : ex.kind === 'enrich' ? form.value.enrich
+        : form.value.templates
+  const payloads = Array.isArray(ex.payload) ? ex.payload : [ex.payload]
+  for (const p of payloads) target.push(JSON.parse(JSON.stringify(p)))
+  ElMessage.success(`已追加 ${payloads.length} 条规则，核对后请点右上角「保存」使其生效`)
+}
 
 const loading = ref(false)
 const saving = ref(false)
@@ -580,6 +752,12 @@ onMounted(load)
 }
 .tip {
   margin-bottom: 18px;
+}
+.examples {
+  margin-bottom: 6px;
+}
+.examples .preview-box {
+  max-height: 260px;
 }
 .section {
   margin-bottom: 22px;
