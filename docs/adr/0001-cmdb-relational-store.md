@@ -15,6 +15,9 @@ Status: proposed（随资产管理首批实现落地转 accepted）
 ## Consequences
 
 - 新增二进制构成变化（引入纯 Go SQLite 驱动），需在 `build/cross-compile.sh` 的产物验证与离线包体积评估中复核。
+  **已实测**：`CGO_ENABLED=0` 下 linux/amd64、linux/arm64、linux/arm 三架构均可正常编译（含该依赖的测试二进制约 10.7 MB），离线包的多架构交付不受影响。
+- **工具链下限升到 Go 1.26**：`modernc.org/sqlite` 的传递依赖（`modernc.org/libc`、`modernc.org/ccgo/v4`）要求 `go >= 1.26`，因此 `go.mod` 的 `go` 指令与 `.github/workflows/{ci,release}.yml` 的 `go-version` 一并升到 1.26（开发机 1.26.5、验证机 1.27.1 均满足）。
+  选择升工具链而非手工钉住更老的依赖组合：手工压低传递依赖的版本会在后续每次 `go mod tidy` 时被 MVS 抬回，属长期脆弱点；而 1.26 只影响从源码构建的环境，已发布的离线包不受影响。
 - 数据库文件必须纳入既有升级备份流程（`internal/server/upgrade` 的备份替换路径），并在 `server.yaml` 暴露路径配置项。
 - 迁移路径：首次启动按现有节点清单与实例注册表**导入一次**（幂等、来源标记为采集），导入失败不影响主流程。
 - 若将来关系型数据规模超出单机 SQLite 能力，替换为外部数据库需要改动持久化适配层——这是本决策"较难回退"的部分，故记录在案。

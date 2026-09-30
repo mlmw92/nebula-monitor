@@ -23,7 +23,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           # 必须与 go.mod 的 go 指令一致
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - name: go vet
