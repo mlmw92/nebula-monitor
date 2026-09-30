@@ -103,6 +103,7 @@ import {
   Aim,
   View,
   TopRight,
+  Tools,
 } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { useBrand } from '../composables/useBrand'
@@ -148,6 +149,16 @@ const groups = [
       { key: 'assets', to: '/assets', label: '资产台账', icon: Files, perm: 'assets:read' },
       // 配置巡检：读看记录与差异；触发巡检另有 inspect:run（页面内门控）
       { key: 'inspect', to: '/inspect', label: '配置巡检', icon: Aim, perm: 'inspect:read' },
+    ],
+  },
+  {
+    key: 'ops',
+    label: '运维操作',
+    icon: Tools,
+    items: [
+      // 下行操作：读看任务与动作目录需 ops:read；**下发**另有 ops:exec（高风险，页面内门控）。
+      // 能不能真的执行还取决于目标机器自己的 guards.ops——权限只是四道护栏之一。
+      { key: 'ops', to: '/ops', label: '节点操作', icon: Tools, perm: 'ops:read' },
     ],
   },
   {
