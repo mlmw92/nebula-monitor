@@ -91,19 +91,16 @@
         <span class="op-chip op-chip-clear" @click="clearAllChips">清空全部</span>
       </div>
 
-      <!-- 批量条：选中才出现，避免常驻噪音 -->
-      <div v-if="selection.length" class="op-bulk">
-        <span>已选中 <b>{{ selection.length }}</b> 条</span>
+      <!-- 批量条：选中才出现，避免常驻噪音（与资产台账共用 BatchBar） -->
+      <BatchBar v-if="selection.length" :count="selection.length" @clear="clearSelection">
         <el-button size="small" @click="exportRows(selection, '选中记录')">导出选中</el-button>
         <el-button v-if="canExec" size="small" @click="rerunSelected">
           <el-icon :size="12"><RefreshRight /></el-icon><span class="btn-txt">重新执行</span>
         </el-button>
-        <span class="op-bulk-sp" />
         <el-button v-if="canExec" size="small" type="danger" plain @click="bulkDelete">
           <el-icon :size="12"><Delete /></el-icon><span class="btn-txt">批量删除</span>
         </el-button>
-        <el-button size="small" text @click="clearSelection">取消选择</el-button>
-      </div>
+      </BatchBar>
 
 
       <div class="op-table-wrap" :class="{ 'op-dense': density }">
@@ -422,6 +419,7 @@ import {
   ArrowDown, Check, CircleCheck, Close, Delete, Download, Files,
   Grid, Operation, Plus, Refresh, RefreshRight, Search, Sort, Timer,
 } from '@element-plus/icons-vue'
+import BatchBar from './BatchBar.vue'
 import KpiCard from './KpiCard.vue'
 import { cancelOpsTasks, createOpsBatch, createOpsTask, deleteOpsTask, listOpsActions, listOpsTasks } from '../api/ops'
 import http from '../api/http'
@@ -1338,26 +1336,6 @@ const resultSections = computed(() => {
 .op-chip-clear:hover {
   color: var(--text);
 }
-.op-bulk {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  margin-top: 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--accent-dim);
-  font-size: 13px;
-}
-.op-bulk b {
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-}
-.op-bulk-sp {
-  flex: 1;
-}
-
 /* ================= 表格单元 ================= */
 .op-table-wrap {
   margin-top: 10px;

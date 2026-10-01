@@ -84,7 +84,7 @@
           <div class="perm-matrix">
             <el-alert type="warning" :closable="false" class="perm-hint">
               <template #title>
-                高风险权限：system:upgrade、agent:secret:read、agent:upgrade、security:write、notify:write、users:manage、roles:manage、audit:export
+                高风险权限：system:upgrade、agent:secret:read、agent:upgrade、security:write、notify:write、users:manage、roles:manage、audit:export、assets:export
                 等涉及系统变更或敏感信息，请谨慎授予。
               </template>
             </el-alert>

@@ -109,7 +109,7 @@ func TestEveryCatalogKeyIsGrantedBySomeRole(t *testing.T) {
 // TestBuiltinRolesCoverAddedKeys 新增权限点必须有内置角色可用：
 // 超级管理员走 allKeys() 自动覆盖；运维管理员需显式补齐，否则新权限无角色可选。
 func TestBuiltinRolesCoverAddedKeys(t *testing.T) {
-	want := []string{"dashboard:write", "system:config", "ops:read", "ops:exec"}
+	want := []string{"dashboard:write", "system:config", "ops:read", "ops:exec", "assets:export"}
 
 	byName := map[string]Role{}
 	for _, r := range BuiltinRoles() {

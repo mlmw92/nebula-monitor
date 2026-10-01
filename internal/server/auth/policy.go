@@ -86,6 +86,9 @@ var HighRiskPermissions = map[string]struct{}{
 	"users:manage":      {},
 	"roles:manage":      {},
 	"audit:export":      {},
+	// 资产清单导出：一次把整份台账（含 IP、责任人、标签）落盘，敏感度与审计导出一档，
+	// 因此同样纳入高风险（需要二次确认 + 审计留痕）。
+	"assets:export": {},
 	// 资产属性的人工维护会改变运维判断所依赖的台账数据（虽然不是执行动作），
 	// 按设计纳入高风险：需要二次确认 + 审计留痕。
 	"assets:write": {},

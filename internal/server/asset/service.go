@@ -307,6 +307,16 @@ func (s *Service) List(f ListFilter) ([]Asset, error) { return s.store.listAsset
 // 与 List 用同一套条件（含 Nodes 资源范围下推），保证「总数」与「能翻到的条数」一致。
 func (s *Service) Count(f ListFilter) (int, error) { return s.store.countAssets(f) }
 
+// ListAll 返回符合条件的**全部**资产（不分页，忽略入参里的 Limit/Offset）。
+//
+// 导出清单必须走它：分页版默认只取一页，导出就会"看起来像全量、其实只有 50 条"——
+// 这种错误没有任何提示，而用户会拿导出的表去做盘点（巡检早就踩过同一个坑，
+// 见 listAssetsAll 的注释）。
+func (s *Service) ListAll(f ListFilter) ([]Asset, error) {
+	f.Limit, f.Offset = 0, 0
+	return s.store.listAssetsAll(f)
+}
+
 // Stats 汇总台账健康度：总数 / 失联 / 无责任人 / 冲突 / 窗口内变更。
 //
 // 五个数字必须来自**同一套筛选条件与同一时刻**，否则顶部数字点进列表会出现

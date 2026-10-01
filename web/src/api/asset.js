@@ -2,7 +2,7 @@
 //
 // 与 security.js 同一形态：只做「路径拼接 + 参数过滤」，鉴权与错误文案交给 http.js。
 // 服务端才是安全边界（资源范围、权限点都在服务端校验），这里不做任何权限判断。
-import http from './http'
+import http, { getToken } from './http'
 
 // withQuery 拼接查询串，空值一律不拼：
 // `?type=` 与「不传 type」在服务端语义不同（前者是"筛选类型为空"，后者是"全部类型"），
@@ -81,3 +81,61 @@ export const purgeAsset = (id) => http.post('/api/v1/assets/' + encodeURICompone
 // 标签维护：labels 写入/覆盖，remove 删除；两者键冲突时服务端返回 400。
 export const updateAssetLabels = (id, labels, remove = []) =>
   http.put('/api/v1/assets/' + encodeURIComponent(id) + '/labels', { labels, remove })
+
+// ---- 批量维护与清单导出 ----
+
+// 批量维护：转派责任人 / 清除责任人 / 打标签 / 忽略 / 恢复（{ ids, op, ... }）。
+//
+// 刻意**不用 http.post**：一条都没成功时服务端返回 409，而响应体里带着**逐条原因**，
+// 通用封装只抛 error.message，会把最有用的那份信息丢掉——用户只能看到
+// "没有任何一条资产被更新"，却看不到"为什么"。因此这里把状态码与 body 一起交回调用方。
+export async function batchAssets(payload) {
+  const token = getToken()
+  const res = await fetch('/api/v1/assets/batch', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: 'Bearer ' + token } : {}),
+    },
+    body: JSON.stringify(payload),
+  })
+  let body = {}
+  try {
+    body = await res.json()
+  } catch (e) {
+    /* 非 JSON 响应体：交给调用方按状态码兜底 */
+  }
+  return { ok: res.ok, status: res.status, body }
+}
+
+// 导出资产清单 CSV：与列表**同一套筛选参数**（服务端不分页，只导资源范围内的资产）。
+// 文件名优先用服务端给的（自带导出时间），避免同一天导出多份互相覆盖。
+export async function exportAssets(params = {}, fallbackName = 'assets.csv') {
+  const token = getToken()
+  const res = await fetch(withQuery('/api/v1/assets/export', params), {
+    headers: token ? { Authorization: 'Bearer ' + token } : {},
+  })
+  if (!res.ok) {
+    let msg = 'HTTP ' + res.status
+    try {
+      const body = await res.json()
+      if (body && body.error) msg = body.error
+    } catch (e) {
+      /* 保留状态码文案 */
+    }
+    throw new Error(msg)
+  }
+  const disposition = res.headers.get('Content-Disposition') || ''
+  const hit = /filename=([^;]+)/.exec(disposition)
+  const name = hit ? hit[1].trim() : fallbackName
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  return name
+}

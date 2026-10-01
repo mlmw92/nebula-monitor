@@ -220,6 +220,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/assets/{id}/restore", a.permit(a.handleAssetRestore, "assets:write"))
 	mux.HandleFunc("POST /api/v1/assets/{id}/purge", a.permit(a.handleAssetPurge, "assets:write"))
 	mux.HandleFunc("PUT /api/v1/assets/{id}/labels", a.permit(a.handleAssetLabels, "assets:write"))
+	// 批量维护与清单导出：批量沿用单条写的权限点（逐条结论、范围在 handler 内逐条判定）；
+	// 导出单设 assets:export——它一次把整份台账落盘，与「逐页翻看」不是一个量级的动作。
+	// 字面量路径比 {id} 更具体，ServeMux 会优先匹配（与 /assets/summary 同理）。
+	mux.HandleFunc("POST /api/v1/assets/batch", a.permit(a.handleAssetsBatch, "assets:write"))
+	mux.HandleFunc("GET /api/v1/assets/export", a.permit(a.handleAssetExport, "assets:export"))
 	// 配置巡检（inspect）：只给结论、不改配置，因此「跑」与「改」分成两个权限点
 	mux.HandleFunc("POST /api/v1/inspect/runs", a.permit(a.handleInspectRunCreate, "inspect:run"))
 	mux.HandleFunc("GET /api/v1/inspect/runs", a.permit(a.handleInspectRuns, "inspect:read"))

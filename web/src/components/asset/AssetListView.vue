@@ -121,6 +121,13 @@
         <span v-else class="muted">
           当前账号只读：缺 assets:write 权限，可在「权限模型 → 资产」中授予
         </span>
+        <!-- 导出走独立权限点：一次把整份台账落盘。导的是**当前筛选命中的全部资产**，不是这一页。 -->
+        <el-button
+          v-if="canExport"
+          :loading="exporting"
+          title="导出当前筛选命中的全部资产（服务端导出，不受分页限制）；属高风险操作，需二次确认"
+          @click="doExport"
+        >导出清单 CSV</el-button>
         <span class="muted action-note">
           范围外资产按「不存在」返回，不做 403 区分；状态与来源由既有数据推导，不单独落库
         </span>
@@ -128,14 +135,29 @@
 
       <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" class="alert-gap" />
 
+      <!-- 批量条：勾选后才出现。动作与单条一致（转派/标签/忽略/恢复），
+           区别只在于"一次改一批"；结果逐条给结论（部分成功是常态）。 -->
+      <BatchBar v-if="selection.length" :count="selection.length" @clear="clearSelection">
+        <el-button size="small" @click="openBatchOwner">转派责任人</el-button>
+        <el-button size="small" @click="openBatchLabel">打标签</el-button>
+        <el-button size="small" @click="batchIgnore">忽略</el-button>
+        <el-button size="small" @click="batchRestore">恢复</el-button>
+      </BatchBar>
+
       <el-table
+        ref="tableRef"
         :data="items"
         v-loading="loading"
+        row-key="id"
         empty-text="没有匹配的资产（资产会在 Agent 首次上报后自动出现）"
         :row-class-name="rowClass"
         style="width: 100%"
-        @row-click="openDetail"
+        @row-click="onRowClick"
+        @selection-change="onSelectionChange"
       >
+        <!-- 多选列：批量维护的入口。点复选框不应打开详情（那是在选行，不是在"看这一条"），
+             见 onRowClick 里对 selection 列的判断。 -->
+        <el-table-column type="selection" width="42" />
         <el-table-column label="资产名称" min-width="260">
           <template #default="{ row }">
             <div class="name">
@@ -532,11 +554,96 @@
         <el-button type="primary" :loading="saving" @click="submitEdit">提交</el-button>
       </template>
     </el-dialog>
+
+    <!-- 批量转派责任人：留空即报错（要清空请点底部的「清空责任人」），
+         避免"输入框忘了填"就把一整批责任人静默清掉。 -->
+    <el-dialog v-model="batchOwner.visible" title="批量转派责任人" width="540px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="alert-gap"
+        :title="`把选中的 ${selection.length} 条资产的责任人统一改成下面的值（写入人工属性 owner，采集值不受影响）`"
+      />
+      <el-form label-width="90px">
+        <el-form-item label="责任人">
+          <el-input
+            v-model="batchOwner.owner"
+            placeholder="如 张三 / sre-team"
+            @keyup.enter="submitBatchOwner(false)"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchOwner.visible = false">取消</el-button>
+        <el-button @click="submitBatchOwner(true)">清空责任人</el-button>
+        <el-button type="primary" :loading="batchBusy" @click="submitBatchOwner(false)">保存转派</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 批量打标签：写入会覆盖同名标签，删除会移除该键。
+         两种方式放在一起，是因为"给这批机器打上 env=prod"与"把打错的 env 摘掉"是同一件事的两面。 -->
+    <el-dialog v-model="batchLabel.visible" title="批量打标签" width="540px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="alert-gap"
+        title="标签是分类维度（如 env=prod、system=order），与「其它属性」不同：只用于筛选与展示，不参与巡检比对。"
+      />
+      <el-form label-width="90px">
+        <el-form-item label="方式">
+          <el-radio-group v-model="batchLabel.mode">
+            <el-radio value="set">写入 / 覆盖</el-radio>
+            <el-radio value="remove">删除该标签</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="标签键">
+          <el-input v-model="batchLabel.key" placeholder="如 env" />
+        </el-form-item>
+        <el-form-item v-if="batchLabel.mode === 'set'" label="值">
+          <el-input v-model="batchLabel.value" placeholder="如 prod（可留空 = 只标记存在该键）" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchLabel.visible = false">取消</el-button>
+        <el-button type="primary" :loading="batchBusy" @click="submitBatchLabel">提交</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 批量维护结果：逐条结论。部分成功是常态（范围外的按「不存在」计入），
+         因此必须逐条说明原因，而不是只弹一句"成功 3 条"。 -->
+    <el-dialog v-model="batchResultVisible" :title="batchTitle" width="660px">
+      <div v-if="batchResult">
+        <el-alert
+          :type="batchResult.failed === 0 ? 'success' : batchResult.ok > 0 ? 'warning' : 'error'"
+          :closable="false"
+          show-icon
+          class="alert-gap"
+          :title="`目标 ${batchResult.total} 条：成功 ${batchResult.ok} 条，失败 ${batchResult.failed} 条`"
+          :description="batchResultHint"
+        />
+        <template v-if="failedItems.length">
+          <div class="batch-sec">
+            <span>未成功（{{ failedItems.length }}）</span>
+            <span class="muted">逐条原因</span>
+          </div>
+          <div v-for="it in failedItems" :key="it.id" class="batch-row">
+            <span class="mono">{{ it.node || '—' }}</span>
+            <span class="batch-name">{{ it.name || 'ast_' + it.id }}</span>
+            <span class="warn-text">{{ it.error }}</span>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="batchResultVisible = false">知道了</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   listAssets,
@@ -553,10 +660,14 @@ import {
   restoreAsset,
   purgeAsset,
   updateAssetLabels,
+  batchAssets,
+  exportAssets,
 } from '../../api/asset'
 import { useAuth } from '../../composables/useAuth'
 // 与中间件 / 容器等页面统一的 KPI 卡片（顶部彩条 + 图标 + 数值）
 import KpiCard from '../KpiCard.vue'
+// 批量条与节点操作页共用（同一个视觉与「取消选择」位置）
+import BatchBar from '../BatchBar.vue'
 
 const auth = useAuth()
 // 前端隐藏仅为体验：服务端 assets:write 是真正的边界（且属高风险权限，提交前二次确认）。
@@ -1109,6 +1220,161 @@ async function dropBaseline() {
   }
 }
 
+/* ================= 批量维护与清单导出 ================= */
+
+const canExport = computed(() => auth.can('assets:export'))
+const exporting = ref(false)
+const selection = ref([])
+const tableRef = ref(null)
+const batchBusy = ref(false)
+const batchResult = ref(null)
+const batchResultVisible = ref(false)
+const batchOwner = reactive({ visible: false, owner: '' })
+const batchLabel = reactive({ visible: false, key: '', value: '', mode: 'set' })
+
+function onSelectionChange(rows) {
+  selection.value = rows
+}
+function clearSelection() {
+  selection.value = []
+  if (tableRef.value) tableRef.value.clearSelection()
+}
+// 点复选框列只应改变选中态，不该顺带打开详情抽屉（用户是在选行，不是在"看这一条"）
+function onRowClick(row, column) {
+  if (column && column.type === 'selection') return
+  openDetail(row)
+}
+
+const failedItems = computed(() => (batchResult.value ? batchResult.value.items.filter((i) => !i.ok) : []))
+const batchTitle = computed(() => (batchResult.value ? `批量${batchResult.value.opLabel}结果` : '批量维护结果'))
+const batchResultHint = computed(() => {
+  const r = batchResult.value
+  if (!r) return ''
+  if (r.ok === 0) return r.message || '没有任何一条被更新，原因见下方。'
+  if (r.failed === 0) return '全部成功。'
+  return '部分成功：未成功的给出了具体原因；资源范围外的资产按「不存在」处理。'
+})
+
+// runBatch 是所有批量动作的统一出口：结果面板、部分成功的呈现、清空选中与刷新列表
+// 只写一遍。各动作自己拼一遍的话，迟早在某个分支上漏掉"刷新列表"或"清空选中"。
+async function runBatch(op, payload, actionLabel) {
+  const ids = selection.value.map((r) => r.id)
+  if (!ids.length) return
+  batchBusy.value = true
+  try {
+    const { status, body } = await batchAssets({ ids, op, ...payload })
+    // 没有 batch 字段 = 请求本身就没被接受（旧服务端 405、网关 404 之类），
+    // 这时**不能**弹"逐条结论"面板：面板是给"每条改没改成"用的，
+    // 用它去呈现"整个请求失败了"只会显示成"成功 0 条、失败 0 条"这种自相矛盾的话。
+    if (!body || !body.batch) {
+      ElMessage.error((body && body.error) || `批量维护未被执行（HTTP ${status}）：请确认服务端已升级到支持批量接口的版本`)
+      return
+    }
+    const b = body.batch
+    batchResult.value = {
+      opLabel: b.opLabel || actionLabel,
+      total: b.total || ids.length,
+      ok: b.ok || 0,
+      failed: b.failed || 0,
+      items: b.items || [],
+      message: (body && body.error) || '',
+    }
+    // 409（一条都没成功）也照常弹面板：items 里的逐条原因才是用户要看的东西
+    batchResultVisible.value = true
+    if (status >= 500) ElMessage.error('服务端处理失败，请稍后重试')
+    clearSelection()
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message || '批量维护失败')
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+function openBatchOwner() {
+  batchOwner.owner = ''
+  batchOwner.visible = true
+}
+async function submitBatchOwner(clear) {
+  const n = selection.value.length
+  if (!n) return
+  const owner = batchOwner.owner.trim()
+  if (!clear && !owner) {
+    ElMessage.warning('请填写责任人；要清空请点「清空责任人」')
+    return
+  }
+  const what = clear ? `清空 ${n} 条资产的责任人` : `把 ${n} 条资产的责任人统一改为「${owner}」`
+  if (!(await confirmWrite(`${what}；写入的是人工值，采集值不受影响`))) return
+  batchOwner.visible = false
+  await runBatch(clear ? 'ownerClear' : 'owner', clear ? {} : { owner }, clear ? '清除责任人' : '转派责任人')
+}
+
+function openBatchLabel() {
+  batchLabel.key = ''
+  batchLabel.value = ''
+  batchLabel.mode = 'set'
+  batchLabel.visible = true
+}
+async function submitBatchLabel() {
+  const key = batchLabel.key.trim()
+  if (!key) {
+    ElMessage.warning('标签键不能为空')
+    return
+  }
+  const n = selection.value.length
+  const value = batchLabel.value.trim()
+  const what =
+    batchLabel.mode === 'set'
+      ? `给 ${n} 条资产写入标签 ${key}${value ? '=' + value : ''}（同名标签会被覆盖）`
+      : `从 ${n} 条资产上删除标签「${key}」`
+  if (!(await confirmWrite(what))) return
+  batchLabel.visible = false
+  await runBatch('labels', batchLabel.mode === 'set' ? { labels: { [key]: value } } : { remove: [key] }, '打标签')
+}
+
+async function batchIgnore() {
+  const n = selection.value.length
+  if (!n) return
+  const reason = await ElMessageBox.prompt(
+    `把选中的 ${n} 条资产从台账隐藏（忽略）：采集仍在继续、可随时恢复，列表与统计默认不再计入。`,
+    '批量忽略',
+    {
+      type: 'warning',
+      confirmButtonText: '忽略',
+      cancelButtonText: '取消',
+      inputPlaceholder: '忽略理由（可选，便于日后理解为什么藏了它们）',
+    },
+  )
+    .then((r) => r.value)
+    .catch(() => null)
+  if (reason === null) return
+  await runBatch('ignore', { reason: reason || '' }, '忽略')
+}
+
+async function batchRestore() {
+  const n = selection.value.length
+  if (!n) return
+  if (!(await confirmWrite(`把选中的 ${n} 条资产恢复到台账（解除忽略）`))) return
+  await runBatch('restore', {}, '恢复')
+}
+
+// 导出清单：走服务端导出（与列表同一套筛选、不受分页限制），
+// 因此导出的就是"筛出来的那一份"，而不是当前这一页。
+async function doExport() {
+  if (!(await confirmWrite('导出当前筛选命中的全部资产（不受分页限制，含责任人、标签与归属节点），以 CSV 下载'))) {
+    return
+  }
+  exporting.value = true
+  try {
+    const name = await exportAssets(filterParams())
+    ElMessage.success(`已导出 ${name}`)
+  } catch (e) {
+    ElMessage.error(e.message || '导出失败')
+  } finally {
+    exporting.value = false
+  }
+}
+
 // 写入后统一刷新：详情（若打开着当前资产）、列表与摘要
 async function afterWrite(id) {
   if (detailVisible.value && detail.value && String(detail.value.id) === String(id)) {
@@ -1361,6 +1627,32 @@ onMounted(load)
 }
 .mono {
   font-family: var(--mono);
+}
+/* 批量结果面板：与节点操作页同一形态（分节标题 + 逐条一行）。
+   scoped 样式不跨组件，因此 .warn-text 这类小类必须在本页也定义一份。 */
+.batch-sec {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 14px 0 6px;
+  font-size: 13px;
+}
+.batch-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: 13px;
+}
+.batch-name {
+  flex: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.warn-text {
+  color: var(--warn);
 }
 .struck {
   color: var(--text-dim);

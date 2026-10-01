@@ -22,6 +22,9 @@ type AssetProvider interface {
 	List(f asset.ListFilter) ([]asset.Asset, error)
 	// Count 与 List 共用条件（含 Nodes 资源范围），用于给出分页所需的真实总数。
 	Count(f asset.ListFilter) (int, error)
+	// ListAll 取符合条件的全部资产（忽略 Limit/Offset），供导出清单使用。
+	// 导出绝不能走 List：分页版默认只取一页，导出的表会"看起来像全量"。
+	ListAll(f asset.ListFilter) ([]asset.Asset, error)
 	// Stats 汇总台账健康度，同样与 List 共用条件，保证顶部数字能下钻到列表。
 	Stats(f asset.ListFilter, changesSince int64) (asset.Stats, error)
 	Get(ref asset.Ref) (asset.Asset, bool, error)

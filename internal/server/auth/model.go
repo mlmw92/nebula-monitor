@@ -209,6 +209,9 @@ func PermissionCatalog() []permDomain {
 		{Domain: "资产", Items: []Permission{
 			{"assets:read", "查看资产台账"},
 			{"assets:write", "维护资产属性"},
+			// 导出是**整份台账落盘**：一次拿走全部资产与责任人，与「逐页翻看」不是一个量级的动作，
+			// 因此单设权限点（与 audit:export / metrics:export 同一约定）。
+			{"assets:export", "导出资产清单"},
 			{"inspect:read", "查看配置巡检"},
 			{"inspect:run", "执行配置巡检"},
 		}},
@@ -260,7 +263,7 @@ func BuiltinRoles() []Role {
 			ScopeMode:   ScopeGlobal,
 			Permissions: []string{
 				"dashboard:read", "dashboard:write", "nodes:read", "nodes:write", "groups:read", "groups:write",
-				"middleware:read", "middleware:write", "assets:read", "assets:write",
+				"middleware:read", "middleware:write", "assets:read", "assets:write", "assets:export",
 			"inspect:read", "inspect:run", "probe:read", "probe:write",
 				// 集中日志（C2）：运维是排查问题的人，默认给全局运维角色；
 				// 刻意不给只读/告警/安全/审计角色——日志内容可能含敏感数据，按需单独授予。
