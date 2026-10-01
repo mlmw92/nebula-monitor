@@ -66,7 +66,7 @@ type OpsResult struct {
 	DurationMs int64 `json:"durationMs,omitempty"`
 }
 
-// 操作任务状态机：queued → delivered → running → succeeded / failed / expired。
+// 操作任务状态机：queued → delivered → running → succeeded / failed / expired / cancelled。
 //
 // 与防护任务（model.DefenseState*）刻意保持同一套字面量：两者都是「下行指令的生命周期」，
 // 前端与运维只该学一套状态词。
@@ -83,4 +83,18 @@ const (
 	OpsStateFailed = "failed"
 	// OpsStateExpired 超时未完成，已被回收——**不是**"任务还在排队"。
 	OpsStateExpired = "expired"
+	// OpsStateCancelled 被操作者取消（仅允许在 queued 阶段取消）。
+	//
+	// 刻意用「留一条 cancelled 记录」而不是把任务删掉：否则"我明明下过这条指令"会变成悬案，
+	// 且与"从未下发"无法区分。删除只对**终态**记录开放，且要写审计。
+	OpsStateCancelled = "cancelled"
 )
+
+// OpsStateTerminal 判断状态是否为终态（不会再变化）。
+func OpsStateTerminal(state string) bool {
+	switch state {
+	case OpsStateSucceeded, OpsStateFailed, OpsStateExpired, OpsStateCancelled:
+		return true
+	}
+	return false
+}

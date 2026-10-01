@@ -1681,10 +1681,13 @@ journalctl -u monitor-proxy-hub -f
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/v1/ops/actions?node=` | 动作目录；带 node 时附带该节点**本机放行**的动作清单（`ops:read`） |
-| GET | `/api/v1/ops/tasks?node=&state=&kind=&limit=` | 操作任务列表（按资源范围过滤，`ops:read`） |
+| GET | `/api/v1/ops/actions?node=&nodes=a,b,c` | 动作目录；带 `node`/`nodes` 时附带这些节点**本机放行**的动作清单（`ops:read`） |
+| GET | `/api/v1/ops/tasks?node=&state=&kind=&batchId=&limit=` | 操作任务列表（按资源范围过滤，`ops:read`） |
 | GET | `/api/v1/ops/tasks/{id}` | 任务详情（含执行输出，`ops:read`） |
 | POST | `/api/v1/ops/tasks` | 下发一条操作任务 `{node,kind,params,reason}`（`ops:exec`，**高风险**） |
+| POST | `/api/v1/ops/tasks/batch` | 批量下发 `{nodes,kind,params,reason}`，逐节点返回结论；最多 200 台（`ops:exec`） |
+| POST | `/api/v1/ops/tasks/cancel` | 取消 `{ids}` 或 `{batchId}`；**仅排队中可撤**，已下发的逐条报"无法取消"（`ops:exec`） |
+| DELETE | `/api/v1/ops/tasks/{id}` | 删除一条**已结束**的任务记录（写审计，`ops:exec`） |
 
 > **四道护栏**：① Agent 本机护栏 `guards.ops`（默认只读，写操作需 `write: true` **且**单元在 `units` 清单）；
 > ② 能力协商（Agent 只声明本机放行的动作，Server 只下发声明过的）；③ 中心授权 + 参数校验 + 审计

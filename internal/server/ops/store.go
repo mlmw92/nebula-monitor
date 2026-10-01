@@ -2,6 +2,8 @@ package ops
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"sort"
@@ -9,6 +11,16 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
+)
+
+// 取消失败的两种原因刻意分开，供 API 层给出不同的状态码与提示：
+//   - ErrNotCancellable：任务已被节点领取，撤不回来了（409，说明"已下发"）；
+//   - ErrNotTerminal：想删的是还在跑的任务（409 或 400，提示先取消/等结束）。
+var (
+	// ErrNotCancellable 表示任务已过可取消阶段（只有 queued 能取消）。
+	ErrNotCancellable = errors.New("任务已下发，无法取消")
+	// ErrNotTerminal 表示任务尚未结束。
+	ErrNotTerminal = errors.New("任务尚未结束")
 )
 
 const (
@@ -45,6 +57,8 @@ type Task struct {
 	RunningAt   int64  `json:"runningAt,omitempty"`
 	DoneAt      int64  `json:"doneAt,omitempty"`
 	DurationMs  int64  `json:"durationMs,omitempty"`
+	// BatchID 是批量下发的批次号（单条下发为空）。用于按批次聚合结果与「整批取消」。
+	BatchID string `json:"batchId,omitempty"`
 }
 
 // Store 持久化并管理操作任务。
@@ -173,6 +187,11 @@ func itoa(n int64) string {
 
 // Create 创建一条待下发任务，初始状态 queued。
 func (s *Store) Create(cmd model.OpsCommand, operator, operatorIP, reason string) *Task {
+	return s.create(cmd, "", operator, operatorIP, reason)
+}
+
+// create 是 Create 与批次创建共用的落库逻辑（batchID 为空表示单条下发）。
+func (s *Store) create(cmd model.OpsCommand, batchID, operator, operatorIP, reason string) *Task {
 	s.mu.Lock()
 	if cmd.ID == "" {
 		cmd.ID = s.nextID()
@@ -189,12 +208,111 @@ func (s *Store) Create(cmd model.OpsCommand, operator, operatorIP, reason string
 		Operator:   operator,
 		OperatorIP: operatorIP,
 		Reason:     reason,
+		BatchID:    batchID,
 	}
 	s.tasks[t.ID] = t
 	s.mu.Unlock()
 	s.prune()
 	s.save()
 	return t
+}
+
+// NextBatchID 生成批次号。与任务 ID 共用同一个自增序列（并**消耗**一个序号），
+// 避免两套编号各自漂移、也避免两个批次拿到同一个号（那会让"整批取消"误伤另一批）。
+func (s *Store) NextBatchID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seq++
+	return "ob-" + itoa(s.seq)
+}
+
+// CreateInBatch 在指定批次下创建一条任务（批次号由调用方先用 NextBatchID 生成，
+// 让同一批的所有任务共用它，前端才能按批次聚合）。
+func (s *Store) CreateInBatch(cmd model.OpsCommand, batchID, operator, operatorIP, reason string) *Task {
+	return s.create(cmd, batchID, operator, operatorIP, reason)
+}
+
+// CreateMany 在同一批次下一次性创建多条任务（一次加锁、一次落盘）。
+//
+// 与逐条 Create 的差别只在开销与一致性：200 台的任务逐个落盘会写 200 次 JSON 文件，
+// 且中途出问题时留下"半批"。这里一次写完——批量下发要么整批成立，要么什么都不建。
+func (s *Store) CreateMany(cmds []model.OpsCommand, batchID, operator, operatorIP, reason string) []*Task {
+	if len(cmds) == 0 {
+		return nil
+	}
+	out := make([]*Task, 0, len(cmds))
+	s.mu.Lock()
+	for _, cmd := range cmds {
+		if cmd.ID == "" {
+			cmd.ID = s.nextID()
+		}
+		if cmd.CreatedAt == 0 {
+			cmd.CreatedAt = s.now()
+		}
+		if cmd.ExpireAt == 0 {
+			cmd.ExpireAt = cmd.CreatedAt + taskTTL.Milliseconds()
+		}
+		t := &Task{
+			OpsCommand: cmd,
+			State:      model.OpsStateQueued,
+			Operator:   operator,
+			OperatorIP: operatorIP,
+			Reason:     reason,
+			BatchID:    batchID,
+		}
+		s.tasks[t.ID] = t
+		out = append(out, t)
+	}
+	s.mu.Unlock()
+	s.prune()
+	s.save()
+	return out
+}
+
+// Cancel 取消一条**仍未被节点领取**（queued）的任务，返回取消后的任务。
+//
+// 只允许 queued 取消：一旦 delivered，指令已经随某轮上报发出去了，此时改状态只会
+// 让界面显示"已取消"而机器照样执行——那比不提供取消更危险。
+func (s *Store) Cancel(id string, actor string) (*Task, error) {
+	s.mu.Lock()
+	t, ok := s.tasks[id]
+	if !ok {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("任务不存在")
+	}
+	if t.State != model.OpsStateQueued {
+		cur := t.State
+		s.mu.Unlock()
+		return nil, fmt.Errorf("%w：任务当前状态为 %s（已被节点领取或已结束），无法取消", ErrNotCancellable, cur)
+	}
+	t.State = model.OpsStateCancelled
+	t.Message = "已由 " + actor + " 取消（下发前撤回）"
+	t.DoneAt = s.now()
+	s.mu.Unlock()
+	s.save()
+	return t, nil
+}
+
+// Remove 删除一条**终态**记录，返回是否真的删掉了。
+//
+// 只允许终态：删掉排队中/执行中的任务会让"这条指令去哪了"无从回答。
+// 删除本身要写审计——它是"抹掉运维记录"，必须留痕（审计里仍能查到谁删了什么）。
+func (s *Store) Remove(id string, actor string) error {
+	s.mu.Lock()
+	t, ok := s.tasks[id]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("任务不存在")
+	}
+	if !model.OpsStateTerminal(t.State) {
+		cur := t.State
+		s.mu.Unlock()
+		return fmt.Errorf("%w：任务当前状态为 %s，只有已结束（成功/失败/超时/已取消）的记录才能删除", ErrNotTerminal, cur)
+	}
+	delete(s.tasks, id)
+	s.mu.Unlock()
+	s.save()
+	return nil
 }
 
 // prune 在任务数超限时丢弃最老的已完成任务（queued/running 的任务永不丢弃：
@@ -314,7 +432,9 @@ type ListFilter struct {
 	Node  string
 	Kind  string
 	State string
-	Limit int
+	// BatchID 按批次过滤（前端点批次号即筛该批）。
+	BatchID string
+	Limit   int
 }
 
 // List 返回任务列表（创建时间倒序）。
@@ -329,6 +449,9 @@ func (s *Store) List(f ListFilter) []*Task {
 			continue
 		}
 		if f.State != "" && t.State != f.State {
+			continue
+		}
+		if f.BatchID != "" && t.BatchID != f.BatchID {
 			continue
 		}
 		out = append(out, t)

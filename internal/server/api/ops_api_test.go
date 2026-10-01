@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -190,5 +191,147 @@ func TestRoutes_OpsActionsWithNode(t *testing.T) {
 	mux.ServeHTTP(rec, reqWith(p, http.MethodGet, "/api/v1/ops/actions?node=db-01", ""))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("范围外节点应 404，实际 %d", rec.Code)
+	}
+}
+
+// 批量下发：逐节点结论；只有一台能下发也要成功，一台都不能下发才 409。
+func TestRoutes_OpsBatchCreate(t *testing.T) {
+	a, svc := opsTestAPI(t)
+	mux := newRoutesMux(a)
+	p := restrictedPrincipal([]string{"ops:read", "ops:exec"}, "g1")
+	// web-01 放行只读；web-02 刻意不声明任何能力（模拟旧 Agent / 护栏全关）
+	svc.Store().SaveCaps("web-01", []string{ops.KindNodeDiagnostics, ops.KindSvcStatus})
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, reqWith(p, http.MethodPost, "/api/v1/ops/tasks/batch",
+		`{"nodes":["web-01","web-02","db-01","no-such-node"],"kind":"node.diagnostics","reason":"批量排障"}`))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("部分成功应 201，实际 %d（%s）", rec.Code, rec.Body.String())
+	}
+	batch, _ := decodeBody(t, rec)["batch"].(map[string]any)
+	if batch["created"].(float64) != 1 || batch["failed"].(float64) != 3 || batch["total"].(float64) != 4 {
+		t.Fatalf("应为 4 目标 / 1 成功 / 3 失败：%v", batch)
+	}
+	if batch["batchId"] == "" {
+		t.Fatalf("应返回批次号：%v", batch)
+	}
+	// 逐节点失败原因必须可区分：范围外与不存在都报「不存在」（不可用作探测面），
+	// 未声明能力给出护栏/版本提示
+	raw, _ := json.Marshal(batch["items"])
+	joined := string(raw)
+	if strings.Count(joined, "节点不存在") != 2 {
+		t.Fatalf("范围外与不存在都应报「节点不存在」：%s", joined)
+	}
+	if !strings.Contains(joined, "尚未声明") {
+		t.Fatalf("未声明能力的节点应给出可操作提示：%s", joined)
+	}
+
+	// 全部不可下发 → 409（不能报成部分成功）
+	allFail := httptest.NewRecorder()
+	mux.ServeHTTP(allFail, reqWith(p, http.MethodPost, "/api/v1/ops/tasks/batch",
+		`{"nodes":["web-02","db-01"],"kind":"node.diagnostics"}`))
+	if allFail.Code != http.StatusConflict {
+		t.Fatalf("全部不可下发应 409，实际 %d（%s）", allFail.Code, allFail.Body.String())
+	}
+
+	// 权限：只有 ops:read 不能下发
+	denied := httptest.NewRecorder()
+	mux.ServeHTTP(denied, reqWith(restrictedPrincipal([]string{"ops:read"}, "g1"), http.MethodPost,
+		"/api/v1/ops/tasks/batch", `{"nodes":["web-01"],"kind":"node.diagnostics"}`))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("只有 ops:read 应 403，实际 %d", denied.Code)
+	}
+
+	// 批量能力查询：范围外的节点不出现在 nodeCaps 里
+	capsRec := httptest.NewRecorder()
+	mux.ServeHTTP(capsRec, reqWith(p, http.MethodGet, "/api/v1/ops/actions?nodes=web-01,db-01,no-such", ""))
+	nodeCaps, _ := decodeBody(t, capsRec)["nodeCaps"].(map[string]any)
+	if len(nodeCaps) != 1 {
+		t.Fatalf("nodeCaps 只应含范围内的存在节点：%v", nodeCaps)
+	}
+	if _, ok := nodeCaps["web-01"]; !ok {
+		t.Fatalf("web-01 应在 nodeCaps 里：%v", nodeCaps)
+	}
+
+	// 按批次查询任务
+	listRec := httptest.NewRecorder()
+	mux.ServeHTTP(listRec, reqWith(p, http.MethodGet, "/api/v1/ops/tasks?batchId="+batch["batchId"].(string), ""))
+	tasks, _ := decodeBody(t, listRec)["tasks"].([]any)
+	if len(tasks) != 1 {
+		t.Fatalf("按批次应查到 1 条任务，实际 %d", len(tasks))
+	}
+}
+
+// 取消与删除：取消只对排队中生效；删除只对已结束生效；范围外的任务一律「不存在」。
+func TestRoutes_OpsCancelAndDelete(t *testing.T) {
+	a, svc := opsTestAPI(t)
+	mux := newRoutesMux(a)
+	p := restrictedPrincipal([]string{"ops:read", "ops:exec"}, "g1")
+	svc.Store().SaveCaps("web-01", []string{ops.KindNodeDiagnostics})
+	svc.Store().SaveCaps("db-01", []string{ops.KindNodeDiagnostics})
+
+	batch := httptest.NewRecorder()
+	mux.ServeHTTP(batch, reqWith(p, http.MethodPost, "/api/v1/ops/tasks/batch",
+		`{"nodes":["web-01"],"kind":"node.diagnostics"}`))
+	batchID, _ := decodeBody(t, batch)["batch"].(map[string]any)["batchId"].(string)
+
+	// 排队中的任务不能删（先取消或等结束）
+	queued := httptest.NewRecorder()
+	mux.ServeHTTP(queued, reqWith(p, http.MethodGet, "/api/v1/ops/tasks?batchId="+batchID, ""))
+	taskID, _ := decodeBody(t, queued)["tasks"].([]any)[0].(map[string]any)["id"].(string)
+	delActive := httptest.NewRecorder()
+	mux.ServeHTTP(delActive, reqWith(p, http.MethodDelete, "/api/v1/ops/tasks/"+taskID, ""))
+	if delActive.Code != http.StatusConflict {
+		t.Fatalf("删除排队中任务应 409，实际 %d（%s）", delActive.Code, delActive.Body.String())
+	}
+
+	// 取消 → 成功；再取消 → 失败项
+	cancel1 := httptest.NewRecorder()
+	mux.ServeHTTP(cancel1, reqWith(p, http.MethodPost, "/api/v1/ops/tasks/cancel", `{"ids":["`+taskID+`"]}`))
+	res, _ := decodeBody(t, cancel1)["result"].(map[string]any)
+	if cancel1.Code != http.StatusOK || res["cancelled"].(float64) != 1 {
+		t.Fatalf("取消应成功：%d %s", cancel1.Code, cancel1.Body.String())
+	}
+	cancel2 := httptest.NewRecorder()
+	mux.ServeHTTP(cancel2, reqWith(p, http.MethodPost, "/api/v1/ops/tasks/cancel", `{"ids":["`+taskID+`"]}`))
+	res2, _ := decodeBody(t, cancel2)["result"].(map[string]any)
+	if res2["cancelled"].(float64) != 0 || res2["failed"].(float64) != 1 {
+		t.Fatalf("重复取消应记为失败项：%s", cancel2.Body.String())
+	}
+
+	// 已结束的记录可以删
+	del := httptest.NewRecorder()
+	mux.ServeHTTP(del, reqWith(p, http.MethodDelete, "/api/v1/ops/tasks/"+taskID, ""))
+	if del.Code != http.StatusOK {
+		t.Fatalf("删除已取消的记录应成功，实际 %d（%s）", del.Code, del.Body.String())
+	}
+
+	// 范围外的任务：查/取消/删都按「不存在」处理
+	other, err := svc.Create("db-01", ops.KindNodeDiagnostics, nil, "other", "", "")
+	if err != nil {
+		t.Fatalf("准备环境失败: %v", err)
+	}
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v1/ops/tasks/" + other.ID, ""},
+		{http.MethodDelete, "/api/v1/ops/tasks/" + other.ID, ""},
+		{http.MethodPost, "/api/v1/ops/tasks/cancel", `{"ids":["` + other.ID + `"]}`},
+	} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, reqWith(p, tc.method, tc.path, tc.body))
+		if tc.method == http.MethodPost {
+			// 批量取消逐条给结果：范围外的条目必须报「任务不存在」且不计入成功
+			res, _ := decodeBody(t, rec)["result"].(map[string]any)
+			if res["cancelled"].(float64) != 0 {
+				t.Fatalf("范围外任务不应被取消：%s", rec.Body.String())
+			}
+			continue
+		}
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s %s 范围外应 404，实际 %d", tc.method, tc.path, rec.Code)
+		}
+	}
+	// 那条范围外的任务必须仍然存在（不能因为别人的请求被动过）
+	if t2, ok := svc.Task(other.ID); !ok || t2.State != "queued" {
+		t.Fatalf("范围外任务不应被改动：%+v ok=%v", t2, ok)
 	}
 }
