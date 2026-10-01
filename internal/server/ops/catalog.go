@@ -86,7 +86,7 @@ var catalog = []Action{
 	},
 	{
 		Kind: KindSvcRestart, Title: "重启服务（写操作）", Group: "服务", ReadOnly: false,
-		Desc: "重启某个 systemd 单元。**默认不可用**：需要目标机器在 agent.yaml 的 guards.ops 里显式开启写操作并列出该单元",
+		Desc: "重启某个 systemd 单元。默认不可用：需要目标机器在 agent.yaml 的 guards.ops 里显式开启写操作并列出该单元",
 		Params: []Param{
 			{Name: "unit", Title: "服务单元", Required: true, Pattern: unitPattern.String(),
 				Example: "nginx.service", Desc: "systemd 单元名，需以 .service 结尾，且必须在目标机器的允许清单里"},

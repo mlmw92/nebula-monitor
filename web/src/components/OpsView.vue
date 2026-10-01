@@ -5,7 +5,7 @@
         <h2>节点操作</h2>
         <span class="muted">
           平台下发一条白名单动作 → 目标节点执行 → 回执与审计。可一次选多个节点（按分组整选）。
-          指令随节点下一次上报下发（默认 15s 内），因此**离线节点无法下发**；
+          指令随节点下一次上报下发（默认 15s 内），因此<b class="warn-text">离线节点无法下发</b>；
           能否真正执行还取决于每台机器自己的 agent.yaml（guards.ops）。
         </span>
       </div>
@@ -198,8 +198,8 @@
       </template>
     </el-dialog>
 
-    <!-- 执行结果：按分节展示 -->
-    <el-dialog v-model="resultVisible" :title="resultTitle" width="760px">
+    <!-- 执行结果：按分节展示（正文限高见文件末尾的非 scoped 样式） -->
+    <el-dialog v-model="resultVisible" :title="resultTitle" width="760px" top="5vh" class="ops-result-dialog">
       <div v-if="resultTask">
         <div class="d-meta">
           <span class="mono">{{ resultTask.node }}</span> · {{ resultTask.kind }} ·
@@ -215,12 +215,18 @@
           class="alert-gap"
           :title="resultTask.message"
         />
+        <!-- 每个分节 = 标题行 + 该节输出原文。两者必须在**同一个 v-for 里**：
+             此前 `<pre>` 落在 v-for 之外，`sec` 成了未定义变量，弹窗一渲染就抛
+             TypeError（"Cannot read properties of undefined"），表现是"点了没反应"，
+             控制台之外看不到任何线索。 -->
         <template v-if="resultSections.length">
-          <div v-for="sec in resultSections" :key="sec.key" class="sec">
-            <span>{{ sec.key }}</span>
-            <span class="muted">命令输出原文</span>
+          <div v-for="sec in resultSections" :key="sec.key" class="sec-block">
+            <div class="sec">
+              <span>{{ sec.key }}</span>
+              <span class="muted">命令输出原文</span>
+            </div>
+            <pre class="out">{{ sec.value }}</pre>
           </div>
-          <pre class="out">{{ sec.value }}</pre>
         </template>
         <el-empty v-else description="暂无输出（任务可能还在等待节点领取或执行）" />
       </div>
@@ -499,7 +505,7 @@ async function cancelBatch() {
   if (!batchResult.value || !batchResult.value.batchId) return
   try {
     await ElMessageBox.confirm(
-      '将撤回本批中**仍在排队**的任务；已被节点领取的无法撤回（会在结果里列出）。',
+      '将撤回本批中「仍在排队」的任务；已被节点领取的无法撤回（会在结果里列出）。',
       '撤回本批任务', { type: 'warning', confirmButtonText: '撤回', cancelButtonText: '取消' },
     )
   } catch (e) {
@@ -648,6 +654,9 @@ const resultSections = computed(() => {
 .warn-text {
   color: var(--warn);
 }
+/* 分节 = 标题行（.sec）+ 输出块（.out）。.sec-block 只是成组的包裹元素，
+   不留样式：标题行自己已有上下外边距（批量结果弹窗里也用同一个 .sec 当分节头），
+   这里再加一层间距会让两处观感不一致。 */
 .sec {
   display: flex;
   align-items: baseline;
@@ -677,5 +686,17 @@ const resultSections = computed(() => {
 }
 .field-hint.warn {
   color: var(--warn);
+}
+</style>
+
+<!-- 弹窗被 Element Plus 传送到 body，scoped 选择器匹配不到，因此这里**不加 scoped**，
+   用弹窗自带的类名做命名空间。 -->
+<style>
+/* 执行结果弹窗限高：诊断包有 7 个分节，每节输出（uname / df -h / ps / ss）可能几十行，
+   不限高时弹窗会比屏幕还高——标题与「状态 · 耗时 · 批次」那行被顶出视野后，
+   用户就说不清自己正在看哪条任务的结果了。正文自己滚动，标题与摘要始终可见。 */
+.ops-result-dialog .el-dialog__body {
+  max-height: 62vh;
+  overflow-y: auto;
 }
 </style>

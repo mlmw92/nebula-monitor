@@ -224,7 +224,7 @@ func DefaultTemplates() []model.AlertRule {
 			Severity: model.SeverityWarning, Scope: "all", Enabled: true, Desc: "端到端耗时（含 DNS 与 TLS 握手），按业务 SLO 调整"},
 		{Name: "证书即将到期", TemplateGroup: "拨测与证书", Metric: "dial_test_cert_expiry", Operator: "<", Threshold: 15, For: "1h",
 			Severity: model.SeverityWarning, Scope: "all", Enabled: true,
-			Desc: "剩余天数小于 15 天。**方向是越小越糟**，务必用小于号——设成大于号会让规则永不触发（静默失效）"},
+			Desc: "剩余天数小于 15 天。方向是越小越糟，务必用小于号——设成大于号会让规则永不触发（静默失效）"},
 		{Name: "证书已过期", TemplateGroup: "拨测与证书", Metric: "dial_test_cert_expiry", Operator: "<", Threshold: 1, For: "5m",
 			Severity: model.SeverityCritical, Scope: "all", Enabled: true, Desc: "剩余不足 1 天：浏览器已开始拦截"},
 		{Name: "端口不可达", TemplateGroup: "拨测与证书", Metric: "port_up", Operator: "<=", Threshold: 0, For: "5m",
