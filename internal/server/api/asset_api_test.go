@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -787,9 +788,24 @@ func TestHandleAssetLinkWriteLifecycle(t *testing.T) {
 		}
 		return out
 	}
-	write := func(h func(http.ResponseWriter, *http.Request), assetID int64, method string, body interface{}) (int, linksPayload) {
+	// DELETE 的寻址只能走查询串（请求体在 HTTP 语义里没有定义）；POST / restore 走 JSON 体。
+	write := func(h func(http.ResponseWriter, *http.Request), assetID int64, method string, body assetLinkWriteBody) (int, linksPayload) {
 		t.Helper()
-		req := assetWriteReq(global, method, linkPath(assetID), body)
+		path := linkPath(assetID)
+		var req *http.Request
+		if method == http.MethodDelete {
+			q := url.Values{}
+			for k, v := range map[string]string{
+				"toType": body.ToType, "toKey": body.ToKey, "kind": body.Kind, "direction": body.Direction,
+			} {
+				if v != "" {
+					q.Set(k, v)
+				}
+			}
+			req = assetWriteReq(global, method, path+"?"+q.Encode(), nil)
+		} else {
+			req = assetWriteReq(global, method, path, body)
+		}
 		req.SetPathValue("id", strconv.FormatInt(assetID, 10))
 		w := httptest.NewRecorder()
 		h(w, req)
@@ -890,5 +906,15 @@ func TestHandleAssetLinkWriteLifecycle(t *testing.T) {
 	a.handleAssetLinkCreate(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("对范围外对端建边应返回 404，实际 %d（响应 %s）", w.Code, w.Body.String())
+	}
+
+	// 反向钉一次「DELETE 只认查询串」：体里给的寻址不生效，必须 400 而不是"悄悄成功"。
+	// 若有人"顺手"让它也读请求体，中间设备丢弃 DELETE 体时就会退化成"点了删除没反应"。
+	noQuery := assetWriteReq(global, http.MethodDelete, linkPath(inst.ID), body)
+	noQuery.SetPathValue("id", strconv.FormatInt(inst.ID, 10))
+	wNoQuery := httptest.NewRecorder()
+	a.handleAssetLinkDelete(wNoQuery, noQuery)
+	if wNoQuery.Code != http.StatusBadRequest {
+		t.Fatalf("DELETE 不应从请求体读寻址，期望 400，实际 %d", wNoQuery.Code)
 	}
 }

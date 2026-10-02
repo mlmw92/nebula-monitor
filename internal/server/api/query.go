@@ -209,8 +209,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/assets/{id}/history", a.permit(a.handleAssetHistory, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}/links", a.permit(a.handleAssetLinks, "assets:read"))
 	// 人工维护关联：与忽略 / 标签 / 标杆同为「台账维护」，共用 assets:write。
-	// 三种动作（建 / 删 / 取消抑制）共用一套寻址：body 给 toType/toKey/kind/direction，
-	// 详见 asset_link_api.go 文件头。删除是逻辑删除（落抑制，采集不再重建）。
+	// 三种动作（建 / 删 / 取消抑制）共用一套寻址：toType/toKey/kind/direction。
+	// POST 从 JSON 体读，DELETE 从**查询串**读（DELETE 的请求体在 HTTP 语义里没有定义，
+	// 中间设备丢弃它是合法行为）——详见 asset_link_api.go 文件头。
+	// 删除是逻辑删除（落抑制，采集不再重建），取消抑制走 /links/restore。
 	mux.HandleFunc("POST /api/v1/assets/{id}/links", a.permit(a.handleAssetLinkCreate, "assets:write"))
 	mux.HandleFunc("DELETE /api/v1/assets/{id}/links", a.permit(a.handleAssetLinkDelete, "assets:write"))
 	mux.HandleFunc("POST /api/v1/assets/{id}/links/restore", a.permit(a.handleAssetLinkRestore, "assets:write"))

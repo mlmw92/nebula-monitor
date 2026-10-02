@@ -14,10 +14,16 @@ import (
 
 // 人工维护资产关联（关系的写接口）。
 //
-// 三种动作（建 / 删 / 取消抑制）共用**一套寻址**：URL 里的资产是基准，body 给
+// 三种动作（建 / 删 / 取消抑制）共用**一套寻址**：URL 里的资产是基准，给
 // {toType,toKey,kind,direction}。direction=out（默认）表示「基准 → 对端」，
 // in 表示「对端 → 基准」。读出接口本来就返回 direction，前端把它原样回传即可 ——
 // 这样既不用前端自己算方向，也不会出现「我以为是出边、其实删的是入边」。
+//
+// 寻址的**来源**按方法分开，这是刻意的：
+//   - POST 从 JSON 体读（常规写法）；
+//   - DELETE 只从**查询串**读。DELETE 的请求体在 HTTP 语义里没有定义，中间设备丢弃它是
+//     合法行为，把寻址放在体里等于埋一个"某些环境下删不掉"的坑，而且极难现场排查。
+// 不做"哪个有值用哪个"的兜底猜测：来源不明确会让调用方无从判断自己写错了没有。
 //
 // 为什么删除是**逻辑删除**（实现见 asset.Service.UnlinkManual）：关系多半是采集发现的，
 // 物理删掉下一轮采集立刻把它建回来，用户的操作等于没做。删除会落一条抑制记录，
@@ -36,17 +42,23 @@ type assetLinkWriteBody struct {
 	Direction string `json:"direction"`
 }
 
-// decodeAssetLinkBody 解析并校验寻址参数，返回（from, to, kind）。
+// decodeAssetLinkTarget 解析并校验寻址参数，返回（from, to, kind）。
 //
 // 出错时自己写好响应并返回 ok=false，与 assetInScope 的约定一致 ——
 // 调用方只需要 `if !ok { return }`。
-func (a *API) decodeAssetLinkBody(w http.ResponseWriter, r *http.Request, item asset.Asset) (asset.Ref, asset.Ref, asset.LinkKind, bool) {
-	var body assetLinkWriteBody
-	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+func (a *API) decodeAssetLinkTarget(w http.ResponseWriter, r *http.Request, item asset.Asset) (asset.Ref, asset.Ref, asset.LinkKind, bool) {
+	q := r.URL.Query()
+	body := assetLinkWriteBody{
+		ToType: q.Get("toType"), ToKey: q.Get("toKey"),
+		Kind: q.Get("kind"), Direction: q.Get("direction"),
+	}
+	if r.Method != http.MethodDelete && r.Body != nil {
+		var fromBody assetLinkWriteBody
+		if err := json.NewDecoder(r.Body).Decode(&fromBody); err != nil && !errors.Is(err, io.EOF) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体不是合法 JSON"})
 			return asset.Ref{}, asset.Ref{}, "", false
 		}
+		body = fromBody
 	}
 	kind := asset.LinkKind(strings.TrimSpace(body.Kind))
 	if !kind.Valid() {
@@ -104,7 +116,7 @@ func (a *API) handleAssetLinkCreate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	from, to, kind, ok := a.decodeAssetLinkBody(w, r, item)
+	from, to, kind, ok := a.decodeAssetLinkTarget(w, r, item)
 	if !ok {
 		return
 	}
@@ -134,7 +146,7 @@ func (a *API) handleAssetLinkDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	from, to, kind, ok := a.decodeAssetLinkBody(w, r, item)
+	from, to, kind, ok := a.decodeAssetLinkTarget(w, r, item)
 	if !ok {
 		return
 	}
@@ -162,7 +174,7 @@ func (a *API) handleAssetLinkRestore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	from, to, kind, ok := a.decodeAssetLinkBody(w, r, item)
+	from, to, kind, ok := a.decodeAssetLinkTarget(w, r, item)
 	if !ok {
 		return
 	}
