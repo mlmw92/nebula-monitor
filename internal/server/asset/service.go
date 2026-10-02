@@ -357,36 +357,92 @@ func (s *Service) ResetManual(ref Ref, keys []string, actor string) (Asset, erro
 	return updated, err
 }
 
-// Link 建立资产关联（幂等：重复建立不报错、不产生重复边）。
-func (s *Service) Link(from, to Ref, kind LinkKind) error {
-	if !kind.Valid() {
-		return fmt.Errorf("未知的资产关联类型: %q", kind)
-	}
-	fromAsset, err := s.resolve(from)
+// LinkDiscovered 建立一条**采集得到**的关联（幂等）。采集侧的唯一入口。
+//
+// 两条例外：
+//   - 这条边被人工抑制过（人删过它）→ 不重建。否则用户删一次、采集建一次，等于没删。
+//   - 这条边已被人工认领 → 保持 manual，不降级（人工优先，由 store 的 UPSERT 保证）。
+func (s *Service) LinkDiscovered(from, to Ref, kind LinkKind) error {
+	fromAsset, toAsset, err := s.resolveLinkPair(from, to, kind)
 	if err != nil {
 		return err
 	}
-	toAsset, err := s.resolve(to)
+	suppressed, err := s.store.linkSuppressed(fromAsset.ID, toAsset.ID, kind)
 	if err != nil {
 		return err
 	}
-	if fromAsset.ID == toAsset.ID {
-		return errors.New("不能把资产关联到自身")
+	if suppressed {
+		return nil
 	}
-	return s.store.linkAssets(fromAsset.ID, toAsset.ID, kind, s.now())
+	return s.store.linkAssets(fromAsset.ID, toAsset.ID, kind, SourceDiscovery, s.now())
 }
 
-// Unlink 解除资产关联（幂等）。
-func (s *Service) Unlink(from, to Ref, kind LinkKind) error {
-	fromAsset, err := s.resolve(from)
+// LinkManual 由人工建立（或认领）一条关联。
+//
+// 人工主动加回来会**同时取消抑制**：人再建一次的意思就是要它存在，
+// 此时不该继续挡着采集上报同一条边。
+func (s *Service) LinkManual(from, to Ref, kind LinkKind) error {
+	fromAsset, toAsset, err := s.resolveLinkPair(from, to, kind)
 	if err != nil {
 		return err
+	}
+	if err := s.store.clearLinkSuppression(fromAsset.ID, toAsset.ID, kind); err != nil {
+		return err
+	}
+	return s.store.linkAssets(fromAsset.ID, toAsset.ID, kind, SourceManual, s.now())
+}
+
+// UnlinkManual 由人工解除一条关联 —— **逻辑删除**：删边 + 记录抑制。
+//
+// 为什么不能只删边：这条边本来就是采集发现的，下一轮采集立刻把它建回来，
+// 用户的操作等于没做。抑制记录保留的正是「人说过这条关系不存在」这个信息。
+// 想撤回这个判断用 RestoreDiscovered。
+func (s *Service) UnlinkManual(from, to Ref, kind LinkKind, actor string) error {
+	fromAsset, toAsset, err := s.resolveLinkPair(from, to, kind)
+	if err != nil {
+		return err
+	}
+	if err := s.store.unlinkAssets(fromAsset.ID, toAsset.ID, kind); err != nil {
+		return err
+	}
+	return s.store.suppressLink(fromAsset.ID, toAsset.ID, kind, actor, s.now())
+}
+
+// RestoreDiscovered 撤销人工抑制，允许采集侧重新建立这条边（幂等）。
+func (s *Service) RestoreDiscovered(from, to Ref, kind LinkKind) error {
+	fromAsset, toAsset, err := s.resolveLinkPair(from, to, kind)
+	if err != nil {
+		return err
+	}
+	return s.store.clearLinkSuppression(fromAsset.ID, toAsset.ID, kind)
+}
+
+// SuppressedLinks 返回与某资产相关、被人工抑制掉的关联（供界面展示并可恢复）。
+func (s *Service) SuppressedLinks(ref Ref) ([]SuppressedLink, error) {
+	a, err := s.resolve(ref)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.suppressedLinksOf(a.ID)
+}
+
+// resolveLinkPair 校验关联类型并把两端解析成资产，供上面几个方法共用。
+func (s *Service) resolveLinkPair(from, to Ref, kind LinkKind) (Asset, Asset, error) {
+	if !kind.Valid() {
+		return Asset{}, Asset{}, fmt.Errorf("未知的资产关联类型: %q", kind)
+	}
+	fromAsset, err := s.resolve(from)
+	if err != nil {
+		return Asset{}, Asset{}, err
 	}
 	toAsset, err := s.resolve(to)
 	if err != nil {
-		return err
+		return Asset{}, Asset{}, err
 	}
-	return s.store.unlinkAssets(fromAsset.ID, toAsset.ID, kind)
+	if fromAsset.ID == toAsset.ID {
+		return Asset{}, Asset{}, errors.New("不能把资产关联到自身")
+	}
+	return fromAsset, toAsset, nil
 }
 
 // Links 返回与某资产直接相关的关联（出边与入边）。

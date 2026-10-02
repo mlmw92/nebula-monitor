@@ -172,10 +172,10 @@ func TestLinkIsIdempotentAndResolvesMissingAssets(t *testing.T) {
 
 	host := Ref{TypeKey: TypeHost, NaturalKey: "web-05"}
 	redis := Ref{TypeKey: TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6379"}
-	if err := svc.Link(redis, host, LinkRunsOn); err != nil {
+	if err := svc.LinkDiscovered(redis, host, LinkRunsOn); err != nil {
 		t.Fatalf("建立关联失败: %v", err)
 	}
-	if err := svc.Link(redis, host, LinkRunsOn); err != nil {
+	if err := svc.LinkDiscovered(redis, host, LinkRunsOn); err != nil {
 		t.Fatalf("重复建立关联应幂等，实际报错: %v", err)
 	}
 	links, err := svc.Links(redis)
@@ -186,20 +186,20 @@ func TestLinkIsIdempotentAndResolvesMissingAssets(t *testing.T) {
 		t.Fatalf("关联应有且仅有一条，实际 %+v", links)
 	}
 
-	if err := svc.Link(redis, redis, LinkDependsOn); err == nil {
+	if err := svc.LinkDiscovered(redis, redis, LinkDependsOn); err == nil {
 		t.Fatal("自关联应报错")
 	}
-	if err := svc.Link(redis, Ref{TypeKey: TypeHost, NaturalKey: "missing"}, LinkRunsOn); err == nil {
+	if err := svc.LinkDiscovered(redis, Ref{TypeKey: TypeHost, NaturalKey: "missing"}, LinkRunsOn); err == nil {
 		t.Fatal("关联到不存在的资产应报错")
 	}
-	if err := svc.Link(redis, host, LinkKind("unknown")); err == nil {
+	if err := svc.LinkDiscovered(redis, host, LinkKind("unknown")); err == nil {
 		t.Fatal("未知关联类型应报错")
 	}
 
-	if err := svc.Unlink(redis, host, LinkRunsOn); err != nil {
+	if err := svc.UnlinkManual(redis, host, LinkRunsOn, "tester"); err != nil {
 		t.Fatalf("解除关联失败: %v", err)
 	}
-	if err := svc.Unlink(redis, host, LinkRunsOn); err != nil {
+	if err := svc.UnlinkManual(redis, host, LinkRunsOn, "tester"); err != nil {
 		t.Fatalf("重复解除应幂等，实际报错: %v", err)
 	}
 	links, err = svc.Links(redis)
@@ -208,6 +208,91 @@ func TestLinkIsIdempotentAndResolvesMissingAssets(t *testing.T) {
 	}
 	if len(links) != 0 {
 		t.Fatalf("解除后不应有剩余关联，实际 %+v", links)
+	}
+}
+
+// 人工维护的关系优先于采集自动发现，且人工删除是**逻辑删除**。
+//
+// 这几条规则缺任何一条都会让用户的操作失效，所以逐条断言：
+//  1. 采集建立的边来源是 discovery；
+//  2. 人工建立同一条边 → 来源升为 manual；
+//  3. 人工认领之后采集继续上报 → 仍是 manual（不降级）；
+//  4. 人工删除 → 边消失且落下抑制；采集再报不会把它建回来；
+//  5. 取消抑制之后，采集才能重建。
+func TestManualLinkWinsOverDiscovery(t *testing.T) {
+	svc, _ := newTestService(t)
+	svc.now = func() int64 { return 5000 }
+
+	if _, _, err := svc.Apply(hostObservation("web-06", nil)); err != nil {
+		t.Fatalf("建立主机资产失败: %v", err)
+	}
+	inst := Observation{TypeKey: TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6380", Name: "dev-redis-b"}
+	if _, _, err := svc.Apply(inst); err != nil {
+		t.Fatalf("建立实例资产失败: %v", err)
+	}
+	host := Ref{TypeKey: TypeHost, NaturalKey: "web-06"}
+	redis := Ref{TypeKey: TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6380"}
+
+	// sourceOf 返回这条边的来源；没有边时返回空串。
+	sourceOf := func() string {
+		t.Helper()
+		links, err := svc.Links(redis)
+		if err != nil {
+			t.Fatalf("查询关联失败: %v", err)
+		}
+		if len(links) == 0 {
+			return ""
+		}
+		return string(links[0].Source)
+	}
+
+	// 1. 采集建立 → discovery
+	if err := svc.LinkDiscovered(redis, host, LinkRunsOn); err != nil {
+		t.Fatalf("采集建立关联失败: %v", err)
+	}
+	if got := sourceOf(); got != string(SourceDiscovery) {
+		t.Fatalf("采集建立的边来源应为 discovery，实际 %q", got)
+	}
+
+	// 2. 人工认领同一条边 → 升为 manual
+	if err := svc.LinkManual(redis, host, LinkRunsOn); err != nil {
+		t.Fatalf("人工建立关联失败: %v", err)
+	}
+	if got := sourceOf(); got != string(SourceManual) {
+		t.Fatalf("人工建立后来源应为 manual，实际 %q", got)
+	}
+
+	// 3. 采集继续上报 → 不得把人工的认领降级回 discovery
+	if err := svc.LinkDiscovered(redis, host, LinkRunsOn); err != nil {
+		t.Fatalf("采集重复上报不应报错: %v", err)
+	}
+	if got := sourceOf(); got != string(SourceManual) {
+		t.Fatalf("人工认领的边不应被采集降级，实际 %q", got)
+	}
+
+	// 4. 人工删除 = 逻辑删除
+	if err := svc.UnlinkManual(redis, host, LinkRunsOn, "tester"); err != nil {
+		t.Fatalf("人工解除关联失败: %v", err)
+	}
+	if got := sourceOf(); got != "" {
+		t.Fatalf("人工删除后不应还有边，实际来源 %q", got)
+	}
+	if err := svc.LinkDiscovered(redis, host, LinkRunsOn); err != nil {
+		t.Fatalf("抑制期间的采集上报不应报错: %v", err)
+	}
+	if got := sourceOf(); got != "" {
+		t.Fatalf("被人工抑制的边不应被采集重建，实际来源 %q", got)
+	}
+
+	// 5. 取消抑制后才允许采集重建
+	if err := svc.RestoreDiscovered(redis, host, LinkRunsOn); err != nil {
+		t.Fatalf("取消抑制失败: %v", err)
+	}
+	if err := svc.LinkDiscovered(redis, host, LinkRunsOn); err != nil {
+		t.Fatalf("取消抑制后采集建立关联失败: %v", err)
+	}
+	if got := sourceOf(); got != string(SourceDiscovery) {
+		t.Fatalf("重建的边来源应为 discovery，实际 %q", got)
 	}
 }
 

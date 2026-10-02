@@ -76,7 +76,9 @@ func (r *Receiver) applyAssets(p *model.ReportPayload) {
 			slog.Warn("写入中间件实例资产失败", "type", ob.Type, "instance", ob.Addr, "err", err)
 			continue
 		}
-		if err := r.assets.Link(
+		// 采集路径：走 LinkDiscovered —— 它会跳过被人工抑制过的边，
+		// 也不会把人工认领过的同一条边降级回 discovery。
+		if err := r.assets.LinkDiscovered(
 			asset.Ref{TypeKey: instance.TypeKey, NaturalKey: instance.NaturalKey}, hostRef, asset.LinkRunsOn,
 		); err != nil {
 			// 主机资产写入失败时这里会报错：只影响关系，不影响实例本身，故不中断循环。

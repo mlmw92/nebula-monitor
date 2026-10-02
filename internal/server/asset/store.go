@@ -14,7 +14,10 @@ import (
 
 // schemaVersion 是资产库结构版本，写入 PRAGMA user_version。
 // 只允许递增；读到更高版本直接拒绝启动，避免新库被旧程序写坏。
-const schemaVersion = 1
+//
+// v2：关系加来源列（asset_links.source）与关联抑制表（asset_link_suppressions），
+// 支撑「人工维护的关系优先于采集自动发现」以及关系的逻辑删除。
+const schemaVersion = 2
 
 // schemaStatements 是幂等的建表语句。每次启动都执行：`IF NOT EXISTS` 保证重复执行无副作用，
 // 同时能修复被手工删表的库。
@@ -47,16 +50,34 @@ var schemaStatements = []string{
 		updated_by TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY(asset_id, key, source)
 	)`,
+	// source 记录这条边由谁认领（采集 / 人工，见 model.Source）。
+	// 唯一约束里**刻意不含** source：同一 (from,to,kind) 只有一条边，
+	// 人工认领之后采集侧不再把它降级回 discovery —— 这正是「人工优先」的落点。
 	`CREATE TABLE IF NOT EXISTS asset_links(
 		id         INTEGER PRIMARY KEY AUTOINCREMENT,
 		from_id    INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
 		to_id      INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
 		kind       TEXT NOT NULL,
+		source     TEXT NOT NULL DEFAULT 'discovery',
 		created_at INTEGER NOT NULL,
 		UNIQUE(from_id, to_id, kind)
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_links_from ON asset_links(from_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_links_to ON asset_links(to_id)`,
+	// 关联的**逻辑删除**：人工删掉一条采集来的边 → 记在这里，采集侧不再重建。
+	// 若物理删除，下一轮采集立刻把它建回来，用户的操作等于没做——这与「采集资产用忽略、
+	// 而不是删除」是同一个判断：在采集驱动的系统里，"删掉"往往不是用户的真实意图。
+	`CREATE TABLE IF NOT EXISTS asset_link_suppressions(
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		from_id    INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+		to_id      INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+		kind       TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		created_by TEXT NOT NULL DEFAULT '',
+		UNIQUE(from_id, to_id, kind)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_link_supp_from ON asset_link_suppressions(from_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_link_supp_to ON asset_link_suppressions(to_id)`,
 	`CREATE TABLE IF NOT EXISTS asset_changes(
 		id        INTEGER PRIMARY KEY AUTOINCREMENT,
 		asset_id  INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
@@ -207,6 +228,11 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("资产库建表失败: %w", err)
 		}
 	}
+	// v1 存量库的 asset_links 没有 source 列，而 CREATE TABLE IF NOT EXISTS 不会补列，
+	// 因此显式补齐（新库建表时已含该列，这里是 no-op）。
+	if err := s.ensureLinkSourceColumn(); err != nil {
+		return err
+	}
 	for _, t := range BuiltinTypes() {
 		// 内置类型每次启动对齐标题：类型行被手工删除后也能自愈，
 		// 否则会出现「资产引用不存在的类型」这种外键报错。
@@ -224,6 +250,57 @@ func (s *Store) migrate() error {
 		}
 	}
 	return nil
+}
+
+// ensureLinkSourceColumn 为 v1 存量库补上 asset_links.source。
+//
+// 用「查列是否存在」而不是「按版本号判断」：手工删表、升级到一半留下的中间态都能自愈，
+// 与 schemaStatements 每次执行 IF NOT EXISTS 的取向一致。存量边一律视为采集所得——
+// 它们确实都是采集建的，语义上没有任何变化。
+func (s *Store) ensureLinkSourceColumn() error {
+	has, err := s.linkSourceColumnExists()
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := s.db.Exec(
+		`ALTER TABLE asset_links ADD COLUMN source TEXT NOT NULL DEFAULT 'discovery'`,
+	); err != nil {
+		return fmt.Errorf("为 asset_links 补 source 列失败: %w", err)
+	}
+	return nil
+}
+
+// linkSourceColumnExists 查询 asset_links 是否已有 source 列。
+//
+// 注意先把结果读完再返回：连接池是单连接（MaxOpenConns(1)），
+// 若留着未关闭的 rows 去执行 ALTER，会等不到连接而卡死。
+func (s *Store) linkSourceColumnExists() (bool, error) {
+	rows, err := s.db.Query(`PRAGMA table_info(asset_links)`)
+	if err != nil {
+		return false, fmt.Errorf("读取 asset_links 结构失败: %w", err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var (
+			cid, notNull, pk int
+			name, colType    string
+			dflt             sql.NullString
+		)
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			return false, fmt.Errorf("读取 asset_links 结构失败: %w", err)
+		}
+		if name == "source" {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("读取 asset_links 结构失败: %w", err)
+	}
+	return found, nil
 }
 
 // typeExists 判断资产类型是否已注册。
@@ -863,18 +940,29 @@ func (s *Store) deleteManualAttrs(assetID int64, keys []string, at int64, actor 
 }
 
 // linkAssets 建立关联；重复建立视为成功（幂等）。
-func (s *Store) linkAssets(fromID, toID int64, kind LinkKind, at int64) error {
+//
+// **人工优先**：同一 (from,to,kind) 只有一条边，source 一旦成为 manual 就不再降级——
+// 采集侧继续上报同一条边不会把人工的认领抹掉。用一条 UPSERT 表达而不是「先查再写」：
+// 既原子，也不依赖调用方记得先读一次。
+func (s *Store) linkAssets(fromID, toID int64, kind LinkKind, src Source, at int64) error {
 	if _, err := s.db.Exec(
-		`INSERT INTO asset_links(from_id,to_id,kind,created_at) VALUES(?,?,?,?)
-		 ON CONFLICT(from_id,to_id,kind) DO NOTHING`,
-		fromID, toID, string(kind), at,
+		`INSERT INTO asset_links(from_id,to_id,kind,source,created_at) VALUES(?,?,?,?,?)
+		 ON CONFLICT(from_id,to_id,kind) DO UPDATE SET
+		   source = CASE
+		     WHEN excluded.source='manual' OR asset_links.source='manual' THEN 'manual'
+		     ELSE asset_links.source
+		   END`,
+		fromID, toID, string(kind), string(src.normalized()), at,
 	); err != nil {
 		return fmt.Errorf("建立资产关联失败: %w", err)
 	}
 	return nil
 }
 
-// unlinkAssets 解除关联；不存在时视为成功（幂等）。
+// unlinkAssets 物理删除关联；不存在时视为成功（幂等）。
+//
+// 只应由「人工删除」路径调用——该路径同时会写一条抑制记录，
+// 否则下一轮采集立刻把边建回来。采集路径不要直接调它。
 func (s *Store) unlinkAssets(fromID, toID int64, kind LinkKind) error {
 	if _, err := s.db.Exec(
 		`DELETE FROM asset_links WHERE from_id=? AND to_id=? AND kind=?`, fromID, toID, string(kind)); err != nil {
@@ -883,10 +971,74 @@ func (s *Store) unlinkAssets(fromID, toID int64, kind LinkKind) error {
 	return nil
 }
 
+// suppressLink 记录「这条采集来的边被人工删掉了」，采集侧据此不再重建（幂等）。
+func (s *Store) suppressLink(fromID, toID int64, kind LinkKind, by string, at int64) error {
+	if _, err := s.db.Exec(
+		`INSERT INTO asset_link_suppressions(from_id,to_id,kind,created_at,created_by) VALUES(?,?,?,?,?)
+		 ON CONFLICT(from_id,to_id,kind) DO UPDATE SET created_at=excluded.created_at, created_by=excluded.created_by`,
+		fromID, toID, string(kind), at, by,
+	); err != nil {
+		return fmt.Errorf("记录关联抑制失败: %w", err)
+	}
+	return nil
+}
+
+// clearLinkSuppression 取消抑制，让采集侧可以重新建立这条边（幂等）。
+func (s *Store) clearLinkSuppression(fromID, toID int64, kind LinkKind) error {
+	if _, err := s.db.Exec(
+		`DELETE FROM asset_link_suppressions WHERE from_id=? AND to_id=? AND kind=?`,
+		fromID, toID, string(kind)); err != nil {
+		return fmt.Errorf("取消关联抑制失败: %w", err)
+	}
+	return nil
+}
+
+// linkSuppressed 判断这条边是否被人工抑制。
+func (s *Store) linkSuppressed(fromID, toID int64, kind LinkKind) (bool, error) {
+	var n int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(1) FROM asset_link_suppressions WHERE from_id=? AND to_id=? AND kind=?`,
+		fromID, toID, string(kind)).Scan(&n); err != nil {
+		return false, fmt.Errorf("查询关联抑制失败: %w", err)
+	}
+	return n > 0, nil
+}
+
+// suppressedLinksOf 取与某资产相关的全部抑制记录（出边与入边都返回）。
+//
+// 必须能被列出来：抑制是逻辑删除，界面上看不到就无从恢复，
+// 用户会以为"删掉的关系永远回不来了"。
+func (s *Store) suppressedLinksOf(assetID int64) ([]SuppressedLink, error) {
+	rows, err := s.db.Query(
+		`SELECT sp.kind,sp.created_at,sp.created_by,
+		        f.type_key,f.natural_key,t.type_key,t.natural_key
+		 FROM asset_link_suppressions sp
+		 JOIN assets f ON f.id=sp.from_id
+		 JOIN assets t ON t.id=sp.to_id
+		 WHERE sp.from_id=? OR sp.to_id=?
+		 ORDER BY sp.kind,f.natural_key,t.natural_key`, assetID, assetID)
+	if err != nil {
+		return nil, fmt.Errorf("查询关联抑制失败: %w", err)
+	}
+	defer rows.Close()
+	var out []SuppressedLink
+	for rows.Next() {
+		var sl SuppressedLink
+		var kind string
+		if err := rows.Scan(&kind, &sl.CreatedAt, &sl.CreatedBy,
+			&sl.From.TypeKey, &sl.From.NaturalKey, &sl.To.TypeKey, &sl.To.NaturalKey); err != nil {
+			return nil, fmt.Errorf("读取关联抑制失败: %w", err)
+		}
+		sl.Kind = LinkKind(kind)
+		out = append(out, sl)
+	}
+	return out, rows.Err()
+}
+
 // linksOf 取与某资产直接相关的关联（出边与入边都返回）。
 func (s *Store) linksOf(assetID int64) ([]Link, error) {
 	rows, err := s.db.Query(
-		`SELECT l.id,l.kind,l.created_at,
+		`SELECT l.id,l.kind,l.source,l.created_at,
 		        f.type_key,f.natural_key,t.type_key,t.natural_key
 		 FROM asset_links l
 		 JOIN assets f ON f.id=l.from_id
@@ -900,12 +1052,13 @@ func (s *Store) linksOf(assetID int64) ([]Link, error) {
 	var out []Link
 	for rows.Next() {
 		var l Link
-		var kind string
-		if err := rows.Scan(&l.ID, &kind, &l.CreatedAt,
+		var kind, source string
+		if err := rows.Scan(&l.ID, &kind, &source, &l.CreatedAt,
 			&l.From.TypeKey, &l.From.NaturalKey, &l.To.TypeKey, &l.To.NaturalKey); err != nil {
 			return nil, fmt.Errorf("读取资产关联失败: %w", err)
 		}
 		l.Kind = LinkKind(kind)
+		l.Source = Source(source)
 		out = append(out, l)
 	}
 	return out, rows.Err()

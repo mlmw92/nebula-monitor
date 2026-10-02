@@ -246,12 +246,32 @@ type Ref struct {
 }
 
 // Link 是一条资产关联（有向）。
+//
+// Source 记录这条边由谁认领，复用属性那套「采集 / 人工」词汇——关系的来源与属性的来源
+// 是同一个概念，没必要各造一套。
+//
+// **人工优先**：同一 (from,to,kind) 只存在一条边（见 asset_links 的唯一约束），
+// 一旦被人工认领就一直是 manual；采集侧照常上报同一条边，但不把它降级回 discovery。
+// 人工删除一条边则是**逻辑删除**（落 asset_link_suppressions），否则下一轮采集就把它建回来。
 type Link struct {
 	ID        int64
 	From      Ref
 	To        Ref
 	Kind      LinkKind
+	Source    Source
 	CreatedAt int64
+}
+
+// SuppressedLink 是一条**被人工抑制**的关联（逻辑删除的结果）。
+//
+// 单独一个类型而不是复用 Link：抑制记录没有"来源"可言（它就是「人工说过这条关系不存在」），
+// 但多带一个 created_by，用来回答「谁把它藏了」——这在多人协作的台账里比时间更有用。
+type SuppressedLink struct {
+	From      Ref
+	To        Ref
+	Kind      LinkKind
+	CreatedAt int64
+	CreatedBy string
 }
 
 // ChangeRecord 是一条字段级变更。
