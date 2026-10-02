@@ -989,7 +989,11 @@ middleware_config() {
     echo
     echo "--- 配置第 $idx 个 ${mw_name} 实例（留空名称跳过结束）---"
 
-    local name addr user password exporter_url extra_fields=""
+    # 必须显式赋初值：脚本是 set -u（见文件头），而 `local a b` 这种只声明不赋值的写法
+    # 会让变量停在 unset 状态，一旦被 `[[ -n "$a" ]]` 读到就以 "unbound variable" 中止向导。
+    # 这里 user/password 只在部分类型的分支里被 prompt（kafka / rocketmq 走的是不提示的那条），
+    # 但下面的 YAML 拼装对它们是**无条件**读取的，所以不赋初值必然崩。
+    local name="" addr="" user="" password="" exporter_url="" extra_fields=""
     local access_log="" log_format=""
     prompt name "实例别名（如 ${mw_type}-primary）" ""
     [[ -z "$name" ]] && { echo "已结束实例添加。"; break; }
@@ -1229,7 +1233,12 @@ k8s_config() {
     echo
     echo "--- 配置第 $idx 个 Kubernetes 集群（留空集群别名跳过结束）---"
 
-    local name api_server auth_mode kubeconfig token insecure_tls metrics_server exporter_url
+    # 同上，必须显式赋初值。这一处三条认证路径各自只赋其中一部分：
+    #   选 kubeconfig → token 从不赋值；
+    #   选 apiServer+Token → kubeconfig 从不赋值；
+    #   拒绝 kube-state-metrics → exporter_url 从不赋值。
+    # 而下面三者都被 `[[ -n ... ]]` 读取，所以**任何一条路径**都会崩（不只是某一种选择）。
+    local name="" api_server="" auth_mode="" kubeconfig="" token="" insecure_tls="" metrics_server="" exporter_url=""
     prompt name "集群别名（如 prod-cluster）" ""
     [[ -z "$name" ]] && { echo "已结束集群添加。"; break; }
 
