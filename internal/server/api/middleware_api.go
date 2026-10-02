@@ -1553,18 +1553,22 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type k8sClusterInfo struct {
-		Node                  string  `json:"node"`
-		Instance              string  `json:"instance"`
-		Name                  string  `json:"name"`
-		Version               string  `json:"version"`
-		Up                    bool    `json:"up"`
-		Group                 string  `json:"group"`
-		NodesTotal            float64 `json:"nodesTotal"`
-		NodesReady            float64 `json:"nodesReady"`
-		PodsTotal             float64 `json:"podsTotal"`
-		PodsRunning           float64 `json:"podsRunning"`
-		PodsPending           float64 `json:"podsPending"`
-		PodsFailed            float64 `json:"podsFailed"`
+		Node        string  `json:"node"`
+		Instance    string  `json:"instance"`
+		Name        string  `json:"name"`
+		Version     string  `json:"version"`
+		Up          bool    `json:"up"`
+		Group       string  `json:"group"`
+		NodesTotal  float64 `json:"nodesTotal"`
+		NodesReady  float64 `json:"nodesReady"`
+		PodsTotal   float64 `json:"podsTotal"`
+		PodsRunning float64 `json:"podsRunning"`
+		PodsPending float64 `json:"podsPending"`
+		PodsFailed  float64 `json:"podsFailed"`
+		// PodsAbnormal 是"有效状态不正常"的 Pod 数：含 phase=Running 但容器在
+		// CrashLoopBackOff / RunContainerError 的那一类。与上面几个 phase 桶
+		// **不是一个口径**（那些是生命周期阶段，这个是健康度），别互相推导。
+		PodsAbnormal          float64 `json:"podsAbnormal"`
 		DeploymentsTotal      float64 `json:"deploymentsTotal"`
 		DeploymentsUnhealthy  float64 `json:"deploymentsUnhealthy"`
 		StatefulSetsTotal     float64 `json:"statefulSetsTotal"`
@@ -1648,6 +1652,30 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 异常 Pod 计数：单独查一次而不是塞进上面的 metricMap，因为要区分
+	// "指标值为 0" 与 "指标根本不存在"——后者是旧 Agent（不产出 k8s_pods_abnormal），
+	// 此时必须退回旧口径 pending+failed，否则升级服务端后界面上的"异常 Pod"
+	// 会直接变成 0，把已经存在的异常悄悄藏起来。
+	abnormalSeen := map[string]bool{}
+	if series, err := a.store.QueryAllLatest("k8s_pods_abnormal", nil); err == nil {
+		for _, s := range series {
+			node, instance := s.Labels["node"], s.Labels["instance"]
+			if node == "" || instance == "" || len(s.Points) == 0 {
+				continue
+			}
+			key := node + "|" + instance
+			abnormalSeen[key] = true
+			if ci, ok := clusters[key]; ok {
+				ci.PodsAbnormal = s.Points[len(s.Points)-1].Value
+			}
+		}
+	}
+	for key, ci := range clusters {
+		if !abnormalSeen[key] {
+			ci.PodsAbnormal = ci.PodsPending + ci.PodsFailed
+		}
+	}
+
 	// 资源范围：受限用户只能看到范围内节点上的集群。
 	keys = filterByNodeScope(a, Principal(r), keys, nodeOfKey)
 	clusterOut := make([]k8sClusterInfo, 0, len(keys))
@@ -1721,7 +1749,11 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 		Instance  string `json:"instance"`
 		Namespace string `json:"namespace"`
 		Pod       string `json:"pod"`
-		Phase     string `json:"phase"`
+		// Phase 是生命周期阶段（Pending / Running ...），Status 是**有效状态**
+		// （ImagePullBackOff / CrashLoopBackOff / RunContainerError ...）。
+		// 两个都留：界面展示 Status（运维认得的那个），Phase 用于判断"是不是还在调度"。
+		Phase  string `json:"phase"`
+		Status string `json:"status"`
 	}
 	var podOut []k8sPodInfo
 	if phaseSeries, err := a.store.QueryAllLatest("k8s_pod_phase", nil); err == nil {
@@ -1731,12 +1763,18 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 			if instance == "" || pod == "" || len(s.Points) == 0 || s.Points[len(s.Points)-1].Value == 0 {
 				continue
 			}
+			// 旧 Agent 不产出 status 标签，退回 phase——显示得糙一点，好过显示空白。
+			status := s.Labels["status"]
+			if status == "" {
+				status = s.Labels["phase"]
+			}
 			podOut = append(podOut, k8sPodInfo{
 				Cluster:   s.Labels["name"],
 				Instance:  instance,
 				Namespace: s.Labels["namespace"],
 				Pod:       pod,
 				Phase:     s.Labels["phase"],
+				Status:    status,
 			})
 		}
 	}
