@@ -134,8 +134,8 @@
             :icon="activeIcon"
             title="还没有查询结果"
             :hints="[
-              '选择集群、按需填命名空间后点「查询」',
-              '指令随 Agent 上报下发，通常 15 秒内返回',
+              '已自动按当前集群提交查询，结果通常 15 秒内返回',
+              '换集群或切 Tab 会自动重查，也可以点「查询」手动刷新',
             ]"
           />
         </SectionCard>
@@ -158,7 +158,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Refresh, Grid, Monitor, Bell } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import http from '../../api/http'
@@ -275,6 +275,22 @@ function onClusterChange() {
     query[t.key].error = ''
     query[t.key].task = null
   }
+  // 清完顺手把当前 Tab 查一次，免得换完集群又对着空白面板。
+  autoRun(activeTab.value)
+}
+
+// autoRun 只在"这个 Tab 还没有结果"时自动发起查询。
+//
+// 为什么要自动查：全平台其它 Tab 都是自动加载，只有这一页要手点「查询」，
+// 第一眼看到「还没有查询结果」会以为功能坏了（真实用户反馈）。
+//
+// 命名空间输入**不**触发自动查询：那是"改条件"而不是"换视图"，
+// 边打字边下发任务既吵又费，那种场景让用户点「查询」更合适。
+function autoRun(tab) {
+  const item = query[tab]
+  if (!item || item.busy || item.result) return
+  if (!currentCluster.value || !currentCluster.value.up) return
+  run(tab)
 }
 
 /* ===== 提交与轮询 ===== */
@@ -447,7 +463,17 @@ async function describeRow(row) {
   }
 }
 
-onMounted(loadClusters)
+onMounted(async () => {
+  await loadClusters()
+  // 进页面就把当前 Tab 查一次（同上：不要让人对着空白面板猜）
+  autoRun(activeTab.value)
+})
+
+// 切 Tab 时若该 Tab 还没有结果，也自动查一次；已有结果不重查，避免重复下发任务。
+watch(activeTab, (tab) => {
+  nextTick(() => autoRun(tab))
+})
+
 onBeforeUnmount(() => {
   for (const h of timers) clearTimeout(h)
   timers.clear()
