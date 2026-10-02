@@ -435,17 +435,23 @@
           <el-tab-pane :label="`关联关系 ${links.length}`" name="links">
             <div class="sec">
               <span>关联关系</span>
-              <span class="muted">自动发现时建立：中间件实例 runs_on 宿主主机</span>
+              <el-button v-if="canWrite" size="small" style="margin-left: auto" @click="openLinkAdd">
+                添加关系
+              </el-button>
             </div>
+            <p class="muted">
+              人工维护的关系优先于采集自动发现：被人工认领过的边不会被采集覆盖。
+              目前只有「中间件实例 runs_on 宿主主机」由 Agent 上报后自动建立。
+            </p>
             <el-table :data="links" style="width: 100%">
               <template #empty>
                 <EmptyState
                   :icon="Files"
                   title="暂无关联关系"
-                  :hints="['中间件实例与宿主主机的 runs_on 关系由 Agent 上报后自动建立', '宿主机或实例任一侧未上报时，这里会是空的']"
+                  :hints="['中间件实例与宿主主机的 runs_on 关系由 Agent 上报后自动建立', '也可以用上方「添加关系」人工建立']"
                 />
               </template>
-              <el-table-column label="方向" width="110">
+              <el-table-column label="方向" width="105">
                 <template #default="{ row }">
                   <span :class="'rel-' + row.direction">{{ row.direction === 'out' ? '本资产 →' : '← 指向本资产' }}</span>
                 </template>
@@ -453,20 +459,97 @@
               <el-table-column label="关系" width="130">
                 <template #default="{ row }"><span class="tag">{{ kindLabel(row.kind) }}</span></template>
               </el-table-column>
-              <el-table-column label="对端资产" min-width="240">
+              <el-table-column label="对端资产" min-width="200">
                 <template #default="{ row }">
                   <span class="mono">{{ row.peerKey }}</span>
                   <span class="muted">（{{ row.peerType === 'host' ? '主机' : '实例' }}）</span>
                 </template>
               </el-table-column>
+              <el-table-column label="来源" width="80">
+                <template #default="{ row }">
+                  <span :class="row.source === 'manual' ? 'src-manual' : 'muted'">
+                    {{ row.source === 'manual' ? '人工' : '采集' }}
+                  </span>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="canWrite" label="操作" width="70" align="center">
+                <template #default="{ row }">
+                  <el-button type="danger" link size="small" @click="removeLink(row)">解除</el-button>
+                </template>
+              </el-table-column>
             </el-table>
+
+            <!-- 被人工隐藏的关系（逻辑删除的结果）。必须能列出来并能恢复：
+                 看不见的删除等于不可逆，用户会以为删错了就再也回不来。 -->
+            <template v-if="suppressed.length">
+              <div class="sec"><span>已人工隐藏 {{ suppressed.length }}</span></div>
+              <el-table :data="suppressed" size="small" style="width: 100%">
+                <el-table-column label="关系" width="130">
+                  <template #default="{ row }"><span class="tag">{{ kindLabel(row.kind) }}</span></template>
+                </el-table-column>
+                <el-table-column label="对端资产" min-width="200">
+                  <template #default="{ row }"><span class="mono">{{ row.peerKey }}</span></template>
+                </el-table-column>
+                <el-table-column label="隐藏者" width="110">
+                  <template #default="{ row }">{{ row.createdBy || '—' }}</template>
+                </el-table-column>
+                <el-table-column v-if="canWrite" label="操作" width="70" align="center">
+                  <template #default="{ row }">
+                    <el-button link size="small" @click="restoreLink(row)">恢复</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <p class="muted note">
+                隐藏是逻辑删除：采集不会再自动建立这些关系。「恢复」把它们交还给采集 ——
+                若采集仍在上报，下一次上报就会重新出现。
+              </p>
+            </template>
             <p class="muted note">
-              仅展示自动发现的直接关系，范围外的对端不返回。业务系统 / 分组等上层关系与人工关系维护属后续批次。
+              仅展示直接关系，范围外的对端不返回。集群归属（member_of）、依赖与暴露关系属后续批次。
             </p>
           </el-tab-pane>
         </el-tabs>
       </div>
     </el-drawer>
+
+    <!-- 添加关系：方向 × 类型 × 对端。方向做成显式选择而不是让前端猜——
+         服务端把 URL 里的资产当作边的基准，direction 决定对端是终点还是起点。 -->
+    <el-dialog v-model="linkAddVisible" title="添加关系" width="560px">
+      <el-form label-width="90px">
+        <el-form-item label="方向">
+          <el-radio-group v-model="linkForm.direction">
+            <el-radio-button value="out">本资产 → 对端</el-radio-button>
+            <el-radio-button value="in">对端 → 本资产</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="关系类型">
+          <el-select v-model="linkForm.kind" style="width: 100%">
+            <el-option v-for="k in LINK_KINDS" :key="k.value" :label="k.label" :value="k.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="对端资产">
+          <el-select
+            v-model="linkForm.peer"
+            filterable
+            remote
+            :remote-method="searchLinkPeers"
+            :loading="peerLoading"
+            placeholder="输入名称 / 自然键 / 节点搜索"
+            style="width: 100%"
+          >
+            <el-option v-for="o in peerOptions" :key="o.value" :label="o.label" :value="o.value" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <div class="muted">
+        候选只列出你可见范围内的资产（范围外的对端即便手工填也会被服务端拒绝）。
+        目前 runs_on 与 member_of 多由采集建立，depends_on 与 exposes 只能人工维护。
+      </div>
+      <template #footer>
+        <el-button @click="linkAddVisible = false">取消</el-button>
+        <el-button type="primary" :loading="linkBusy" @click="submitLinkAdd">确定</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 新建：手工建档（人工来源）。表单项与列表列一一对应：
          资产名称→「资产名称」，类型+地址→「类型」，归属节点→「归属节点」，责任人→「责任人」；
@@ -674,6 +757,9 @@ import {
   getAsset,
   getAssetHistory,
   getAssetLinks,
+  createAssetLink,
+  deleteAssetLink,
+  restoreAssetLink,
   getAssetSummary,
   createAsset,
   updateAsset,
@@ -732,7 +818,24 @@ const detailVisible = ref(false)
 const detail = ref(null)
 const history = ref([])
 const links = ref([])
+// 被人工隐藏（逻辑删除）的关系：必须让用户看见并能恢复
+const suppressed = ref([])
 const tab = ref('attr')
+
+// ---- 关系的人工维护 ----
+// 类型清单与服务端 asset.LinkKind 对齐：这里的下拉只是可选项，真正的边界在服务端
+// （未知类型一律 400）。
+const LINK_KINDS = [
+  { value: 'runs_on', label: 'runs_on · 运行于' },
+  { value: 'member_of', label: 'member_of · 归属' },
+  { value: 'depends_on', label: 'depends_on · 依赖' },
+  { value: 'exposes', label: 'exposes · 暴露' },
+]
+const linkAddVisible = ref(false)
+const linkBusy = ref(false)
+const linkForm = reactive({ direction: 'out', kind: 'runs_on', peer: '' })
+const peerOptions = ref([])
+const peerLoading = ref(false)
 // 各资产类型当前的期望值（标杆）来源，用于抽屉里显示"本资产是不是标杆"
 const baselines = ref([])
 
@@ -1077,20 +1180,125 @@ async function loadDetail(id) {
   // 标杆列表一并取：抽屉要能回答"本资产是不是该类型的期望值"
   const [hist, rel, bl] = await Promise.all([getAssetHistory(id), getAssetLinks(id), listInspectBaselines()])
   history.value = (hist && hist.records) || []
-  links.value = (rel && rel.links) || []
+  applyLinks(rel)
   baselines.value = (bl && bl.baselines) || []
+}
+
+// applyLinks 把关联载荷落进状态：可见的边 + 被人工隐藏的边。
+// 两者永远一起更新（写接口返回的也是同一个载荷），避免"表格已更新、隐藏区还是旧的"。
+function applyLinks(payload) {
+  links.value = (payload && payload.links) || []
+  suppressed.value = (payload && payload.suppressed) || []
 }
 
 async function openDetail(row) {
   detail.value = row
   history.value = []
   links.value = []
+  suppressed.value = []
   tab.value = 'attr'
   detailVisible.value = true
   try {
     await loadDetail(row.id)
   } catch (e) {
     ElMessage.error(e.message || '加载资产详情失败')
+  }
+}
+
+/* ================= 关联关系的人工维护 ================= */
+
+// linkAddress 把一条「读出来的边」翻译成写接口的寻址参数。
+//
+// 读接口返回的 direction 与 peer 就是写接口需要的全部信息，原样回传即可——
+// 前端不自己算方向，也就不会出现"以为是出边、实际删了入边"。
+function linkAddress(row) {
+  return { toType: row.peerType, toKey: row.peerKey, kind: row.kind, direction: row.direction }
+}
+
+function openLinkAdd() {
+  linkForm.direction = 'out'
+  linkForm.kind = 'runs_on'
+  linkForm.peer = ''
+  peerOptions.value = []
+  linkAddVisible.value = true
+}
+
+// searchLinkPeers 搜索对端候选：直接复用台账列表接口。
+// 它已按资源范围裁剪，因此这里不必再判断"这个人能不能看到那台资产"。
+async function searchLinkPeers(keyword) {
+  const kw = (keyword || '').trim()
+  if (!kw) {
+    peerOptions.value = []
+    return
+  }
+  peerLoading.value = true
+  try {
+    const resp = await listAssets({ keyword: kw, limit: 20 })
+    peerOptions.value = ((resp && resp.assets) || [])
+      // 自己跟自己建关系服务端也会拒，从候选里剔掉体验更好
+      .filter((a) => String(a.id) !== String(detail.value && detail.value.id))
+      .map((a) => ({
+        value: a.typeKey + '|' + a.naturalKey,
+        label: (a.name || a.naturalKey) + '（' + typeLabel(a) + '）',
+      }))
+  } catch (e) {
+    ElMessage.error(e.message || '搜索资产失败')
+  } finally {
+    peerLoading.value = false
+  }
+}
+
+async function submitLinkAdd() {
+  if (!linkForm.peer) {
+    ElMessage.warning('请选择对端资产')
+    return
+  }
+  // 选项值形如「<类型>|<自然键>」；自然键本身含冒号（如 redis:127.0.0.1:6379），
+  // 因此只按**第一个**分隔符切开，而不是 split 后取前两段。
+  const sep = linkForm.peer.indexOf('|')
+  linkBusy.value = true
+  try {
+    applyLinks(await createAssetLink(detail.value.id, {
+      toType: linkForm.peer.slice(0, sep),
+      toKey: linkForm.peer.slice(sep + 1),
+      kind: linkForm.kind,
+      direction: linkForm.direction,
+    }))
+    linkAddVisible.value = false
+    ElMessage.success('已添加关系')
+  } catch (e) {
+    ElMessage.error(e.message || '添加关系失败')
+  } finally {
+    linkBusy.value = false
+  }
+}
+
+async function removeLink(row) {
+  // 解除 = 逻辑删除：服务端会记一条抑制，采集不会再把它建回来。
+  // 这不是"少显示一行"，而是表达了「这条关系不存在」这个判断，所以先把后果说清楚。
+  try {
+    await ElMessageBox.confirm(
+      '解除后采集不会再自动建立这条关系（服务端会记一条抑制记录，可在「已人工隐藏」里恢复）。确认解除？',
+      '解除关系',
+      { type: 'warning', confirmButtonText: '解除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    applyLinks(await deleteAssetLink(detail.value.id, linkAddress(row)))
+    ElMessage.success('已解除，可在「已人工隐藏」里恢复')
+  } catch (e) {
+    ElMessage.error(e.message || '解除关系失败')
+  }
+}
+
+async function restoreLink(row) {
+  try {
+    applyLinks(await restoreAssetLink(detail.value.id, linkAddress(row)))
+    ElMessage.success('已恢复：这条关系交还给采集')
+  } catch (e) {
+    ElMessage.error(e.message || '恢复关系失败')
   }
 }
 
@@ -1714,6 +1922,11 @@ onMounted(load)
 }
 .rel-in {
   color: var(--violet);
+}
+/* 「来源 = 人工」用强调色标出：被人工认领过的边不会被采集覆盖，
+   这是关系表里最需要一眼看清的属性（其余边都是采集自动建立的）。 */
+.src-manual {
+  color: var(--accent);
 }
 .note {
   margin-top: 14px;

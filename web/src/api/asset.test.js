@@ -7,6 +7,9 @@ import {
   getAssetHistory,
   getAssetSummary,
   getAssetLinks,
+  createAssetLink,
+  deleteAssetLink,
+  restoreAssetLink,
   createAsset,
   updateAsset,
 } from './asset'
@@ -83,5 +86,34 @@ describe('资产 API 封装', () => {
     const body = JSON.parse(updateOpts.body)
     expect(body.name).toBe('新名字')
     expect(body.node).toBeUndefined()
+  })
+
+  // 关系维护的寻址来源按方法分开，这条约束错了会在"某些环境里点删除没反应"，
+  // 且现场极难排查 —— 因此在这里钉住。
+  it('关系维护：POST 走 JSON 体，DELETE 只走查询串（不携带请求体）', async () => {
+    const payload = { toType: 'host', toKey: 'web-01', kind: 'runs_on', direction: 'out' }
+    await createAssetLink('12', payload)
+    const [createUrl, createOpts] = fetchMock.mock.calls[0]
+    expect(createUrl).toBe('/api/v1/assets/12/links')
+    expect(createOpts.method).toBe('POST')
+    expect(JSON.parse(createOpts.body)).toEqual(payload)
+
+    await restoreAssetLink('12', payload)
+    const [restoreUrl, restoreOpts] = fetchMock.mock.calls[1]
+    expect(restoreUrl).toBe('/api/v1/assets/12/links/restore')
+    expect(restoreOpts.method).toBe('POST')
+    expect(JSON.parse(restoreOpts.body).direction).toBe('out')
+
+    // 自然键里的冒号必须被编码（如 redis:127.0.0.1:6379）
+    const delPayload = { toType: 'middleware_inst', toKey: 'redis:127.0.0.1:6379', kind: 'runs_on', direction: 'in' }
+    await deleteAssetLink('12', delPayload)
+    const [delUrl, delOpts] = fetchMock.mock.calls[2]
+    expect(delUrl.startsWith('/api/v1/assets/12/links?')).toBe(true)
+    expect(delUrl).toContain('toType=middleware_inst')
+    expect(delUrl).toContain('toKey=' + encodeURIComponent(delPayload.toKey))
+    expect(delUrl).toContain('kind=runs_on')
+    expect(delUrl).toContain('direction=in')
+    expect(delOpts.method).toBe('DELETE')
+    expect(delOpts.body).toBeUndefined()
   })
 })

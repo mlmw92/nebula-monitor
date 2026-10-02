@@ -39,7 +39,27 @@ export const updateAsset = (id, payload) => http.put('/api/v1/assets/' + encodeU
 export const getAssetSummary = (params = {}) => http.get(withQuery('/api/v1/assets/summary', params))
 
 // 资产的直接关联（出边 + 入边）；范围外的对端由服务端剔除，前端拿到的都是可见资产。
+// 返回 { links, suppressed }：suppressed 是被人工隐藏（逻辑删除）的边 ——
+// 它必须能看见且能恢复，否则「删掉的关系就永远回不来」。
 export const getAssetLinks = (id) => http.get('/api/v1/assets/' + encodeURIComponent(id) + '/links')
+
+// ---- 关系的人工维护 ----
+// 三种动作共用一套寻址：URL 里的资产是基准，给 {toType,toKey,kind,direction}。
+// direction 用读接口返回的原值即可（out=基准 → 对端，in=对端 → 基准），前端不必自己算方向。
+
+// 添加关系：幂等；若这条边此前由采集建立，会把它升级为「人工认领」，之后不再被采集覆盖。
+export const createAssetLink = (id, payload) =>
+  http.post('/api/v1/assets/' + encodeURIComponent(id) + '/links', payload)
+
+// 解除关系 = 逻辑删除：服务端会落一条抑制记录，采集不会再把它建回来。
+// **寻址走查询串**：DELETE 的请求体在 HTTP 语义里没有定义，中间设备丢弃它是合法行为，
+// 因此服务端只从查询串读（见 internal/server/api/asset_link_api.go 文件头）。
+export const deleteAssetLink = (id, payload) =>
+  http.del(withQuery('/api/v1/assets/' + encodeURIComponent(id) + '/links', payload))
+
+// 取消抑制：把这条关系交还给采集（逻辑删除的出口）。
+export const restoreAssetLink = (id, payload) =>
+  http.post('/api/v1/assets/' + encodeURIComponent(id) + '/links/restore', payload)
 
 // ---- 配置巡检（inspect）----
 // 巡检只给结论、不改配置；「跑」与「改」在服务端是两个权限点（inspect:run / assets:write）。
