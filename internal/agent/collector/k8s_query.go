@@ -83,12 +83,9 @@ type cqPod struct {
 		Phase     string `json:"phase"`
 		PodIP     string `json:"podIP"`
 		StartTime string `json:"startTime"`
-		// ContainerStatuses 里的 ready/restartCount 是排障第一眼要看的东西。
-		ContainerStatuses []struct {
-			Name         string `json:"name"`
-			Ready        bool   `json:"ready"`
-			RestartCount int32  `json:"restartCount"`
-		} `json:"containerStatuses"`
+		// 容器级状态（复用 k8s.go 的类型）：ready/restartCount 是排障第一眼要看的，
+		// state 里的 waiting/terminated reason 才是"这个 Pod 到底怎么了"的答案。
+		ContainerStatuses []k8sContainerStatus `json:"containerStatuses"`
 	} `json:"status"`
 }
 
@@ -330,8 +327,11 @@ func (c *K8sCollector) QueryPods(ctx context.Context, cluster, namespace string)
 			}
 			restarts += cs.RestartCount
 		}
+		// 状态列用**有效状态**（对齐 kubectl 的 STATUS），而不是裸 phase：
+		// 只报 phase 会把 ImagePullBackOff 显示成 Pending、把 CrashLoopBackOff
+		// 显示成 Running——后者看起来是健康的，正好把要排的故障藏起来。
 		addRow(res, it.Metadata.Namespace, it.Metadata.Name,
-			fallback(it.Status.Phase, "Unknown"),
+			fallback(podStatus(it.Status.Phase, it.Status.ContainerStatuses), "Unknown"),
 			fmt.Sprintf("%d/%d", ready, len(it.Status.ContainerStatuses)),
 			itoa32(restarts),
 			fallback(it.Spec.NodeName, "—"),
@@ -474,8 +474,11 @@ func projectPod(raw map[string]any, res *ContainerQueryResult) {
 	addRow(res, "创建时间", formatK8sTime(str(meta["creationTimestamp"])))
 	addRow(res, "标签", joinMap(meta["labels"]))
 	addRow(res, "节点", str(spec["nodeName"]))
+	cstatus := rawContainerStatuses(status["containerStatuses"])
 	addRow(res, "Pod IP", str(status["podIP"]))
-	addRow(res, "状态", str(status["phase"]))
+	// 状态给**有效状态**（对齐 kubectl 的 STATUS）：只给 phase 时，
+	// CrashLoopBackOff 的 Pod 会显示成 Running —— 看起来是健康的。
+	addRow(res, "状态", fallback(podStatus(str(status["phase"]), cstatus), "—"))
 	addRow(res, "QoS", str(status["qosClass"]))
 
 	// 只列容器名与镜像：env 的**值**可能含明文密钥，一律不下发。
@@ -486,9 +489,55 @@ func projectPod(raw map[string]any, res *ContainerQueryResult) {
 			addRow(res, field, str(c["name"])+" → "+str(c["image"]))
 		}
 	}
+	// 容器级原因：这才是"这个 Pod 为什么起不来"的答案（镜像拉不动 / 反复崩溃 / OOM）。
+	// 光有容器名和镜像不够——排查时第一眼要看的就是这里。
+	for _, c := range cstatus {
+		addRow(res, "容器状态", containerStatusText(c))
+	}
 	appendEnvNames(res, spec, "containers", "容器环境变量名")
 	appendConditions(res, status)
 	res.Notice = appendNotice(res.Notice, "环境变量只返回变量名，不返回值；密钥类字段不下发")
+}
+
+// rawContainerStatuses 把原始对象里的 containerStatuses 转成共用类型。
+// 这里走一次 JSON 往返，而不是手写字段提取：目的是让"有效状态"始终只有
+// podStatus（k8s.go）一处实现。手写提取等于把判定逻辑复制一遍，
+// 采集页与查询页迟早会给出互相矛盾的结论。
+func rawContainerStatuses(v any) []k8sContainerStatus {
+	if v == nil {
+		return nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var out []k8sContainerStatus
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// containerStatusText 一行说清一个容器的处境：状态（含原因）与重启次数。
+func containerStatusText(c k8sContainerStatus) string {
+	state := "Running"
+	if r := strings.TrimSpace(c.State.Waiting.Reason); r != "" {
+		state = r
+	} else if t := c.State.Terminated; t != nil {
+		switch {
+		case strings.TrimSpace(t.Reason) != "":
+			state = t.Reason
+		case t.ExitCode != 0:
+			state = "Error"
+		default:
+			state = "Completed"
+		}
+	}
+	s := c.Name + ": " + state
+	if c.RestartCount > 0 {
+		s += fmt.Sprintf("（重启 %d 次）", c.RestartCount)
+	}
+	return s
 }
 
 func projectWorkload(raw map[string]any, res *ContainerQueryResult) {

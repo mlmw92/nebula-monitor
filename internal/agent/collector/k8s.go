@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -253,11 +254,20 @@ func (c *K8sCollector) collectPods(ctx context.Context, cfg model.K8sInstanceCon
 	}
 	var out []model.Metric
 	total := len(list.Items)
-	running, pending, failed, succeeded := 0, 0, 0, 0
+	// running 按**有效状态**计数，其余三个按 phase 计数——两者刻意不同，见下方注释。
+	running, pending, failed, succeeded, abnormal := 0, 0, 0, 0, 0
 	for _, p := range list.Items {
-		switch p.Status.Phase {
-		case "Running":
+		status := podStatus(p.Status.Phase, p.Status.ContainerStatuses)
+
+		// "运行中"用有效状态判定，不用 phase：phase 是 Pod 的生命周期阶段，
+		// 容器在 CrashLoopBackOff / RunContainerError 时 kubelet 仍把 phase 留在 Running，
+		// 按 phase 数出来的"运行 Pod"会把崩溃中的 Pod 一起算进去——监控报假健康比不报更糟。
+		if status == "Running" {
 			running++
+		}
+		// 这三个保留 phase 口径：它们表达的是生命周期阶段分布，
+		// 与"是否健康"是两件事（Pending 可能是排队，也可能是镜像拉不动）。
+		switch p.Status.Phase {
 		case "Pending":
 			pending++
 		case "Failed":
@@ -265,12 +275,15 @@ func (c *K8sCollector) collectPods(ctx context.Context, cfg model.K8sInstanceCon
 		case "Succeeded":
 			succeeded++
 		}
-		// 异常 Pod（非 Running/Succeeded）产明细
-		if p.Status.Phase != "Running" && p.Status.Phase != "Succeeded" {
+		if !podHealthy(status) {
+			abnormal++
+			// detail 系列沿用 k8s_pod_phase 这个名字（服务端按名取），
+			// 但把有效状态放进 status 标签，phase 一并保留：老服务端读 phase 依然可用。
 			out = append(out, c.mk("k8s_pod_phase", 1, cfg, conn, map[string]string{
 				"namespace": p.Metadata.Namespace,
 				"pod":       p.Metadata.Name,
 				"phase":     p.Status.Phase,
+				"status":    status,
 			}, now))
 		}
 	}
@@ -280,8 +293,48 @@ func (c *K8sCollector) collectPods(ctx context.Context, cfg model.K8sInstanceCon
 		c.mk("k8s_pods_pending", float64(pending), cfg, conn, nil, now),
 		c.mk("k8s_pods_failed", float64(failed), cfg, conn, nil, now),
 		c.mk("k8s_pods_succeeded", float64(succeeded), cfg, conn, nil, now),
+		c.mk("k8s_pods_abnormal", float64(abnormal), cfg, conn, nil, now),
 	)
 	return out
+}
+
+// podStatus 推断 Pod 的**有效状态**，语义对齐 `kubectl get pods` 的 STATUS 列：
+// 容器等待原因优先（ImagePullBackOff / CrashLoopBackOff / RunContainerError ...），
+// 其次是容器终止原因（Error / OOMKilled / Completed），最后才回退到 phase。
+//
+// 为什么必须这样：phase 只表达 Pod 的生命周期阶段，**不反映容器起不起得来**。
+// 镜像拉不动时 phase 是 Pending、容器崩溃重启时 phase 是 Running，
+// 只报 phase 会让崩溃中的 Pod 在界面上显示成"运行中"。
+func podStatus(phase string, cs []k8sContainerStatus) string {
+	for _, c := range cs {
+		if r := strings.TrimSpace(c.State.Waiting.Reason); r != "" {
+			return r
+		}
+	}
+	for _, c := range cs {
+		t := c.State.Terminated
+		if t == nil {
+			continue
+		}
+		if r := strings.TrimSpace(t.Reason); r != "" {
+			return r
+		}
+		if t.ExitCode != 0 {
+			return "Error"
+		}
+		return "Completed"
+	}
+	return phase
+}
+
+// podHealthy 判断有效状态是否属于"正常"。Completed 是正常结束（Job 跑完），
+// 与 Succeeded 等价，不能算异常。
+func podHealthy(status string) bool {
+	switch status {
+	case "Running", "Succeeded", "Completed":
+		return true
+	}
+	return false
 }
 
 func (c *K8sCollector) collectNodeMetrics(ctx context.Context, cfg model.K8sInstanceConfig, conn *k8sConn, now int64) []model.Metric {
@@ -625,11 +678,40 @@ type k8sDaemonSetList struct {
 	} `json:"items"`
 }
 
+// k8sContainerStatus 是容器级状态。**状态的真相在这里，不在 pod 的 phase 里**：
+// 镜像拉不动时 phase 仍是 Pending，容器反复崩溃重启时 phase 仍是 Running。
+//
+// 这个类型被 K8s 采集（本文件）与容器只读查询（k8s_query.go）**共用**：
+// 两个接口返回的 containerStatuses 形状一致，共用一个类型才能让"有效状态"的判定
+// 只有 podStatus 一处实现——否则两个页面迟早给出互相矛盾的结论。
+type k8sContainerStatus struct {
+	Name         string `json:"name"`
+	Ready        bool   `json:"ready"`
+	RestartCount int32  `json:"restartCount"`
+	State        struct {
+		Waiting    k8sContainerWaiting     `json:"waiting"`
+		Terminated *k8sContainerTerminated `json:"terminated"`
+	} `json:"state"`
+}
+
+// k8sContainerWaiting 是容器等待状态。reason 是镜像拉不动/崩溃退避这类
+// "容器根本没起来"的答案（ImagePullBackOff / CrashLoopBackOff / RunContainerError）。
+type k8sContainerWaiting struct {
+	Reason string `json:"reason"`
+}
+
+// k8sContainerTerminated 是容器终止状态。
+type k8sContainerTerminated struct {
+	Reason   string `json:"reason"`
+	ExitCode int    `json:"exitCode"`
+}
+
 type k8sPodList struct {
 	Items []struct {
 		Metadata k8sObjectMeta `json:"metadata"`
 		Status   struct {
-			Phase string `json:"phase"`
+			Phase             string               `json:"phase"`
+			ContainerStatuses []k8sContainerStatus `json:"containerStatuses"`
 		} `json:"status"`
 	} `json:"items"`
 }
@@ -646,17 +728,28 @@ type k8sNodeMetricsList struct {
 
 // ---- 辅助解析 ----
 
-// nodeRole 从 node label 推断角色。
+// nodeRole 从 node label 推断角色；多角色按字典序拼接（如 control-plane,master）。
+//
+// 两处都是踩过的坑：
+//  1. **必须排序**。labels 是 map，遍历顺序随机；此前"取第一个命中的"会让多角色节点
+//     （标准 K8s 控制面同时带 control-plane 与 master）的角色在采集周期之间随机跳变，
+//     界面上看起来就是角色在闪。
+//  2. **全部返回而不是只取一个**。与 `kubectl get nodes` 的 ROLES 列口径一致，
+//     否则多角色节点的角色"显示不全"。
 func nodeRole(labels map[string]string) string {
+	var roles []string
 	for k := range labels {
 		if strings.HasPrefix(k, "node-role.kubernetes.io/") {
-			role := strings.TrimPrefix(k, "node-role.kubernetes.io/")
-			if role != "" {
-				return role
+			if role := strings.TrimPrefix(k, "node-role.kubernetes.io/"); role != "" {
+				roles = append(roles, role)
 			}
 		}
 	}
-	return "worker"
+	if len(roles) == 0 {
+		return "worker"
+	}
+	sort.Strings(roles)
+	return strings.Join(roles, ",")
 }
 
 // parseK8sCPU 解析 metrics-server 的 CPU 用量（如 "123456789n" 纳核）为核数。

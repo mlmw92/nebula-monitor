@@ -133,11 +133,13 @@ func main() {
 		}
 	}
 	opsExec = opsagent.New(nodeName, cfg.Guards.Ops, opsExecutedPath)
+	// 这里只报"本机放行了什么"，**刻意不报 supported**：supported 还取决于后面才注入的
+	// 容器查询实现（coll.K8s()），在这一行打印会恒缺 container.*，
+	// 排查"为什么容器动作被拒"时会被这行带偏。完整清单在注入之后单独打印。
 	slog.Info("下行操作本机护栏已就绪",
 		"readOnly", cfg.Guards.Ops.OpsReadOnlyEnabled(),
 		"write", cfg.Guards.Ops.Write,
-		"units", cfg.Guards.Ops.Units,
-		"supported", opsExec.Supported())
+		"units", cfg.Guards.Ops.Units)
 
 	// 代理模式（edge/hub）走独立启动路径，不进入采集主循环
 	if cfg.Mode == config.ModeEdge || cfg.Mode == config.ModeHub {
@@ -175,6 +177,9 @@ func main() {
 	if k := coll.K8s(); k != nil {
 		opsExec.SetK8sQuerier(k)
 	}
+	// 到这一行能力清单才完整：Node/服务类动作来自本机护栏，容器类动作取决于上面这次注入。
+	// 单独一条而不是并进上面那句，是为了让代理模式（在注入之前就 return）保持原有日志行为。
+	slog.Info("下行操作能力清单已就绪", "supported", opsExec.Supported())
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
 	// 构建已开启的采集器列表
