@@ -44,6 +44,13 @@ type AssetProvider interface {
 	ClearBaseline(typeKey string) error
 	// Links 返回资产的直接关联（出边与入边）。
 	Links(ref asset.Ref) ([]asset.Link, error)
+	// SuppressedLinks 返回被人工隐藏（逻辑删除）的关联，供界面展示并可恢复。
+	SuppressedLinks(ref asset.Ref) ([]asset.SuppressedLink, error)
+	// 关系的人工维护：采集侧走 LinkDiscovered（此处不暴露，采集不经过 API 层），
+	// 人工建边会把已有边升级为 manual；解除是**逻辑删除**（落抑制），RestoreDiscovered 撤销它。
+	LinkManual(from, to asset.Ref, kind asset.LinkKind) error
+	UnlinkManual(from, to asset.Ref, kind asset.LinkKind, actor string) error
+	RestoreDiscovered(from, to asset.Ref, kind asset.LinkKind) error
 	// 忽略（隐藏）与彻底删除：忽略是管理动作（可恢复、不停止采集），
 	// 彻底删除仅限纯人工建档资产（采集资产删了会被重建）。
 	Ignore(ref asset.Ref, actor, reason string) (asset.Asset, error)
@@ -108,7 +115,11 @@ type assetView struct {
 // 同时给出方向与两端：前端要按「本资产 → 对方」「对方 → 本资产」分两组展示，
 // 只给一个无向的边会让「谁 runs_on 谁」在界面上说不清楚。
 type assetLinkView struct {
-	Kind      string `json:"kind"`
+	ID   int64  `json:"id"`
+	Kind string `json:"kind"`
+	// Source 是这条边由谁认领：manual=人工维护、discovery=采集发现。
+	// 人工认领过的边会一直保持 manual —— 采集继续上报同一条边不会把它降级。
+	Source    string `json:"source"`
 	Direction string `json:"direction"` // out=本资产指向对方；in=对方指向本资产
 	FromType  string `json:"fromType"`
 	FromKey   string `json:"fromKey"`
@@ -117,6 +128,20 @@ type assetLinkView struct {
 	PeerType  string `json:"peerType"`
 	PeerKey   string `json:"peerKey"`
 	CreatedAt int64  `json:"createdAt"`
+}
+
+// assetSuppressedLinkView 是被人工**隐藏**（逻辑删除）的关联。
+//
+// 与 assetLinkView 刻意分开：抑制记录没有 id / source 可言（它就是「人工说过这条关系不存在」），
+// 但多一个 createdBy —— 多人协作的台账里「谁把它藏了」往往比时间更有用。
+// 之所以要能列出来：隐藏是可恢复的，界面上看不到就无从恢复，用户会以为删掉就永远回不来。
+type assetSuppressedLinkView struct {
+	Kind      string `json:"kind"`
+	Direction string `json:"direction"`
+	PeerType  string `json:"peerType"`
+	PeerKey   string `json:"peerKey"`
+	CreatedAt int64  `json:"createdAt"`
+	CreatedBy string `json:"createdBy"`
 }
 
 // 失联判定阈值：超过它未再上报即视为 missing。
@@ -181,7 +206,7 @@ func toAssetView(a asset.Asset, staleBefore int64) assetView {
 		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, LastSeenAt: a.LastSeenAt(),
 		ManualCount: manual, ConflictCount: conflict, ConflictKeys: a.ConflictKeys(),
 		Values: map[string]string{}, Attrs: make([]assetAttrView, 0, len(a.Attrs)),
-		Labels: map[string]string{},
+		Labels:       map[string]string{},
 		HasDiscovery: a.HasDiscovery(),
 		Ignored:      a.Ignored, IgnoreReason: a.IgnoreReason, IgnoredBy: a.IgnoredBy, IgnoredAt: a.IgnoredAt,
 	}
@@ -328,17 +353,31 @@ func (a *API) handleAssetLinks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	links, err := a.assets.Links(asset.Ref{TypeKey: item.TypeKey, NaturalKey: item.NaturalKey})
+	payload, err := a.assetLinksPayload(item, Principal(r))
 	if err != nil {
 		slog.Error("查询资产关联失败", "asset", item.NaturalKey, "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询资产关联失败"})
 		return
 	}
-	p := Principal(r)
+	writeJSON(w, http.StatusOK, payload)
+}
+
+// assetLinksPayload 组装关联载荷：可见的边 + 被人工隐藏的边。
+//
+// 读接口与写接口共用同一份组装逻辑：写操作直接把最新载荷返回，前端不必再发一次 GET
+// ——否则很容易出现「表格已更新、抽屉还是旧的」这种不一致。
+//
+// 出入边都返回，并在视图里带 direction：前端要按「本资产 → 对方」「对方 → 本资产」分两组展示，
+// 只给一个无向的边会让「谁 runs_on 谁」在界面上说不清楚。写接口也复用这个 direction 寻址。
+func (a *API) assetLinksPayload(item asset.Asset, p *auth.Principal) (map[string]interface{}, error) {
+	links, err := a.assets.Links(assetRefOf(item))
+	if err != nil {
+		return nil, err
+	}
 	out := make([]assetLinkView, 0, len(links))
 	for _, l := range links {
 		view := assetLinkView{
-			Kind: string(l.Kind), Direction: "out",
+			ID: l.ID, Kind: string(l.Kind), Source: string(l.Source), Direction: "out",
 			FromType: l.From.TypeKey, FromKey: l.From.NaturalKey,
 			ToType: l.To.TypeKey, ToKey: l.To.NaturalKey,
 			PeerType: l.To.TypeKey, PeerKey: l.To.NaturalKey,
@@ -350,16 +389,39 @@ func (a *API) handleAssetLinks(w http.ResponseWriter, r *http.Request) {
 		}
 		peer, found, err := a.assets.Get(asset.Ref{TypeKey: view.PeerType, NaturalKey: view.PeerKey})
 		if err != nil {
-			slog.Error("查询关联对端资产失败", "asset", view.PeerKey, "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询资产关联失败"})
-			return
+			return nil, err
 		}
 		if !found || !a.nodeInScope(p, peer.Node) {
 			continue
 		}
 		out = append(out, view)
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"links": out})
+
+	suppressed, err := a.assets.SuppressedLinks(assetRefOf(item))
+	if err != nil {
+		return nil, err
+	}
+	hidden := make([]assetSuppressedLinkView, 0, len(suppressed))
+	for _, sl := range suppressed {
+		view := assetSuppressedLinkView{
+			Kind: string(sl.Kind), Direction: "out",
+			PeerType: sl.To.TypeKey, PeerKey: sl.To.NaturalKey,
+			CreatedAt: sl.CreatedAt, CreatedBy: sl.CreatedBy,
+		}
+		if sl.To.TypeKey == item.TypeKey && sl.To.NaturalKey == item.NaturalKey {
+			view.Direction = "in"
+			view.PeerType, view.PeerKey = sl.From.TypeKey, sl.From.NaturalKey
+		}
+		peer, found, err := a.assets.Get(asset.Ref{TypeKey: view.PeerType, NaturalKey: view.PeerKey})
+		if err != nil {
+			return nil, err
+		}
+		if !found || !a.nodeInScope(p, peer.Node) {
+			continue
+		}
+		hidden = append(hidden, view)
+	}
+	return map[string]interface{}{"links": out, "suppressed": hidden}, nil
 }
 
 // assetAllowedNodes 计算资源范围允许的归属节点集合，供资产查询下推。

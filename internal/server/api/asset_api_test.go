@@ -672,10 +672,10 @@ func TestHandleAssetLinksSkipsOutOfScopePeer(t *testing.T) {
 	a, svc := assetTestAPI(t)
 	redisRef := asset.Ref{TypeKey: asset.TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6379"}
 	// 范围内的对端（web-01，g1）与范围外的对端（db-01，g2）各建一条边
-	if err := svc.Link(redisRef, asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"}, asset.LinkRunsOn); err != nil {
+	if err := svc.LinkDiscovered(redisRef, asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"}, asset.LinkRunsOn); err != nil {
 		t.Fatalf("建立范围内关联失败: %v", err)
 	}
-	if err := svc.Link(redisRef, asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "db-01"}, asset.LinkRunsOn); err != nil {
+	if err := svc.LinkDiscovered(redisRef, asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "db-01"}, asset.LinkRunsOn); err != nil {
 		t.Fatalf("建立范围外关联失败: %v", err)
 	}
 	redis, _, _ := svc.Get(redisRef)
@@ -748,5 +748,147 @@ func TestHandleAssetsRestrictedWithoutVisibleNodesIsEmpty(t *testing.T) {
 	}
 	if body.Total != 0 || len(body.Assets) != 0 {
 		t.Fatalf("无可见节点应返回空结果，实际 total=%d len=%d", body.Total, len(body.Assets))
+	}
+}
+
+// 人工维护关联的完整生命周期：认领 → 逻辑删除 → 采集不复活 → 取消抑制后可重建。
+//
+// 「人工优先」的规则本身在 asset 包的 TestManualLinkWinsOverDiscovery 里逐条钉过；
+// 这里验的是接口把该语义原样暴露出来：寻址（含 direction）、返回值形态、
+// 以及**删除必须是逻辑删除**这个关键点。
+func TestHandleAssetLinkWriteLifecycle(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	hostRef := asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"}
+	instRef := asset.Ref{TypeKey: asset.TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6379"}
+	inst, _, _ := svc.Get(instRef)
+	host, _, _ := svc.Get(hostRef)
+
+	type linksPayload struct {
+		Links      []assetLinkView           `json:"links"`
+		Suppressed []assetSuppressedLinkView `json:"suppressed"`
+	}
+	global := globalPrincipal("assets:write")
+
+	linkPath := func(id int64) string {
+		return "/api/v1/assets/" + strconv.FormatInt(id, 10) + "/links"
+	}
+	read := func() linksPayload {
+		t.Helper()
+		req := assetReq(global, linkPath(inst.ID))
+		req.SetPathValue("id", strconv.FormatInt(inst.ID, 10))
+		w := httptest.NewRecorder()
+		a.handleAssetLinks(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("读关联状态码 = %d，响应 %s", w.Code, w.Body.String())
+		}
+		var out linksPayload
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("解析关联失败: %v", err)
+		}
+		return out
+	}
+	write := func(h func(http.ResponseWriter, *http.Request), assetID int64, method string, body interface{}) (int, linksPayload) {
+		t.Helper()
+		req := assetWriteReq(global, method, linkPath(assetID), body)
+		req.SetPathValue("id", strconv.FormatInt(assetID, 10))
+		w := httptest.NewRecorder()
+		h(w, req)
+		var out linksPayload
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+
+	// 采集先建一条：初始来源是 discovery
+	if err := svc.LinkDiscovered(instRef, hostRef, asset.LinkRunsOn); err != nil {
+		t.Fatalf("采集建立关联失败: %v", err)
+	}
+	if got := read(); len(got.Links) != 1 || got.Links[0].Source != string(asset.SourceDiscovery) {
+		t.Fatalf("采集建立的边来源应为 discovery，实际 %+v", got.Links)
+	}
+
+	body := assetLinkWriteBody{ToType: asset.TypeHost, ToKey: "web-01", Kind: string(asset.LinkRunsOn)}
+
+	// 1) 人工认领同一条边 → 升级为 manual
+	code, payload := write(a.handleAssetLinkCreate, inst.ID, http.MethodPost, body)
+	if code != http.StatusOK {
+		t.Fatalf("人工建边状态码 = %d", code)
+	}
+	if len(payload.Links) != 1 || payload.Links[0].Source != string(asset.SourceManual) {
+		t.Fatalf("人工认领后来源应为 manual，实际 %+v", payload.Links)
+	}
+
+	// 2) 删除 = 逻辑删除：边消失、进 suppressed、记下操作人
+	code, payload = write(a.handleAssetLinkDelete, inst.ID, http.MethodDelete, body)
+	if code != http.StatusOK {
+		t.Fatalf("删除状态码 = %d", code)
+	}
+	if len(payload.Links) != 0 {
+		t.Fatalf("删除后不应还有可见的边，实际 %+v", payload.Links)
+	}
+	if len(payload.Suppressed) != 1 || payload.Suppressed[0].PeerKey != "web-01" {
+		t.Fatalf("删除后应留下一条抑制记录，实际 %+v", payload.Suppressed)
+	}
+	if payload.Suppressed[0].CreatedBy == "" {
+		t.Fatal("抑制记录应记下操作人")
+	}
+
+	// 3) 关键点：采集再上报同一条边不会把它复活
+	if err := svc.LinkDiscovered(instRef, hostRef, asset.LinkRunsOn); err != nil {
+		t.Fatalf("采集重复上报不应报错: %v", err)
+	}
+	if got := read(); len(got.Links) != 0 {
+		t.Fatalf("被人工抑制的边不应被采集重建，实际 %+v", got.Links)
+	}
+
+	// 4) 取消抑制后采集才能重建，且回到 discovery
+	if code, payload = write(a.handleAssetLinkRestore, inst.ID, http.MethodPost, body); code != http.StatusOK {
+		t.Fatalf("取消抑制状态码 = %d", code)
+	}
+	if len(payload.Suppressed) != 0 {
+		t.Fatalf("取消抑制后不应还有抑制记录，实际 %+v", payload.Suppressed)
+	}
+	if err := svc.LinkDiscovered(instRef, hostRef, asset.LinkRunsOn); err != nil {
+		t.Fatalf("取消抑制后采集建立关联失败: %v", err)
+	}
+	if got := read(); len(got.Links) != 1 || got.Links[0].Source != string(asset.SourceDiscovery) {
+		t.Fatalf("重建的边应回到 discovery，实际 %+v", got.Links)
+	}
+
+	// 5) direction=in：以主机为基准删掉「实例 → 主机」这条入边
+	if code, _ = write(a.handleAssetLinkDelete, host.ID, http.MethodDelete, assetLinkWriteBody{
+		ToType: asset.TypeMiddlewareInst, ToKey: instRef.NaturalKey,
+		Kind: string(asset.LinkRunsOn), Direction: "in",
+	}); code != http.StatusOK {
+		t.Fatalf("按入边删除状态码 = %d", code)
+	}
+	if got := read(); len(got.Links) != 0 {
+		t.Fatalf("入边也应能被删除，实际 %+v", got.Links)
+	}
+
+	// 6) 寻址参数负例：未知类型 / 缺对端 / 非法方向
+	for _, bad := range []assetLinkWriteBody{
+		{ToType: asset.TypeHost, ToKey: "web-01", Kind: "not_a_kind"},
+		{ToType: asset.TypeHost, Kind: string(asset.LinkRunsOn)},
+		{ToType: asset.TypeHost, ToKey: "web-01", Kind: string(asset.LinkRunsOn), Direction: "sideways"},
+	} {
+		if code, _ := write(a.handleAssetLinkCreate, inst.ID, http.MethodPost, bad); code != http.StatusBadRequest {
+			t.Fatalf("非法寻址应返回 400，实际 %d（body=%+v）", code, bad)
+		}
+	}
+	// 自关联由服务层拒绝
+	if code, _ := write(a.handleAssetLinkCreate, inst.ID, http.MethodPost, assetLinkWriteBody{
+		ToType: asset.TypeMiddlewareInst, ToKey: instRef.NaturalKey, Kind: string(asset.LinkDependsOn),
+	}); code != http.StatusBadRequest {
+		t.Fatalf("自关联应返回 400，实际 %d", code)
+	}
+
+	// 范围外的对端一律 404：否则可以用「建边是否成功」探测范围外资产是否存在
+	req := assetWriteReq(restrictedPrincipal([]string{"assets:write"}, "g1"), http.MethodPost, linkPath(inst.ID),
+		assetLinkWriteBody{ToType: asset.TypeHost, ToKey: "db-01", Kind: string(asset.LinkRunsOn)})
+	req.SetPathValue("id", strconv.FormatInt(inst.ID, 10))
+	w := httptest.NewRecorder()
+	a.handleAssetLinkCreate(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("对范围外对端建边应返回 404，实际 %d（响应 %s）", w.Code, w.Body.String())
 	}
 }
