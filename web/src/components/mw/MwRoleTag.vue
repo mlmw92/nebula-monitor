@@ -1,12 +1,16 @@
 <template>
-  <span class="mw-role" :class="'mw-role-' + entry.cls">{{ entry.label }}</span>
+  <span class="mw-role-group">
+    <span v-for="e in entries" :key="e.label" class="mw-role" :class="'mw-role-' + e.cls">{{ e.label }}</span>
+  </span>
 </template>
 
 <script setup>
 import { computed } from 'vue'
 
 const props = defineProps({
-  // 角色/拓扑标识，如 master/slave/sentinel/broker/standalone 等
+  // 角色/拓扑标识，如 master/slave/sentinel/broker/standalone 等。
+  // K8s 节点可能同时带多个角色（标准控制面就是 control-plane,master），
+  // 因此这里按逗号拆开、每个角色各渲染一个标签——与 `kubectl get nodes` 的 ROLES 列一致。
   role: { type: String, default: '' },
 })
 
@@ -32,14 +36,31 @@ const MAP = {
   unknown: { label: '未知', cls: 'unknown' },
 }
 
-const entry = computed(() => {
-  const r = (props.role || '').trim().toLowerCase()
-  if (MAP[r]) return MAP[r]
-  return { label: props.role || '未知', cls: 'unknown' }
+const entries = computed(() => {
+  const raw = (props.role || '').trim()
+  if (!raw) return [MAP.unknown]
+  const list = raw
+    .split(',')
+    .map((part) => {
+      const key = part.trim().toLowerCase()
+      if (!key) return null
+      // 没登记过的角色原样显示（用灰色），好过显示成"未知"把真实取值藏掉。
+      return MAP[key] || { label: part.trim(), cls: 'unknown' }
+    })
+    .filter(Boolean)
+  return list.length ? list : [MAP.unknown]
 })
 </script>
 
 <style scoped>
+/* 外层用 inline-flex + 允许换行：多个角色时逐个排开，列宽不够就换行，
+   而不是被单元格的 overflow 裁掉半截（这正是"角色显示不全"的成因）。 */
+.mw-role-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
 .mw-role {
   display: inline-block;
   padding: 2px 10px;

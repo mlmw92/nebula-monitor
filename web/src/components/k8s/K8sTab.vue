@@ -57,9 +57,12 @@
                 <span class="stat-label">Pod</span>
                 <span class="stat-val">{{ c.podsRunning }}/{{ c.podsTotal }}</span>
               </div>
-              <div class="stat-item" v-if="(c.podsPending + c.podsFailed) > 0">
+              <!-- 用 podsAbnormal（按容器级有效状态算）而不是 pending+failed：
+                   phase=Running 但容器在 CrashLoopBackOff 的 Pod 也必须算进异常。
+                   服务端已对旧 Agent 做过口径回退，这里恒有值。 -->
+              <div class="stat-item" v-if="c.podsAbnormal > 0">
                 <span class="stat-label">异常</span>
-                <span class="stat-val warn">{{ c.podsPending + c.podsFailed }}</span>
+                <span class="stat-val warn">{{ c.podsAbnormal }}</span>
               </div>
               <div class="stat-item" v-if="workloadUnhealthy(c) > 0">
                 <span class="stat-label">负载异常</span>
@@ -77,7 +80,9 @@
           <el-table-column prop="nodeName" label="节点名" min-width="180" show-overflow-tooltip />
           <el-table-column prop="ip" label="IP" min-width="140" show-overflow-tooltip />
           <el-table-column prop="cluster" label="集群" width="140" />
-          <el-table-column label="角色" width="120">
+          <!-- 150 而不是 120：'Control-Plane' 标签连内边距约需 116px，再加单元格左右内边距，
+               120px 的列里会被裁掉一截——这就是"角色显示不全"。 -->
+          <el-table-column label="角色" width="150">
             <template #default="{ row }"><MwRoleTag :role="row.role" /></template>
           </el-table-column>
           <el-table-column label="状态" width="100">
@@ -99,8 +104,16 @@
           <el-table-column prop="pod" label="Pod" min-width="220" show-overflow-tooltip />
           <el-table-column prop="namespace" label="命名空间" width="160" />
           <el-table-column prop="cluster" label="集群" width="140" />
-          <el-table-column label="状态" width="120">
-            <template #default="{ row }"><MwStatusDot :status="['Running', 'Succeeded'].includes(row.phase) ? 'normal' : 'abnormal'" :label="row.phase" /></template>
+          <el-table-column label="状态" width="160">
+            <template #default="{ row }">
+              <!-- 显示有效状态（status），phase 只在旧 Agent 缺 status 时兜底。
+                   两者含义不同：ImagePullBackOff 的 Pod 的 phase 是 Pending，
+                   CrashLoopBackOff 的 Pod 的 phase 是 Running。 -->
+              <MwStatusDot
+                :status="['Running', 'Succeeded', 'Completed'].includes(row.status || row.phase) ? 'normal' : 'abnormal'"
+                :label="row.status || row.phase"
+              />
+            </template>
           </el-table-column>
         </el-table>
       </div>
@@ -141,7 +154,10 @@ const stats = computed(() => {
     s.nodesReady += c.nodesReady || 0
     s.podsTotal += c.podsTotal || 0
     s.podsRunning += c.podsRunning || 0
-    s.podsAbnormal += (c.podsPending || 0) + (c.podsFailed || 0)
+    // 口径：用服务端算好的 podsAbnormal（按容器级有效状态），不再是 pending+failed。
+    // 后者漏掉"phase 是 Running、但容器在 CrashLoopBackOff"的 Pod——那正是最该被看到的。
+    // 用 ?? 而不是 ||：0 是合法值；只有字段根本不存在（新旧版本错配）才回退旧口径。
+    s.podsAbnormal += c.podsAbnormal ?? ((c.podsPending || 0) + (c.podsFailed || 0))
     s.workloadsUnhealthy += workloadUnhealthy(c)
   }
   return s
