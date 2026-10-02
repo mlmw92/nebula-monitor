@@ -1,7 +1,7 @@
 <template>
   <aside class="sidebar glass" :class="{ collapsed }">
       <div class="brand">
-        <img v-if="brand.logo" :src="brand.logo" alt="logo" style="width:36px;height:36px;border-radius:10px;object-fit:contain;background:rgba(255,255,255,0.05);box-shadow:0 0 16px rgba(64,158,255,0.35)" />
+        <img v-if="brand.logo" :src="brand.logo" alt="logo" class="brand-logo" />
         <div class="brand-text" v-show="!collapsed">
           <h1 :title="brand.name">{{ brand.name }}</h1>
           <p v-if="brand.subtitle">{{ brand.subtitle }}</p>
@@ -9,14 +9,16 @@
       </div>
 
     <nav class="nav">
-      <router-link
-        to="/"
-        class="nav-item"
-        :class="{ active: route.path === '/' }"
-      >
-        <el-icon :size="18"><Odometer /></el-icon>
-        <span class="label" v-show="!collapsed">首页概览</span>
-      </router-link>
+      <el-tooltip content="首页概览" placement="right" :disabled="!collapsed">
+        <router-link
+          to="/"
+          class="nav-item"
+          :class="{ active: route.path === '/' }"
+        >
+          <el-icon :size="18"><Odometer /></el-icon>
+          <span class="label" v-show="!collapsed">首页概览</span>
+        </router-link>
+      </el-tooltip>
 
       <div
         v-for="g in visibleGroups"
@@ -24,11 +26,13 @@
         class="nav-group"
         :class="{ 'group-open': isGroupOpen(g), 'group-active': isGroupActive(g) }"
       >
-        <div class="nav-group-title" @click="onGroupClick(g)">
-          <el-icon :size="18"><component :is="g.icon" /></el-icon>
-          <span class="label" v-show="!collapsed">{{ g.label }}</span>
-          <el-icon v-show="!collapsed" class="caret"><ArrowDown v-if="isGroupOpen(g)" /><ArrowRight v-else /></el-icon>
-        </div>
+        <el-tooltip :content="g.label" placement="right" :disabled="!collapsed">
+          <div class="nav-group-title" @click="onGroupClick(g)">
+            <el-icon :size="15"><component :is="g.icon" /></el-icon>
+            <span class="label" v-show="!collapsed">{{ g.label }}</span>
+            <el-icon v-show="!collapsed" class="caret"><ArrowDown v-if="isGroupOpen(g)" /><ArrowRight v-else /></el-icon>
+          </div>
+        </el-tooltip>
         <div v-show="!collapsed && isGroupOpen(g)" class="nav-group-items">
           <template v-for="sub in g.items" :key="sub.key">
             <!-- 免登录的独立页（对外状态页）：用新标签页打开，避免把管理台顶掉。
@@ -64,6 +68,17 @@
       </div>
     </nav>
 
+    <!-- 用户卡：头像 + 用户名 + 角色 -->
+    <div class="nav-foot">
+      <el-tooltip :content="username || 'admin'" placement="right" :disabled="!collapsed">
+        <div class="avatar">{{ initials }}</div>
+      </el-tooltip>
+      <div v-show="!collapsed" class="u-meta">
+        <div class="u-name">{{ username || 'admin' }}</div>
+        <div class="u-sub">{{ roleText }}</div>
+      </div>
+    </div>
+
     <!-- 版本信息（统一取 Server 运行版本，不再区分 Web/Server 版本） -->
     <div class="version-info" v-show="!collapsed">
       <div class="ver-row">
@@ -73,16 +88,18 @@
     </div>
 
     <div class="sidebar-footer">
-      <el-button link class="toggle-btn" @click="$emit('toggle')">
-        <el-icon :size="18"><Fold v-if="!collapsed" /><Expand v-else /></el-icon>
-        <span v-show="!collapsed" class="label">收起</span>
-      </el-button>
+      <el-tooltip :content="collapsed ? '展开侧栏' : '收起侧栏'" placement="right">
+        <el-button link class="toggle-btn" @click="$emit('toggle')">
+          <el-icon :size="18"><Fold v-if="!collapsed" /><Expand v-else /></el-icon>
+          <span v-show="!collapsed" class="label">收起</span>
+        </el-button>
+      </el-tooltip>
     </div>
   </aside>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Odometer,
@@ -113,6 +130,8 @@ import { WEB_VERSION } from '../version'
 const props = defineProps({
   collapsed: Boolean,
   alertCount: { type: Number, default: 0 },
+  username: { type: String, default: '' },
+  roleLabels: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['toggle', 'logout'])
 
@@ -121,6 +140,18 @@ const { brand } = useBrand()
 const auth = useAuth()
 
 const serverVersion = ref(WEB_VERSION) // 初始用构建内嵌版本，加载后覆盖为 Server 实际运行版本
+
+// 头像首字母：英文取前两位，中文取首字
+const initials = computed(() => {
+  const n = (props.username || '').trim()
+  if (!n) return 'AD'
+  return /^[\x00-\x7F]+$/.test(n) ? n.slice(0, 2).toUpperCase() : n.slice(0, 1)
+})
+
+const roleText = computed(() => {
+  const labels = props.roleLabels || []
+  return labels.length ? labels.join(' · ') : '用户'
+})
 
 // 分组菜单：一级分组 + 二级子菜单
 const groups = [
@@ -205,7 +236,9 @@ function isItemVisible(sub) {
 // 仅含可见子项的菜单分组（无可见子项的分组标题不显示）
 const visibleGroups = computed(() => groups.filter((g) => g.items.some(isItemVisible)))
 
-// 用户手动展开/收起的分组状态（默认展开当前路由所在分组）
+// 分组的显式展开/收起状态。
+// 默认**全部展开**——此前只展开当前路由所在分组，导致 22 个页面全靠逐层点开；
+// 这里只记录"用户手动收起过"的分组（false），未记录的一律视为展开。
 const openGroups = ref({})
 
 function isActiveItem(item) {
@@ -218,8 +251,7 @@ function isGroupActive(g) {
 }
 
 function isGroupOpen(g) {
-  // 默认展开当前路由所在分组；用户可手动收起/展开
-  return openGroups.value[g.key] === true
+  return openGroups.value[g.key] !== false
 }
 
 function onGroupClick(g) {
@@ -241,11 +273,20 @@ async function loadVersion() {
   }
 }
 
+// 路由切换时确保目标分组是展开的（用户此前手动收起过也要重新展开，
+// 否则会出现"点了命令面板跳转过来，却看不到自己在哪"的情况）。
+watch(
+  () => route.path,
+  () => {
+    const active = groups.find(isGroupActive)
+    if (active && openGroups.value[active.key] === false) {
+      openGroups.value[active.key] = true
+    }
+  }
+)
+
 onMounted(() => {
   loadVersion()
-  // 默认展开当前路由所在的分组
-  const active = groups.find(isGroupActive)
-  if (active) openGroups.value[active.key] = true
 })
 </script>
 
@@ -275,10 +316,19 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 6px 16px;
+  padding: 4px 6px 14px;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   height: 52px;
+}
+.brand-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-lg);
+  object-fit: contain;
+  flex-shrink: 0;
+  background: var(--fill-2);
+  box-shadow: 0 0 16px var(--accent-glow);
 }
 .brand-text {
   min-width: 0;
@@ -311,22 +361,24 @@ onMounted(() => {
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: 10px;
+  height: 36px;
+  padding: 0 10px;
   color: var(--text-dim);
-  font-size: 15px;
-  border-radius: 8px;
+  font-size: var(--fs-base);
+  border-radius: var(--r-sm);
   text-decoration: none;
-  transition: all 0.15s;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
   position: relative;
 }
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--fill-1);
   color: var(--text);
 }
 .nav-item.active {
   background: var(--accent-dim);
   color: var(--accent);
+  font-weight: 600;
 }
 .nav-item.active::before {
   content: '';
@@ -345,25 +397,27 @@ onMounted(() => {
 .nav-badge {
   margin-left: auto;
 }
-/* 分组菜单 */
+/* 分组菜单：分组标题是"章节标签"，刻意做小、做淡，与子项拉开层级差 */
 .nav-group {
-  margin-top: 2px;
+  margin-top: 6px;
 }
 .nav-group-title {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  color: var(--text-dim);
-  font-size: 15px;
-  border-radius: 8px;
+  gap: 10px;
+  padding: 6px 10px;
+  color: var(--t3);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  border-radius: var(--r-sm);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
   user-select: none;
 }
 .nav-group-title:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text);
+  background: var(--fill-1);
+  color: var(--text-dim);
 }
 .nav-group.group-active .nav-group-title {
   color: var(--accent);
@@ -376,26 +430,42 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 2px 0 2px 30px;
+  padding: 2px 0 2px 24px;
+  position: relative;
 }
 .nav-subitem {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  padding: 7px 10px;
   color: var(--text-dim);
-  font-size: 14px;
-  border-radius: 8px;
+  font-size: var(--fs-base);
+  border-radius: var(--r-sm);
   text-decoration: none;
-  transition: all 0.15s;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
 .nav-subitem:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--fill-1);
   color: var(--text);
 }
 .nav-subitem.active {
   background: var(--accent-dim);
   color: var(--accent);
+  font-weight: 600;
+}
+/* 活动项左侧光条：与 .nav-item.active::before 落在同一条竖线上。
+   子项位于 padding-left:24px 的容器内，所以偏移量取 -24px 才能回到侧栏内缘。 */
+.nav-subitem.active::before {
+  content: '';
+  position: absolute;
+  left: -24px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
 }
 .sub-dot {
   width: 6px;
@@ -411,7 +481,56 @@ onMounted(() => {
   margin-left: auto;
   color: var(--text-muted);
 }
-/* 版本信息 */
+/* 用户卡：头像 + 用户名 + 角色 · 版本 */
+.nav-foot {
+  margin-top: 8px;
+  padding: 10px 4px 2px;
+  border-top: 1px solid var(--bd);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.u-meta {
+  min-width: 0;
+}
+.u-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.u-sub {
+  font-size: 11px;
+  color: var(--t3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar.collapsed .nav-foot {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+/* 版本信息（保持与改造前一致的呈现：左侧「版本」标签 + 右侧等宽字体版本号） */
 .version-info {
   padding: 8px 12px;
   border-top: 1px solid var(--border);
@@ -433,12 +552,8 @@ onMounted(() => {
   font-family: var(--mono);
   font-size: 13px;
 }
-.ver-val.loading {
-  opacity: 0.5;
-}
 .sidebar-footer {
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
+  padding-top: 6px;
 }
 .toggle-btn {
   width: 100%;

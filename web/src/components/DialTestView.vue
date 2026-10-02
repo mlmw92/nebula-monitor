@@ -1,16 +1,19 @@
 <template>
   <div class="dialtest-view">
-    <div class="page-header">
-      <div class="header-left">
-        <h2 class="page-title">服务拨测</h2>
-        <p class="page-desc">HTTP/HTTPS/TCP/ICMP 拨测监控，SSL 证书到期检测</p>
-      </div>
-      <el-button type="primary" @click="showDialog = true">新建拨测任务</el-button>
-    </div>
+    <PageHeader title="服务拨测" desc="HTTP / HTTPS / TCP / ICMP 拨测监控，SSL 证书到期检测">
+      <template #actions>
+        <el-button type="primary" @click="showDialog = true">新建拨测任务</el-button>
+      </template>
+    </PageHeader>
 
-    <div class="chart-section glass">
-      <div class="section-title">拨测任务列表</div>
+    <SectionCard title="拨测任务列表" dense>
       <el-table :data="tasks" style="width: 100%" v-loading="loading">
+        <template #empty>
+          <EmptyState
+            title="暂无拨测任务"
+            :hints="['点右上角「新建拨测任务」，选择 HTTP / TCP / ICMP 与目标地址', '拨测由 Server 主动发起，无需在目标机安装 Agent']"
+          />
+        </template>
         <el-table-column prop="name" label="任务名称" min-width="120" />
         <el-table-column prop="type" label="类型" width="80">
           <template #default="{ row }"><el-tag size="small">{{ row.type }}</el-tag></template>
@@ -48,10 +51,9 @@
           </template>
         </el-table-column>
       </el-table>
-    </div>
+    </SectionCard>
 
-    <div class="chart-section glass" v-if="results.length > 0">
-      <div class="section-title">最近拨测结果</div>
+    <SectionCard v-if="results.length > 0" title="最近拨测结果" dense>
       <el-table :data="results" style="width: 100%">
         <el-table-column prop="name" label="任务名" min-width="120" />
         <el-table-column prop="type" label="类型" width="80" />
@@ -76,7 +78,7 @@
           </template>
         </el-table-column>
       </el-table>
-    </div>
+    </SectionCard>
 
     <!-- 新建/编辑对话框 -->
     <el-dialog v-model="showDialog" :title="editing ? '编辑拨测任务' : '新建拨测任务'" width="540px">
@@ -138,6 +140,9 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import http from '../api/http'
+import PageHeader from './common/PageHeader.vue'
+import SectionCard from './common/SectionCard.vue'
+import EmptyState from './common/EmptyState.vue'
 
 const loading = ref(false)
 const tasks = ref([])

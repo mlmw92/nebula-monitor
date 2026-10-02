@@ -1,13 +1,9 @@
 <template>
   <section class="view">
-    <header class="view-head">
-      <div class="head-row">
-        <h2>资产台账</h2>
-        <span class="muted">
-          主机与中间件实例由 Agent 每轮上报自动发现；人工值不覆盖采集值，两者差异在详情里逐字段可见
-        </span>
-      </div>
-    </header>
+    <PageHeader
+      title="资产台账"
+      desc="主机与中间件实例由 Agent 每轮上报自动发现；人工值不覆盖采集值，两者差异在详情里逐字段可见"
+    />
 
     <!-- 健康度：与其它监控页统一的 KpiCard 卡片行；数字与列表同一套条件，点卡片即下钻 -->
     <div class="kpi-row">
@@ -17,7 +13,7 @@
         </KpiCard>
       </div>
       <div class="kpi-click" title="只看超过 30 分钟未上报的资产" @click="drillStatus('missing')">
-        <KpiCard :value="summary.missing" label="失联" hint="超 30 分钟未上报" tone="down">
+        <KpiCard :value="summary.missing" label="失联" hint="超 30 分钟未上报" :tone="summary.missing > 0 ? 'down' : 'total'">
           <template #icon><el-icon :size="20"><WarningFilled /></el-icon></template>
         </KpiCard>
       </div>
@@ -149,12 +145,14 @@
         :data="items"
         v-loading="loading"
         row-key="id"
-        empty-text="没有匹配的资产（资产会在 Agent 首次上报后自动出现）"
         :row-class-name="rowClass"
         style="width: 100%"
         @row-click="onRowClick"
         @selection-change="onSelectionChange"
       >
+        <template #empty>
+          <EmptyState :icon="Files" :title="listEmptyTitle" :hints="listHints" />
+        </template>
         <!-- 多选列：批量维护的入口。点复选框不应打开详情（那是在选行，不是在"看这一条"），
              见 onRowClick 里对 selection 列的判断。 -->
         <el-table-column type="selection" width="42" />
@@ -312,7 +310,14 @@
               <span>技术属性</span>
               <span class="muted">由 Agent 采集写入；人工值不覆盖采集值</span>
             </div>
-            <el-table :data="techRows" empty-text="暂无采集属性" style="width: 100%">
+            <el-table :data="techRows" style="width: 100%">
+              <template #empty>
+                <EmptyState
+                  :icon="Files"
+                  title="暂无采集属性"
+                  :hints="['该资产还没有采集到的技术属性', '等下一轮上报后再看；仍未出现时确认对应采集项已开启']"
+                />
+              </template>
               <el-table-column label="字段" width="150">
                 <template #default="{ row }"><span class="mono">{{ row.key }}</span></template>
               </el-table-column>
@@ -348,7 +353,14 @@
               <span>管理属性</span>
               <span class="muted">仅人工维护，采集不写入（责任人固定用 owner 键）</span>
             </div>
-            <el-table :data="manualRows" empty-text="暂无人工属性" style="width: 100%">
+            <el-table :data="manualRows" style="width: 100%">
+              <template #empty>
+                <EmptyState
+                  :icon="Files"
+                  title="暂无人工属性"
+                  :hints="['管理属性只由人工维护，采集不会写入', '在详情里补充责任人（owner 键）等字段后这里就有内容']"
+                />
+              </template>
               <el-table-column label="字段" width="150">
                 <template #default="{ row }"><span class="mono">{{ row.key }}</span></template>
               </el-table-column>
@@ -412,7 +424,12 @@
                 </div>
               </el-timeline-item>
             </el-timeline>
-            <el-empty v-else description="暂无变更" />
+            <EmptyState
+              v-else
+              :icon="DataLine"
+              title="暂无变更记录"
+              :hints="['字段发生变化（采集值差异或人工值修改）时才记录一条', '运行态字段（如 up / status）刻意不参与比对']"
+            />
           </el-tab-pane>
 
           <el-tab-pane :label="`关联关系 ${links.length}`" name="links">
@@ -420,7 +437,14 @@
               <span>关联关系</span>
               <span class="muted">自动发现时建立：中间件实例 runs_on 宿主主机</span>
             </div>
-            <el-table :data="links" empty-text="暂无关联" style="width: 100%">
+            <el-table :data="links" style="width: 100%">
+              <template #empty>
+                <EmptyState
+                  :icon="Files"
+                  title="暂无关联关系"
+                  :hints="['中间件实例与宿主主机的 runs_on 关系由 Agent 上报后自动建立', '宿主机或实例任一侧未上报时，这里会是空的']"
+                />
+              </template>
               <el-table-column label="方向" width="110">
                 <template #default="{ row }">
                   <span :class="'rel-' + row.direction">{{ row.direction === 'out' ? '本资产 →' : '← 指向本资产' }}</span>
@@ -664,6 +688,9 @@ import {
   exportAssets,
 } from '../../api/asset'
 import { useAuth } from '../../composables/useAuth'
+import { Files, DataLine } from '@element-plus/icons-vue'
+import PageHeader from '../common/PageHeader.vue'
+import EmptyState from '../common/EmptyState.vue'
 // 与中间件 / 容器等页面统一的 KPI 卡片（顶部彩条 + 图标 + 数值）
 import KpiCard from '../KpiCard.vue'
 // 批量条与节点操作页共用（同一个视觉与「取消选择」位置）
@@ -681,6 +708,21 @@ const loading = ref(false)
 const saving = ref(false)
 const loadError = ref('')
 const summary = ref({ total: 0, missing: 0, noOwner: 0, conflict: 0, changes: 0, ignored: 0 })
+
+// 列表空态：区分「台账本身就是空的」与「被筛选掉了」，并指向下一步动作
+const listEmptyTitle = computed(() => (summary.value.total > 0 ? '没有匹配的资产' : '资产台账为空'))
+const listHints = computed(() => {
+  if (summary.value.total > 0) {
+    return [
+      `台账共 ${summary.value.total} 条资产，当前筛选条件下没有匹配项`,
+      '清空上方筛选条件，或切换「含已忽略」再查一次',
+    ]
+  }
+  return [
+    '资产在 Agent 首次上报后自动出现：确认至少有一台 Agent 已连上 Server',
+    '也可以直接人工建档，新建的资产会立即出现在列表里',
+  ]
+})
 
 const filter = ref({ type: '', status: '', source: '', node: '', keyword: '', label: '', ignored: '' })
 // 摘要下钻的三个条件（无责任人 / 有冲突 / 已忽略）：不在下拉里，单独记状态以便显示与撤销
@@ -1391,23 +1433,7 @@ onMounted(load)
 </script>
 
 <style scoped>
-/* 与 LogsView 等页面同一套头部约定：.view 自带内边距、h2 统一字号 */
-.view {
-  padding: 16px;
-}
-.view-head {
-  margin-bottom: 12px;
-}
-.view-head .head-row {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.view-head h2 {
-  margin: 0;
-  font-size: 18px;
-}
+/* 页头统一走 PageHeader；内容边距交给 MainLayout 的 .content，各页不再自带缩进 */
 .panel + .panel,
 .kpi-row + .panel {
   margin-top: 12px;
@@ -1441,8 +1467,8 @@ onMounted(load)
   padding: 12px;
   margin-bottom: 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--r-md);
+  background: var(--fill-1);
 }
 .field {
   display: inline-flex;
@@ -1483,7 +1509,7 @@ onMounted(load)
   color: var(--danger);
 }
 .tag.archived {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-2);
   color: var(--text-dim);
 }
 /* 列表状态：圆点 + 文字 */
@@ -1546,7 +1572,7 @@ onMounted(load)
   display: inline-block;
   margin-left: 6px;
   padding: 0 6px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid var(--bd-strong);
   border-radius: 3px;
   color: var(--text-dim);
   font-size: 11px;
@@ -1605,7 +1631,7 @@ onMounted(load)
   color: var(--text-dim);
 }
 .d-meta code {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-2);
   border-radius: 3px;
   padding: 1px 5px;
 }
@@ -1668,7 +1694,7 @@ onMounted(load)
   line-height: 18px;
 }
 .srcpill.auto {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-2);
   color: var(--text-dim);
 }
 .srcpill.man {

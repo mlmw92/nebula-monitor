@@ -1,13 +1,11 @@
 <template>
   <section class="view">
-    <header class="view-head">
-      <div class="head-row">
-        <h2>集中日志</h2>
-        <span class="muted">检索各节点上报的日志行（Agent 侧只上传 <code>logSources.patterns</code> 命中的行）</span>
-      </div>
-    </header>
+    <PageHeader
+      title="集中日志"
+      desc="检索各节点上报的日志行（Agent 侧只上传 logSources.patterns 命中的行）"
+    />
 
-    <div class="panel">
+    <div class="card panel">
       <div class="toolbar">
         <el-date-picker
           v-model="range"
@@ -87,7 +85,17 @@
         class="alert-gap"
       />
 
-      <el-table :data="lines" empty-text="没有命中的日志" style="width: 100%">
+      <el-table :data="lines" style="width: 100%">
+        <template #empty>
+          <EmptyState
+            title="没有命中的日志"
+            :hints="[
+              '确认 Agent 的 logSources.patterns 已配置并包含目标文件路径',
+              '扩大时间范围——日志默认只查最近一段时间',
+              '关键词模式下是子串匹配，正则模式需切换到「正则」',
+            ]"
+          />
+        </template>
         <el-table-column label="时间" width="180">
           <template #default="{ row }">{{ fmtTime(row.ts) }}</template>
         </el-table-column>
@@ -165,6 +173,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import http from '../api/http'
+import PageHeader from './common/PageHeader.vue'
+import EmptyState from './common/EmptyState.vue'
 
 const route = useRoute()
 
@@ -446,12 +456,11 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.view { padding: 16px; }
-.view-head { margin-bottom: 12px; }
-.head-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.head-row h2 { margin: 0; font-size: 18px; }
+/* 内边距由 MainLayout 的 .content 统一提供，页面不再自己套一层 */
+.view { padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .muted { color: var(--text-muted); font-size: 12px; }
-.panel { background: var(--panel-bg, transparent); border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; padding: 12px; }
+/* .card 只给底色与描边，内边距由此处的 .panel 提供（与元素表共用一套卡片语言） */
+.panel { padding: 12px; }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .alert-gap { margin-bottom: 10px; }
 .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; background: var(--tag-bg, rgba(64, 158, 255, 0.12)); font-size: 12px; }

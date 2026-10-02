@@ -55,11 +55,11 @@ const entry = computed(() => {
 }
 .mw-role-slave {
   background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
+  color: var(--ok);
 }
 .mw-role-sentinel {
   background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
+  color: var(--warn);
 }
 .mw-role-broker {
   background: rgba(59, 130, 246, 0.15);
@@ -71,6 +71,6 @@ const entry = computed(() => {
 }
 .mw-role-unknown {
   background: rgba(107, 124, 147, 0.15);
-  color: #94a3b8;
+  color: var(--t3);
 }
 </style>

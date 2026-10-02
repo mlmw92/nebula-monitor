@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="b">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NebulaEye 页面重设计方案 v2 · 设计稿</title>
+<style>
+/* ============================================================
+   设计令牌（与 src/assets/style.css 一一对应）
+   ============================================================ */
+:root, body[data-theme="b"] {
+  --bg:#060a13; --bg-elev:#0b1220; --bg-card:#0e1728;
+  --surface-2:#131e33; --surface-3:#18243c;
+  --border:rgba(148,178,224,.10); --border-strong:rgba(148,178,224,.20); --border-hi:rgba(148,178,224,.34);
+  --text:#e8eefb; --t2:#9baed0; --t3:#6f83a6;
+  --accent:#4a9df0; --accent-dim:rgba(74,157,240,.12); --accent-glow:rgba(74,157,240,.16);
+  --ok:#22c55e; --warn:#ffb454; --danger:#ff5d6c; --info:#38bdf8;
+  --ok-dim:rgba(34,197,94,.14); --warn-dim:rgba(255,180,84,.14);
+  --danger-dim:rgba(255,93,108,.14); --info-dim:rgba(56,189,248,.14);
+  --ok-bd:rgba(34,197,94,.32); --warn-bd:rgba(255,180,84,.32);
+  --danger-bd:rgba(255,93,108,.34); --info-bd:rgba(56,189,248,.30);
+  --g1:rgba(74,157,240,.10); --g2:rgba(56,189,248,.06);
+  --c1:#3b82f6; --c2:#22d3ee; --c3:#22c55e; --c4:#f59e0b; --c5:#ef4444; --c6:#a855f7; --c7:#6366f1;
+  --card-hi:linear-gradient(180deg,rgba(255,255,255,.022) 0%,rgba(255,255,255,0) 40%);
+}
+body[data-theme="a"] {
+  --bg:#070b0f; --bg-elev:#0f151c; --bg-card:#121a22;
+  --surface-2:#17212a; --surface-3:#1d2934;
+  --border:rgba(190,214,230,.09); --border-strong:rgba(190,214,230,.18); --border-hi:rgba(190,214,230,.32);
+  --text:#e6edf3; --t2:#a4adba; --t3:#74808f;
+  --accent:#00d9a3; --accent-dim:rgba(0,217,163,.12); --accent-glow:rgba(0,217,163,.16);
+  --ok:#00d9a3; --warn:#f59e0b; --danger:#f43f5e; --info:#38bdf8;
+  --ok-dim:rgba(0,217,163,.14); --warn-dim:rgba(245,158,11,.14);
+  --danger-dim:rgba(244,63,94,.14); --info-dim:rgba(56,189,248,.14);
+  --ok-bd:rgba(0,217,163,.32); --warn-bd:rgba(245,158,11,.32);
+  --danger-bd:rgba(244,63,94,.34); --info-bd:rgba(56,189,248,.30);
+  --g1:rgba(0,217,163,.10); --g2:rgba(56,189,248,.05);
+  --c1:#38bdf8; --c2:#22d3ee; --c3:#00d9a3; --c4:#f59e0b; --c5:#f43f5e; --c6:#a855f7; --c7:#6366f1;
+}
+body[data-theme="c"] {
+  --bg:#080613; --bg-elev:#100c20; --bg-card:#141026;
+  --surface-2:#1a1433; --surface-3:#211a41;
+  --border:rgba(180,150,255,.11); --border-strong:rgba(180,150,255,.22); --border-hi:rgba(180,150,255,.36);
+  --text:#ece9fb; --t2:#aaa3ce; --t3:#7d76a0;
+  --accent:#8b5cf6; --accent-dim:rgba(139,92,246,.14); --accent-glow:rgba(139,92,246,.18);
+  --ok:#34d399; --warn:#fbbf24; --danger:#fb7185; --info:#38bdf8;
+  --ok-dim:rgba(52,211,153,.14); --warn-dim:rgba(251,191,36,.14);
+  --danger-dim:rgba(251,113,133,.14); --info-dim:rgba(56,189,248,.14);
+  --ok-bd:rgba(52,211,153,.32); --warn-bd:rgba(251,191,36,.32);
+  --danger-bd:rgba(251,113,133,.34); --info-bd:rgba(56,189,248,.30);
+  --g1:rgba(139,92,246,.12); --g2:rgba(56,189,248,.05);
+  --c1:#6366f1; --c2:#22d3ee; --c3:#34d399; --c4:#fbbf24; --c5:#fb7185; --c6:#a855f7; --c7:#818cf8;
+}
+:root{
+  --sp1:4px; --sp2:8px; --sp3:12px; --sp4:16px; --sp5:20px; --sp6:24px; --sp8:32px;
+  --r-xs:4px; --r-sm:6px; --r-md:8px; --r-lg:10px; --r-xl:14px; --r-pill:999px;
+  --sh1:0 1px 2px rgba(0,0,0,.32); --sh2:0 2px 8px rgba(0,0,0,.30); --sh3:0 8px 24px rgba(0,0,0,.42);
+  --sh-inset:inset 0 1px 0 rgba(255,255,255,.04);
+  --fs-xs:12px; --fs-sm:13px; --fs-base:14px; --fs-md:15px; --fs-lg:17px; --fs-xl:20px; --fs-2xl:24px; --fs-3xl:30px;
+  --sidebar-w:232px; --topbar-h:56px;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+  --mono:'JetBrains Mono','Consolas','Monaco',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background-color:var(--bg); color:var(--text); font-family:var(--font); font-size:var(--fs-base);
+  -webkit-font-smoothing:antialiased; line-height:1.55;
+  background-image:
+    radial-gradient(1100px 620px at 12% -8%, var(--g1) 0%, transparent 62%),
+    radial-gradient(900px 520px at 102% 4%, var(--g2) 0%, transparent 58%),
+    linear-gradient(transparent 0 calc(100% - 1px), rgba(148,178,224,.03) calc(100% - 1px) 100%),
+    linear-gradient(90deg, transparent 0 calc(100% - 1px), rgba(148,178,224,.03) calc(100% - 1px) 100%);
+  background-size:100% 100%,100% 100%,100% 44px,44px 100%;
+  background-attachment:fixed;
+  transition:background-color .3s, color .3s;
+}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- 稿面外壳 ---------- */
+.wrap{max-width:1440px;margin:0 auto;padding:28px 24px 64px}
+.doc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:24px;flex-wrap:wrap}
+.doc-head h1{font-size:var(--fs-2xl);font-weight:700;letter-spacing:-.015em}
+.doc-head p{font-size:var(--fs-sm);color:var(--t2);margin-top:4px}
+.theme-switch{display:flex;gap:6px;align-items:center}
+.theme-switch button{
+  display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:var(--r-pill);cursor:pointer;
+  background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--t2);
+  font-family:var(--font);font-size:var(--fs-sm);transition:all .15s;
+}
+.theme-switch button:hover{border-color:var(--border-hi);color:var(--text)}
+.theme-switch button.on{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+.theme-switch .sw{width:10px;height:10px;border-radius:50%}
+
+/* ---------- 界面稿容器 ---------- */
+.stage{
+  border:1px solid var(--border-strong);border-radius:var(--r-xl);overflow:hidden;
+  box-shadow:var(--sh3);background:var(--bg);
+}
+.app{display:grid;grid-template-columns:var(--sidebar-w) 1fr;min-height:760px}
+
+/* ---------- 侧边栏 ---------- */
+.sidebar{
+  display:flex;flex-direction:column;padding:14px 12px;gap:4px;
+  background:color-mix(in srgb, var(--bg-elev) 88%, transparent);
+  border-right:1px solid var(--border);
+}
+.brand{display:flex;align-items:center;gap:10px;padding:6px 8px 14px;margin-bottom:6px;border-bottom:1px solid var(--border)}
+.brand-mark{
+  width:34px;height:34px;border-radius:10px;flex-shrink:0;
+  background:linear-gradient(135deg,var(--accent),var(--c2));
+  display:flex;align-items:center;justify-content:center;color:#04121f;font-weight:700;font-size:13px;
+  box-shadow:0 0 16px var(--accent-glow);
+}
+.brand-name{font-size:var(--fs-md);font-weight:700;letter-spacing:.02em;line-height:1.2}
+.brand-sub{font-size:var(--fs-xs);color:var(--t3)}
+.nav-search{
+  display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;margin-bottom:10px;
+  border-radius:var(--r-sm);border:1px solid var(--border);background:rgba(0,0,0,.25);
+  color:var(--t3);font-size:var(--fs-sm);cursor:pointer;transition:all .15s;
+}
+.nav-search:hover{border-color:var(--accent);color:var(--t2)}
+.nav-search .kbd{
+  margin-left:auto;font-family:var(--mono);font-size:11px;padding:1px 5px;border-radius:4px;
+  background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--t3);
+}
+.nav-sec{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--t3);padding:10px 10px 4px}
+.nav-item{
+  position:relative;display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;
+  border-radius:var(--r-sm);color:var(--t2);font-size:var(--fs-base);cursor:pointer;
+  transition:background .15s,color .15s;
+}
+.nav-item:hover{background:rgba(255,255,255,.045);color:var(--text)}
+.nav-item .ic{width:16px;height:16px;flex-shrink:0;opacity:.9}
+.nav-item.on{background:var(--accent-dim);color:var(--accent);font-weight:600}
+.nav-item.on::before{
+  content:'';position:absolute;left:-12px;top:50%;transform:translateY(-50%);
+  width:3px;height:18px;border-radius:0 2px 2px 0;background:var(--accent);
+}
+.nav-item .badge{
+  margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:var(--r-pill);
+  background:var(--danger-dim);color:var(--danger);border:1px solid var(--danger-bd);
+  font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;
+}
+.nav-foot{margin-top:auto;padding-top:10px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.avatar{
+  width:30px;height:30px;border-radius:50%;flex-shrink:0;background:var(--accent-dim);
+  border:1px solid var(--accent);color:var(--accent);
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;
+}
+.nav-foot .u-name{font-size:var(--fs-sm);font-weight:600;line-height:1.2}
+.nav-foot .u-meta{font-size:11px;color:var(--t3)}
+
+/* ---------- 顶栏 ---------- */
+.topbar{
+  height:var(--topbar-h);display:flex;align-items:center;gap:12px;padding:0 20px;
+  border-bottom:1px solid var(--border);background:color-mix(in srgb, var(--bg-elev) 70%, transparent);
+}
+.crumb{font-size:var(--fs-sm);color:var(--t3)}
+.crumb b{color:var(--text);font-weight:600}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.icon-btn{
+  width:32px;height:32px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--t2);cursor:pointer;transition:all .15s;
+}
+.icon-btn:hover{color:var(--text);border-color:var(--border-hi);background:rgba(255,255,255,.07)}
+.icon-btn.has-dot{position:relative}
+.icon-btn.has-dot::after{
+  content:'';position:absolute;top:6px;right:6px;width:6px;height:6px;border-radius:50%;
+  background:var(--danger);box-shadow:0 0 0 2px var(--bg-elev);
+}
+.screen-btn{
+  display:flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:var(--r-sm);
+  border:1px solid var(--border-strong);background:rgba(255,255,255,.03);color:var(--t2);
+  font-size:var(--fs-sm);font-weight:600;cursor:pointer;transition:all .15s;
+}
+.screen-btn:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
+.dot-btn{width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:rgba(255,255,255,.03);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.dot-btn i{width:12px;height:12px;border-radius:50%;background:var(--accent);display:block;box-shadow:0 0 6px var(--accent-glow)}
+
+/* ---------- 内容区 ---------- */
+.content{padding:18px 20px 24px;min-width:0}
+.ai-bar{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;margin-bottom:14px;border-radius:var(--r-md);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);background:var(--accent-dim)}
+.ai-bar .ai-ic{width:22px;height:22px;border-radius:6px;flex-shrink:0;margin-top:1px;background:var(--accent);color:#04121f;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.ai-bar .ai-txt{flex:1;min-width:0;font-size:var(--fs-sm);color:var(--t2)}
+.ai-bar .ai-txt b{color:var(--text);font-weight:600}
+.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.page-head h2{font-size:var(--fs-2xl);font-weight:700;letter-spacing:-.015em;line-height:1.2}
+.page-head .desc{font-size:var(--fs-sm);color:var(--t2);margin-top:2px}
+.page-head .acts{display:flex;gap:8px;flex-shrink:0}
+
+/* 卡片 */
+.card{
+  position:relative;background-color:var(--bg-card);background-image:var(--card-hi);
+  border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh1),var(--sh-inset);
+  transition:border-color .2s,box-shadow .2s,transform .2s;
+}
+.card.hoverable:hover{border-color:var(--border-hi);box-shadow:var(--sh2),var(--sh-inset);transform:translateY(-1px)}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 16px;border-bottom:1px solid var(--border)}
+.card-title{display:flex;align-items:center;gap:8px;font-size:var(--fs-base);font-weight:600;letter-spacing:.01em;color:var(--text)}
+.card-title .accent-bar{width:2px;height:13px;border-radius:2px;background:var(--accent)}
+.card-body{padding:14px 16px}
+.card-body.tight{padding:10px 12px}
+.card-foot{padding:9px 16px;border-top:1px solid var(--border);font-size:var(--fs-xs);color:var(--t3)}
+
+.btn{
+  display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border-radius:var(--r-sm);
+  font-size:var(--fs-sm);font-family:var(--font);cursor:pointer;transition:all .15s;
+  border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--t2);
+}
+.btn:hover{color:var(--text);border-color:var(--border-hi)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:600}
+.btn.primary:hover{box-shadow:0 0 0 3px var(--accent-glow)}
+.btn.sm{height:28px;padding:0 10px;font-size:var(--fs-xs)}
+
+/* 网格 */
+.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}
+.s3{grid-column:span 3}.s4{grid-column:span 4}.s6{grid-column:span 6}.s8{grid-column:span 8}.s12{grid-column:span 12}
+.mb{margin-bottom:16px}
+
+/* ---------- 态势条 ---------- */
+.hero{display:flex;align-items:center;gap:22px;padding:16px 18px;flex-wrap:wrap}
+.hero-ring{position:relative;width:88px;height:88px;border-radius:50%;flex-shrink:0;
+  background:conic-gradient(var(--ok) 0 calc(var(--p)*1%), var(--surface-2) 0);
+  display:flex;align-items:center;justify-content:center}
+.hero-ring::before{content:'';position:absolute;inset:9px;background:var(--bg-card);border-radius:50%}
+.hero-ring .v{position:relative;font-size:var(--fs-3xl);font-weight:800;line-height:1;color:var(--ok)}
+.hero-ring .u{position:relative;font-size:11px;color:var(--t3);margin-left:2px}
+.hero-meta .st{font-size:var(--fs-lg);font-weight:700;color:var(--ok)}
+.hero-meta .sub{font-size:var(--fs-sm);color:var(--t2);margin-top:2px}
+.hero-meta .sub .off{color:var(--danger)}
+.hero-stats{margin-left:auto;display:flex;gap:28px;flex-wrap:wrap}
+.hstat .k{font-size:var(--fs-xs);color:var(--t3);letter-spacing:.04em}
+.hstat .v{font-size:var(--fs-xl);font-weight:700;margin-top:2px}
+.hstat .v.ok{color:var(--ok)}.hstat .v.warn{color:var(--warn)}.hstat .v.danger{color:var(--danger)}
+
+/* ---------- KPI ---------- */
+.kpi{display:flex;align-items:flex-start;gap:12px;padding:14px 16px}
+.kpi-ic{width:36px;height:36px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.kpi-main{min-width:0;flex:1}
+.kpi-k{font-size:var(--fs-sm);color:var(--t2)}
+.kpi-v{font-size:26px;font-weight:700;line-height:1.15;letter-spacing:-.02em;margin-top:2px}
+.kpi-f{font-size:var(--fs-xs);color:var(--t3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spark{margin-top:8px;height:26px}
+
+/* ---------- 告警行 ---------- */
+.alert-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--r-sm);border-left:2px solid var(--t3);background:var(--surface-2);transition:background .15s}
+.alert-row+.alert-row{margin-top:6px}
+.alert-row:hover{background:var(--surface-3)}
+.alert-row.crit{border-left-color:var(--danger)}
+.alert-row.warn{border-left-color:var(--warn)}
+.alert-row .nm{font-size:var(--fs-sm);font-weight:600;flex-shrink:0;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.alert-row .msg{font-size:var(--fs-sm);color:var(--t2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.alert-row .tm{font-size:var(--fs-xs);color:var(--t3);flex-shrink:0}
+
+/* 药丸 */
+.pill{display:inline-flex;align-items:center;gap:5px;padding:1px 9px;border-radius:var(--r-pill);font-size:var(--fs-xs);font-weight:600;border:1px solid transparent;white-space:nowrap}
+.pill.ok{background:var(--ok-dim);color:var(--ok);border-color:var(--ok-bd)}
+.pill.warn{background:var(--warn-dim);color:var(--warn);border-color:var(--warn-bd)}
+.pill.danger{background:var(--danger-dim);color:var(--danger);border-color:var(--danger-bd)}
+.pill.info{background:var(--info-dim);color:var(--info);border-color:var(--info-bd)}
+.pill.muted{background:rgba(255,255,255,.05);color:var(--t2);border-color:var(--border)}
+.pill i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
+
+/* ---------- 主机芯片 ---------- */
+.host-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r-sm);border:1px solid var(--border);background:rgba(255,255,255,.02);cursor:pointer;transition:all .15s}
+.host-row+.host-row{margin-top:6px}
+.host-row:hover{border-color:var(--accent);background:var(--accent-dim)}
+.host-row .nm{font-size:var(--fs-sm);width:120px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.metric{display:flex;align-items:center;gap:6px;flex:1;min-width:0}
+.metric .lb{font-size:11px;color:var(--t3);width:28px;flex-shrink:0}
+.mini-bar{flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden;min-width:0}
+.mini-bar i{display:block;height:100%;border-radius:3px}
+.metric .vl{font-size:11px;color:var(--t2);width:38px;text-align:right;flex-shrink:0}
+
+/* ---------- 中间件 ---------- */
+.mw-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.mw{padding:12px 14px;border-radius:var(--r-md);border:1px solid var(--border);background:rgba(255,255,255,.02);transition:all .15s}
+.mw:hover{border-color:var(--border-hi);background:rgba(255,255,255,.04)}
+.mw-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.mw-ic{width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;background:var(--surface-2);border:1px solid var(--border);color:var(--t2)}
+.mw-nm{font-size:var(--fs-sm);font-weight:600}
+.mw-nums{display:flex;align-items:baseline;gap:6px}
+.mw-nums .n{font-size:var(--fs-xl);font-weight:700}
+.mw-nums .d{font-size:var(--fs-xs);color:var(--t3)}
+.mw-sub{font-size:11px;color:var(--t3);margin-top:2px}
+
+/* ---------- 表格 ---------- */
+.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-base)}
+.tbl th{text-align:left;padding:7px 12px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border)}
+.tbl td{padding:7px 12px;border-bottom:1px solid var(--border);color:var(--t2);font-size:var(--fs-sm)}
+.tbl td.strong{color:var(--text);font-weight:600}
+.tbl tbody tr:hover{background:rgba(255,255,255,.02)}
+
+/* ---------- 空状态 ---------- */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:32px 16px;text-align:center}
+.empty .ei{width:46px;height:46px;border-radius:var(--r-lg);background:var(--surface-2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;margin-bottom:4px}
+.empty .et{font-size:var(--fs-base);font-weight:600;color:var(--t2)}
+.empty .ed{font-size:var(--fs-sm);color:var(--t3);max-width:420px}
+
+/* ---------- 命令面板 ---------- */
+.cmdk{position:relative;margin-top:24px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--bg-elev);box-shadow:var(--sh3);overflow:hidden;max-width:640px}
+.cmdk-in{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.cmdk-in input{flex:1;background:transparent;border:none;outline:none;color:var(--text);font-size:var(--fs-md);font-family:var(--font)}
+.cmdk-in .kbd{font-family:var(--mono);font-size:11px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--t3)}
+.cmdk-list{max-height:280px;overflow:auto;padding:6px}
+.cmdk-sec{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);padding:8px 10px 4px}
+.cmdk-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r-sm);font-size:var(--fs-base);color:var(--t2);cursor:pointer}
+.cmdk-row.on{background:var(--accent-dim);color:var(--accent)}
+.cmdk-row .rt{margin-left:auto;font-size:var(--fs-xs);color:var(--t3)}
+
+/* ---------- 规范区 ---------- */
+.spec{margin-top:40px}
+.spec h3{font-size:var(--fs-xl);font-weight:700;margin-bottom:4px}
+.spec .lead{font-size:var(--fs-sm);color:var(--t2);margin-bottom:16px}
+.tok-tbl{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+.tok-tbl th{text-align:left;padding:8px 12px;font-size:var(--fs-xs);color:var(--t3);border-bottom:1px solid var(--border);letter-spacing:.05em;text-transform:uppercase}
+.tok-tbl td{padding:8px 12px;border-bottom:1px solid var(--border);color:var(--t2)}
+.tok-tbl td code{font-family:var(--mono);font-size:var(--fs-xs);color:var(--accent);background:var(--accent-dim);padding:1px 6px;border-radius:4px}
+.swatches{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.sw{width:88px}
+.sw .box{height:44px;border-radius:var(--r-sm);border:1px solid var(--border)}
+.sw .lb{font-size:11px;margin-top:4px}
+.sw .hex{font-size:11px;color:var(--t3);font-family:var(--mono)}
+.note{margin-top:24px;padding:14px 16px;border-radius:var(--r-md);border:1px solid var(--border);background:rgba(255,255,255,.02);font-size:var(--fs-sm);color:var(--t2)}
+.note b{color:var(--text)}
+@media(max-width:1080px){
+  .app{grid-template-columns:64px 1fr}
+  .sidebar .brand-sub,.sidebar .nav-sec,.sidebar .nav-item span,.nav-foot .u-name,.nav-foot .u-meta,.nav-search{display:none}
+  .s3,.s4{grid-column:span 6}.s6,.s8{grid-column:span 12}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="doc-head">
+    <div>
+      <h1>NebulaEye 页面重设计方案 v2.1</h1>
+      <p>深空指挥台 · 设计稿（静态预览，未改动任何业务代码）· 切换右上角主题可验证令牌联动</p>
+    </div>
+    <div class="theme-switch">
+      <button class="on" data-t="b"><span class="sw" style="background:#4a9df0"></span>极光蓝</button>
+      <button data-t="a"><span class="sw" style="background:#00d9a3"></span>星云青绿</button>
+      <button data-t="c"><span class="sw" style="background:#8b5cf6"></span>星河紫</button>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="app">
+
+      <!-- ============ 侧边栏 ============ -->
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">NE</div>
+          <div>
+            <div class="brand-name">NebulaEye</div>
+            <div class="brand-sub">服务器监控指挥中心</div>
+          </div>
+        </div>
+
+        <div class="nav-search">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+          <span>搜索页面、主机</span>
+          <span class="kbd">⌘K</span>
+        </div>
+
+        <div class="nav-item on">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 9l2-2 2 2 2-3"/></svg>
+          <span>首页概览</span>
+        </div>
+
+        <div class="nav-sec">观测监控</div>
+        <div class="nav-item">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="3" width="13" height="8" rx="1.5"/><path d="M5.5 13h5"/></svg>
+          <span>主机列表</span>
+        </div>
+        <div class="nav-item">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="4" cy="8" r="2"/><circle cx="12" cy="4.5" r="2"/><circle cx="12" cy="11.5" r="2"/><path d="M5.8 7.2l4.4-1.9M5.8 8.8l4.4 1.9"/></svg>
+          <span>中间件监控</span>
+        </div>
+        <div class="nav-item">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10M3 8h10M3 12h6"/></svg>
+          <span>集中日志</span>
+        </div>
+        <div class="nav-item">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="1.6"/></svg>
+          <span>服务拨测</span>
+        </div>
+
+        <div class="nav-sec">告警运维</div>
+        <div class="nav-item">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2.5a4 4 0 014 4v3l1.5 2.5H2.5L4 9.5v-3a4 4 0 014-4z"/><path d="M6.5 13.5a1.7 1.7 0 003 0"/></svg>
+          <span>告警中心</span>
+          <span class="badge">12</span>
+        </div>
+        <div class="nav-item">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 13V9M6.5 13V5M10.5 13V7M14 13V3"/></svg>
+          <span>智能分析</span>
+        </div>
+
+        <div class="nav-sec">资产与配置</div>
+        <div class="nav-item">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 4.5h4l1 1.5h6v6.5h-11z"/></svg>
+          <span>资产台账</span>
+        </div>
+        <div class="nav-item">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.8l5.2 2v4.4c0 3-2.2 5.2-5.2 6-3-.8-5.2-3-5.2-6V3.8z"/><path d="M5.8 8l1.6 1.6L10.4 6.6"/></svg>
+          <span>配置巡检</span>
+        </div>
+
+        <div class="nav-sec">安全治理</div>
+        <div class="nav-item">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5.2a2.5 2.5 0 015 0V7"/></svg>
+          <span>安全中心</span>
+        </div>
+        <div class="nav-item">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 3.5h11v9h-11z"/><path d="M5 6.5h6M5 9.5h4"/></svg>
+          <span>操作审计</span>
+        </div>
+
+        <div class="nav-sec">系统设置</div>
+        <div class="nav-item">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3"/></svg>
+          <span>站点与品牌</span>
+        </div>
+        <div class="nav-item">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="6" r="2.6"/><path d="M3 13.5c0-2.6 2.2-4.2 5-4.2s5 1.6 5 4.2"/></svg>
+          <span>用户管理</span>
+        </div>
+
+        <div class="nav-foot">
+          <div class="avatar">AD</div>
+          <div>
+            <div class="u-name">admin</div>
+            <div class="u-meta">超级管理员 · v1.15.0</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ============ 主区 ============ -->
+      <div>
+        <header class="topbar">
+          <div class="crumb">首页 / <b>系统概览</b></div>
+          <div class="topbar-right">
+            <div class="screen-btn">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v7H2z"/><path d="M6 13h4M8 10v3"/></svg>
+              数据大屏
+            </div>
+            <div class="dot-btn" title="切换配色主题"><i></i></div>
+            <div class="icon-btn" title="刷新数据">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13 8a5 5 0 11-1.6-3.7"/><path d="M13.2 2.4v2.6h-2.6"/></svg>
+            </div>
+            <div class="icon-btn has-dot" title="告警">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 2.5a4 4 0 014 4v3l1.5 2.5H2.5L4 9.5v-3a4 4 0 014-4z"/><path d="M6.5 13.5a1.7 1.7 0 003 0"/></svg>
+            </div>
+            <div class="avatar" style="cursor:pointer">AD</div>
+          </div>
+        </header>
+
+        <div class="content">
+          <div class="page-head">
+            <div>
+              <h2>系统概览</h2>
+              <div class="desc">主机、中间件与告警的实时健康总览 · 30 秒自动刷新</div>
+            </div>
+            <div class="acts">
+              <div class="btn">自定义布局</div>
+              <div class="btn primary">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M13 8a5 5 0 11-1.6-3.7"/><path d="M13.2 2.4v2.6h-2.6"/></svg>
+                刷新
+              </div>
+            </div>
+          </div>
+
+          <div class="ai-bar">
+            <span class="ai-ic">AI</span>
+            <div class="ai-txt"><b>过去 1 小时新增 3 条告警。</b>最需要处理的是 db-prod-01 磁盘已用 94%，按当前增速约 6 小时后写满；k8s-node-07 已离线 5 分钟，建议优先检查 kubelet 与节点网络。其余指标无异常。</div>
+            <span class="pill info" style="flex-shrink:0">查看依据</span>
+          </div>
+
+          <div class="grid">
+
+            <!-- 态势条 -->
+            <div class="s12 mb">
+              <div class="card">
+                <div class="hero">
+                  <div class="hero-ring" style="--p:92">
+                    <span class="v num">92</span><span class="u">分</span>
+                  </div>
+                  <div class="hero-meta">
+                    <div class="st">运行良好</div>
+                    <div class="sub">在线 126 / 共 128 · <span class="off">离线 2</span></div>
+                  </div>
+                  <div class="hero-stats">
+                    <div class="hstat"><div class="k">在线率</div><div class="v ok num">98.4%</div></div>
+                    <div class="hstat"><div class="k">活跃告警</div><div class="v warn num">12</div></div>
+                    <div class="hstat"><div class="k">紧急告警</div><div class="v danger num">3</div></div>
+                    <div class="hstat"><div class="k">采集延迟</div><div class="v num">1.2s</div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- KPI ×4 -->
+            <div class="s3 mb">
+              <div class="card hoverable kpi">
+                <div class="kpi-ic" style="background:rgba(255,255,255,.055);color:var(--t2)">
+                  <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="3" width="13" height="8" rx="1.5"/><path d="M5.5 13h5"/></svg>
+                </div>
+                <div class="kpi-main">
+                  <div class="kpi-k">主机总数</div>
+                  <div class="kpi-v num">128</div>
+                  <div class="kpi-f">在线 126 · 离线 2</div>
+                  <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" fill="none">
+                    <polyline points="0,20 12,17 24,18 36,13 48,15 60,10 72,12 84,7 100,9" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round"/>
+                    <polyline points="0,20 12,17 24,18 36,13 48,15 60,10 72,12 84,7 100,9 100,26 0,26" fill="var(--accent-dim)" stroke="none"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+            <div class="s3 mb">
+              <div class="card hoverable kpi">
+                <div class="kpi-ic" style="background:var(--danger-dim);color:var(--danger)">
+                  <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2.5a4 4 0 014 4v3l1.5 2.5H2.5L4 9.5v-3a4 4 0 014-4z"/><path d="M6.5 13.5a1.7 1.7 0 003 0"/></svg>
+                </div>
+                <div class="kpi-main">
+                  <div class="kpi-k">活跃告警</div>
+                  <div class="kpi-v num" style="color:var(--danger)">12</div>
+                  <div class="kpi-f">紧急 3 · 警告 9</div>
+                  <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" fill="none">
+                    <polyline points="0,22 12,20 24,21 36,16 48,12 60,14 72,8 84,10 100,6" stroke="var(--danger)" stroke-width="1.8" stroke-linecap="round"/>
+                    <polyline points="0,22 12,20 24,21 36,16 48,12 60,14 72,8 84,10 100,6 100,26 0,26" fill="var(--danger-dim)" stroke="none"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+            <div class="s3 mb">
+              <div class="card hoverable kpi">
+                <div class="kpi-ic" style="background:rgba(255,255,255,.055);color:var(--t2)">
+                  <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="4" cy="8" r="2"/><circle cx="12" cy="4.5" r="2"/><circle cx="12" cy="11.5" r="2"/><path d="M5.8 7.2l4.4-1.9M5.8 8.8l4.4 1.9"/></svg>
+                </div>
+                <div class="kpi-main">
+                  <div class="kpi-k">中间件实例</div>
+                  <div class="kpi-v num">47</div>
+                  <div class="kpi-f">9 种类型 · 全部可达</div>
+                  <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" fill="none">
+                    <polyline points="0,16 12,15 24,17 36,14 48,15 60,13 72,14 84,12 100,13" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round"/>
+                    <polyline points="0,16 12,15 24,17 36,14 48,15 60,13 72,14 84,12 100,13 100,26 0,26" fill="var(--accent-dim)" stroke="none"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+            <div class="s3 mb">
+              <div class="card hoverable kpi">
+                <div class="kpi-ic" style="background:rgba(255,255,255,.055);color:var(--t2)">
+                  <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="4" width="11" height="9" rx="2"/><path d="M6 4V2.6h4V4"/><path d="M6.5 8.5h3"/></svg>
+                </div>
+                <div class="kpi-main">
+                  <div class="kpi-k">系统健康度</div>
+                  <div class="kpi-v num">92</div>
+                  <div class="kpi-f">较昨日 +3</div>
+                  <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" fill="none">
+                    <polyline points="0,19 12,18 24,15 36,16 48,12 60,11 72,12 84,9 100,8" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round"/>
+                    <polyline points="0,19 12,18 24,15 36,16 48,12 60,11 72,12 84,9 100,8 100,26 0,26" fill="var(--accent-dim)" stroke="none"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            <!-- 紧急告警 -->
+            <div class="s6 mb">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-title"><span class="accent-bar"></span>紧急告警</div>
+                  <span class="pill danger"><i></i>3 条待处理</span>
+                </div>
+                <div class="card-body tight">
+                  <div class="alert-row crit">
+                    <span class="nm">db-prod-01</span>
+                    <span class="msg">磁盘使用率 94% 超过阈值</span>
+                    <span class="pill danger">紧急</span>
+                    <span class="tm num">2 分钟前</span>
+                  </div>
+                  <div class="alert-row crit">
+                    <span class="nm">k8s-node-07</span>
+                    <span class="msg">节点 NotReady 已持续 5 分钟</span>
+                    <span class="pill danger">紧急</span>
+                    <span class="tm num">5 分钟前</span>
+                  </div>
+                  <div class="alert-row warn">
+                    <span class="nm">redis-cache-02</span>
+                    <span class="msg">内存碎片率 1.83 偏高</span>
+                    <span class="pill warn">警告</span>
+                    <span class="tm num">18 分钟前</span>
+                  </div>
+                  <div class="alert-row warn">
+                    <span class="nm">nginx-edge-03</span>
+                    <span class="msg">5xx 错误率 2.4% 连续上升</span>
+                    <span class="pill warn">警告</span>
+                    <span class="tm num">32 分钟前</span>
+                  </div>
+                </div>
+                <div class="card-foot">仅展示最高优先级 8 条 · 进入告警中心查看全部</div>
+              </div>
+            </div>
+
+            <!-- 主机概览 -->
+            <div class="s6 mb">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-title"><span class="accent-bar"></span>主机概览</div>
+                  <span class="pill muted">生产环境</span>
+                </div>
+                <div class="card-body tight">
+                  <div class="host-row">
+                    <span class="pill ok"><i></i>在线</span>
+                    <span class="nm">web-prod-01</span>
+                    <div class="metric"><span class="lb">CPU</span><span class="mini-bar"><i style="width:38%;background:var(--c1)"></i></span><span class="vl num">38%</span></div>
+                    <div class="metric"><span class="lb">内存</span><span class="mini-bar"><i style="width:61%;background:var(--c2)"></i></span><span class="vl num">61%</span></div>
+                  </div>
+                  <div class="host-row">
+                    <span class="pill ok"><i></i>在线</span>
+                    <span class="nm">web-prod-02</span>
+                    <div class="metric"><span class="lb">CPU</span><span class="mini-bar"><i style="width:44%;background:var(--c1)"></i></span><span class="vl num">44%</span></div>
+                    <div class="metric"><span class="lb">内存</span><span class="mini-bar"><i style="width:57%;background:var(--c2)"></i></span><span class="vl num">57%</span></div>
+                  </div>
+                  <div class="host-row">
+                    <span class="pill warn"><i></i>压力</span>
+                    <span class="nm">db-prod-01</span>
+                    <div class="metric"><span class="lb">CPU</span><span class="mini-bar"><i style="width:82%;background:var(--warn)"></i></span><span class="vl num">82%</span></div>
+                    <div class="metric"><span class="lb">内存</span><span class="mini-bar"><i style="width:76%;background:var(--warn)"></i></span><span class="vl num">76%</span></div>
+                  </div>
+                  <div class="host-row">
+                    <span class="pill danger"><i></i>离线</span>
+                    <span class="nm">k8s-node-07</span>
+                    <div class="metric"><span class="lb">CPU</span><span class="mini-bar"><i style="width:0%"></i></span><span class="vl num">—</span></div>
+                    <div class="metric"><span class="lb">内存</span><span class="mini-bar"><i style="width:0%"></i></span><span class="vl num">—</span></div>
+                  </div>
+                </div>
+                <div class="card-foot">按分组聚合，点击行进入主机详情</div>
+              </div>
+            </div>
+
+            <!-- 中间件 -->
+            <div class="s12 mb">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-title"><span class="accent-bar"></span>中间件总览</div>
+                  <span class="pill info">9 种类型</span>
+                </div>
+                <div class="card-body">
+                  <div class="mw-grid">
+                    <div class="mw">
+                      <div class="mw-top"><div class="mw-ic">R</div><div class="mw-nm">Redis</div></div>
+                      <div class="mw-nums"><span class="n num">12</span><span class="d">实例 · 12 在线</span></div>
+                      <div class="mw-sub">命中率 96.2%</div>
+                    </div>
+                    <div class="mw">
+                      <div class="mw-top"><div class="mw-ic">PG</div><div class="mw-nm">PostgreSQL</div></div>
+                      <div class="mw-nums"><span class="n num">6</span><span class="d">实例 · 6 在线</span></div>
+                      <div class="mw-sub">连接数 128 / 400</div>
+                    </div>
+                    <div class="mw">
+                      <div class="mw-top"><div class="mw-ic">N</div><div class="mw-nm">Nginx</div></div>
+                      <div class="mw-nums"><span class="n num">8</span><span class="d">实例 · 8 在线</span></div>
+                      <div class="mw-sub">QPS 4.2k</div>
+                    </div>
+                    <div class="mw">
+                      <div class="mw-top"><div class="mw-ic">DK</div><div class="mw-nm">Docker</div></div>
+                      <div class="mw-nums"><span class="n num">34</span><span class="d">容器 · 33 运行</span></div>
+                      <div class="mw-sub"><span class="pill warn">1 个容器退出</span></div>
+                    </div>
+                    <div class="mw">
+                      <div class="mw-top"><div class="mw-ic">K8</div><div class="mw-nm">Kubernetes</div></div>
+                      <div class="mw-nums"><span class="n num">2</span><span class="d">集群 · 14 节点</span></div>
+                      <div class="mw-sub"><span class="pill danger">1 节点 NotReady</span></div>
+                    </div>
+                    <div class="mw">
+                      <div class="mw-top"><div class="mw-ic">K</div><div class="mw-nm">Kafka</div></div>
+                      <div class="mw-nums"><span class="n num">5</span><span class="d">Broker · 5 在线</span></div>
+                      <div class="mw-sub">积压 1.2k 条</div>
+                    </div>
+                    <div class="mw">
+                      <div class="mw-top"><div class="mw-ic">MG</div><div class="mw-nm">MongoDB</div></div>
+                      <div class="mw-nums"><span class="n num">3</span><span class="d">实例 · 3 在线</span></div>
+                      <div class="mw-sub">oplog 窗口 18h</div>
+                    </div>
+                    <div class="mw">
+                      <div class="mw-top"><div class="mw-ic">FS</div><div class="mw-nm">FastDFS</div></div>
+                      <div class="mw-nums"><span class="n num">4</span><span class="d">节点 · 4 在线</span></div>
+                      <div class="mw-sub">剩余空间 62%</div>
+                    </div>
+                    <div class="mw">
+                      <div class="mw-top"><div class="mw-ic">MQ</div><div class="mw-nm">RocketMQ</div></div>
+                      <div class="mw-nums"><span class="n num">2</span><span class="d">集群 · 2 在线</span></div>
+                      <div class="mw-sub">TPS 860</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 最近告警 -->
+            <div class="s12">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-title"><span class="accent-bar"></span>最近告警</div>
+                  <span class="pill muted">近 24 小时</span>
+                </div>
+                <div class="card-body" style="padding:6px 8px 8px">
+                  <table class="tbl">
+                    <thead>
+                      <tr><th style="width:130px">主机</th><th>摘要</th><th style="width:90px">级别</th><th style="width:90px">状态</th><th style="width:130px">开始时间</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr><td class="strong">db-prod-01</td><td>磁盘使用率 94% 超过阈值</td><td><span class="pill danger">紧急</span></td><td><span class="pill danger"><i></i>触发中</span></td><td class="num">10-01 18:12</td></tr>
+                      <tr><td class="strong">k8s-node-07</td><td>节点 NotReady 已持续 5 分钟</td><td><span class="pill danger">紧急</span></td><td><span class="pill danger"><i></i>触发中</span></td><td class="num">10-01 18:09</td></tr>
+                      <tr><td class="strong">redis-cache-02</td><td>内存碎片率 1.83 偏高</td><td><span class="pill warn">警告</span></td><td><span class="pill danger"><i></i>触发中</span></td><td class="num">10-01 17:56</td></tr>
+                      <tr><td class="strong">nginx-edge-01</td><td>证书将在 15 天后过期</td><td><span class="pill info">提示</span></td><td><span class="pill ok"><i></i>已恢复</span></td><td class="num">10-01 15:20</td></tr>
+                      <tr><td class="strong">web-prod-03</td><td>CPU 负载 5 分钟均值 8.4</td><td><span class="pill warn">警告</span></td><td><span class="pill ok"><i></i>已恢复</span></td><td class="num">10-01 14:03</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 命令面板 ============ -->
+  <div class="spec">
+    <h3>命令面板</h3>
+    <p class="lead">Ctrl / ⌘ + K 唤起，支持页面跳转与主机直达，解决 20+ 页面靠点菜单的问题</p>
+    <div class="cmdk">
+      <div class="cmdk-in">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--t3)" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+        <input value="告警" readonly />
+        <span class="kbd">ESC 关闭</span>
+      </div>
+      <div class="cmdk-list">
+        <div class="cmdk-sec">页面</div>
+        <div class="cmdk-row on">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2.5a4 4 0 014 4v3l1.5 2.5H2.5L4 9.5v-3a4 4 0 014-4z"/></svg>
+          告警中心<span class="rt">告警运维</span>
+        </div>
+        <div class="cmdk-row">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v7H2z"/></svg>
+          通知配置<span class="rt">告警运维</span>
+        </div>
+        <div class="cmdk-row">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 13V9M6.5 13V5M10.5 13V7M14 13V3"/></svg>
+          智能分析<span class="rt">告警运维</span>
+        </div>
+        <div class="cmdk-sec">主机</div>
+        <div class="cmdk-row">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="3" width="13" height="8" rx="1.5"/></svg>
+          db-prod-01<span class="rt">生产数据库</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 组件规范 ============ -->
+  <div class="spec">
+    <h3>组件规范</h3>
+    <p class="lead">四个新增规范件，统一全站节奏</p>
+    <div class="grid">
+      <div class="s6">
+        <div class="card">
+          <div class="card-head"><div class="card-title">SectionCard</div><span class="pill muted">头 / 体 / 脚</span></div>
+          <div class="card-body">
+            <div style="font-size:var(--fs-sm);color:var(--t2)">替代现有的 <span class="num" style="font-size:12px">.glass / .kpi / .ov-card / .panel</span> 四种容器，统一为 surface-1 底 + 1px 描边 + 顶部受光高光 + 16px 圆角，悬浮态抬升 1px 并加深阴影。</div>
+            <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+              <span class="pill ok"><i></i>正常</span>
+              <span class="pill warn"><i></i>警告</span>
+              <span class="pill danger"><i></i>紧急</span>
+              <span class="pill info"><i></i>提示</span>
+              <span class="pill muted">未分类</span>
+            </div>
+          </div>
+          <div class="card-foot">StatusPill：12px 轻量药丸，用于高密度列表</div>
+        </div>
+      </div>
+      <div class="s6">
+        <div class="card">
+          <div class="card-head"><div class="card-title">EmptyState</div><span class="pill muted">图标 + 建议</span></div>
+          <div class="card-body" style="padding:0">
+            <div class="empty">
+              <div class="ei">
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 4.5h4l1 1.5h6v6.5h-11z"/><path d="M6 8.5h4"/></svg>
+              </div>
+              <div class="et">暂无采集数据</div>
+              <div class="ed">检查生效分组与目标可达性，或前往「采集项模板」确认配置</div>
+            </div>
+          </div>
+          <div class="card-foot">替代各页面散落的「暂无数据」，给出排查方向</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 令牌表 ============ -->
+  <div class="spec">
+    <h3>令牌对照</h3>
+    <p class="lead">施工时写入 src/assets/style.css，v1 变量名全部保留，存量组件零改动</p>
+    <div class="card">
+      <div class="card-body" style="padding:6px 8px 8px">
+        <table class="tok-tbl">
+          <thead><tr><th style="width:150px">类别</th><th style="width:230px">令牌</th><th>取值</th></tr></thead>
+          <tbody>
+            <tr><td>表面层级</td><td><code>--surface-0 … 3</code></td><td>#060a13 / #0b1220 / #0e1728 / #131e33</td></tr>
+            <tr><td>文本层级</td><td><code>--t-primary / 2 / 3</code></td><td>#e8eefb / #9baed0 / #6f83a6</td></tr>
+            <tr><td>语义色</td><td><code>--ok / --warn / --danger / --info</code></td><td>#22c55e / #ffb454 / #ff5d6c / #38bdf8（各含 -dim 14% 与 -border 32% 两档）</td></tr>
+            <tr><td>间距</td><td><code>--sp-1 … --sp-10</code></td><td>4 / 8 / 12 / 16 / 20 / 24 / 32 / 40px</td></tr>
+            <tr><td>圆角</td><td><code>--r-xs … --r-pill</code></td><td>4 / 6 / 8 / 10 / 14 / 999px</td></tr>
+            <tr><td>阴影</td><td><code>--sh-1 / 2 / 3</code></td><td>0 1px 2px · 0 2px 8px · 0 8px 24px（极轻，主要靠 1px 描边表达边界）</td></tr>
+            <tr><td>字号</td><td><code>--fs-xs … --fs-3xl</code></td><td>12 / 13 / 14 / 15 / 17 / 20 / 24 / 30px</td></tr>
+            <tr><td>动效</td><td><code>--dur / --ease</code></td><td>0.12s 反馈 · 0.2s 常态 · 0.36s 入场，cubic-bezier(.4,0,.2,1)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>施工顺序建议：</b>① 令牌层（style.css 追加，不动存量变量）→ ② PageHeader / SectionCard / StatusPill / EmptyState 四个规范件 → ③ Sidebar + TopBar + 命令面板 → ④ 首页概览 → ⑤ 其余页面逐个替换为规范件。每一步都可独立上线，不会中途破版。
+    </div>
+
+    <div class="note" style="margin-top:12px">
+      <b>趋势校准（v2.1）：</b>对照 2026 年仪表盘趋势后修正了四处 —— ① KPI 取消彩色图标网格，图标统一中性色，颜色只留给"告警"这类真实异常状态；② 圆角 16→10px、卡片内边距 24→16px、表格行高收紧，提升信息密度；③ 卡片渐变高光 4.5%→2.2%，阴影减重，边界主要交给 1px 描边；④ 新增 AI 研判条，概览页直接回答"最该处理什么"，而不是只罗列指标。
+      <br><br>
+      <b>未跟随的两处（有意为之）：</b>圆角没有降到 2px —— 那是终端与极简工具的语言，运维平台需要长时间盯屏，8–10px 更耐看；阴影没有完全移除 —— 深色下完全无阴影会失去浮起感，保留极轻一级。
+    </div>
+  </div>
+
+</div>
+
+<script>
+  document.querySelectorAll('.theme-switch button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.body.dataset.theme = b.dataset.t;
+      document.documentElement.dataset.theme = b.dataset.t;
+      document.querySelectorAll('.theme-switch button').forEach(function (x) { x.classList.remove('on'); });
+      b.classList.add('on');
+    });
+  });
+</script>
+</body>
+</html>

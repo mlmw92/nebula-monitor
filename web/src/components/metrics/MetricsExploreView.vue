@@ -211,22 +211,24 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* 原来这里全是写死的十六进制色（var(--t1) / var(--ok) / var(--t3)），
+   切到青绿或紫色主题时整页不跟随。全部收敛到令牌。 */
 .explore { display: flex; height: calc(100vh - 140px); }
-.left { width: 320px; border-right: 1px solid rgba(34,211,238,0.12); padding: 12px; overflow: auto; }
+.left { width: 320px; border-right: 1px solid var(--bd); padding: 12px; overflow: auto; }
 .left-head-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.left-head { font-size: 15px; font-weight: 700; color: #e5edf7; }
-.discover-count { font-size: 13px; color: #34d399; }
-.discover-count.muted { color: #64748b; }
+.left-head { font-size: var(--fs-md); font-weight: 700; color: var(--t1); }
+.discover-count { font-size: var(--fs-sm); color: var(--ok); }
+.discover-count.muted { color: var(--t3); }
 .metric-tree-node { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; }
-.metric-state { flex: none; font-size: 13px; }
-.metric-state.online { color: #34d399; }
-.metric-state.offline { color: #64748b; }
+.metric-state { flex: none; font-size: var(--fs-sm); }
+.metric-state.online { color: var(--ok); }
+.metric-state.offline { color: var(--t3); }
 .kw { margin-bottom: 8px; }
-.right { flex: 1; padding: 16px; }
-.empty { color: #64748b; margin-top: 40px; text-align: center; }
+.right { flex: 1; padding: 16px; min-width: 0; }
+.empty { color: var(--t3); margin-top: 40px; text-align: center; }
 .right-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
-.m-title { font-size: 16px; font-weight: 700; color: #e5edf7; }
-.m-name { font-size: 13px; color: #64748b; font-weight: 400; }
-.m-meta { font-size: 13px; color: #94a3b8; margin-top: 4px; }
-.chart { height: calc(100% - 70px); min-height: 320px; background: rgba(15,23,42,0.4); border-radius: 10px; }
+.m-title { font-size: var(--fs-lg); font-weight: 700; color: var(--t1); }
+.m-name { font-size: var(--fs-sm); color: var(--t3); font-weight: 400; }
+.m-meta { font-size: var(--fs-sm); color: var(--t2); margin-top: 4px; }
+.chart { height: calc(100% - 70px); min-height: 320px; background: var(--s1); border: 1px solid var(--bd); border-radius: var(--r-lg); }
 </style>

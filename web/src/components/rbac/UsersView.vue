@@ -1,12 +1,13 @@
 <template>
   <div class="rbac-view">
-    <div class="page-head">
-      <div>
-        <h2 class="page-title">用户管理</h2>
-        <p class="page-sub">管理可登录系统的账号及其角色与数据范围。删除 / 禁用最后一个超级管理员会被服务端拒绝。</p>
-      </div>
-      <el-button type="primary" :icon="Plus" @click="openCreate" v-if="auth.can('users:manage')">新建用户</el-button>
-    </div>
+    <PageHeader
+      title="用户管理"
+      desc="管理可登录系统的账号及其角色与数据范围；删除 / 禁用最后一个超级管理员会被服务端拒绝"
+    >
+      <template #actions>
+        <el-button type="primary" :icon="Plus" @click="openCreate" v-if="auth.can('users:manage')">新建用户</el-button>
+      </template>
+    </PageHeader>
 
     <el-card class="glass table-card" shadow="never">
       <el-table :data="users" v-loading="loading" stripe style="width: 100%">
@@ -125,6 +126,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import http from '../../api/http'
+import PageHeader from '../common/PageHeader.vue'
 import { useAuth } from '../../composables/useAuth'
 
 const auth = useAuth()

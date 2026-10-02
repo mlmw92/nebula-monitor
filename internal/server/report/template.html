@@ -57,11 +57,41 @@
   .muted{color:var(--dim);}
   .empty{color:var(--dim);font-size:13px;padding:8px 0;}
   .footer{text-align:center;color:var(--dim);font-size:12px;margin-top:30px;}
+  /* A4 纵向；页边距交给 @page，不用 .wrap 的内边距模拟 */
+  @page{size:A4 portrait;margin:14mm 12mm;}
+
   @media print{
-    body{background:#fff;}
-    .hero{box-shadow:none;}
-    .section{break-inside:avoid;box-shadow:none;}
-    .chart-card{break-inside:avoid;}
+    /* 最关键的一条：默认浏览器会丢弃 background，而本报告的信息是"靠底色承载"的——
+       hero 深蓝渐变上的白字、badge 的实心状态色、cmp 的绿/红，丢了底色就全是白字白底。 */
+    *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}
+
+    body{background:#fff;font-size:10.5pt;line-height:1.5;}
+    .wrap{max-width:none;padding:0;margin:0;}
+
+    /* 屏幕上 hero 靠大圆角+投影建立层级，纸上只需要一个实心深蓝块 */
+    .hero{box-shadow:none;border-radius:6px;padding:16px 18px;
+      /* 渐变在部分打印机上会出现色带且耗墨；纸上是白字，纯深底比渐变更稳 */
+      background:#2b5876!important;color:#fff!important;}
+    .hero h1{font-size:18pt;}
+
+    /* 分栏容器：小卡片不允许被撕开，大 section 反而必须允许跨页——
+       否则一个装了 30 条 finding 的整块会被整体推到下一页，前一页留大片空白。 */
+    .section{break-inside:auto;box-shadow:none;border-radius:6px;padding:12px 14px;margin-bottom:12px;}
+    .stat,.chart-card,.finding,.cards{break-inside:avoid;page-break-inside:avoid;}
+    .chart-card{background:#fff;}
+
+    /* 表头跨页重复：本报告是真 <table>，thead 复用有效，长表格必须开 */
+    thead{display:table-header-group;}
+    tfoot{display:table-footer-group;}
+    tr{break-inside:avoid;page-break-inside:avoid;}
+    table{font-size:9pt;}
+    /* 屏幕上 th 用 nowrap 防抖动；A4 宽度下 nowrap 会把 11 列的明细表挤到溢出 */
+    th,td{white-space:normal!important;padding:4px 6px;}
+
+    /* hover 态在纸上没有意义，个别浏览器打印时会保留 */
+    tbody tr:hover{background:transparent;}
+
+    .footer{margin-top:14px;font-size:9pt;}
   }
 </style>
 </head>

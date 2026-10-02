@@ -1,16 +1,17 @@
 <template>
   <div class="dash">
-    <div class="dash-head">
-      <div class="tabs">
-        <span
-          v-for="d in dashboards"
-          :key="d.id"
-          :class="['tab', { active: d.id === activeId }]"
-          @click="activeId = d.id"
-        >{{ d.name }}</span>
-        <el-button size="small" @click="newDash">+ 新建看板</el-button>
-      </div>
-      <div v-if="active" class="head-actions">
+    <!-- 看板切换改用全站统一的次级导航条：原来自写的 .tabs 是另一套视觉（圆角块 + 独立一行按钮区），
+         与主机列表等页面的次级导航不一致。 -->
+    <div class="subnav">
+      <span
+        v-for="d in dashboards"
+        :key="d.id"
+        class="subnav-item"
+        :class="{ on: d.id === activeId }"
+        @click="activeId = d.id"
+      >{{ d.name }}</span>
+      <span class="subnav-item" style="color: var(--t3)" @click="newDash">+ 新建看板</span>
+      <div v-if="active" class="subnav-right">
         <el-button size="small" type="primary" @click="enterEdit" v-if="!editing">编辑</el-button>
         <template v-else>
           <el-button size="small" @click="addPanel">+ 添加面板</el-button>
@@ -23,7 +24,13 @@
       </div>
     </div>
 
-    <div v-if="!active" class="empty">暂无看板，点击「新建看板」创建</div>
+    <EmptyState
+      v-if="!active"
+      title="暂无看板"
+      :hints="['点上方「+ 新建看板」创建第一个自定义仪表盘', '看板由若干面板组成，每个面板绑定一个指标与图表类型']"
+      action-text="新建看板"
+      @action="newDash"
+    />
     <div v-else class="grid">
       <PanelChart
         v-for="(p, i) in activePanels"
@@ -92,6 +99,7 @@ import { ElMessage } from 'element-plus'
 import PanelChart from './PanelChart.vue'
 import http from '../../api/http'
 import { useDashboards } from '../../composables/useDashboards'
+import EmptyState from '../common/EmptyState.vue'
 
 const { state, load, create, update, remove } = useDashboards()
 const dashboards = computed(() => state.dashboards)
@@ -204,9 +212,9 @@ onMounted(async () => {
 .dash { padding: 12px 16px; height: calc(100vh - 132px); overflow: auto; }
 .dash-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .tabs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tab { padding: 4px 12px; border-radius: 6px; cursor: pointer; color: #94a3b8; border: 1px solid transparent; }
-.tab.active { color: #e5edf7; border-color: rgba(34,211,238,0.4); background: rgba(34,211,238,0.08); }
+.tab { padding: 4px 12px; border-radius: 6px; cursor: pointer; color: var(--t3); border: 1px solid transparent; }
+.tab.active { color: var(--t1); border-color: rgba(34,211,238,0.4); background: rgba(34,211,238,0.08); }
 .head-actions { display: flex; gap: 8px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
-.empty { color: #64748b; text-align: center; margin-top: 60px; }
+.empty { color: var(--t3); text-align: center; margin-top: 60px; }
 </style>

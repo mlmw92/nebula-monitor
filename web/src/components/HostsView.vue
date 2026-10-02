@@ -1,7 +1,44 @@
 <template>
   <div class="hosts-view">
-    <!-- 顶部操作栏 -->
-    <div class="glass panel toolbar">
+    <PageHeader
+      title="主机列表"
+      :desc="`共 ${filteredNodes.length} 台 · 在线 ${onlineCount} · 离线 ${offlineCount} · 异常 ${warningCount}`"
+    >
+      <template #actions>
+        <el-button :icon="Setting" size="small" plain @click="showGroupManage = true">分组管理</el-button>
+        <el-button type="warning" :icon="Upload" size="small" :disabled="selectedRows.length === 0" @click="batchUpgrade">
+          批量升级{{ selectedRows.length ? ' (' + selectedRows.length + ')' : '' }}
+        </el-button>
+        <el-button type="primary" :icon="Plus" size="small" @click="openAddNode">添加主机</el-button>
+        <el-button :icon="Printer" size="small" plain @click="printList">打印</el-button>
+      </template>
+    </PageHeader>
+
+    <!-- 次级导航条：Tab 与刷新状态合并到同一行。
+         原为独立的 el-tabs 条 + 刷新条两张卡片，纵向占约 160px，首屏只剩 11 行数据。 -->
+    <div class="subnav">
+      <div class="subnav-item" :class="{ on: hostTab === 'hosts' }" @click="hostTab = 'hosts'">普通主机</div>
+      <div class="subnav-item" :class="{ on: hostTab === 'proxy' }" @click="hostTab = 'proxy'">网闸代理 · Hub / Edge</div>
+      <div class="subnav-right">
+        <el-tooltip :content="refreshInterval === 0 ? '已暂停自动刷新' : `${countdown}s 后刷新`" placement="top">
+          <el-button :icon="Refresh" size="small" circle @click="manualRefresh" />
+        </el-tooltip>
+        <StatusPill v-if="loadError" tone="danger" dot>{{ loadError }}</StatusPill>
+        <span class="refresh-text" v-if="lastRefresh && !loadError">上次刷新：{{ lastRefresh }}</span>
+        <span class="refresh-label">自动刷新</span>
+        <el-select v-model="refreshInterval" size="small" style="width: 100px" @change="onIntervalChange">
+          <el-option :value="0" label="关闭" />
+          <el-option :value="10" label="10 秒" />
+          <el-option :value="20" label="20 秒" />
+          <el-option :value="30" label="30 秒" />
+          <el-option :value="60" label="60 秒" />
+        </el-select>
+        <span class="countdown" v-if="refreshInterval > 0">{{ countdown }}s</span>
+      </div>
+    </div>
+
+    <!-- 工具栏：只保留筛选与搜索，主操作已上移到页头 -->
+    <div class="toolbar">
       <div class="toolbar-left">
         <el-radio-group v-model="statusFilter" size="small">
           <el-radio-button value="">全部 ({{ filteredNodes.length }})</el-radio-button>
@@ -9,12 +46,11 @@
           <el-radio-button value="offline">离线 ({{ offlineCount }})</el-radio-button>
           <el-radio-button value="warning">异常 ({{ warningCount }})</el-radio-button>
         </el-radio-group>
-      </div>
-      <div class="toolbar-right">
         <el-select v-model="groupFilter" placeholder="分组" clearable size="small" style="width: 120px">
           <el-option v-for="g in groups" :key="g.name" :value="g.name" :label="g.name" />
         </el-select>
-        <el-button :icon="Setting" size="small" plain @click="showGroupManage = true">分组管理</el-button>
+      </div>
+      <div class="toolbar-right">
         <el-input
           v-model="keyword"
           placeholder="搜索主机名 / IP"
@@ -35,47 +71,20 @@
             </el-checkbox-group>
           </div>
         </el-popover>
-        <el-button type="warning" :icon="Upload" size="small" :disabled="selectedRows.length === 0" @click="batchUpgrade">
-          批量升级{{ selectedRows.length ? ' (' + selectedRows.length + ')' : '' }}
-        </el-button>
-        <el-button type="primary" :icon="Plus" size="small" @click="openAddNode">添加主机</el-button>
       </div>
     </div>
-
-    <!-- 刷新控制条 -->
-    <div class="glass panel refresh-bar">
-      <div class="refresh-left">
-        <el-tooltip :content="refreshInterval === 0 ? '已暂停自动刷新' : `${countdown}s 后刷新`" placement="top">
-          <el-button :icon="Refresh" size="small" circle @click="manualRefresh" />
-        </el-tooltip>
-        <span class="refresh-text" v-if="lastRefresh">上次刷新：{{ lastRefresh }}</span>
-        <el-tag v-if="loadError" type="danger" size="small" effect="dark">{{ loadError }}</el-tag>
-      </div>
-      <div class="refresh-right">
-        <span class="refresh-label">自动刷新</span>
-        <el-select v-model="refreshInterval" size="small" style="width: 100px" @change="onIntervalChange">
-          <el-option :value="0" label="关闭" />
-          <el-option :value="10" label="10 秒" />
-          <el-option :value="20" label="20 秒" />
-          <el-option :value="30" label="30 秒" />
-          <el-option :value="60" label="60 秒" />
-        </el-select>
-        <span class="countdown" v-if="refreshInterval > 0">{{ countdown }}s</span>
-      </div>
-    </div>
-
-    <el-tabs v-model="hostTab" class="host-tabs" type="card">
-      <el-tab-pane label="普通主机" name="hosts" />
-      <el-tab-pane label="网闸代理（Hub / Edge）" name="proxy" />
-    </el-tabs>
 
     <!-- 代理节点独立展示，不与普通采集主机混在一起。 -->
-    <div v-if="hostTab === 'proxy'" class="glass panel proxy-status-panel">
-      <div class="proxy-status-head">
-        <div><span class="panel-title">网闸代理状态</span><span class="panel-subtitle">Hub / Edge</span></div>
-        <el-tag v-if="proxyStatus.length === 0" type="info" size="small">暂无代理上报</el-tag>
-        <span v-else class="proxy-summary">在线 {{ proxyStatus.filter(p => p.online).length }} / {{ proxyStatus.length }}</span>
-      </div>
+    <SectionCard
+      v-if="hostTab === 'proxy'"
+      class="proxy-status-panel"
+      title="网闸代理状态"
+      subtitle="Hub / Edge"
+      dense
+    >
+      <template #actions>
+        <span v-if="proxyStatus.length" class="proxy-summary">在线 {{ proxyStatus.filter(p => p.online).length }} / {{ proxyStatus.length }}</span>
+      </template>
       <el-table v-if="proxyStatus.length" :data="proxyStatus" size="small" stripe>
         <el-table-column prop="node" label="节点" min-width="180" />
         <el-table-column label="角色" width="90"><template #default="{ row }"><el-tag size="small" :type="row.mode === 'hub' ? 'warning' : 'primary'">{{ row.mode === 'hub' ? 'Hub' : 'Edge' }}</el-tag></template></el-table-column>
@@ -84,16 +93,25 @@
         <el-table-column prop="forwardTotal" label="转发请求" width="110" />
         <el-table-column prop="reconnectTotal" label="重连次数" width="100" />
       </el-table>
-    </div>
+      <EmptyState
+        v-else
+        :icon="Connection"
+        title="暂无网闸代理上报"
+        :hints="[
+          '确认 Hub / Edge 已启动，且 Edge 已连上 Hub',
+          '网闸需放通 Edge → Hub 的 TCP 隧道端口（默认 8443）',
+          '代理状态在首个上报周期后出现，通常 1 分钟内',
+        ]"
+      />
+    </SectionCard>
 
     <!-- 主机列表 -->
-    <div v-if="hostTab === 'hosts'" class="glass panel">
+    <SectionCard v-if="hostTab === 'hosts'" dense>
       <el-table
         ref="hostTable"
         :data="pagedNodes"
         stripe
         style="width: 100%"
-        empty-text="暂无主机"
         row-key="hostname"
         :row-class-name="rowClass"
         @row-click="(r) => goDetail(r)"
@@ -101,6 +119,13 @@
         @selection-change="handleSelectionChange"
         class="host-table"
       >
+        <template #empty>
+          <EmptyState
+            :icon="Monitor"
+            :title="nodes.length ? '没有符合筛选条件的主机' : '暂无主机'"
+            :hints="emptyHints"
+          />
+        </template>
         <el-table-column type="selection" width="44" :reserve-selection="true" />
         <el-table-column v-if="colVisible('host')" label="主机名称 / IP" prop="hostname" sortable="custom" min-width="160">
           <template #default="{ row }">
@@ -244,7 +269,7 @@
           @size-change="(s) => (pageSize = s)"
         />
       </div>
-    </div>
+    </SectionCard>
 
     <!-- 添加主机 / 部署 Agent 抽屉 -->
     <el-drawer v-model="showAddModal" title="添加主机" direction="rtl" size="520px" :close-on-click-modal="false">
@@ -467,11 +492,16 @@ openssl x509 -req -in edge.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 36
 <script setup>
 import { ref, computed, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, Setting, ArrowDown, Refresh, Edit, Operation, Upload } from '@element-plus/icons-vue'
+import { Plus, Search, Setting, ArrowDown, Refresh, Edit, Operation, Upload, Monitor, Connection, Printer } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
 import OsIcon from './OsIcon.vue'
 import GroupManage from './GroupManage.vue'
+import PageHeader from './common/PageHeader.vue'
+import SectionCard from './common/SectionCard.vue'
+import EmptyState from './common/EmptyState.vue'
+import StatusPill from './common/StatusPill.vue'
+import { printPage } from '../utils/print'
 
 const router = useRouter()
 const nodes = ref([])
@@ -668,6 +698,21 @@ function sortValue(n, prop) {
 }
 
 // 仅过滤（不含排序）
+// 空态提示：区分「一台主机都没有」与「被筛选掉了」，并给出下一步动作
+const emptyHints = computed(() => {
+  if (!nodes.value.length) {
+    return [
+      '在目标机器以 root 执行 Agent 安装命令（点右上角「添加主机」获取命令）',
+      '确认目标机 systemctl status monitor-agent 处于 running',
+      'Agent 的服务器地址需指向本 Server（含端口），且防火墙已放通该端口',
+    ]
+  }
+  return [
+    `共 ${nodes.value.length} 台主机，当前筛选条件下没有匹配项`,
+    '清空搜索关键词，或把状态切回「全部」',
+  ]
+})
+
 const filteredNodes = computed(() => {
   // 后端 /api/v1/nodes 已过滤 edge/hub；前端再过滤一次作为兜底，避免其它入口混入代理节点
   let arr = nodes.value.filter((n) => n.mode !== 'edge' && n.mode !== 'hub')
@@ -832,6 +877,23 @@ function restartTimers() {
       if (countdown.value > 0) countdown.value--
     }, 1000)
   }
+}
+
+// 打印当前视图：抬头带上筛选口径，否则纸上的一组数字无法复现
+function printList() {
+  const meta = [
+    `共 ${filteredNodes.value.length} 台`,
+    `在线 ${onlineCount.value} · 离线 ${offlineCount.value} · 异常 ${warningCount.value}`,
+  ]
+  const cond = []
+  if (statusFilter.value) cond.push(`状态=${statusFilter.value}`)
+  if (groupFilter.value) {
+    const g = groups.value.find((x) => String(x.id) === String(groupFilter.value))
+    cond.push(`分组=${g ? g.name : groupFilter.value}`)
+  }
+  if (keyword.value) cond.push(`关键词=${keyword.value}`)
+  meta.push(cond.length ? `筛选：${cond.join('，')}` : '筛选：无')
+  printPage({ title: hostTab.value === 'proxy' ? '网闸代理节点' : '主机列表', meta })
 }
 
 function openAddNode() {
@@ -1040,13 +1102,13 @@ defineExpose({ reload: load })
   flex-direction: column;
   gap: 14px;
 }
+/* 工具栏不再包卡片：表格已经是卡片，工具栏再包一层会平白吃掉 56px 纵向空间 */
 .toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  flex-wrap: wrap;
   gap: 10px;
+  flex-wrap: wrap;
 }
 .toolbar-left,
 .toolbar-right {
@@ -1054,20 +1116,6 @@ defineExpose({ reload: load })
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
-}
-
-/* 刷新控制条 */
-.refresh-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-}
-.refresh-left,
-.refresh-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 .refresh-text {
   font-size: 13px;
@@ -1132,7 +1180,7 @@ defineExpose({ reload: load })
 }
 .ver-cell.dev {
   color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--fill-1);
 }
 .ver-cell.release {
   color: var(--accent);
@@ -1159,8 +1207,8 @@ defineExpose({ reload: load })
   vertical-align: middle;
 }
 .status-led.on {
-  background: var(--chart-green);
-  box-shadow: 0 0 6px var(--chart-green);
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok);
 }
 .status-led.off {
   background: var(--danger);
@@ -1169,7 +1217,7 @@ defineExpose({ reload: load })
   font-size: 13px;
   vertical-align: middle;
 }
-.status-text.on { color: var(--chart-green); }
+.status-text.on { color: var(--ok); }
 .status-text.off { color: var(--danger); }
 
 /* 分组标签 */
@@ -1187,7 +1235,7 @@ defineExpose({ reload: load })
   transition: background 0.15s;
 }
 .group-tag.clickable:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-2);
   color: var(--text);
 }
 .group-arrow {
@@ -1204,7 +1252,7 @@ defineExpose({ reload: load })
 .mini-bar {
   flex: 1;
   height: 5px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-2);
   border-radius: 3px;
   overflow: hidden;
   min-width: 40px;
@@ -1368,13 +1416,10 @@ defineExpose({ reload: load })
   line-height: 1.55;
   color: var(--text-muted);
 }
-.proxy-status-panel { margin-bottom: 14px; }
-.host-tabs { margin: 0 0 12px; }
-.host-tabs :deep(.el-tabs__header) { margin: 0; }
-.host-tabs :deep(.el-tabs__content) { display: none; }
-.proxy-status-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.panel-title { font-size: 13px; color: var(--text); font-weight: 600; }
-.panel-subtitle { margin-left: 8px; font-size: 13px; color: var(--text-muted); }
+/* 次级导航条（替代已删除的 el-tabs + 刷新条） */
+.subnav-right :deep(.el-select) {
+  width: 100px;
+}
 .proxy-summary { font-size: 13px; color: var(--text-muted); }
 .field-help code {
   font-family: var(--mono);
@@ -1392,16 +1437,16 @@ defineExpose({ reload: load })
   font-size: 13px;
   line-height: 1.7;
   color: var(--text-dim);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
+  background: var(--fill-1);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-md);
   padding: 10px 14px;
   margin: 0;
 }
 .deploy-steps {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
+  background: var(--fill-1);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-md);
   padding: 12px 14px;
 }
 .steps-list {
@@ -1426,8 +1471,8 @@ defineExpose({ reload: load })
   color: var(--text);
 }
 .cmd-box {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border: 1px solid var(--bd-strong);
+  border-radius: var(--r-md);
   overflow: hidden;
   background: rgba(0, 0, 0, 0.35);
 }
@@ -1436,8 +1481,8 @@ defineExpose({ reload: load })
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--bd);
+  background: var(--fill-1);
 }
 .cmd-label {
   font-family: var(--mono);

@@ -23,7 +23,7 @@
         <KpiCard label="在线实例" :value="stats.up" tone="up">
           <template #icon><el-icon :size="20"><CircleCheck /></el-icon></template>
         </KpiCard>
-        <KpiCard label="离线实例" :value="stats.down" tone="down">
+        <KpiCard label="离线实例" :value="stats.down" :tone="stats.down > 0 ? 'down' : 'total'">
           <template #icon><el-icon :size="20"><CircleClose /></el-icon></template>
         </KpiCard>
         <KpiCard v-for="k in spec.kpis" :key="k.metric + k.agg" :label="k.label" :value="formatNum(kpiValue(k))" :tone="k.tone || 'ops'">
@@ -245,16 +245,16 @@ onBeforeUnmount(() => {
 .mw-list-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
 .pager { margin-top: 10px; display: flex; justify-content: flex-end; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
-.dot.up { background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.5); }
-.dot.down { background: #f87171; }
+.dot.up { background: var(--ok); box-shadow: 0 0 6px rgba(74, 222, 128, 0.5); }
+.dot.down { background: var(--danger); }
 .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 :deep(.clickable) { cursor: pointer; }
 :deep(.row-down) { opacity: 0.55; }
 .detail-meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-bottom: 14px; }
-.meta-item { background: rgba(255, 255, 255, 0.04); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.meta-item { background: var(--fill-1); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
 .meta-label { color: var(--text-dim); margin-right: 8px; font-size: 12px; }
 .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 16px; }
-.metric-cell { background: rgba(255, 255, 255, 0.04); border-radius: 8px; padding: 10px 12px; }
+.metric-cell { background: var(--fill-1); border-radius: 8px; padding: 10px 12px; }
 .mc-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
 .mc-value { font-size: 18px; font-weight: 600; font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .trend-block { margin-bottom: 18px; }

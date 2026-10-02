@@ -1,11 +1,9 @@
 <template>
   <div class="profile-view">
-    <div class="page-head">
-      <div>
-        <h2 class="page-title">个人中心</h2>
-        <p class="page-sub">查看当前账号的身份信息，修改昵称与登录密码。角色与数据范围由管理员分配，个人不可更改。</p>
-      </div>
-    </div>
+    <PageHeader
+      title="个人中心"
+      desc="查看当前账号的身份信息，修改昵称与登录密码；角色与数据范围由管理员分配，个人不可更改"
+    />
 
     <el-tabs v-model="activeTab" class="profile-tabs">
       <el-tab-pane label="基本信息" name="basic">
@@ -51,6 +49,7 @@ import { ElMessage } from 'element-plus'
 import http from '../../api/http'
 import { useAuth } from '../../composables/useAuth'
 import ChangePasswordSubView from '../settings/ChangePasswordSubView.vue'
+import PageHeader from '../common/PageHeader.vue'
 
 const auth = useAuth()
 const principal = auth.principal

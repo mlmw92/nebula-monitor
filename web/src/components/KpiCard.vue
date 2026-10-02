@@ -34,8 +34,8 @@ defineProps({
   transition: transform 0.2s, box-shadow 0.2s;
 }
 .kpi-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  transform: translateY(-1px);
+  box-shadow: var(--sh-2);
 }
 .kpi-card::before {
   content: '';
@@ -43,8 +43,8 @@ defineProps({
   top: 0;
   left: 0;
   right: 0;
-  height: 2px;
-  opacity: 0.8;
+  height: 1px;
+  background: var(--bd);
 }
 .kpi-icon {
   width: 36px;
@@ -54,6 +54,9 @@ defineProps({
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  /* 默认中性：颜色只留给真实异常，不用来给 KPI 分类 */
+  background: var(--fill-2);
+  color: var(--t2);
 }
 .kpi-icon :deep(svg) {
   width: 19px;
@@ -84,34 +87,33 @@ defineProps({
   white-space: nowrap;
 }
 
-/* 色调：顶栏渐变 + 图标底色（跟随主题 chart 色板） */
-.tone-total::before { background: linear-gradient(90deg, var(--chart-cyan), var(--chart-blue)); }
-.tone-total .kpi-icon { background: color-mix(in srgb, var(--chart-cyan) 14%, transparent); color: var(--chart-cyan); }
-
-.tone-host::before { background: linear-gradient(90deg, var(--chart-cyan), color-mix(in srgb, var(--chart-blue) 70%, #000)); }
-.tone-host .kpi-icon { background: color-mix(in srgb, var(--chart-cyan) 16%, transparent); color: var(--chart-cyan); }
-
-.tone-up::before { background: linear-gradient(90deg, var(--chart-green), color-mix(in srgb, var(--chart-green) 65%, #000)); }
-.tone-up .kpi-icon { background: color-mix(in srgb, var(--chart-green) 16%, transparent); color: var(--chart-green); }
-
-.tone-down::before { background: linear-gradient(90deg, var(--chart-red), color-mix(in srgb, var(--chart-red) 65%, #000)); }
-.tone-down .kpi-icon { background: color-mix(in srgb, var(--chart-red) 16%, transparent); color: var(--chart-red); }
-
-.tone-mem::before { background: linear-gradient(90deg, var(--chart-purple), color-mix(in srgb, var(--chart-purple) 65%, #000)); }
-.tone-mem .kpi-icon { background: color-mix(in srgb, var(--chart-purple) 15%, transparent); color: var(--chart-purple); }
-
-.tone-conn::before { background: linear-gradient(90deg, var(--chart-blue), color-mix(in srgb, var(--chart-blue) 70%, #000)); }
-.tone-conn .kpi-icon { background: color-mix(in srgb, var(--chart-cyan) 14%, transparent); color: var(--chart-cyan); }
-
-.tone-ops::before { background: linear-gradient(90deg, var(--chart-orange), color-mix(in srgb, var(--chart-orange) 65%, #000)); }
-.tone-ops .kpi-icon { background: color-mix(in srgb, var(--chart-orange) 14%, transparent); color: var(--chart-orange); }
-
-.tone-cluster::before { background: linear-gradient(90deg, var(--chart-indigo), var(--chart-purple)); }
-.tone-cluster .kpi-icon { background: color-mix(in srgb, var(--chart-indigo) 16%, transparent); color: var(--chart-indigo); }
-
-.tone-alert::before { background: linear-gradient(90deg, var(--chart-red), color-mix(in srgb, var(--chart-red) 65%, #000)); }
-.tone-alert .kpi-icon { background: color-mix(in srgb, var(--chart-red) 18%, transparent); color: color-mix(in srgb, var(--chart-red) 85%, #fff); }
-
-.tone-ok::before { background: linear-gradient(90deg, var(--chart-green), color-mix(in srgb, var(--chart-green) 65%, #000)); }
-.tone-ok .kpi-icon { background: color-mix(in srgb, var(--chart-green) 16%, transparent); color: var(--chart-green); }
+/* =========================================================
+ * 色调：只区分「异常」与「正常」两档，不给 KPI 做分类配色。
+ * 原来 8 个 tone 各配一种颜色（青/绿/红/紫/蓝/橙/靛），是典型的
+ * 彩色图标网格——颜色变成了装饰，真正的异常反而不显眼。
+ * 现在：默认中性；只有 down / alert（真实故障）上红色。
+ * ========================================================= */
+.tone-down .kpi-icon,
+.tone-alert .kpi-icon {
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+.tone-down::before,
+.tone-alert::before {
+  height: 2px;
+  background: var(--danger);
+}
+.tone-down .kpi-num,
+.tone-alert .kpi-num {
+  color: var(--danger);
+}
+/* warn 级：琥珀，用于"接近阈值"这类需要看一眼但不是故障的指标 */
+.tone-warn .kpi-icon {
+  background: var(--warn-dim);
+  color: var(--warn);
+}
+.tone-warn::before {
+  height: 2px;
+  background: var(--warn);
+}
 </style>

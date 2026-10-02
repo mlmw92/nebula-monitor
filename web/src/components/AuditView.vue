@@ -1,16 +1,17 @@
 <template>
   <div class="audit-view">
-    <div class="glass panel">
-      <div class="panel-title-row">
-        <div>
-          <div class="panel-title">操作审计</div>
-          <div class="panel-subtitle">记录登录和管理操作，支持按分类、操作者与接口路径筛选</div>
-        </div>
-        <div class="toolbar">
-          <el-button size="small" :loading="loading" @click="loadEvents">刷新</el-button>
-          <el-button size="small" type="primary" :loading="exporting" @click="exportCSV">导出 CSV</el-button>
-        </div>
-      </div>
+    <PageHeader
+      title="操作审计"
+      desc="记录登录和管理操作，支持按分类、操作者与接口路径筛选"
+    >
+      <template #actions>
+        <el-button size="small" :loading="loading" @click="loadEvents">刷新</el-button>
+        <el-button size="small" type="primary" :loading="exporting" @click="exportCSV">导出 CSV</el-button>
+        <el-button size="small" plain @click="printList">打印</el-button>
+      </template>
+    </PageHeader>
+
+    <div class="card filter-bar">
       <div class="filters">
         <el-select v-model="filters.category" clearable placeholder="全部分类" size="small" style="width: 150px" @change="loadEvents">
           <el-option value="authentication" label="认证" />
@@ -40,8 +41,17 @@
       </template>
     </el-alert>
 
-    <div class="glass panel" v-loading="loading">
-      <el-table :data="events" empty-text="暂无审计记录" style="width: 100%">
+    <div class="card" v-loading="loading">
+      <el-table :data="events" style="width: 100%">
+        <template #empty>
+          <EmptyState
+            title="暂无审计记录"
+            :hints="[
+              '审计仅在启用 RBAC 后记录，确认已在系统设置中开启',
+              '调整时间范围或清除筛选条件后重新查询',
+            ]"
+          />
+        </template>
         <el-table-column label="时间" width="180">
           <template #default="{ row }">{{ formatTime(row.time) }}</template>
         </el-table-column>
@@ -96,6 +106,9 @@
 import { reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import http from '../api/http'
+import PageHeader from './common/PageHeader.vue'
+import EmptyState from './common/EmptyState.vue'
+import { printPage } from '../utils/print'
 
 const loading = ref(false)
 const exporting = ref(false)
@@ -139,6 +152,17 @@ function queryString(format = '') {
   return params.toString()
 }
 
+// 审计打印件要能说明"按什么条件导出的"，否则作为凭证材料无效
+function printList() {
+  const cond = [
+    `分类=${categoryLabel(filters.category)}`,
+    `操作者=${filters.user || '全部'}`,
+    `接口路径=${filters.path || '全部'}`,
+    `条数=${filters.limit}`,
+  ]
+  printPage({ title: '操作审计', meta: [`共 ${events.value.length} 条`, cond.join(' · ')] })
+}
+
 async function loadEvents() {
   loading.value = true
   try {
@@ -180,12 +204,10 @@ onMounted(loadEvents)
 <style scoped>
 .audit-view { display: flex; flex-direction: column; gap: 16px; }
 .audit-error :deep(.el-button--primary) { font-size: 13px; }
-.panel { padding: 16px; }
-.panel-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.panel-title { color: var(--text); font-size: 16px; font-weight: 600; }
-.panel-subtitle { color: var(--text-muted); font-size: 13px; margin-top: 5px; }
+/* 页头与筛选分离：筛选条独立成一张薄卡，不再和标题挤在同一个容器里 */
+.filter-bar { padding: 12px 16px; }
 .toolbar { display: flex; gap: 8px; }
-.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; }
 .filters .el-input { width: 180px; }
 .method { display: inline-block; min-width: 48px; margin-right: 8px; color: var(--accent, #4a9df0); font-size: 13px; font-weight: 700; }
 .method-post, .method-put, .method-patch, .method-delete { color: #ffb454; }
@@ -199,5 +221,5 @@ onMounted(loadEvents)
 .source-ip { font-family: var(--font-mono, monospace); font-size: 13px; }
 .source-loc { font-size: 13px; color: var(--text-muted); }
 .source-loc--unknown { font-style: italic; opacity: 0.7; }
-@media (max-width: 720px) { .panel-title-row { align-items: flex-start; flex-direction: column; } .toolbar { width: 100%; } }
+@media (max-width: 720px) { .toolbar { width: 100%; } }
 </style>

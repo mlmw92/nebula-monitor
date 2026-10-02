@@ -1,0 +1,864 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NebulaEye 数据大屏 v2 · 大气版（1920×1080）</title>
+<style>
+/* ============ 外壳（浅色） ============ */
+:root{
+  --ink:#0f172a;--ink2:#334155;--ink3:#64748b;
+  --line:#e3e8ef;--line2:#cbd5e1;--bg:#f5f7fa;--sf:#fff;--sf2:#f8fafc;--sf3:#f1f5f9;
+  --brand:#2563eb;--ok:#15803d;--warn:#b45309;--bad:#b91c1c;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;line-height:1.6}
+.topbar{position:sticky;top:0;z-index:40;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);padding:12px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.tb-t{font-size:16px;font-weight:700}
+.tb-s{font-size:12px;color:var(--ink3)}
+.tabs{display:flex;gap:4px;margin-left:auto;background:var(--sf3);padding:3px;border-radius:999px}
+.tab{border:0;background:transparent;color:var(--ink2);font-size:13px;font-weight:600;padding:6px 14px;border-radius:999px;cursor:pointer;font-family:inherit}
+.tab.on{background:var(--sf);color:var(--ink);box-shadow:0 1px 2px rgba(15,23,42,.08)}
+.zoom{display:flex;gap:4px;align-items:center;font-size:12px;color:var(--ink3)}
+.zoom button{border:1px solid var(--line2);background:var(--sf);color:var(--ink2);font-size:12px;padding:4px 9px;border-radius:7px;cursor:pointer;font-family:inherit}
+.zoom button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.mode{display:flex;gap:4px;align-items:center;font-size:12px;color:var(--ink3)}
+.mode button{border:1px solid var(--line2);background:var(--sf);color:var(--ink2);font-size:12px;padding:4px 10px;border-radius:7px;cursor:pointer;font-family:inherit}
+.mode button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+.wrap{max-width:1400px;margin:0 auto;padding:22px 22px 90px}
+.pane{display:none}.pane.on{display:block}
+.lead{background:var(--sf);border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin-bottom:20px}
+.lead h2{margin:0 0 6px;font-size:16px}
+.lead p{margin:0;color:var(--ink2);font-size:13px}
+h3.sec{font-size:16px;margin:28px 0 12px;display:flex;align-items:center;gap:8px}
+h3.sec::before{content:"";width:3px;height:15px;background:var(--brand);border-radius:2px}
+.tk{width:100%;border-collapse:collapse;font-size:13px;background:var(--sf);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.tk th{background:var(--sf2);text-align:left;padding:9px 12px;font-size:12px;color:var(--ink3);font-weight:700;border-bottom:1px solid var(--line)}
+.tk td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.tk tr:last-child td{border-bottom:0}
+code.k{font-family:var(--mono);font-size:12px;background:var(--sf3);padding:1px 6px;border-radius:5px;color:var(--ink2)}
+pre{background:#0f172a;color:#e2e8f0;padding:15px 17px;border-radius:12px;overflow:auto;font-size:12.5px;line-height:1.65;font-family:var(--mono);margin:0}
+pre .c{color:#7d8ba1}
+.sc-cap{font-size:12px;color:var(--ink3);margin:10px 0 0}
+
+/* ============ 大屏舞台 ============ */
+.scaler{position:relative;overflow:hidden;border-radius:14px;background:#000206;
+  box-shadow:0 10px 40px rgba(0,0,0,.5)}
+.stage{width:1920px;height:1080px;transform:scale(var(--s,.56));transform-origin:top left;
+  position:relative;overflow:hidden;color:#eaf4ff;
+  display:flex;flex-direction:column;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+.stage{--acc:#38bdf8;--acc2:#0ea5e9;--ok:#22c55e;--warn:#ffb454;--bad:#ff4d63;
+  --t1:#f2f8ff;--t2:#a9c4e6;--t3:#7791b4;--cnr:rgba(56,189,248,.55);
+  --pnl:rgba(8,20,38,.52);--pnl-line:rgba(56,189,248,.16);
+  --f-kpi:78px;--f-xl:44px;--f-lg:26px;--f-md:19px;--f-sm:16px;--f-xs:14px;--f-hero:120px}
+.stage{background:
+  radial-gradient(1100px 560px at 50% -6%,rgba(56,189,248,.16),transparent 66%),
+  radial-gradient(700px 400px at 4% 100%,rgba(14,165,233,.10),transparent 70%),
+  radial-gradient(700px 400px at 96% 100%,rgba(14,165,233,.10),transparent 70%),
+  linear-gradient(180deg,#000409 0%,#030a17 46%,#020611 100%)}
+
+/* 背景装饰层 */
+.bg-beam{position:absolute;left:50%;top:-200px;width:1000px;height:640px;transform:translateX(-50%);
+  background:radial-gradient(ellipse at 50% 0%,rgba(56,189,248,.20),transparent 70%);filter:blur(8px);pointer-events:none}
+.bg-floor{position:absolute;left:-25%;right:-25%;bottom:0;height:300px;pointer-events:none;opacity:.42;
+  background-image:linear-gradient(rgba(56,189,248,.22) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(56,189,248,.16) 1px,transparent 1px);
+  background-size:64px 46px;
+  transform:perspective(460px) rotateX(67deg);transform-origin:bottom center;
+  -webkit-mask-image:linear-gradient(to top,#000 5%,transparent 82%);
+  mask-image:linear-gradient(to top,#000 5%,transparent 82%)}
+.bg-vignette{position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(1200px 700px at 50% 42%,transparent 40%,rgba(0,2,8,.72) 100%)}
+.bg-corner{position:absolute;inset:24px;pointer-events:none;z-index:6}
+.bg-corner i{position:absolute;width:44px;height:44px;border:2px solid var(--cnr)}
+.bg-corner i:nth-child(1){left:0;top:0;border-right:0;border-bottom:0}
+.bg-corner i:nth-child(2){right:0;top:0;border-left:0;border-bottom:0}
+.bg-corner i:nth-child(3){left:0;bottom:0;border-right:0;border-top:0}
+.bg-corner i:nth-child(4){right:0;bottom:0;border-left:0;border-top:0}
+.bg-star{position:absolute;inset:0;pointer-events:none;opacity:.5;
+  background-image:radial-gradient(1.4px 1.4px at 12% 18%,rgba(180,220,255,.7),transparent),
+    radial-gradient(1.2px 1.2px at 78% 12%,rgba(180,220,255,.55),transparent),
+    radial-gradient(1.6px 1.6px at 34% 8%,rgba(180,220,255,.5),transparent),
+    radial-gradient(1.2px 1.2px at 62% 22%,rgba(180,220,255,.45),transparent),
+    radial-gradient(1.2px 1.2px at 8% 62%,rgba(180,220,255,.35),transparent),
+    radial-gradient(1.2px 1.2px at 92% 58%,rgba(180,220,255,.35),transparent)}
+
+/* 通用面板 + HUD 角标 */
+.pnl{position:relative;background:var(--pnl);border:1px solid var(--pnl-line);border-radius:4px}
+.pnl::before{content:"";position:absolute;left:-1px;top:-1px;width:15px;height:15px;
+  border-left:2px solid var(--cnr);border-top:2px solid var(--cnr);z-index:2}
+.pnl::after{content:"";position:absolute;right:-1px;bottom:-1px;width:15px;height:15px;
+  border-right:2px solid var(--cnr);border-bottom:2px solid var(--cnr);z-index:2}
+.cnr{position:absolute;inset:0;pointer-events:none;z-index:2}
+.cnr::before{content:"";position:absolute;right:-1px;top:-1px;width:15px;height:15px;
+  border-right:2px solid var(--cnr);border-top:2px solid var(--cnr)}
+.cnr::after{content:"";position:absolute;left:-1px;bottom:-1px;width:15px;height:15px;
+  border-left:2px solid var(--cnr);border-bottom:2px solid var(--cnr)}
+.pnl-h{display:flex;align-items:center;gap:12px;padding:14px 20px 10px}
+.pnl-h .bar{width:3px;height:20px;background:var(--acc);box-shadow:0 0 10px rgba(56,189,248,.8)}
+.pnl-h .t{font-size:var(--f-lg);font-weight:700;letter-spacing:.06em}
+.pnl-h .s{margin-left:auto;font-size:var(--f-xs);color:var(--t3);letter-spacing:.04em}
+
+/* 顶栏 */
+.hd{position:relative;z-index:8;flex:0 0 104px;display:flex;align-items:center;padding:0 56px}
+.hd-brand{display:flex;align-items:center;gap:14px}
+.hd-logo{width:44px;height:44px;background:linear-gradient(135deg,#38bdf8,#0369a1);
+  clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
+  display:flex;align-items:center;justify-content:center;font-weight:900;font-size:22px;color:#001a2e}
+.hd-bn{font-size:22px;font-weight:800;letter-spacing:.14em;line-height:1.15}
+.hd-bs{font-size:var(--f-xs);color:var(--t3);letter-spacing:.34em}
+.hd-mid{flex:1;display:flex;flex-direction:column;align-items:center;position:relative}
+.hd-title{font-size:42px;font-weight:800;letter-spacing:.42em;text-indent:.42em;line-height:1;
+  color:#fff;text-shadow:0 0 30px rgba(56,189,248,.55),0 0 80px rgba(56,189,248,.22)}
+.hd-wing{display:flex;align-items:center;gap:16px;margin-top:10px;width:100%}
+.hd-wing .ln{flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(56,189,248,.85),transparent)}
+.hd-wing .dg{width:8px;height:8px;transform:rotate(45deg);background:var(--acc);box-shadow:0 0 12px var(--acc)}
+.hd-wing .lbl{font-size:var(--f-xs);color:var(--t3);letter-spacing:.5em}
+.hd-right{display:flex;align-items:center;gap:26px}
+.hd-clock{text-align:right}
+.hd-clock .t{font-size:34px;font-weight:700;font-family:var(--mono);letter-spacing:.02em;line-height:1}
+.hd-clock .d{font-size:var(--f-sm);color:var(--t3);margin-top:4px;letter-spacing:.08em}
+.hd-state{display:flex;align-items:center;gap:10px;padding:9px 20px;
+  border:1px solid rgba(34,197,94,.42);background:rgba(34,197,94,.10);
+  clip-path:polygon(12px 0,100% 0,calc(100% - 12px) 100%,0 100%)}
+.hd-state .dot{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 12px var(--ok)}
+.hd-state .tx{font-size:var(--f-md);font-weight:700;color:var(--ok);letter-spacing:.06em}
+.hd-light{position:absolute;left:0;right:0;bottom:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(56,189,248,.9) 22%,rgba(56,189,248,.9) 78%,transparent)}
+
+/* KPI 带 */
+.kb-row{position:relative;z-index:8;display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  margin:18px 56px 0;background:rgba(56,189,248,.16);border-top:1px solid rgba(56,189,248,.28);
+  border-bottom:1px solid rgba(56,189,248,.28)}
+.kb{position:relative;background:linear-gradient(180deg,rgba(10,24,45,.72),rgba(4,12,26,.5));
+  padding:18px 30px;display:flex;flex-direction:column;justify-content:center;gap:4px}
+.kb .l{font-size:var(--f-xs);color:var(--t3);letter-spacing:.24em}
+.kb .v{font-size:var(--f-kpi);font-weight:800;font-family:var(--mono);line-height:.98;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums}
+.kb .v small{font-size:26px;font-weight:600;margin-left:6px;letter-spacing:0}
+.kb .s{font-size:var(--f-sm);color:var(--t2);letter-spacing:.04em}
+.kb.hot{background:linear-gradient(180deg,rgba(60,12,26,.72),rgba(20,4,10,.5))}
+.kb::after{content:"";position:absolute;right:0;top:18%;height:64%;width:1px;background:rgba(56,189,248,.22)}
+.kb:last-child::after{display:none}
+
+/* 主区 */
+.mn{position:relative;z-index:8;flex:1;min-height:0;display:grid;grid-template-columns:420px 1fr 420px;gap:20px;
+  padding:20px 56px;margin-top:18px}
+.col{display:flex;flex-direction:column;gap:20px;min-height:0}
+
+/* 资源水位 */
+.wl{display:flex;flex-direction:column;gap:16px;padding:4px 20px 18px}
+.wl-row .k{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px}
+.wl-row .k span{font-size:var(--f-md);color:var(--t2);letter-spacing:.06em}
+.wl-row .k b{font-size:36px;font-weight:800;font-family:var(--mono);line-height:1}
+.wl-bar{position:relative;height:12px;background:rgba(120,160,210,.14);
+  clip-path:polygon(0 0,100% 0,calc(100% - 6px) 100%,0 100%)}
+.wl-bar i{display:block;height:100%;background:linear-gradient(90deg,#0ea5e9,#38bdf8);
+  box-shadow:0 0 14px rgba(56,189,248,.55)}
+.wl-bar i.w{background:linear-gradient(90deg,#d97706,#ffb454);box-shadow:0 0 14px rgba(255,180,84,.5)}
+.wl-bar i.d{background:linear-gradient(90deg,#b91c1c,#ff4d63);box-shadow:0 0 14px rgba(255,77,99,.55)}
+.wl-mark{position:absolute;top:-4px;width:2px;height:20px;background:rgba(255,255,255,.7)}
+.wl-sub{display:flex;justify-content:space-between;font-size:var(--f-xs);color:var(--t3);margin-top:5px}
+
+/* 大环 */
+.ring-wrap{position:relative;display:flex;align-items:center;justify-content:center;height:400px}
+.ring-wrap svg{position:absolute;inset:0;margin:auto}
+.ring-ctr{position:relative;text-align:center;z-index:3}
+.ring-ctr .n{font-size:var(--f-hero);font-weight:800;font-family:var(--mono);line-height:.9;
+  letter-spacing:-.03em;font-variant-numeric:tabular-nums;
+  text-shadow:0 0 40px rgba(34,197,94,.45)}
+.ring-ctr .u{font-size:var(--f-md);color:var(--t3);letter-spacing:.4em;margin-top:6px}
+.ring-ctr .d{font-size:var(--f-sm);color:var(--t2);margin-top:10px;letter-spacing:.05em}
+.scan{transform-origin:240px 240px}
+body:not(.demo) .scan{animation:none}
+body.demo .scan{animation:spin 9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.q4{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:rgba(56,189,248,.16);
+  border:1px solid rgba(56,189,248,.2)}
+.q4 div{background:rgba(6,16,32,.62);padding:12px 8px;text-align:center}
+.q4 .n{font-size:30px;font-weight:800;font-family:var(--mono);line-height:1}
+.q4 .l{font-size:var(--f-xs);color:var(--t3);margin-top:5px;letter-spacing:.1em}
+
+/* 告警项 */
+.aq{display:flex;flex-direction:column;padding:6px 0 0}
+.aq-i{display:flex;align-items:center;gap:14px;padding:13px 20px;position:relative}
+.aq-i+.aq-i{border-top:1px solid rgba(56,189,248,.1)}
+.aq-i .lv{flex:0 0 auto;width:4px;height:34px;border-radius:2px}
+.aq-i .lv.c{background:var(--bad);box-shadow:0 0 12px var(--bad)}
+.aq-i .lv.w{background:var(--warn);box-shadow:0 0 12px rgba(255,180,84,.7)}
+.aq-i .lv.i{background:var(--acc)}
+.aq-i .b{flex:1;min-width:0}
+.aq-i .t{font-size:var(--f-md);color:var(--t1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.aq-i .m{font-size:var(--f-sm);color:var(--t3);margin-top:3px}
+.aq-i .d{font-family:var(--mono);font-size:var(--f-sm);color:var(--t2);flex:0 0 auto}
+body.demo .aq-i .lv.c{animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* 趋势图 */
+.tr{padding:6px 20px 14px}
+.tr-legend{display:flex;gap:26px;font-size:var(--f-sm);margin-top:6px}
+.tr-legend span{display:flex;align-items:center;gap:8px}
+.tr-legend i{width:16px;height:3px;border-radius:2px;display:block}
+
+/* 表格（主机/告警队列） */
+.tb{width:100%;border-collapse:collapse;font-size:var(--f-md)}
+.tb th{text-align:left;padding:9px 12px;font-size:var(--f-xs);color:var(--t3);font-weight:700;
+  letter-spacing:.14em;border-bottom:1px solid rgba(56,189,248,.24)}
+.tb td{padding:9px 12px;border-bottom:1px solid rgba(56,189,248,.07);color:var(--t2)}
+.tb td.nm{color:var(--t1);font-weight:600}
+.tb .num{text-align:right;font-family:var(--mono)}
+
+/* 底栏数据流 */
+.ft{position:relative;z-index:8;flex:0 0 78px;margin:0 56px;display:flex;align-items:center;
+  border-top:1px solid rgba(56,189,248,.28);border-bottom:1px solid rgba(56,189,248,.28);
+  background:linear-gradient(90deg,rgba(8,20,38,.7),rgba(4,12,26,.35));overflow:hidden}
+.ft-lb{flex:0 0 auto;padding:0 26px;display:flex;align-items:baseline;gap:10px;
+  border-right:1px solid rgba(56,189,248,.24);height:100%;align-items:center}
+.ft-lb .t{font-size:var(--f-md);color:var(--t2);letter-spacing:.2em}
+.ft-lb .n{font-size:36px;font-weight:800;font-family:var(--mono);color:var(--t1)}
+.ft-fl{flex:1;overflow:hidden;position:relative;height:100%;display:flex;align-items:center}
+.ft-fl .track{display:flex;gap:52px;white-space:nowrap;padding-left:40px}
+body.demo .ft-fl .track{animation:flow 34s linear infinite}
+@keyframes flow{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.ft-it{display:flex;align-items:center;gap:14px;font-size:var(--f-md)}
+.ft-it .lv{width:8px;height:8px;transform:rotate(45deg);background:var(--t3)}
+.ft-it.c .lv{background:var(--bad);box-shadow:0 0 10px var(--bad)}
+.ft-it.w .lv{background:var(--warn)}
+.ft-it .a{color:var(--t1)}
+.ft-it .b{color:var(--t3);font-family:var(--mono)}
+.ft-up{flex:0 0 auto;padding:0 26px;font-size:var(--f-xs);color:var(--t3);letter-spacing:.08em}
+
+/* 告警态 */
+.stage.alarm{--cnr:rgba(255,77,99,.6);--pnl-line:rgba(255,77,99,.2)}
+.stage.alarm{background:
+  radial-gradient(1100px 560px at 50% -6%,rgba(255,77,99,.16),transparent 66%),
+  radial-gradient(700px 400px at 4% 100%,rgba(180,20,40,.12),transparent 70%),
+  radial-gradient(700px 400px at 96% 100%,rgba(180,20,40,.12),transparent 70%),
+  linear-gradient(180deg,#080205 0%,#12040a 46%,#0a0206 100%)}
+.stage.alarm .bg-beam{background:radial-gradient(ellipse at 50% 0%,rgba(255,77,99,.22),transparent 70%)}
+.stage.alarm .hd-state{border-color:rgba(255,77,99,.5);background:rgba(255,77,99,.12)}
+.stage.alarm .hd-state .dot{background:var(--bad);box-shadow:0 0 14px var(--bad)}
+.stage.alarm .hd-state .tx{color:var(--bad)}
+.stage.alarm .hd-title{text-shadow:0 0 30px rgba(255,77,99,.5),0 0 80px rgba(255,77,99,.2)}
+.stage.alarm .hd-light{background:linear-gradient(90deg,transparent,rgba(255,77,99,.9) 22%,rgba(255,77,99,.9) 78%,transparent)}
+.stage.alarm .kb-row{background:rgba(255,77,99,.18);border-color:rgba(255,77,99,.3)}
+.stage.alarm .kb::after{background:rgba(255,77,99,.24)}
+body.demo .stage.alarm .bg-floor{animation:none}
+.stage.alarm .bg-floor{opacity:.3;
+  background-image:linear-gradient(rgba(255,77,99,.22) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,77,99,.16) 1px,transparent 1px)}
+.alm-top{position:absolute;top:0;left:0;right:0;height:4px;z-index:9;
+  background:linear-gradient(90deg,transparent,var(--bad) 20%,var(--bad) 80%,transparent)}
+body.demo .alm-top{animation:pulse 1.8s ease-in-out infinite}
+.focus{padding:16px 22px}
+.focus .h{font-size:34px;font-weight:800;line-height:1.25;letter-spacing:.02em}
+.focus .kv{margin-top:16px;display:flex;flex-direction:column;gap:11px}
+.focus .kv div{display:flex;justify-content:space-between;align-items:baseline;font-size:var(--f-md)}
+.focus .kv span{color:var(--t3)}
+.focus .kv b{font-family:var(--mono);font-size:22px}
+.act{margin-top:18px;padding:16px 18px;background:rgba(255,77,99,.10);border-left:3px solid var(--bad)}
+.act .h{font-size:var(--f-md);font-weight:700;color:var(--bad);letter-spacing:.06em}
+.act .b{font-size:var(--f-sm);color:var(--t2);margin-top:8px;line-height:1.75}
+.act ol{margin:10px 0 0;padding-left:20px;font-size:var(--f-sm);color:var(--t2)}
+.act li{margin-bottom:5px}
+.big3{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:rgba(56,189,248,.16);
+  border:1px solid rgba(56,189,248,.2);margin:0 20px}
+.big3 div{background:rgba(6,16,32,.62);padding:18px 10px;text-align:center}
+.big3 .n{font-size:64px;font-weight:800;font-family:var(--mono);line-height:1;font-variant-numeric:tabular-nums}
+.big3 .l{font-size:var(--f-sm);color:var(--t3);margin-top:8px;letter-spacing:.14em}
+.big3 div.c{background:rgba(60,10,22,.6)}
+.big3 div.w{background:rgba(52,30,6,.55)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <div class="tb-t">NebulaEye 数据大屏 v2 · 大气版</div>
+    <div class="tb-s">1920×1080 · 单焦点构图 / 尺度对比 / 纵深背景 · 2026-10-01</div>
+  </div>
+  <div class="tabs">
+    <button class="tab on" data-p="q1">① 常态</button>
+    <button class="tab" data-p="q2">② 告警态接管</button>
+    <button class="tab" data-p="q3">③ 大气感从哪来</button>
+  </div>
+  <div class="mode">
+    <span>档位</span>
+    <button data-m="demo" class="on">演示档</button>
+    <button data-m="duty">值班档</button>
+  </div>
+  <div class="zoom">
+    <span>缩放</span>
+    <button data-z="0.4">40%</button>
+    <button class="on" data-z="0.56">56%</button>
+    <button data-z="0.76">76%</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+<!-- ================= ① 常态 ================= -->
+<div class="pane on" id="q1">
+  <div class="lead">
+    <h2>① 常态（大气版）</h2>
+    <p>整屏只有一个视觉中心——直径 400px 的健康环。左右两列是它的注释，不是平级的第三个模块。所有"大气感"来自<b>尺度对比</b>：环心数字 120px、KPI 78px、标签 14px，最大与最小相差近 9 倍。</p>
+  </div>
+
+  <div class="scaler">
+    <div class="stage">
+      <div class="bg-beam"></div>
+      <div class="bg-star"></div>
+      <div class="bg-floor"></div>
+      <div class="bg-vignette"></div>
+      <div class="bg-corner"><i></i><i></i><i></i><i></i></div>
+
+      <!-- 顶栏 -->
+      <header class="hd">
+        <div class="hd-brand">
+          <div class="hd-logo">N</div>
+          <div>
+            <div class="hd-bn">NEBULAEYE</div>
+            <div class="hd-bs">SHENZHEN IDC-A</div>
+          </div>
+        </div>
+        <div class="hd-mid">
+          <div class="hd-title">监控指挥中心</div>
+          <div class="hd-wing">
+            <span class="ln"></span><span class="dg"></span>
+            <span class="lbl">OPERATION COMMAND CENTER</span>
+            <span class="dg"></span><span class="ln"></span>
+          </div>
+        </div>
+        <div class="hd-right">
+          <div class="hd-state"><span class="dot"></span><span class="tx">系统正常</span></div>
+          <div class="hd-clock">
+            <div class="t">18:40:26</div>
+            <div class="d">2026-10-01 星期四</div>
+          </div>
+        </div>
+        <div class="hd-light"></div>
+      </header>
+
+      <!-- KPI 带 -->
+      <div class="kb-row">
+        <div class="kb"><span class="l">在线主机</span>
+          <span class="v" style="color:#f2f8ff">12<small>/13</small></span>
+          <span class="s">batch-05 离线 6h 12m</span></div>
+        <div class="kb hot"><span class="l">活跃告警</span>
+          <span class="v" style="color:#ff4d63">3<small>条</small></span>
+          <span class="s">1 严重 · 2 警告 · 最久 6h 12m</span></div>
+        <div class="kb"><span class="l">系统健康</span>
+          <span class="v" style="color:#22c55e">92<small>分</small></span>
+          <span class="s">较昨日 +2 · 7 日区间 86–94</span></div>
+        <div class="kb"><span class="l">今日告警</span>
+          <span class="v" style="color:#f2f8ff">27<small>条</small></span>
+          <span class="s">已恢复 24 · 平均恢复 24m</span></div>
+      </div>
+
+      <!-- 主区 -->
+      <div class="mn">
+        <!-- 左 -->
+        <div class="col">
+          <div class="pnl" style="flex:0 0 auto">
+            <i class="cnr"></i>
+            <div class="pnl-h"><span class="bar"></span><span class="t">资源水位</span><span class="s">均值 / 峰值</span></div>
+            <div class="wl">
+              <div class="wl-row">
+                <div class="k"><span>CPU</span><b style="color:#38bdf8">31.4%</b></div>
+                <div class="wl-bar"><i style="width:31.4%"></i><span class="wl-mark" style="left:78.2%"></span></div>
+                <div class="wl-sub"><span>峰值 78.2%</span><span>13 台</span></div>
+              </div>
+              <div class="wl-row">
+                <div class="k"><span>内存</span><b style="color:#ffb454">56.1%</b></div>
+                <div class="wl-bar"><i class="w" style="width:56.1%"></i><span class="wl-mark" style="left:88%"></span></div>
+                <div class="wl-sub"><span>峰值 88.0%</span><span>13 台</span></div>
+              </div>
+              <div class="wl-row">
+                <div class="k"><span>磁盘</span><b style="color:#ff4d63">62.7%</b></div>
+                <div class="wl-bar"><i class="d" style="width:62.7%"></i><span class="wl-mark" style="left:91%"></span></div>
+                <div class="wl-sub"><span>峰值 91.0% · db-prod-01</span><span>13 台</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="pnl" style="flex:1;min-height:0;display:flex;flex-direction:column">
+            <i class="cnr"></i>
+            <div class="pnl-h"><span class="bar"></span><span class="t">中间件</span><span class="s">6 类 · 11 实例</span></div>
+            <div style="flex:1;padding:4px 20px 14px;display:flex;flex-direction:column;justify-content:space-between">
+              <div>
+                <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid rgba(56,189,248,.08)">
+                  <span style="width:8px;height:8px;background:#22c55e;border-radius:50%;box-shadow:0 0 8px #22c55e"></span>
+                  <span style="font-size:19px;min-width:80px">Redis</span>
+                  <span style="font-size:16px;color:#7791b4;font-family:var(--mono);margin-left:auto">命中 98.2% · 3.1G</span></div>
+                <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid rgba(56,189,248,.08)">
+                  <span style="width:8px;height:8px;background:#ffb454;border-radius:50%;box-shadow:0 0 8px #ffb454"></span>
+                  <span style="font-size:19px;min-width:80px">MySQL</span>
+                  <span style="font-size:16px;color:#7791b4;font-family:var(--mono);margin-left:auto">连接 412/500 · 慢查 7</span></div>
+                <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid rgba(56,189,248,.08)">
+                  <span style="width:8px;height:8px;background:#22c55e;border-radius:50%;box-shadow:0 0 8px #22c55e"></span>
+                  <span style="font-size:19px;min-width:80px">Kafka</span>
+                  <span style="font-size:16px;color:#7791b4;font-family:var(--mono);margin-left:auto">积压 0 · TPS 2.4k</span></div>
+                <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid rgba(56,189,248,.08)">
+                  <span style="width:8px;height:8px;background:#22c55e;border-radius:50%;box-shadow:0 0 8px #22c55e"></span>
+                  <span style="font-size:19px;min-width:80px">Nginx</span>
+                  <span style="font-size:16px;color:#7791b4;font-family:var(--mono);margin-left:auto">QPS 8.6k · 5xx 0</span></div>
+                <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid rgba(56,189,248,.08)">
+                  <span style="width:8px;height:8px;background:#22c55e;border-radius:50%;box-shadow:0 0 8px #22c55e"></span>
+                  <span style="font-size:19px;min-width:80px">Elastic</span>
+                  <span style="font-size:16px;color:#7791b4;font-family:var(--mono);margin-left:auto">分片 64 · 42ms</span></div>
+                <div style="display:flex;align-items:center;gap:12px;padding:9px 0">
+                  <span style="width:8px;height:8px;background:#ff4d63;border-radius:50%;box-shadow:0 0 8px #ff4d63"></span>
+                  <span style="font-size:19px;min-width:80px">Mongo</span>
+                  <span style="font-size:16px;color:#7791b4;font-family:var(--mono);margin-left:auto">副本延迟 18s</span></div>
+              </div>
+              <div style="font-size:14px;color:#7791b4;padding-top:10px;border-top:1px solid rgba(56,189,248,.12)">
+                采集延迟 4.2s · 采集成功率 99.7%
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 中：视觉中心 -->
+        <div class="col">
+          <div class="pnl" style="flex:0 0 400px;display:flex;flex-direction:column;position:relative">
+            <i class="cnr"></i>
+            <div class="pnl-h"><span class="bar"></span><span class="t">系统态势</span><span class="s">综合健康评分</span></div>
+            <div class="ring-wrap">
+              <svg width="400" height="400" viewBox="0 0 480 480">
+                <!-- 外圈刻度 -->
+                <circle cx="240" cy="240" r="222" fill="none" stroke="rgba(56,189,248,.30)" stroke-width="1.5"
+                  stroke-dasharray="3 20.3"/>
+                <!-- 内圈细线 -->
+                <circle cx="240" cy="240" r="196" fill="none" stroke="rgba(56,189,248,.14)" stroke-width="1"/>
+                <!-- 底环 -->
+                <circle cx="240" cy="240" r="168" fill="none" stroke="rgba(120,160,210,.13)" stroke-width="18"/>
+                <!-- 进度环 -->
+                <circle cx="240" cy="240" r="168" fill="none" stroke="#22c55e" stroke-width="18"
+                  stroke-linecap="round" stroke-dasharray="1055.6" stroke-dashoffset="84.4"
+                  transform="rotate(-90 240 240)" style="filter:drop-shadow(0 0 16px rgba(34,197,94,.55))"/>
+                <!-- 扫描弧 -->
+                <g class="scan">
+                  <circle cx="240" cy="240" r="222" fill="none" stroke="rgba(56,189,248,.9)" stroke-width="3"
+                    stroke-dasharray="90 1305" stroke-linecap="round"/>
+                </g>
+                <!-- 四角刻度点 -->
+                <circle cx="240" cy="18" r="3.5" fill="#38bdf8"/>
+                <circle cx="462" cy="240" r="3.5" fill="rgba(56,189,248,.5)"/>
+                <circle cx="240" cy="462" r="3.5" fill="rgba(56,189,248,.5)"/>
+                <circle cx="18" cy="240" r="3.5" fill="rgba(56,189,248,.5)"/>
+              </svg>
+              <div class="ring-ctr">
+                <div class="n" style="color:#22c55e">92</div>
+                <div class="u">健康分</div>
+                <div class="d">较昨日 +2 · 30 分钟前 92</div>
+              </div>
+            </div>
+            <div class="q4" style="margin:0 20px 16px">
+              <div><div class="n" style="color:#22c55e">92%</div><div class="l">在线率</div></div>
+              <div><div class="n" style="color:#38bdf8">77%</div><div class="l">无告警占比</div></div>
+              <div><div class="n" style="color:#38bdf8">69%</div><div class="l">CPU 余量</div></div>
+              <div><div class="n" style="color:#ffb454">37%</div><div class="l">磁盘余量</div></div>
+            </div>
+          </div>
+
+          <div class="pnl" style="flex:1;min-height:0;display:flex;flex-direction:column">
+            <i class="cnr"></i>
+            <div class="pnl-h"><span class="bar"></span><span class="t">集群资源趋势</span><span class="s">近 6 小时 · 均值</span></div>
+            <div class="tr" style="flex:1">
+              <svg width="100%" height="150" viewBox="0 0 900 150" preserveAspectRatio="none" style="display:block">
+                <defs>
+                  <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#38bdf8" stop-opacity=".34"/>
+                    <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <g stroke="rgba(120,160,210,.10)" stroke-width="1">
+                  <line x1="0" y1="30" x2="900" y2="30"/><line x1="0" y1="65" x2="900" y2="65"/>
+                  <line x1="0" y1="100" x2="900" y2="100"/><line x1="0" y1="135" x2="900" y2="135"/>
+                </g>
+                <path d="M0,110 L100,102 L200,112 L300,90 L400,98 L500,80 L600,92 L700,72 L800,84 L900,78
+                  L900,150 L0,150 Z" fill="url(#g1)"/>
+                <polyline points="0,110 100,102 200,112 300,90 400,98 500,80 600,92 700,72 800,84 900,78"
+                  fill="none" stroke="#38bdf8" stroke-width="3" stroke-linejoin="round"
+                  style="filter:drop-shadow(0 0 8px rgba(56,189,248,.7))"/>
+                <polyline points="0,88 100,85 200,92 300,82 400,87 500,76 600,83 700,74 800,79 900,78"
+                  fill="none" stroke="#ffb454" stroke-width="3" stroke-linejoin="round"/>
+                <polyline points="0,126 100,124 200,127 300,122 400,125 500,120 600,123 700,119 800,122 900,121"
+                  fill="none" stroke="#22c55e" stroke-width="3" stroke-linejoin="round"/>
+              </svg>
+              <div class="tr-legend">
+                <span><i style="background:#38bdf8"></i>CPU 31.4%</span>
+                <span><i style="background:#ffb454"></i>内存 56.1%</span>
+                <span><i style="background:#22c55e"></i>磁盘 62.7%</span>
+                <span style="margin-left:auto;color:#7791b4">12:40 → 18:40</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右 -->
+        <div class="col">
+          <div class="pnl" style="flex:1;min-height:0;display:flex;flex-direction:column">
+            <i class="cnr"></i>
+            <div class="pnl-h"><span class="bar"></span><span class="t">待处理告警</span><span class="s">严重优先 · 3 条</span></div>
+            <div class="aq" style="flex:1;min-height:0;overflow:hidden">
+              <div class="aq-i"><span class="lv c"></span>
+                <div class="b"><div class="t">db-prod-01 数据分区使用率 91%</div>
+                  <div class="m">严重 · 数据库 · 预计 6h 后写满</div></div>
+                <span class="d">6h 12m</span></div>
+              <div class="aq-i"><span class="lv w"></span>
+                <div class="b"><div class="t">app-prod-03 CPU 持续 3 小时 &gt; 75%</div>
+                  <div class="m">警告 · 应用 · 网关延迟 480ms</div></div>
+                <span class="d">3h 04m</span></div>
+              <div class="aq-i"><span class="lv w"></span>
+                <div class="b"><div class="t">mongo-rs02 副本同步延迟 18s</div>
+                  <div class="m">警告 · 中间件 · 阈值 10s</div></div>
+                <span class="d">1h 41m</span></div>
+              <div class="aq-i"><span class="lv i"></span>
+                <div class="b"><div class="t">batch-05 失联超过 6 小时</div>
+                  <div class="m">提示 · 主机 · 疑似计划内停机</div></div>
+                <span class="d">6h 12m</span></div>
+              <div class="aq-i"><span class="lv i"></span>
+                <div class="b"><div class="t">MySQL 慢查询 7 条/分钟</div>
+                  <div class="m">提示 · 中间件 · 基线 2</div></div>
+                <span class="d">22m</span></div>
+            </div>
+          </div>
+
+          <div class="pnl" style="flex:0 0 auto">
+            <i class="cnr"></i>
+            <div class="pnl-h"><span class="bar"></span><span class="t">Top 负载</span><span class="s">实时</span></div>
+            <div style="padding:4px 20px 16px;display:flex;flex-direction:column;gap:11px">
+              <div><div style="display:flex;justify-content:space-between;font-size:16px;margin-bottom:6px">
+                <span style="color:#a9c4e6">db-prod-01 · 磁盘</span><b style="font-family:var(--mono);font-size:20px;color:#ff4d63">91%</b></div>
+                <div style="height:8px;background:rgba(120,160,210,.14);clip-path:polygon(0 0,100% 0,calc(100% - 5px) 100%,0 100%)">
+                  <i style="display:block;width:91%;height:100%;background:linear-gradient(90deg,#b91c1c,#ff4d63);box-shadow:0 0 12px rgba(255,77,99,.5)"></i></div></div>
+              <div><div style="display:flex;justify-content:space-between;font-size:16px;margin-bottom:6px">
+                <span style="color:#a9c4e6">app-prod-03 · CPU</span><b style="font-family:var(--mono);font-size:20px;color:#ffb454">78%</b></div>
+                <div style="height:8px;background:rgba(120,160,210,.14);clip-path:polygon(0 0,100% 0,calc(100% - 5px) 100%,0 100%)">
+                  <i style="display:block;width:78%;height:100%;background:linear-gradient(90deg,#d97706,#ffb454)"></i></div></div>
+              <div><div style="display:flex;justify-content:space-between;font-size:16px;margin-bottom:6px">
+                <span style="color:#a9c4e6">db-prod-01 · 内存</span><b style="font-family:var(--mono);font-size:20px;color:#ffb454">81%</b></div>
+                <div style="height:8px;background:rgba(120,160,210,.14);clip-path:polygon(0 0,100% 0,calc(100% - 5px) 100%,0 100%)">
+                  <i style="display:block;width:81%;height:100%;background:linear-gradient(90deg,#d97706,#ffb454)"></i></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底栏 -->
+      <footer class="ft">
+        <div class="ft-lb"><span class="t">活跃告警</span><span class="n">3</span></div>
+        <div class="ft-fl"><div class="track">
+          <div class="ft-it c"><span class="lv"></span><span class="a">db-prod-01 · 磁盘 91% · 预计 6h 后写满</span><span class="b">6h 12m</span></div>
+          <div class="ft-it w"><span class="lv"></span><span class="a">app-prod-03 · CPU 78%</span><span class="b">3h 04m</span></div>
+          <div class="ft-it w"><span class="lv"></span><span class="a">mongo-rs02 · 同步延迟 18s</span><span class="b">1h 41m</span></div>
+          <div class="ft-it c"><span class="lv"></span><span class="a">db-prod-01 · 磁盘 91% · 预计 6h 后写满</span><span class="b">6h 12m</span></div>
+          <div class="ft-it w"><span class="lv"></span><span class="a">app-prod-03 · CPU 78%</span><span class="b">3h 04m</span></div>
+        </div></div>
+        <div class="ft-up">数据更新 18:40:22 · 采集延迟 4.2s</div>
+      </footer>
+    </div>
+  </div>
+  <div class="sc-cap">1920×1080 真实尺寸。演示档下外圈扫描弧旋转、严重告警脉冲、底栏数据流滚动；切到值班档可关闭全部动效，构图与字号保持不变。</div>
+</div>
+
+<!-- ================= ② 告警态 ================= -->
+<div class="pane" id="q2">
+  <div class="lead">
+    <h2>② 告警态（整屏接管）</h2>
+    <p>异常时不只是"某个组件变红"：背景光柱、屏幕角标、HUD 角线、标题辉光、KPI 分隔光带<b>全部从青蓝切到红</b>。整屏的气场在 1 秒内改变，站在三米外也能立刻察觉出事了。</p>
+  </div>
+
+  <div class="scaler">
+    <div class="stage alarm">
+      <div class="alm-top"></div>
+      <div class="bg-beam"></div>
+      <div class="bg-star"></div>
+      <div class="bg-floor"></div>
+      <div class="bg-vignette"></div>
+      <div class="bg-corner"><i></i><i></i><i></i><i></i></div>
+
+      <header class="hd">
+        <div class="hd-brand">
+          <div class="hd-logo" style="background:linear-gradient(135deg,#ff4d63,#b91c1c)">N</div>
+          <div><div class="hd-bn">NEBULAEYE</div><div class="hd-bs">SHENZHEN IDC-A</div></div>
+        </div>
+        <div class="hd-mid">
+          <div class="hd-title">监控指挥中心</div>
+          <div class="hd-wing">
+            <span class="ln"></span><span class="dg" style="background:#ff4d63;box-shadow:0 0 12px #ff4d63"></span>
+            <span class="lbl" style="color:#ff8a99">CRITICAL INCIDENT · 严重故障</span>
+            <span class="dg" style="background:#ff4d63;box-shadow:0 0 12px #ff4d63"></span><span class="ln"></span>
+          </div>
+        </div>
+        <div class="hd-right">
+          <div class="hd-state"><span class="dot"></span><span class="tx">1 项严重 · 影响下单与支付</span></div>
+          <div class="hd-clock"><div class="t">18:40:26</div><div class="d">2026-10-01 星期四</div></div>
+        </div>
+        <div class="hd-light"></div>
+      </header>
+
+      <div class="kb-row">
+        <div class="kb"><span class="l">在线主机</span>
+          <span class="v" style="color:#f2f8ff">12<small>/13</small></span>
+          <span class="s">batch-05 离线 6h 12m</span></div>
+        <div class="kb hot"><span class="l">活跃告警</span>
+          <span class="v" style="color:#ff4d63">3<small>条</small></span>
+          <span class="s">1 严重 · 2 警告 · 最久 6h 12m</span></div>
+        <div class="kb"><span class="l">系统健康</span>
+          <span class="v" style="color:#ffb454">74<small>分</small></span>
+          <span class="s">较昨日 −18 · 30 分钟前 92</span></div>
+        <div class="kb"><span class="l">持续时长</span>
+          <span class="v" style="color:#ff4d63">6h<small>12m</small></span>
+          <span class="s">自 12:28 起未恢复</span></div>
+      </div>
+
+      <div class="mn">
+        <div class="col">
+          <div class="pnl" style="flex:0 0 auto">
+            <i class="cnr"></i>
+            <div class="pnl-h"><span class="bar" style="background:#ff4d63;box-shadow:0 0 10px #ff4d63"></span>
+              <span class="t">告警分级</span><span class="s">未恢复</span></div>
+            <div style="padding:6px 20px 18px">
+              <div class="big3">
+                <div class="c"><div class="n" style="color:#ff4d63">1</div><div class="l">严重</div></div>
+                <div class="w"><div class="n" style="color:#ffb454">2</div><div class="l">警告</div></div>
+                <div><div class="n" style="color:#7791b4">0</div><div class="l">提示</div></div>
+              </div>
+              <div style="margin-top:18px;font-size:16px;color:#7791b4;letter-spacing:.1em">影响范围</div>
+              <div style="margin-top:10px;display:flex;flex-direction:column;gap:9px">
+                <div style="display:flex;justify-content:space-between;font-size:19px"><span>下单服务</span><span style="color:#ff4d63;font-weight:700">受阻</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:19px"><span>支付查询</span><span style="color:#ffb454;font-weight:700">降级</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:19px"><span>后台报表</span><span style="color:#ffb454;font-weight:700">延迟</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:19px"><span>官网门户</span><span style="color:#22c55e;font-weight:700">正常</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="pnl" style="flex:1;min-height:0">
+            <i class="cnr"></i>
+            <div class="pnl-h"><span class="bar" style="background:#ff4d63;box-shadow:0 0 10px #ff4d63"></span>
+              <span class="t">未恢复时长分布</span></div>
+            <div style="padding:8px 20px 16px">
+              <div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;font-size:16px;color:#a9c4e6;margin-bottom:6px">
+                <span>&gt; 6 小时</span><b style="font-family:var(--mono);font-size:22px;color:#ff4d63">1</b></div>
+                <div style="height:10px;background:rgba(200,120,140,.14)"><i style="display:block;width:33%;height:100%;background:linear-gradient(90deg,#b91c1c,#ff4d63);box-shadow:0 0 12px rgba(255,77,99,.5)"></i></div></div>
+              <div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;font-size:16px;color:#a9c4e6;margin-bottom:6px">
+                <span>1–6 小时</span><b style="font-family:var(--mono);font-size:22px;color:#ffb454">1</b></div>
+                <div style="height:10px;background:rgba(200,170,120,.14)"><i style="display:block;width:33%;height:100%;background:linear-gradient(90deg,#d97706,#ffb454)"></i></div></div>
+              <div><div style="display:flex;justify-content:space-between;font-size:16px;color:#a9c4e6;margin-bottom:6px">
+                <span>&lt; 1 小时</span><b style="font-family:var(--mono);font-size:22px;color:#38bdf8">1</b></div>
+                <div style="height:10px;background:rgba(120,160,210,.14)"><i style="display:block;width:33%;height:100%;background:linear-gradient(90deg,#0ea5e9,#38bdf8)"></i></div></div>
+              <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(255,77,99,.2);font-size:16px;color:#7791b4;line-height:1.9">
+                今日累计 27 条 · 平均响应 8m 20s<br>平均恢复 24m 10s
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="pnl" style="flex:1;min-height:0;display:flex;flex-direction:column">
+            <i class="cnr"></i>
+            <div class="pnl-h"><span class="bar" style="background:#ff4d63;box-shadow:0 0 10px #ff4d63"></span>
+              <span class="t">告警队列</span><span class="s">严重优先 · 每屏 8 行</span></div>
+            <div style="flex:1;min-height:0;overflow:hidden;padding:0 6px">
+              <table class="tb">
+                <thead><tr><th style="width:9%">等级</th><th style="width:33%">告警</th><th style="width:19%">主机</th>
+                  <th style="width:13%">分类</th><th style="width:13%;text-align:right">持续</th><th style="width:13%;text-align:right">状态</th></tr></thead>
+                <tbody>
+                  <tr><td><span style="color:#ff4d63;font-weight:700">严重</span></td>
+                    <td class="nm">数据分区使用率 91%</td><td>db-prod-01</td><td>数据库</td>
+                    <td class="num" style="color:#ff4d63">6h 12m</td><td class="num" style="color:#ffb454">处理中</td></tr>
+                  <tr><td><span style="color:#ffb454;font-weight:700">警告</span></td>
+                    <td class="nm">CPU 持续 3 小时 &gt; 75%</td><td>app-prod-03</td><td>应用</td>
+                    <td class="num">3h 04m</td><td class="num" style="color:#7791b4">未处理</td></tr>
+                  <tr><td><span style="color:#ffb454;font-weight:700">警告</span></td>
+                    <td class="nm">副本同步延迟 18s</td><td>mongo-rs02</td><td>中间件</td>
+                    <td class="num">1h 41m</td><td class="num" style="color:#7791b4">未处理</td></tr>
+                  <tr><td><span style="color:#38bdf8;font-weight:700">提示</span></td>
+                    <td class="nm">失联超过 6 小时</td><td>batch-05</td><td>主机</td>
+                    <td class="num">6h 12m</td><td class="num" style="color:#7791b4">已静默</td></tr>
+                  <tr><td><span style="color:#38bdf8;font-weight:700">提示</span></td>
+                    <td class="nm">慢查询 7 条/分钟</td><td>mysql-01</td><td>中间件</td>
+                    <td class="num">22m</td><td class="num" style="color:#7791b4">未处理</td></tr>
+                  <tr><td><span style="color:#7791b4">已恢复</span></td>
+                    <td style="color:#7791b4">网关 5xx 突增</td><td style="color:#7791b4">gw-01</td><td style="color:#7791b4">网关</td>
+                    <td class="num" style="color:#7791b4">14m</td><td class="num" style="color:#22c55e">18:26 恢复</td></tr>
+                  <tr><td><span style="color:#7791b4">已恢复</span></td>
+                    <td style="color:#7791b4">Kafka 消费积压</td><td style="color:#7791b4">mq-01</td><td style="color:#7791b4">中间件</td>
+                    <td class="num" style="color:#7791b4">9m</td><td class="num" style="color:#22c55e">17:52 恢复</td></tr>
+                  <tr><td><span style="color:#7791b4">已恢复</span></td>
+                    <td style="color:#7791b4">证书 30 天内到期</td><td style="color:#7791b4">gw-02</td><td style="color:#7791b4">安全</td>
+                    <td class="num" style="color:#7791b4">2h</td><td class="num" style="color:#22c55e">16:10 恢复</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="pnl" style="flex:1;min-height:0;display:flex;flex-direction:column">
+            <i class="cnr"></i>
+            <div class="pnl-h"><span class="bar" style="background:#ff4d63;box-shadow:0 0 10px #ff4d63"></span>
+              <span class="t">当前焦点</span><span class="s">严重 · 已选中</span></div>
+            <div class="focus" style="flex:1">
+              <div class="h">db-prod-01<br>数据分区使用率 91%</div>
+              <div class="kv">
+                <div><span>触发时间</span><b>12:28</b></div>
+                <div><span>持续时间</span><b style="color:#ff4d63">6h 12m</b></div>
+                <div><span>当前值 / 增速</span><b>91.0% · +1.2%/h</b></div>
+                <div><span>影响业务</span><b>下单 · 支付查询</b></div>
+                <div><span>值班</span><b>张伟 · 18:13 已通知</b></div>
+              </div>
+              <div class="act">
+                <div class="h">研判结论</div>
+                <div class="b">按当前增速约 <b style="color:#ff4d63">6 小时后</b>分区写满，届时将导致主库写入失败。近 7 天该分区日均增长 1.1%，非突发，属容量规划问题。</div>
+                <ol>
+                  <li>清理 30 天前归档表（释放约 180GB）</li>
+                  <li>不可清理则扩容 200GB，低峰执行</li>
+                  <li>临时：binlog 保留 7 天 → 3 天</li>
+                </ol>
+              </div>
+              <div style="margin-top:16px;font-size:16px;color:#7791b4">工单 #4821 已创建 · 处理中 28 分钟</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <footer class="ft">
+        <div class="ft-lb"><span class="t">待处理</span><span class="n" style="color:#ff4d63">3</span></div>
+        <div class="ft-fl"><div class="track">
+          <div class="ft-it c"><span class="lv"></span><span class="a">严重 · db-prod-01 磁盘 91% · 预计 6h 后写满</span><span class="b">6h 12m</span></div>
+          <div class="ft-it w"><span class="lv"></span><span class="a">警告 · app-prod-03 CPU 78%</span><span class="b">3h 04m</span></div>
+          <div class="ft-it w"><span class="lv"></span><span class="a">警告 · mongo-rs02 同步延迟 18s</span><span class="b">1h 41m</span></div>
+          <div class="ft-it c"><span class="lv"></span><span class="a">严重 · db-prod-01 磁盘 91% · 预计 6h 后写满</span><span class="b">6h 12m</span></div>
+          <div class="ft-it w"><span class="lv"></span><span class="a">警告 · app-prod-03 CPU 78%</span><span class="b">3h 04m</span></div>
+        </div></div>
+        <div class="ft-up">严重告警已持续 28 分钟</div>
+      </footer>
+    </div>
+  </div>
+  <div class="sc-cap">告警态：背景光柱、角标、HUD 角线、分隔光带、标题辉光、菱形指示全部切红——整屏气场改变，而非局部变色。</div>
+</div>
+
+<!-- ================= ③ 说明 ================= -->
+<div class="pane" id="q3">
+  <div class="lead">
+    <h2>③ 大气感从哪来（以及我上一版为什么不够）</h2>
+    <p>我上一版做的是"放大的仪表盘"：圆角卡片一个个摆上去，三栏平均分配注意力。它正确、可读、不累，但没有视觉中心，也就没有冲击力。<b>大气不是靠加装饰，是靠制造对比。</b></p>
+  </div>
+
+  <h3 class="sec">五个真正的来源</h3>
+  <table class="tk">
+    <thead><tr><th style="width:130px">要素</th><th style="width:34%">v1（不够大气）</th><th>v2 的做法</th></tr></thead>
+    <tbody>
+      <tr><td><b>尺度对比</b></td><td>最大 72px、最小 13px（约 5.5:1）</td><td>环心 120px、KPI 78px、标签 14px → <b>8.6:1</b>。极端对比是最有效的震撼手段，比任何光效都管用。</td></tr>
+      <tr><td><b>单一焦点</b></td><td>三栏平权，注意力被均分，没有主角</td><td>中列 400px 巨型环是唯一焦点；左右两列在视觉层级上明确是它的注释（角标更弱、字号更小）。</td></tr>
+      <tr><td><b>纵深</b></td><td>几乎纯色背景，平面感</td><td>加三层：顶部光柱（径向渐变）+ 底部透视网格（<code class="k">rotateX(67deg)</code> 模拟地平线）+ 四周暗角。画面有了"空间"，元素才像浮在里面。</td></tr>
+      <tr><td><b>出血构图</b></td><td>内容缩在 padding 里，四周留白，像网页</td><td>屏幕四角 HUD 角线、贯穿全屏的标题光带、无圆角的直角面板（r4）——内容顶到边缘才有"指挥屏"感，而不是"浏览器里的一张页面"。</td></tr>
+      <tr><td><b>克制动效</b></td><td>基本无动效</td><td>只做三处：环外圈扫描弧 9s 旋转、严重告警脉冲 1.6s、底栏数据流 34s 滚动。<b>动效是节奏感，不是炫技</b>——超过三处就开始干扰阅读。</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sec">我坚持不做的三件事</h3>
+  <table class="tk">
+    <thead><tr><th style="width:150px">不做的</th><th>原因</th></tr></thead>
+    <tbody>
+      <tr><td>粒子连线背景</td><td><code class="k">ParticleBg</code> 80 粒子常驻 RAF，7×24 投屏的 GPU 开销换不来任何信息量；而且这是 2018 年的标志性元素，现在看到它就"过时感"扑面而来。<b>如果非要，建议只在演示档开启、且降到 30 粒子。</b></td></tr>
+      <tr><td>渐变发光标题字</td><td>v1 已去掉。它会让标题成为全屏最抢眼的元素，而标题是信息量最低的东西——这正是"层级倒挂"。v2 改为实心白字 + 外发光辉光，保留气势但不抢数据。</td></tr>
+      <tr><td>旋转地球 / 3D 城市</td><td>13 台主机的地理分布信息量极低，却要占 40% 面积；且涉及地图合规成本。中央环承载的信息（健康分 + 四项构成）比地球有用得多。</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sec">双档设计（解决"震撼"与"盯屏"的矛盾）</h3>
+  <table class="tk">
+    <thead><tr><th style="width:110px">档位</th><th style="width:30%">开启内容</th><th>场景</th></tr></thead>
+    <tbody>
+      <tr><td><b>演示档</b></td><td>扫描弧旋转、告警脉冲、底栏数据流滚动、透视网格、暗角、星点</td><td>展厅、领导参观、对外演示、截图宣传</td></tr>
+      <tr><td><b>值班档</b></td><td>关闭全部循环动效与背景装饰层，<b>构图与字号完全不变</b></td><td>7×24 值班盯屏。持续运动的元素会让眼睛疲劳，2 小时后就没人愿意看这块屏。</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:13px;color:var(--ink3);margin-top:12px">
+    两档只差一个 <code class="k">body.demo</code> 类（或 <code class="k">cfg.mode</code>）。默认值建议设为<b>演示档</b>——大屏在这个项目里更多承担展示职能，值班同学看的是主站不是大屏。</p>
+
+  <h3 class="sec">实施清单（在 v1 基础上增量）</h3>
+  <pre><span class="c">// 1. 背景三层（新增组件 ScreenBackdrop.vue，约 0.5 天）</span>
+.bg-beam    radial-gradient 顶部光柱，演示档 opacity 1 / 值班档 .35
+.bg-floor   perspective(460px) rotateX(67deg) 网格 + mask 渐隐
+.bg-vignette 径向暗角，让中心更亮
+<span class="c">// 三层的配色随 alarm 态切换（青蓝 → 红）</span>
+
+<span class="c">// 2. 面板：圆角 12px → 4px，加 HUD 四角（约 0.5 天）</span>
+.pnl::before / ::after + &lt;i class="cnr"&gt; 四个直角亮线
+--cnr 变量跟随主题与告警态
+
+<span class="c">// 3. 中央环（约 1 天，纯 SVG + CSS）</span>
+外圈刻度 circle stroke-dasharray="3 20.3" r=222
+进度环   r=168 stroke-width=18 dasharray=1055.6 offset=84.4（92%）
+扫描弧   &lt;g class="scan"&gt; + animation:spin 9s linear infinite
+环心数字 120px，tabular-nums
+
+<span class="c">// 4. 顶栏出血（约 0.5 天）</span>
+标题 42px letter-spacing .42em + 左右延伸光带（.hd-wing）
+.hd-light 贯穿全屏渐变线
+屏幕四角 .bg-corner 44px 直角线
+
+<span class="c">// 5. 双档开关（约 0.5 天）</span>
+cfg.mode = 'demo' | 'duty'，写入 useScreenConfig
+演示档额外开启：scan / pulse / flow / floor / star
+
+<span class="c">// 6. 告警态整屏换色（约 0.5 天）</span>
+.stage.alarm 覆盖 --cnr / --pnl-line / .bg-beam / .hd-light / .alm-top</pre>
+
+  <p style="font-size:13px;color:var(--ink3);margin-top:12px">
+    合计约 3.5 天，全部是样式层改动，不涉及任何数据逻辑。可以叠在 v1 的批次 1 之后做，也可以直接跳过大屏 v1、从这一版起步。</p>
+</div>
+
+</div>
+
+<script>
+var tabs = document.querySelectorAll('.tab');
+tabs.forEach(function (t) {
+  t.addEventListener('click', function () {
+    tabs.forEach(function (x) { x.classList.remove('on'); });
+    document.querySelectorAll('.pane').forEach(function (x) { x.classList.remove('on'); });
+    t.classList.add('on');
+    document.getElementById(t.dataset.p).classList.add('on');
+    setScale(cur);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+});
+var cur = 0.56;
+function setScale(s) {
+  cur = s;
+  document.querySelectorAll('.scaler').forEach(function (el) {
+    var st = el.querySelector('.stage');
+    if (!st) return;
+    st.style.setProperty('--s', s);
+    el.style.height = (1080 * s) + 'px';
+  });
+}
+document.querySelectorAll('.zoom button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.querySelectorAll('.zoom button').forEach(function (x) { x.classList.remove('on'); });
+    b.classList.add('on');
+    setScale(parseFloat(b.dataset.z));
+  });
+});
+document.querySelectorAll('.mode button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.querySelectorAll('.mode button').forEach(function (x) { x.classList.remove('on'); });
+    b.classList.add('on');
+    if (b.dataset.m === 'demo') document.body.classList.add('demo');
+    else document.body.classList.remove('demo');
+  });
+});
+document.body.classList.add('demo');
+setScale(0.56);
+</script>
+</body>
+</html>

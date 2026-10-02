@@ -5,32 +5,62 @@
 :root,
 body[data-theme="b"] {
   /* 极光蓝 · 深蓝权威指挥中心风 */
-  --bg: #070d1a;
-  --bg-elev: #0d1526;
-  --bg-card: rgba(15, 24, 43, 0.92);
-  --border: rgba(120, 170, 255, 0.10);
-  --border-strong: rgba(120, 170, 255, 0.20);
-  --text: #e8eefb;
-  --text-main: #e8eefb;
-  --text-dim: #9baed0;
+  /* —— 表面层级（四级，亮度递增；深色下建层次靠它，不靠背景透明度） —— */
+  --s0: #060a13;   /* 页面底 */
+  --s1: #0e1728;   /* 卡片 */
+  --s2: #131e33;   /* 卡内嵌套行 */
+  --s3: #18243c;   /* 悬停 / 浮层 */
+  --bg: var(--s0);
+  --bg-elev: #0b1220;
+  --bg-card: var(--s1);
+
+  /* —— 描边（三级） —— */
+  --bd: rgba(148, 178, 224, 0.10);
+  --bd-strong: rgba(148, 178, 224, 0.20);
+  --bd-hi: rgba(148, 178, 224, 0.34);
+  --border: var(--bd);
+  --border-strong: var(--bd-strong);
+
+  /* —— 文本三级 —— */
+  --t1: #e8eefb;
+  --t2: #9baed0;
+  --t3: #6f83a6;
+  --text: var(--t1);
+  --text-main: var(--t1);
+  --text-dim: var(--t2);
   --label: #b0c0dd;
-  --text-muted: #7184a8;
+  --text-muted: var(--t3);
+
   --accent: #4a9df0;
   --accent-dim: rgba(74, 157, 240, 0.12);
   --accent-glow: rgba(74, 157, 240, 0.16);
+  /* 语义色四态：主色 + -dim(14%) + -bd(32%) */
+  --ok: #22c55e;
+  --ok-dim: rgba(34, 197, 94, 0.14);
+  --ok-bd: rgba(34, 197, 94, 0.32);
   --warn: #ffb454;
   --warn-dim: rgba(255, 180, 84, 0.14);
+  --warn-bd: rgba(255, 180, 84, 0.32);
   --danger: #ff5d6c;
   --danger-dim: rgba(255, 93, 108, 0.14);
+  --danger-bd: rgba(255, 93, 108, 0.34);
   --info: #38bdf8;
   --info-dim: rgba(56, 189, 248, 0.14);
+  --info-bd: rgba(56, 189, 248, 0.30);
+
+  /* —— 通用填充令牌（收敛硬编码白色） —— */
+  --fill-1: rgba(148, 178, 224, 0.04);
+  --fill-2: rgba(148, 178, 224, 0.06);
+  --fill-3: rgba(148, 178, 224, 0.09);
+  --fill-hover: rgba(148, 178, 224, 0.07);
+
   --violet: #a78bfa;
   --brand-grad: linear-gradient(135deg, #4a9df0 0%, #2ea8d8 100%);
   --brand-ink: #04233f;
   --grid-line: rgba(74, 157, 240, 0.04);
   --glow-acc: rgba(74, 157, 240, 0.07);
-  --radius: 12px;
-  --sidebar-w: 190px;
+  --radius: var(--r-lg);
+  --sidebar-w: 232px;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --mono: 'JetBrains Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
   /* KPI / 图表类别色板（保持区分度，随主题微调） */
@@ -45,25 +75,45 @@ body[data-theme="b"] {
 
 /* 星云青绿（经典品牌色） */
 body[data-theme="a"] {
-  --bg: #0a0e14;
-  --bg-elev: #13181f;
-  --bg-card: rgba(22, 28, 38, 0.92);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
-  --text: #e6edf3;
-  --text-main: #e6edf3;
-  --text-dim: #a4adba;
+  --s0: #070b0f;
+  --s1: #121a22;
+  --s2: #17212a;
+  --s3: #1d2934;
+  --bg: var(--s0);
+  --bg-elev: #0f151c;
+  --bg-card: var(--s1);
+  --bd: rgba(190, 214, 230, 0.09);
+  --bd-strong: rgba(190, 214, 230, 0.18);
+  --bd-hi: rgba(190, 214, 230, 0.32);
+  --border: var(--bd);
+  --border-strong: var(--bd-strong);
+  --t1: #e6edf3;
+  --t2: #a4adba;
+  --t3: #74808f;
+  --text: var(--t1);
+  --text-main: var(--t1);
+  --text-dim: var(--t2);
   --label: #b6c0cd;
-  --text-muted: #778594;
+  --text-muted: var(--t3);
   --accent: #00d9a3;
   --accent-dim: rgba(0, 217, 163, 0.12);
   --accent-glow: rgba(0, 217, 163, 0.16);
+  --ok: #00d9a3;
+  --ok-dim: rgba(0, 217, 163, 0.14);
+  --ok-bd: rgba(0, 217, 163, 0.32);
   --warn: #f59e0b;
   --warn-dim: rgba(245, 158, 11, 0.14);
+  --warn-bd: rgba(245, 158, 11, 0.32);
   --danger: #f43f5e;
   --danger-dim: rgba(244, 63, 94, 0.14);
+  --danger-bd: rgba(244, 63, 94, 0.34);
   --info: #38bdf8;
   --info-dim: rgba(56, 189, 248, 0.14);
+  --info-bd: rgba(56, 189, 248, 0.30);
+  --fill-1: rgba(255, 255, 255, 0.04);
+  --fill-2: rgba(255, 255, 255, 0.06);
+  --fill-3: rgba(255, 255, 255, 0.09);
+  --fill-hover: rgba(255, 255, 255, 0.07);
   --violet: #a78bfa;
   --brand-grad: linear-gradient(135deg, #00d9a3 0%, #38bdf8 100%);
   --brand-ink: #002b22;
@@ -73,30 +123,69 @@ body[data-theme="a"] {
 
 /* 星河紫（高端科技差异化） */
 body[data-theme="c"] {
-  --bg: #0b0916;
-  --bg-elev: #141026;
-  --bg-card: rgba(22, 17, 43, 0.92);
-  --border: rgba(170, 130, 255, 0.10);
-  --border-strong: rgba(170, 130, 255, 0.20);
-  --text: #ece9fb;
-  --text-main: #ece9fb;
-  --text-dim: #aaa3ce;
+  --s0: #080613;
+  --s1: #141026;
+  --s2: #1a1433;
+  --s3: #211a41;
+  --bg: var(--s0);
+  --bg-elev: #100c20;
+  --bg-card: var(--s1);
+  --bd: rgba(180, 150, 255, 0.11);
+  --bd-strong: rgba(180, 150, 255, 0.22);
+  --bd-hi: rgba(180, 150, 255, 0.36);
+  --border: var(--bd);
+  --border-strong: var(--bd-strong);
+  --t1: #ece9fb;
+  --t2: #aaa3ce;
+  --t3: #7d76a0;
+  --text: var(--t1);
+  --text-main: var(--t1);
+  --text-dim: var(--t2);
   --label: #c0b9dc;
-  --text-muted: #8079a0;
+  --text-muted: var(--t3);
   --accent: #8b5cf6;
-  --accent-dim: rgba(139, 92, 246, 0.12);
-  --accent-glow: rgba(139, 92, 246, 0.16);
+  --accent-dim: rgba(139, 92, 246, 0.14);
+  --accent-glow: rgba(139, 92, 246, 0.18);
+  --ok: #34d399;
+  --ok-dim: rgba(52, 211, 153, 0.14);
+  --ok-bd: rgba(52, 211, 153, 0.32);
   --warn: #fbbf24;
   --warn-dim: rgba(251, 191, 36, 0.14);
+  --warn-bd: rgba(251, 191, 36, 0.32);
   --danger: #fb7185;
   --danger-dim: rgba(251, 113, 133, 0.14);
+  --danger-bd: rgba(251, 113, 133, 0.34);
   --info: #38bdf8;
   --info-dim: rgba(56, 189, 248, 0.14);
+  --info-bd: rgba(56, 189, 248, 0.30);
+  --fill-1: rgba(170, 130, 255, 0.05);
+  --fill-2: rgba(170, 130, 255, 0.07);
+  --fill-3: rgba(170, 130, 255, 0.10);
+  --fill-hover: rgba(170, 130, 255, 0.08);
   --violet: #c4b5fd;
   --brand-grad: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 55%, #38bdf8 100%);
   --brand-ink: #1d0f4d;
   --grid-line: rgba(139, 92, 246, 0.05);
   --glow-acc: rgba(139, 92, 246, 0.14);
+}
+
+/* =========================================================
+ * 设计令牌 · 尺度层（与主题无关，全站唯一来源）
+ * 4px 栅格：页面里不允许再出现 10 / 14 / 18 这类零碎取值
+ * ========================================================= */
+:root {
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
+  --r-xs: 4px; --r-sm: 6px; --r-md: 8px; --r-lg: 10px; --r-xl: 14px; --r-pill: 999px;
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --sh-2: 0 2px 8px rgba(0, 0, 0, 0.30);
+  --sh-3: 0 8px 24px rgba(0, 0, 0, 0.42);
+  --sh-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --fs-xs: 12px; --fs-sm: 13px; --fs-base: 14px; --fs-md: 15px;
+  --fs-lg: 17px; --fs-xl: 20px; --fs-2xl: 24px; --fs-3xl: 30px;
+  --topbar-h: 56px;
+  --dur-1: 0.12s; --dur-2: 0.2s; --dur-3: 0.36s;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 * {
@@ -133,14 +222,46 @@ a {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--fill-3);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--bd-strong);
 }
 
-/* 玻璃态面板 */
+/* =========================================================
+ * 统一容器 .card —— 全站唯一卡片语言
+ * 替代此前的 .glass / .kpi / .ov-card / .panel 四种并存写法。
+ * 层次靠「表面层级 + 极轻阴影 + 1px 描边」，不靠背景透明度。
+ * ========================================================= */
+.card {
+  position: relative;
+  background: var(--s1);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-1);
+  transition: border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease),
+    transform var(--dur-2) var(--ease);
+}
+/* 顶部受光高光：仅 2.2%，克制到几乎看不见，只用来"托"起上边缘 */
+.card::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.022), transparent);
+  pointer-events: none;
+}
+/* 抬升是可选行为：表格类大卡片不应在鼠标划过时跳动 */
+.card.hoverable:hover {
+  border-color: var(--bd-hi);
+  box-shadow: var(--sh-2);
+  transform: translateY(-1px);
+}
+
+/* 玻璃态面板（存量类名保留，取值统一走新令牌） */
 /* 注意：背景为纯色实底，backdrop-filter: blur 实际无可见毛玻璃效果，
    却会在滚动时强制浏览器对每个面板下方内容重算模糊，是导致滚动卡顿的主因。
    改为纯不透明背景，视觉一致且滚动流畅。 */
@@ -149,6 +270,7 @@ a {
   backdrop-filter: none;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: var(--sh-1);
 }
 
 .panel {
@@ -156,10 +278,10 @@ a {
 }
 
 .panel-title {
-  font-size: 16px;
+  font-size: var(--fs-base);
   font-weight: 600;
-  letter-spacing: 0.02em;
-  margin-bottom: 14px;
+  letter-spacing: 0.01em;
+  margin-bottom: var(--sp-3);
   color: var(--text);
   display: flex;
   align-items: center;
@@ -195,7 +317,7 @@ a {
   color: var(--text);
 }
 .tbl tbody tr:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--fill-1);
 }
 
 /* 标签 */
@@ -249,11 +371,11 @@ a {
   cursor: not-allowed;
 }
 .btn-ghost {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--fill-2);
   border: 1px solid var(--border);
 }
 .btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--fill-3);
   border-color: var(--border-strong);
 }
 .btn-primary.sm,
@@ -295,7 +417,7 @@ textarea:focus {
 /* 进度条 */
 .bar {
   height: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-2);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -323,7 +445,8 @@ textarea:focus {
   backdrop-filter: none;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px 18px;
+  box-shadow: var(--sh-1);
+  padding: 16px;
 }
 .kpi-label {
   font-size: 13px;
@@ -367,7 +490,7 @@ textarea:focus {
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--fill-1);
   border: 1px solid var(--border);
   border-radius: 8px;
   cursor: pointer;
@@ -447,7 +570,7 @@ textarea:focus {
   gap: 4px;
 }
 .range-tabs button {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--fill-1);
   border: 1px solid var(--border);
   color: var(--text-dim);
   padding: 4px 12px;
@@ -525,25 +648,27 @@ html.dark {
   --el-color-danger: var(--danger);
   --el-color-info: var(--info);
 
-  --el-bg-color: var(--bg-elev);
-  --el-bg-color-page: var(--bg);
-  --el-bg-color-overlay: var(--bg-elev);
+  --el-bg-color: var(--s1);
+  --el-bg-color-page: var(--s0);
+  --el-bg-color-overlay: var(--s3);
 
   --el-text-color-primary: var(--text-main);
   --el-text-color-regular: var(--text);
   --el-text-color-secondary: var(--text-dim);
   --el-text-color-placeholder: var(--text-muted);
 
-  --el-border-color: var(--border);
-  --el-border-color-light: var(--border);
-  --el-border-color-lighter: var(--border);
-  --el-border-color-extra-light: var(--border);
+  --el-border-color: var(--bd);
+  --el-border-color-light: var(--bd);
+  --el-border-color-lighter: var(--bd);
+  --el-border-color-extra-light: var(--bd);
 
-  --el-fill-color: rgba(255, 255, 255, 0.04);
-  --el-fill-color-light: rgba(255, 255, 255, 0.03);
-  --el-fill-color-lighter: rgba(255, 255, 255, 0.02);
-  --el-fill-color-blank: var(--bg-elev);
+  --el-fill-color: var(--fill-2);
+  --el-fill-color-light: var(--fill-1);
+  --el-fill-color-lighter: var(--fill-1);
+  --el-fill-color-blank: var(--s2);
   --el-fill-color-dark: rgba(0, 0, 0, 0.2);
+
+  --el-border-radius-base: var(--r-sm);
 
   --el-mask-color: rgba(0, 0, 0, 0.6);
   --el-box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
@@ -555,7 +680,7 @@ html.dark .el-table {
   background: transparent;
   --el-table-bg-color: transparent;
   --el-table-tr-bg-color: transparent;
-  --el-table-header-bg-color: rgba(255, 255, 255, 0.02);
+  --el-table-header-bg-color: var(--fill-1);
   --el-table-border-color: var(--border);
   --el-table-row-hover-bg-color: var(--accent-dim);
   --el-table-text-color: var(--text);
@@ -567,7 +692,7 @@ html.dark .el-dialog {
   --el-dialog-bg-color: var(--bg-elev);
   --el-dialog-title-font-size: 16px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--r-xl);
 }
 
 /* el-input/textarea/select 背景透明 */
@@ -575,15 +700,368 @@ html.dark .el-input__wrapper,
 html.dark .el-textarea__inner,
 html.dark .el-select__wrapper {
   background-color: rgba(0, 0, 0, 0.3) !important;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+  box-shadow: 0 0 0 1px var(--bd-strong) inset;
 }
 
 /* el-button 圆角 */
 html.dark .el-button {
-  border-radius: 8px;
+  border-radius: var(--r-sm);
 }
 
 /* el-tag 圆角 */
 html.dark .el-tag {
   border-radius: 12px;
+}
+
+/* =========================================================
+ * 批次 6.0 · 全局规范层
+ * 目标：100 个页面不必逐个调样式，靠这一层立起一致性。
+ * 只追加、不删除——存量页面的自定义样式优先级更高，不会被这里覆盖掉。
+ * ========================================================= */
+
+/* ---- 6.0.1 表格密度 ----
+ * 现状：默认行高约 48px、字号 14px，1080 屏首屏只能看到 11 行。
+ * 规范：行高 38px / 正文 13px / 表头 12px·600·--t3。
+ */
+html.dark .el-table {
+  font-size: var(--fs-sm);
+  --el-table-row-hover-bg-color: var(--fill-hover);
+}
+html.dark .el-table .cell {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+html.dark .el-table th.el-table__cell {
+  background: var(--fill-1);
+  padding: 7px 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--t3);
+  letter-spacing: 0.04em;
+}
+html.dark .el-table th.el-table__cell .cell {
+  font-size: var(--fs-xs);
+}
+html.dark .el-table td.el-table__cell {
+  padding: 7px 0;
+}
+/* 斑马纹：深色下与 hover 底色互相干扰，统一关掉，行分隔只留 1px 线。
+ * 容器层关而不是逐个模板删 stripe 属性，避免漏改与回归风险。 */
+html.dark .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background: transparent;
+}
+/* 数值列：右对齐 + 等宽数字，数字跳动时列不抖 */
+html.dark .el-table th.num-cell .cell,
+html.dark .el-table td.num-cell .cell {
+  justify-content: flex-end;
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+html.dark .el-table td.num-cell .cell {
+  color: var(--t1);
+}
+/* 空态区留够高度给 EmptyState 的排查建议与动作 */
+html.dark .el-table__empty-block {
+  min-height: 160px;
+}
+
+/* ---- 6.0.2 状态四态 ---- */
+
+/* 骨架屏：替代全屏 v-loading 遮罩。keep-alive 页面来回切时遮罩会频繁闪。 */
+.sk {
+  background: var(--fill-3);
+  border-radius: var(--r-xs);
+  animation: sk-pulse 1.4s var(--ease) infinite;
+}
+.sk-row {
+  height: 12px;
+  margin-bottom: 10px;
+}
+.sk-row:last-child {
+  margin-bottom: 0;
+}
+@keyframes sk-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* 部分失败提示条：多接口页面一个源失败时，不要整页报错，
+ * 已成功的数据照常渲染，只在这一条里说明并允许单独重试。 */
+.partial-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 9px 16px;
+  background: var(--warn-dim);
+  border-bottom: 1px solid var(--warn-bd);
+  font-size: var(--fs-sm);
+  color: var(--warn);
+}
+
+/* ---- 6.0.3 页面模板通用类（供各页面改造时直接套用） ---- */
+
+/* 单行工具栏：替代原来的多层工具卡片 */
+.page-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+}
+.page-toolbar .sp {
+  flex: 1;
+}
+
+/* 次级导航条：Tab 与状态信息合并到同一行，省一层纵向空间。
+ * 废弃 el-tabs type="card" / border-card（深色下是厚边框盒子）。 */
+.subnav {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  border-bottom: 1px solid var(--bd);
+  margin-bottom: var(--sp-3);
+}
+.subnav-item {
+  font-size: var(--fs-base);
+  color: var(--t3);
+  padding-bottom: 8px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease);
+  user-select: none;
+}
+.subnav-item:hover {
+  color: var(--t2);
+}
+.subnav-item.on {
+  color: var(--t1);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+.subnav-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-bottom: 6px;
+}
+
+/* 对象头：详情页顶部。不切 Tab 就知道这个对象什么状态。 */
+.obj-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: var(--sp-4) var(--sp-5);
+}
+.obj-title {
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.obj-meta {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--t3);
+  margin-top: var(--sp-1);
+}
+.obj-kpis {
+  display: flex;
+  gap: var(--sp-6);
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.obj-kpi-label {
+  font-size: var(--fs-xs);
+  color: var(--t3);
+}
+.obj-kpi-value {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-lg);
+  line-height: 1.3;
+}
+
+/* 定义列表：详情页设备信息等"标签-值"成对信息，比平铺网格更易扫读 */
+.def-list {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  row-gap: 10px;
+  column-gap: 12px;
+  font-size: var(--fs-sm);
+}
+.def-list > dt {
+  color: var(--t3);
+}
+.def-list > dd {
+  color: var(--t1);
+  min-width: 0;
+  word-break: break-all;
+}
+
+/* 表单规范：标签右对齐 88px，控件最大宽 480px */
+.form-grid {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  row-gap: var(--sp-4);
+  column-gap: var(--sp-3);
+  align-items: center;
+}
+.form-grid > label {
+  font-size: var(--fs-sm);
+  color: var(--t3);
+  text-align: right;
+}
+.form-grid > .fg-ctl {
+  min-width: 0;
+}
+.form-grid .fg-ctl > * {
+  max-width: 480px;
+}
+
+/* 底部保存条：仅在有未保存改动时出现 */
+.save-bar {
+  position: sticky;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+  padding: 10px 16px;
+  background: var(--s2);
+  border: 1px solid var(--bd-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-3);
+}
+
+/* 危险操作区：与正常表单视觉分离 */
+.danger-zone {
+  border-color: var(--danger-bd);
+}
+.danger-zone .sec-head {
+  border-bottom-color: var(--danger-bd);
+}
+
+/* 状态色条：列表里表达状态比色块更省空间、扫读更快 */
+.state-bar {
+  display: inline-block;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  vertical-align: -3px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+.state-bar.ok { background: var(--ok); }
+.state-bar.warn { background: var(--warn); }
+.state-bar.danger { background: var(--danger); }
+.state-bar.off { background: var(--t3); }
+
+/* ---- 6.0.4 Element Plus 组件收敛 ---- */
+
+/* el-tag：实心 dark 改描边式，高密度列表噪音立刻降一半。
+ * 与 StatusPill 视觉一致，作为存量 tag 的过渡方案。 */
+html.dark .el-tag.el-tag--dark {
+  background: transparent;
+  border-width: 1px;
+  border-style: solid;
+  font-weight: 600;
+}
+html.dark .el-tag.el-tag--dark.el-tag--success {
+  background: var(--ok-dim);
+  color: var(--ok);
+  border-color: var(--ok-bd);
+}
+html.dark .el-tag.el-tag--dark.el-tag--warning {
+  background: var(--warn-dim);
+  color: var(--warn);
+  border-color: var(--warn-bd);
+}
+html.dark .el-tag.el-tag--dark.el-tag--danger {
+  background: var(--danger-dim);
+  color: var(--danger);
+  border-color: var(--danger-bd);
+}
+html.dark .el-tag.el-tag--dark.el-tag--info {
+  background: var(--info-dim);
+  color: var(--info);
+  border-color: var(--info-bd);
+}
+html.dark .el-tag.el-tag--dark.el-tag--primary {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: rgba(74, 157, 240, 0.32);
+}
+
+/* el-tabs：border-card 在深色下与卡片形成双层边框，统一减负 */
+html.dark .el-tabs--border-card {
+  background: transparent;
+  border-color: var(--bd);
+}
+html.dark .el-tabs--border-card > .el-tabs__header {
+  background: var(--fill-1);
+  border-bottom-color: var(--bd);
+}
+html.dark .el-tabs--border-card > .el-tabs__header .el-tabs__item.is-active {
+  background: transparent;
+}
+
+/* el-pagination：字号与表格一致，当前页用主色底 */
+html.dark .el-pagination {
+  font-size: var(--fs-xs);
+}
+html.dark .el-pager li.is-active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* el-dialog：标题区加下边框，与内容分离 */
+html.dark .el-dialog {
+  --el-dialog-title-font-size: var(--fs-md);
+}
+html.dark .el-dialog__header {
+  border-bottom: 1px solid var(--bd);
+  margin-right: 0;
+  padding: 14px 20px;
+}
+html.dark .el-dialog__title {
+  font-weight: 600;
+  color: var(--t1);
+}
+
+/* el-form：标签与控件高度规范 */
+html.dark .el-form-item__label {
+  font-size: var(--fs-sm);
+  color: var(--t3);
+}
+html.dark .el-form-item__error {
+  font-size: var(--fs-xs);
+}
+
+/* el-message：左侧 3px 色条取代整块彩色 */
+html.dark .el-message {
+  border-radius: var(--r-md);
+  background: var(--s3);
+  border: 1px solid var(--bd-strong);
+  box-shadow: var(--sh-3);
+}
+html.dark .el-message--success {
+  border-left: 3px solid var(--ok);
+}
+html.dark .el-message--warning {
+  border-left: 3px solid var(--warn);
+}
+html.dark .el-message--error {
+  border-left: 3px solid var(--danger);
+}
+html.dark .el-message--info {
+  border-left: 3px solid var(--info);
 }

@@ -27,7 +27,7 @@
         <KpiCard label="运行中" :value="stats.running" tone="ok">
           <template #icon><PlayIcon /></template>
         </KpiCard>
-        <KpiCard label="已停止" :value="stats.stopped" tone="down">
+        <KpiCard label="已停止" :value="stats.stopped" :tone="stats.stopped > 0 ? 'down' : 'total'">
           <template #icon><StopIcon /></template>
         </KpiCard>
         <KpiCard label="总镜像数" :value="stats.totalImages" tone="mem">
@@ -115,6 +115,8 @@ import http from '../../api/http'
 import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
 import MwStatusDot from '../mw/MwStatusDot.vue'
+import { tokenColor } from '../../charts/echarts'
+const AXIS_COLOR = tokenColor('t2', '#9fb3c8')
 
 // ---- 图标组件（内联 SVG 渲染函数） ----
 function svgIcon(s) {
@@ -209,7 +211,7 @@ async function loadTrendChart(row) {
     }
     chartInstance.setOption({
       tooltip: { trigger: 'axis' },
-      legend: { data: ['CPU%'], textStyle: { color: '#8b949e' } },
+      legend: { data: ['CPU%'], textStyle: { color: AXIS_COLOR } },
       grid: { left: 50, right: 30, top: 40, bottom: 30 },
       xAxis: { type: 'time' },
       yAxis: { type: 'value', name: '%' },
@@ -275,14 +277,14 @@ onMounted(load)
 .host-block.is-down { opacity: 0.6; }
 .host-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-weight: 600; }
 .host-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.host-dot.up { background: #4ade80; }
-.host-dot.down { background: #f87171; }
+.host-dot.up { background: var(--ok); }
+.host-dot.down { background: var(--danger); }
 .host-id { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
 .host-name { font-size: 13px; font-family: var(--mono); }
 .host-name-sub { font-size: 13px; color: var(--text-muted); font-family: var(--mono); font-weight: 400; }
 .host-count { margin-left: auto; font-size: 13px; color: var(--text-muted); font-weight: 400; }
 .host-body { padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 8px; }
-.container-chip { display: flex; flex-direction: column; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; background: rgba(255,255,255,0.03); font-size: 13px; min-width: 110px; }
+.container-chip { display: flex; flex-direction: column; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; background: var(--fill-1); font-size: 13px; min-width: 110px; }
 .container-chip.is-down { opacity: 0.6; }
 .container-chip.st-running { border-left: 3px solid var(--chart-green); }
 .container-chip.st-paused { border-left: 3px solid var(--chart-orange); }
@@ -298,12 +300,12 @@ onMounted(load)
 .empty-list-hint { text-align: center; color: var(--text-muted); font-size: 13px; padding: 24px 0; }
 :deep(.row-down) { opacity: 0.6; }
 .detail-content { padding: 0 20px; }
-.detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; }
+.detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: var(--fill-1); border-radius: 8px; }
 .meta-item { font-size: 13px; }
 .meta-label { color: var(--text-muted); margin-right: 6px; }
 .mono { font-family: var(--mono); }
 .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
-.metric-cell { padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; text-align: center; }
+.metric-cell { padding: 12px; background: var(--fill-1); border-radius: 8px; text-align: center; }
 .mc-label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
 .mc-value { font-size: 18px; font-weight: 600; }
 .chart-box { width: 100%; height: 300px; }

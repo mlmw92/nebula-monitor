@@ -35,7 +35,13 @@ vi.mock('echarts', () => ({
 
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 
-vi.mock('@element-plus/icons-vue', () => ({ Plus: { name: 'Plus', template: '<i />' } }))
+// 组件按需 import 的图标必须在这里都有同名导出，否则会在加载期直接抛
+// "No \"Xxx\" export is defined on the \"@element-plus/icons-vue\" mock"
+// 而让整个文件的用例全部失败（新增图标时记得同步这里）。
+vi.mock('@element-plus/icons-vue', () => ({
+  Plus: { name: 'Plus', template: '<i />' },
+  Printer: { name: 'Printer', template: '<i />' },
+}))
 
 vi.mock('element-plus', () => ({
   ElMessage: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },

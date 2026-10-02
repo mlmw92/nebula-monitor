@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NebulaEye 浅色方向设计稿 · 打印/导出层 + 对外状态页</title>
+<style>
+:root{
+  --ink:#0f172a; --ink2:#334155; --ink3:#64748b; --ink4:#94a3b8;
+  --line:#e3e8ef; --line2:#cbd5e1;
+  --bg:#f5f7fa; --surface:#ffffff; --surface2:#f8fafc; --surface3:#f1f5f9;
+  --brand:#2563eb; --brand-soft:#eff5ff;
+  --ok:#15803d; --ok-soft:#eafaf0;
+  --warn:#b45309; --warn-soft:#fdf5e7;
+  --bad:#b91c1c; --bad-soft:#fdeded;
+  --info:#1d4ed8; --mute:#94a3b8;
+  --r:10px; --r-sm:8px; --r-lg:14px;
+  --fs-xs:12px; --fs-sm:13px; --fs-md:14px; --fs-lg:16px; --fs-xl:20px; --fs-2xl:26px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:var(--fs-md);line-height:1.6;-webkit-font-smoothing:antialiased}
+
+/* ---------- 外壳 ---------- */
+.topbar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.88);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line);padding:14px 24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.tb-title{font-size:var(--fs-lg);font-weight:700;letter-spacing:-.01em}
+.tb-sub{font-size:var(--fs-xs);color:var(--ink3)}
+.tabs{display:flex;gap:4px;margin-left:auto;background:var(--surface3);padding:3px;border-radius:999px}
+.tab{border:0;background:transparent;color:var(--ink2);font-size:var(--fs-sm);font-weight:600;
+  padding:6px 14px;border-radius:999px;cursor:pointer;font-family:inherit}
+.tab.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(15,23,42,.08)}
+.wrap{max-width:1180px;margin:0 auto;padding:26px 24px 80px}
+.pane{display:none}.pane.on{display:block}
+
+.lead{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px 20px;margin-bottom:22px}
+.lead h2{margin:0 0 6px;font-size:var(--fs-lg)}
+.lead p{margin:0;color:var(--ink2);font-size:var(--fs-sm)}
+.lead .warn{margin-top:10px;padding:10px 12px;background:var(--warn-soft);border-left:3px solid var(--warn);
+  border-radius:6px;font-size:var(--fs-sm);color:#7c4a03}
+h3.sec{font-size:var(--fs-lg);margin:30px 0 12px;display:flex;align-items:center;gap:8px}
+h3.sec::before{content:"";width:3px;height:15px;background:var(--brand);border-radius:2px}
+
+/* ---------- A. A4 打印 ---------- */
+.paper-stage{padding:8px 0}
+.paper{width:794px;min-height:1123px;margin:0 auto 26px;background:#fff;color:#111827;
+  border:1px solid var(--line2);border-radius:4px;padding:44px 46px 56px;position:relative;
+  box-shadow:0 4px 18px rgba(15,23,42,.10)}
+.paper::after{content:attr(data-page);position:absolute;right:46px;bottom:22px;font-size:11px;color:#9ca3af;font-family:var(--mono)}
+.p-hd{display:flex;align-items:baseline;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid #d8dee9;margin-bottom:22px}
+.p-hd .l{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;font-weight:700}
+.p-hd .r{font-size:11px;color:#6b7280;font-family:var(--mono)}
+.p-title{font-size:24px;font-weight:700;margin:0 0 8px;letter-spacing:-.01em}
+.p-meta{font-size:12px;color:#4b5563;display:flex;gap:22px;flex-wrap:wrap;margin-bottom:20px}
+.p-meta b{font-weight:600;color:#111827}
+.p-concl{border:1px solid #d8dee9;border-left:4px solid #1d4ed8;border-radius:8px;padding:12px 14px;
+  background:#fbfcfe;margin-bottom:20px;font-size:13px}
+.p-concl .h{font-weight:700;font-size:12px;color:#1d4ed8;margin-bottom:4px}
+.p-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:22px}
+.p-stat{border:1px solid #d8dee9;border-radius:8px;padding:9px 11px}
+.p-stat .k{font-size:10.5px;color:#6b7280}
+.p-stat .v{font-size:19px;font-weight:700;margin-top:2px;line-height:1.2}
+.p-stat .v small{font-size:11px;font-weight:400;color:#6b7280}
+.p-sec{margin-bottom:18px}
+.p-sec h4{font-size:14px;margin:0 0 8px;padding-left:9px;border-left:3px solid #1d4ed8}
+.p-tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.p-tbl th{background:#f3f5f9;color:#4b5563;font-weight:700;font-size:10.5px;text-align:left;
+  padding:6px 8px;border-bottom:1px solid #d8dee9}
+.p-tbl td{padding:6px 8px;border-bottom:1px solid #eceff4;color:#1f2937}
+.p-tbl tr.bad td{color:#b91c1c}
+.p-find{border:1px solid #d8dee9;border-left-width:4px;border-radius:8px;padding:10px 12px;margin-bottom:9px;font-size:12px}
+.p-find.crit{border-left-color:#b91c1c}
+.p-find.warn{border-left-color:#b45309}
+.p-find.info{border-left-color:#1d4ed8}
+.p-find .t{font-weight:700;font-size:12.5px;display:flex;justify-content:space-between;gap:10px}
+.p-find .sev{font-size:10px;font-weight:700;padding:1px 7px;border-radius:999px;color:#fff}
+.sev-c{background:#b91c1c}.sev-w{background:#b45309}.sev-i{background:#1d4ed8}
+.p-find .b{margin-top:4px;color:#374151}
+.p-find .b b{color:#111827}
+.p-foot{margin-top:24px;padding-top:10px;border-top:1px solid #d8dee9;font-size:10.5px;color:#6b7280;
+  display:flex;justify-content:space-between}
+.tag-n{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;
+  background:#1d4ed8;color:#fff;font-size:10px;font-weight:700;margin-left:6px;vertical-align:1px}
+.notes{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 18px;margin-top:8px}
+.notes ol{margin:0;padding-left:20px;font-size:var(--fs-sm);color:var(--ink2)}
+.notes li{margin-bottom:7px}
+.notes b{color:var(--ink)}
+
+/* ---------- B. 打印兜底对比 ---------- */
+.cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.cmp-col{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.cmp-hd{padding:10px 14px;border-bottom:1px solid var(--line);font-size:var(--fs-sm);font-weight:700;display:flex;align-items:center;gap:8px}
+.cmp-hd .dot{width:8px;height:8px;border-radius:50%}
+.cmp-bd{padding:14px}
+.mock-dark{background:#0b1220;border-radius:10px;padding:14px;color:#e5eaf3}
+.mock-dark .row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.07);font-size:12px}
+.mock-dark .row:last-child{border-bottom:0}
+.mock-light{background:#fff;border:1px solid #d8dee9;border-radius:10px;padding:14px;color:#111827}
+.mock-light .row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #eceff4;font-size:12px}
+.mock-light .row:last-child{border-bottom:0}
+.pill{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px}
+.p-c{background:#b91c1c;color:#fff}.p-w{background:#b45309;color:#fff}.p-i{background:#eef2f7;color:#475569}
+.cmp-note{margin-top:10px;font-size:var(--fs-xs);color:var(--ink3);line-height:1.55}
+.kill{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;font-size:var(--fs-xs);
+  background:var(--surface3);color:var(--ink3);margin-top:10px;text-decoration:line-through}
+
+/* ---------- C. status 页 ---------- */
+.stage{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:24px;overflow:auto}
+.status-page{max-width:880px;margin:0 auto;color:var(--ink)}
+.sp-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.sp-brand{display:flex;align-items:center;gap:10px;font-size:var(--fs-xl);font-weight:700;letter-spacing:-.01em}
+.sp-logo{width:30px;height:30px;border-radius:8px;background:var(--brand);color:#fff;display:flex;
+  align-items:center;justify-content:center;font-size:14px;font-weight:800}
+.sp-btn{border:1px solid var(--line2);background:var(--surface);color:var(--ink2);font-size:var(--fs-sm);font-weight:600;
+  padding:6px 13px;border-radius:8px;cursor:pointer;font-family:inherit}
+.sp-btn:hover{background:var(--surface2);border-color:var(--ink4)}
+.sp-banner{margin:18px 0 20px;border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 18px;
+  display:flex;align-items:center;gap:14px;background:var(--ok-soft);border-color:#bfe6cd}
+.sp-banner .ic{width:30px;height:30px;border-radius:50%;background:var(--ok);color:#fff;display:flex;
+  align-items:center;justify-content:center;font-size:17px;flex:0 0 auto}
+.sp-banner .t{font-size:var(--fs-lg);font-weight:700;color:#14532d}
+.sp-banner .s{font-size:var(--fs-xs);color:#3f6212}
+.sp-banner.part{background:var(--warn-soft);border-color:#f0dcb4}
+.sp-banner.part .ic{background:var(--warn)}
+.sp-banner.part .t{color:#7c4a03}.sp-banner.part .s{color:#92400e}
+.sp-upd{font-size:var(--fs-xs);color:var(--ink3);margin-bottom:16px;display:flex;align-items:center;gap:6px}
+.sp-upd .live{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.sp-group{margin-bottom:20px}
+.sp-group-h{font-size:var(--fs-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ink3);margin:0 0 8px;padding-left:2px}
+.sp-list{border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;background:var(--surface)}
+.sp-item{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.sp-item:last-child{border-bottom:0}
+.sp-item .nm{font-weight:600;font-size:var(--fs-sm);min-width:150px}
+.sp-item .ty{font-size:11px;color:var(--ink3);background:var(--surface3);padding:1px 7px;border-radius:6px}
+.sp-bars{display:flex;gap:2px;margin-left:auto}
+.sp-bars i{width:7px;height:20px;border-radius:2px;background:#cfe3d6;display:block}
+.sp-bars i.w{background:#f0c98a}.sp-bars i.d{background:#e8a2a2}
+.sp-item .mt{font-size:var(--fs-xs);color:var(--ink3);min-width:96px;text-align:right;font-variant-numeric:tabular-nums}
+.sp-dot{width:9px;height:9px;border-radius:50%;background:var(--mute);flex:0 0 auto}
+.sp-item.up .sp-dot{background:var(--ok)}
+.sp-item.down .sp-dot{background:var(--bad)}
+.sp-item.part .sp-dot{background:var(--warn)}
+.sp-item.down .nm{color:var(--bad)}
+.sp-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.sp-badge.up{background:var(--ok-soft);color:var(--ok)}
+.sp-badge.down{background:var(--bad-soft);color:var(--bad)}
+.sp-badge.part{background:var(--warn-soft);color:var(--warn)}
+.sp-inc{margin-top:10px;border:1px solid #f0c5c5;border-left:4px solid var(--bad);border-radius:10px;
+  padding:12px 14px;background:var(--bad-soft)}
+.sp-inc .h{font-weight:700;color:var(--bad);font-size:var(--fs-sm)}
+.sp-inc .b{font-size:var(--fs-sm);color:var(--ink2);margin-top:3px}
+.sp-inc .f{font-size:var(--fs-xs);color:var(--ink3);margin-top:6px}
+.sp-ev{margin-top:26px}
+.sp-ev h4{font-size:var(--fs-md);margin:0 0 10px}
+.sp-ev-row{display:flex;gap:12px;padding:10px 0;border-top:1px solid var(--line);font-size:var(--fs-sm)}
+.sp-ev-row .d{font-size:var(--fs-xs);color:var(--ink3);min-width:88px;font-variant-numeric:tabular-nums}
+.sp-foot{margin-top:28px;padding-top:14px;border-top:1px solid var(--line);display:flex;
+  justify-content:space-between;gap:12px;font-size:var(--fs-xs);color:var(--ink3);flex-wrap:wrap}
+.mobile-frame{width:390px;border:1px solid var(--line2);border-radius:22px;overflow:hidden;background:var(--surface);
+  box-shadow:0 6px 22px rgba(15,23,42,.10)}
+.mobile-frame .mf-bd{padding:16px}
+.mf-item{border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:9px}
+.mf-item .r1{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);font-weight:600}
+.mf-item .r2{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink3);margin-top:6px}
+.mf-bars{display:flex;gap:2px;margin-top:8px}
+.mf-bars i{width:100%;height:16px;border-radius:2px;background:#cfe3d6}
+.mf-bars i.w{background:#f0c98a}.mf-bars i.d{background:#e8a2a2}
+.two-col{display:grid;grid-template-columns:1fr 420px;gap:22px;align-items:start}
+
+/* ---------- 令牌表 ---------- */
+.tk{width:100%;border-collapse:collapse;font-size:var(--fs-sm);background:var(--surface);
+  border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.tk th{background:var(--surface2);text-align:left;padding:9px 12px;font-size:var(--fs-xs);
+  color:var(--ink3);font-weight:700;border-bottom:1px solid var(--line)}
+.tk td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tk tr:last-child td{border-bottom:0}
+.sw{display:inline-block;width:34px;height:20px;border-radius:5px;border:1px solid var(--line2);
+  vertical-align:-5px;margin-right:9px}
+code.k{font-family:var(--mono);font-size:12px;background:var(--surface3);padding:1px 6px;border-radius:5px;color:var(--ink2)}
+pre{background:#0f172a;color:#e2e8f0;padding:16px 18px;border-radius:12px;overflow:auto;font-size:12.5px;
+  line-height:1.65;font-family:var(--mono);margin:0}
+pre .c{color:#7d8ba1}
+.bad-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;
+  background:var(--bad-soft);color:var(--bad);margin-left:8px}
+.ok-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;
+  background:var(--ok-soft);color:var(--ok);margin-left:8px}
+@media (max-width:1080px){
+  .cmp-grid,.two-col{grid-template-columns:1fr}
+  .paper{width:100%;min-height:0;padding:30px 26px 44px}
+  .p-stats{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <div class="tb-title">NebulaEye · 浅色方向设计稿</div>
+    <div class="tb-sub">打印/导出层 + 对外状态页（/status）· v1.0 · 2026-10-01</div>
+  </div>
+  <div class="tabs">
+    <button class="tab on" data-p="a">A · 报告打印版</button>
+    <button class="tab" data-p="b">B · 深色页打印兜底</button>
+    <button class="tab" data-p="c">C · 对外 /status 浅色</button>
+    <button class="tab" data-p="d">D · 实施清单</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+<!-- ================= A ================= -->
+<div class="pane on" id="a">
+  <div class="lead">
+    <h2>A · 巡检报告打印/导出规范（A4）</h2>
+    <p>模板 <code class="k">internal/server/report/template.html</code> 本身已是浅色（<code class="k">--bg:#f4f6fa</code>），且有 <code class="k">@media print</code>。
+      所以这里要做的<strong>不是"黑转白"</strong>，而是修三个真实会出问题的点：深蓝 hero 在无背景打印时白字消失、表格跨页表头丢失、无页眉页脚与页码。</p>
+    <div class="warn"><strong>致命点</strong>：hero 用 <code class="k">linear-gradient(#2b5876,#4e4376)</code> + <code class="k">color:#fff</code>。
+      Chrome/Edge 默认「不打印背景图形」，此时底色被丢弃、白字留在白纸上 → 标题整块不可见。这不是美观问题，是内容丢失。</div>
+  </div>
+
+  <div class="paper-stage">
+    <div class="paper" data-page="第 1 页 / 共 4 页">
+      <div class="p-hd"><span class="l">NebulaEye · 运维巡检报告</span><span class="r">日报 · 2026-10-01</span></div>
+      <h1 class="p-title">系统巡检报告<span class="tag-n">1</span></h1>
+      <div class="p-meta">
+        <span><b>统计周期：</b>2026-09-30 00:00 ~ 2026-10-01 00:00</span>
+        <span><b>生成时间：</b>2026-10-01 08:00</span>
+        <span><b>报告编号：</b>RPT-20261001-014</span>
+      </div>
+
+      <div class="p-concl">
+        <div class="h">巡检结论</div>
+        整体健康评分 <b>92 / 100</b>，12 台主机在线、1 台离线。最高优先级问题为 db-prod-01 磁盘使用率 91%，
+        按当前增速约 6 小时后写满，建议在今日窗口内扩容或清理归档。
+      </div>
+
+      <div class="p-stats">
+        <div class="p-stat"><div class="k">主机总数</div><div class="v">13</div></div>
+        <div class="p-stat"><div class="k">在线 / 离线</div><div class="v">12 <small>/ 1</small></div></div>
+        <div class="p-stat"><div class="k">CPU 均值/峰值</div><div class="v">31.4<small>% / 78.2%</small></div></div>
+        <div class="p-stat"><div class="k">内存 均值/峰值</div><div class="v">56.1<small>% / 88.0%</small></div></div>
+        <div class="p-stat"><div class="k">磁盘 均值/峰值</div><div class="v">62.7<small>% / 91.0%</small></div></div>
+      </div>
+
+      <div class="p-sec">
+        <h4>主机资源概览<span class="tag-n">2</span></h4>
+        <table class="p-tbl">
+          <thead><tr><th>主机</th><th>状态</th><th>CPU</th><th>内存</th><th>磁盘</th><th>健康分</th><th>较昨日</th></tr></thead>
+          <tbody>
+            <tr><td>db-prod-01</td><td>在线</td><td>64.2%</td><td>81.3%</td><td>91.0%</td><td>58</td><td>-6</td></tr>
+            <tr><td>app-prod-03</td><td>在线</td><td>78.2%</td><td>72.4%</td><td>54.1%</td><td>74</td><td>+2</td></tr>
+            <tr><td>app-prod-04</td><td>在线</td><td>41.7%</td><td>66.8%</td><td>49.3%</td><td>88</td><td>0</td></tr>
+            <tr><td>cache-02</td><td>在线</td><td>12.4%</td><td>38.9%</td><td>31.2%</td><td>97</td><td>+1</td></tr>
+            <tr class="bad"><td>batch-05</td><td>离线</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="p-sec">
+        <h4>巡检发现（按严重程度）<span class="tag-n">3</span></h4>
+        <div class="p-find crit">
+          <div class="t"><span>db-prod-01 数据分区使用率 91%</span><span class="sev sev-c">严重</span></div>
+          <div class="b"><b>影响范围：</b>主库写入，涉及订单与账务两个业务库。
+            <b>修复建议：</b>清理 30 天前归档表或扩容 200GB；按当前增速约 6 小时后写满。</div>
+        </div>
+        <div class="p-find warn">
+          <div class="t"><span>app-prod-03 CPU 峰值持续 3 小时 &gt; 75%</span><span class="sev sev-w">警告</span></div>
+          <div class="b"><b>影响范围：</b>网关响应延迟上升至 480ms。<b>修复建议：</b>排查定时任务重叠，或扩容至 8C16G。</div>
+        </div>
+        <div class="p-find info">
+          <div class="t"><span>batch-05 离线超过 6 小时</span><span class="sev sev-i">提示</span></div>
+          <div class="b"><b>影响范围：</b>离线批处理任务未执行。<b>修复建议：</b>确认是否为计划内停机。</div>
+        </div>
+      </div>
+
+      <div class="p-foot"><span>NebulaEye 自动生成 · 数据来自主动拨测与 Agent 采集</span><span>打印于 2026-10-01 08:12</span></div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <ol>
+      <li><b>标题区去深蓝块</b>：改为白底 + 4px 品牌色左条 + 深色文字。不再依赖背景图形，任何打印机设置下都可读；同时省墨。编号 <code class="k">RPT-…</code> 便于归档检索。</li>
+      <li><b>表头跨页重复</b>：加 <code class="k">thead{display:table-header-group}</code>。现在表格跨页后第二页起没有表头，甲方拿到的是一列无标签数字。</li>
+      <li><b>发现项禁用分页断裂</b>：<code class="k">.p-find{break-inside:avoid}</code>，避免一条发现被撕成两页。同理加给 <code class="k">.p-stat</code>、图表卡。</li>
+      <li><b>页眉/页脚与页码</b>：用 <code class="k">@page{margin:16mm 14mm}</code> 留白，页眉用固定定位元素输出报告名，页码用 CSS <code class="k">counter(page)</code>（Chromium 打印时可用）或后端按页拆分时写入。</li>
+      <li><b>正文对比度</b>：次要文字用 <code class="k">#4b5563</code>（≥7:1），不用 <code class="k">#8492a6</code>（浅色下仅 3.1:1，打印更淡）。</li>
+      <li><b>保留彩色的例外</b>：图表 SVG 与状态左条要加 <code class="k">print-color-adjust:exact</code>，否则会被降成灰度、严重/警告失去区分度。</li>
+    </ol>
+  </div>
+</div>
+
+<!-- ================= B ================= -->
+<div class="pane" id="b">
+  <div class="lead">
+    <h2>B · 主平台深色页的打印兜底层</h2>
+    <p>报告是后端生成的独立浅色 HTML，但<strong>主平台的页面本身仍是深色</strong>——主机清单、告警列表、资产台账这类页面，值班同学会直接 Ctrl+P 交给别人。
+      这里给一份通用的打印兜底：只在 <code class="k">@media print</code> 里覆盖令牌与容器，不动任何组件的正常样式，成本约半天。</p>
+    <div class="warn"><strong>两种失败形态</strong>：开启「打印背景图形」→ 满版黑底、极费墨、复印件全糊；
+      关闭（浏览器默认）→ 卡片背景消失但文字仍是浅色，白纸浅字几乎不可读。两条路都是废纸。</div>
+  </div>
+
+  <div class="cmp-grid">
+    <div class="cmp-col">
+      <div class="cmp-hd"><span class="dot" style="background:#b91c1c"></span>现状：直接 Ctrl+P</div>
+      <div class="cmp-bd">
+        <div class="mock-dark">
+          <div class="row"><span class="pill p-c">严重</span> db-prod-01 磁盘 91%</div>
+          <div class="row"><span class="pill p-w">警告</span> app-prod-03 CPU 78%</div>
+          <div class="row"><span class="pill p-i">提示</span> batch-05 离线 6h</div>
+        </div>
+        <div class="cmp-note">深色令牌 <code class="k">--bg-card</code>、<code class="k">--text</code> 全部原样进入打印上下文。
+          侧栏、顶栏、按钮、分页器一起被打印，一页纸里 70% 是导航控件。</div>
+        <div class="kill">侧边导航 · 顶栏图标 · 筛选器 · 分页按钮 · 刷新定时器</div>
+      </div>
+    </div>
+    <div class="cmp-col">
+      <div class="cmp-hd"><span class="dot" style="background:#15803d"></span>建议：打印兜底层</div>
+      <div class="cmp-bd">
+        <div class="mock-light">
+          <div class="row"><span class="pill p-c">严重</span> db-prod-01 磁盘 91%</div>
+          <div class="row"><span class="pill p-w">警告</span> app-prod-03 CPU 78%</div>
+          <div class="row"><span class="pill p-i">提示</span> batch-05 离线 6h</div>
+        </div>
+        <div class="cmp-note">打印态下把 4 个中性令牌翻成浅色值，卡片强制白底 + 1px 灰描边（硬编码的
+          <code class="k">rgba(255,255,255,.08)</code> 边框在白底上会消失，必须显式覆盖）。导航、工具栏、按钮整体隐藏，只留内容。</div>
+        <div class="kill">侧边导航 · 顶栏图标 · 筛选器 · 分页按钮 · 刷新定时器</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sec">打印态规则</h3>
+  <table class="tk">
+    <thead><tr><th style="width:200px">元素</th><th>打印态处理</th><th style="width:280px">理由</th></tr></thead>
+    <tbody>
+      <tr><td>侧栏 / 顶栏 / 面包屑</td><td><code class="k">display:none</code></td><td>纸面上无交互意义，占 1/3 版面</td></tr>
+      <tr><td>工具栏按钮、分页、筛选</td><td><code class="k">display:none</code></td><td>打印件不需要"点击"，且会被误认为可操作</td></tr>
+      <tr><td>卡片容器（.glass/.kpi/.panel/.ov-card）</td><td>白底 + <code class="k">1px solid #d8dee9</code></td><td>硬编码白色半透明边框在白底上不可见</td></tr>
+      <tr><td>语义色（严重/警告/正常）</td><td>保留 + <code class="k">print-color-adjust:exact</code></td><td>去掉颜色后无法分辨严重程度</td></tr>
+      <tr><td>ECharts 画布</td><td>保持彩色，禁止 <code class="k">break-inside</code></td><td>Canvas 能正常打印，但会被分页切断</td></tr>
+      <tr><td>长表格</td><td><code class="k">thead{display:table-header-group}</code></td><td>跨页后表头要重复</td></tr>
+      <tr><td>链接</td><td>显示 <code class="k">href</code> 于文字后（仅外链）</td><td>纸质件上 URL 才有意义</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sec">顺带补一个入口</h3>
+  <div class="lead" style="margin-bottom:0">
+    <p>只加打印 CSS 仍然依赖用户自己 Ctrl+P 并记得勾选项。建议在页头操作区加一个<b>「打印/存为 PDF」</b>按钮，
+      点击后 <code class="k">window.print()</code>，并在 URL 上带 <code class="k">?print=1</code> 让页面临时切到打印预览态（隐藏交互控件、内容区撑满宽度），
+      所见即所得，避免"打出来跟屏幕上不一样"的反复试错。</p>
+  </div>
+</div>
+
+<!-- ================= C ================= -->
+<div class="pane" id="c">
+  <div class="lead">
+    <h2>C · 对外状态页 /status 浅色版</h2>
+    <p><code class="k">StatusView.vue</code> 的样式其实已经写成浅色友好（<code class="k">var(--border-color,#e5e7eb)</code> 带浅色兜底值），
+      但 <code class="k">main.js</code> 在启动时全局 <code class="k">classList.add('dark')</code>，所以这个对外页现在也是深色。
+      这是全站唯一一处"给外部人看"的页面，浅色是对的——外部访客、甲方、领导截图转发，深色截图在微信/邮件里观感差、打印即废。</p>
+    <div class="warn"><strong>语义色必须换值</strong>：深色下用的 <code class="k">#67c23a</code>（绿）在白底上对比度仅 <b>2.6:1</b>，不满足 WCAG AA（需 4.5:1）。
+      浅色下要整体加深：绿 <code class="k">#15803d</code>、红 <code class="k">#b91c1c</code>、橙 <code class="k">#b45309</code>。这是浅色模式最容易漏的一点。</div>
+  </div>
+
+  <h3 class="sec">桌面版（880px）</h3>
+  <div class="stage">
+    <div class="status-page">
+      <div class="sp-head">
+        <div class="sp-brand"><span class="sp-logo">N</span>NebulaEye 服务状态</div>
+        <button class="sp-btn">订阅状态更新</button>
+      </div>
+
+      <div class="sp-banner part">
+        <div class="ic">!</div>
+        <div>
+          <div class="t">部分服务异常</div>
+          <div class="s">1 项服务受影响 · 更新于 10-01 18:40</div>
+        </div>
+      </div>
+
+      <div class="sp-upd"><span class="live"></span>数据每 30 秒自动刷新 · 来自主动拨测</div>
+
+      <div class="sp-group">
+        <div class="sp-group-h">核心业务</div>
+        <div class="sp-list">
+          <div class="sp-item up">
+            <span class="sp-dot"></span>
+            <span class="nm">官网门户</span>
+            <span class="ty">HTTP</span>
+            <span class="sp-bars" title="近 90 天可用性">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </span>
+            <span class="mt">99.98% · 82 ms</span>
+            <span class="sp-badge up">正常</span>
+          </div>
+          <div class="sp-item down">
+            <span class="sp-dot"></span>
+            <span class="nm">订单接口</span>
+            <span class="ty">HTTP</span>
+            <span class="sp-bars">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i class="w"></i><i class="w"></i><i class="d"></i><i class="d"></i><i class="d"></i>
+            </span>
+            <span class="mt">97.21% · 1,240 ms</span>
+            <span class="sp-badge down">异常</span>
+          </div>
+          <div class="sp-item up">
+            <span class="sp-dot"></span>
+            <span class="nm">数据库集群</span>
+            <span class="ty">TCP</span>
+            <span class="sp-bars">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i class="w"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </span>
+            <span class="mt">99.95% · 12 ms</span>
+            <span class="sp-badge up">正常</span>
+          </div>
+        </div>
+        <div class="sp-inc">
+          <div class="h">订单接口响应超时（进行中）</div>
+          <div class="b">18:12 起拨测连续超时，平均响应 1,240 ms，初步定位为 db-prod-01 磁盘写满导致的写入阻塞。</div>
+          <div class="f">开始 18:12 · 最近更新 18:38 · 影响：下单与支付查询</div>
+        </div>
+      </div>
+
+      <div class="sp-group">
+        <div class="sp-group-h">基础设施</div>
+        <div class="sp-list">
+          <div class="sp-item up">
+            <span class="sp-dot"></span><span class="nm">网关集群</span><span class="ty">TCP</span>
+            <span class="sp-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+            <span class="mt">100.00% · 9 ms</span><span class="sp-badge up">正常</span>
+          </div>
+          <div class="sp-item up">
+            <span class="sp-dot"></span><span class="nm">消息队列</span><span class="ty">TCP</span>
+            <span class="sp-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+            <span class="mt">99.99% · 4 ms</span><span class="sp-badge up">正常</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sp-ev">
+        <h4>近期事件</h4>
+        <div class="sp-ev-row"><span class="d">09-28 02:10</span><span>数据库主从切换演练完成，服务无感知中断。</span></div>
+        <div class="sp-ev-row"><span class="d">09-22 14:35</span><span>消息队列积压告警，18 分钟内自动恢复。</span></div>
+        <div class="sp-ev-row"><span class="d">09-15 09:02</span><span>网关证书轮换，期间 2 次 502，已定位为健康检查间隔过短。</span></div>
+      </div>
+
+      <div class="sp-foot">
+        <span>本页展示服务可用性概览，数据来自主动拨测。</span>
+        <span>NebulaEye · 更新于 10-01 18:40</span>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sec">移动端（390px）</h3>
+  <div class="two-col">
+    <div class="lead" style="margin:0">
+      <p>外部访客多数在手机上看。窄屏下把「90 天可用性条」撑满整行、指标换行到第二排，
+        状态徽标保留在右上角——不缩成小圆点，因为它是唯一一眼可见的结论。</p>
+      <p style="margin-top:10px"><b>两处与现状不同：</b>① 指标组（可用率/延迟）现在是右对齐一行，窄屏会挤压；
+        ② 服务名与类型标签同行，窄屏下改用两行布局避免截断。</p>
+    </div>
+    <div class="mobile-frame">
+      <div class="mf-bd">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:8px;font-weight:700"><span class="sp-logo" style="width:24px;height:24px;font-size:12px">N</span>服务状态</div>
+          <span class="sp-badge part" style="font-size:11px">部分异常</span>
+        </div>
+        <div class="mf-item">
+          <div class="r1"><span class="sp-dot" style="background:var(--ok)"></span>官网门户 <span style="margin-left:auto;font-size:11px;color:var(--ink3)">82 ms</span></div>
+          <div class="mf-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="r2"><span>近 90 天</span><span>99.98%</span></div>
+        </div>
+        <div class="mf-item">
+          <div class="r1"><span class="sp-dot" style="background:var(--bad)"></span>订单接口 <span style="margin-left:auto;font-size:11px;color:var(--bad)">1,240 ms</span></div>
+          <div class="mf-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i></div>
+          <div class="r2"><span>近 90 天</span><span style="color:var(--bad)">97.21%</span></div>
+        </div>
+        <div class="mf-item">
+          <div class="r1"><span class="sp-dot" style="background:var(--ok)"></span>数据库集群 <span style="margin-left:auto;font-size:11px;color:var(--ink3)">12 ms</span></div>
+          <div class="mf-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="w"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="r2"><span>近 90 天</span><span>99.95%</span></div>
+        </div>
+        <div style="font-size:11px;color:var(--ink3);margin-top:14px">更新于 10-01 18:40 · 每 30 秒刷新</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sec">浅色语义令牌（仅此页作用域）</h3>
+  <table class="tk">
+    <thead><tr><th style="width:220px">令牌</th><th style="width:120px">深色值</th><th style="width:120px">浅色值</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code class="k">--surface</code></td><td>#0b1220</td><td><span class="sw" style="background:#ffffff"></span>#ffffff</td><td>页面底色白</td></tr>
+      <tr><td><code class="k">--surface-2</code></td><td>rgba(255,255,255,.04)</td><td><span class="sw" style="background:#f1f5f9"></span>#f1f5f9</td><td>标签、表头底</td></tr>
+      <tr><td><code class="k">--border</code></td><td>rgba(255,255,255,.08)</td><td><span class="sw" style="background:#e3e8ef"></span>#e3e8ef</td><td>不能沿用半透明白</td></tr>
+      <tr><td><code class="k">--text</code> / <code class="k">--text-dim</code></td><td>#e5eaf3 / #94a3b8</td><td><span class="sw" style="background:#0f172a"></span>#0f172a / #64748b</td><td>次要文字 ≥4.5:1</td></tr>
+      <tr><td><code class="k">--ok</code></td><td>#67c23a<span class="bad-tag">2.6:1</span></td><td><span class="sw" style="background:#15803d"></span>#15803d<span class="ok-tag">6.4:1</span></td><td>浅色下必须加深</td></tr>
+      <tr><td><code class="k">--warn</code></td><td>#e6a23c<span class="bad-tag">2.4:1</span></td><td><span class="sw" style="background:#b45309"></span>#b45309<span class="ok-tag">5.7:1</span></td><td>同上</td></tr>
+      <tr><td><code class="k">--bad</code></td><td>#f56c6c<span class="bad-tag">3.1:1</span></td><td><span class="sw" style="background:#b91c1c"></span>#b91c1c<span class="ok-tag">6.9:1</span></td><td>同上</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ================= D ================= -->
+<div class="pane" id="d">
+  <div class="lead">
+    <h2>D · 实施清单</h2>
+    <p>按优先级排。三项互相独立，可分开上线；都不改动业务逻辑，也不影响深色主站。</p>
+  </div>
+
+  <h3 class="sec">① 报告模板打印修正（约 2 小时）</h3>
+  <p style="font-size:var(--fs-sm);color:var(--ink2);margin:0 0 10px">文件：<code class="k">internal/server/report/template.html</code> —— 改 hero 配色、补分页与页眉页脚。</p>
+  <pre><span class="c">/* 1) hero 不依赖背景图形：白底 + 品牌色左条 */</span>
+.hero{ background:#fff; color:#111827; border:1px solid #d8dee9;
+       border-left:4px solid #1d4ed8; border-radius:8px;
+       box-shadow:none; padding:18px 22px; }
+
+<span class="c">/* 2) 分页控制 */</span>
+@media print{
+  @page{ size:A4; margin:16mm 14mm; }
+  thead{ display:table-header-group; }   <span class="c">/* 跨页重复表头 */</span>
+  tfoot{ display:table-footer-group; }
+  .section, .stat, .chart-card, .finding{ break-inside:avoid; }
+  h2,h4{ break-after:avoid; }             <span class="c">/* 标题不与内容分离 */</span>
+  .chart-card svg, .badge, .finding{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body{ background:#fff; font-size:11.5pt; }  <span class="c">/* pt 更适合纸面 */</span>
+}</pre>
+
+  <h3 class="sec">② 主平台打印兜底层（约半天）</h3>
+  <p style="font-size:var(--fs-sm);color:var(--ink2);margin:0 0 10px">新增 <code class="k">src/assets/print.css</code>，在 <code class="k">main.js</code> 引入。只在打印态生效，屏幕渲染零影响。</p>
+  <pre>@media print{
+  <span class="c">/* 令牌翻转：只覆盖中性层，语义色保留 */</span>
+  :root, html.dark{
+    --bg:#fff; --bg-card:#fff; --bg-elevated:#fff;
+    --text:#111827; --text-dim:#4b5563; --text-muted:#6b7280;
+    --border:#d8dee9; --border-strong:#c3ccd8;
+    --shadow:none;
+  }
+  <span class="c">/* 硬编码的白色半透明在白底上不可见，显式覆盖 */</span>
+  .glass,.kpi,.panel,.ov-card,.chart-section,section.card{
+    background:#fff !important; border:1px solid #d8dee9 !important;
+    box-shadow:none !important; break-inside:avoid;
+  }
+  <span class="c">/* 隐藏一切不可在纸上操作的东西 */</span>
+  .sidebar,.topbar,.app-topbar,.page-actions,.pagination,
+  .el-pagination,.filters,.refresh-bar,button,.el-button{ display:none !important; }
+
+  <span class="c">/* 内容区撑满、去掉滚动容器 */</span>
+  .content,.main,.page{ padding:0 !important; margin:0 !important; overflow:visible !important; height:auto !important; }
+  .el-table{ font-size:11.5pt; }
+  .el-table__header-wrapper thead{ display:table-header-group; }
+  .el-table__row{ break-inside:avoid; }
+
+  a[href^="http"]::after{ content:" (" attr(href) ")"; font-size:9pt; color:#6b7280; }
+}</pre>
+
+  <h3 class="sec">③ /status 浅色（约 1 天）</h3>
+  <p style="font-size:var(--fs-sm);color:var(--ink2);margin:0 0 10px">
+    前提是先解除全局 <code class="k">dark</code>。最小改动是在路由后置钩子里按 <code class="k">meta.light</code> 决定 html 的 class。</p>
+  <pre><span class="c">// main.js：去掉无条件 add('dark')，改由路由控制</span>
+<span class="c">// router.afterEach((to) =&gt; {</span>
+<span class="c">//   document.documentElement.classList.toggle('dark', !to.meta.light)</span>
+<span class="c">// })</span>
+<span class="c">// routes: { path:'/status', meta:{ public:true, light:true } }</span>
+
+<span class="c">/* status 页作用域浅色令牌 */</span>
+html:not(.dark) .status-page, .status-page{
+  --surface:#fff; --surface-2:#f1f5f9; --border:#e3e8ef;
+  --text:#0f172a; --text-dim:#64748b;
+  --ok:#15803d; --warn:#b45309; --bad:#b91c1c;
+}</pre>
+
+  <h3 class="sec">上线顺序建议</h3>
+  <table class="tk">
+    <thead><tr><th style="width:60px">序</th><th style="width:220px">事项</th><th style="width:90px">成本</th><th>收益</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>报告模板打印修正</td><td>2h</td><td>修掉"标题白字消失"这一内容丢失缺陷，甲方拿到的 PDF 可直接归档</td></tr>
+      <tr><td>2</td><td>主平台打印兜底层</td><td>0.5d</td><td>任何页面 Ctrl+P 都可用，不再需要截图贴图</td></tr>
+      <tr><td>3</td><td>/status 浅色 + 90 天条 + 事件时间线</td><td>1d</td><td>对外页面观感与可信度；顺带把语义色对比度补到 AA</td></tr>
+      <tr><td>—</td><td>全站浅色模式</td><td>不做</td><td>250+ 处硬编码白色半透明需逐个反转，且值班盯屏场景深色是主场</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:var(--fs-sm);color:var(--ink3);margin-top:14px">
+    注：第 3 项里「语义色加深」同时建议回灌到深色主题之外单独维护一份浅色语义值——将来若真要开全站浅色，这套值可直接复用。</p>
+</div>
+
+</div>
+
+<script>
+document.querySelectorAll('.tab').forEach(function(t){
+  t.addEventListener('click', function(){
+    document.querySelectorAll('.tab').forEach(function(x){ x.classList.remove('on') });
+    document.querySelectorAll('.pane').forEach(function(x){ x.classList.remove('on') });
+    t.classList.add('on');
+    document.getElementById(t.dataset.p).classList.add('on');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+});
+</script>
+</body>
+</html>

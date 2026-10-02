@@ -21,7 +21,7 @@
         <KpiCard label="在线实例" :value="stats.up" tone="up">
           <template #icon><CheckCircleIcon /></template>
         </KpiCard>
-        <KpiCard label="离线实例" :value="stats.down" tone="down">
+        <KpiCard label="离线实例" :value="stats.down" :tone="stats.down > 0 ? 'down' : 'total'">
           <template #icon><XCircleIcon /></template>
         </KpiCard>
         <KpiCard label="总活动连接" :value="stats.totalActive" tone="conn">
@@ -122,6 +122,8 @@ import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
 import MwStatusDot from '../mw/MwStatusDot.vue'
 import MwRoleTag from '../mw/MwRoleTag.vue'
+import { tokenColor } from '../../charts/echarts'
+const AXIS_COLOR = tokenColor('t2', '#9fb3c8')
 
 // ---- 图标组件（内联 SVG 渲染函数） ----
 function svgIcon(s) {
@@ -184,7 +186,7 @@ async function loadTrendChart(row) {
     }
     chartInstance.setOption({
       tooltip: { trigger: 'axis' },
-      legend: { data: ['活动连接'], textStyle: { color: '#8b949e' } },
+      legend: { data: ['活动连接'], textStyle: { color: AXIS_COLOR } },
       grid: { left: 60, right: 30, top: 40, bottom: 30 },
       xAxis: { type: 'time' },
       yAxis: { type: 'value', name: '连接数' },
@@ -252,12 +254,12 @@ onMounted(load)
 .pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 :deep(.row-down) { opacity: 0.6; }
 .detail-content { padding: 0 20px; }
-.detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; }
+.detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: var(--fill-1); border-radius: 8px; }
 .meta-item { font-size: 13px; }
 .meta-label { color: var(--text-muted); margin-right: 6px; }
 .mono { font-family: var(--mono); }
 .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
-.metric-cell { padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; text-align: center; }
+.metric-cell { padding: 12px; background: var(--fill-1); border-radius: 8px; text-align: center; }
 .mc-label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
 .mc-value { font-size: 18px; font-weight: 600; }
 .chart-box { width: 100%; height: 300px; }
@@ -277,8 +279,8 @@ onMounted(load)
 
 /* 列表状态点 */
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-.status-dot.up { background: #4ade80; }
-.status-dot.down { background: #f87171; }
+.status-dot.up { background: var(--ok); }
+.status-dot.down { background: var(--danger); }
 .status-text { display: inline-flex; align-items: center; font-size: 13px; }
-.status-text.status-issue { color: #f87171; }
+.status-text.status-issue { color: var(--danger); }
 </style>

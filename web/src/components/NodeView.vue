@@ -1,51 +1,62 @@
 <template>
   <div class="node-view">
-    <!-- 面包屑 + 主机切换 + 状态 -->
-    <div class="breadcrumb">
-      <el-icon class="bc-home"><HomeFilled /></el-icon>
-      <span class="bc-item bc-link" @click="$router.push('/hosts')">主机监控</span>
-      <el-icon class="bc-sep"><ArrowRight /></el-icon>
-      <el-select
-        v-model="selected"
-        filterable
-        size="small"
-        placeholder="选择主机"
-        class="bc-host-select"
-        @change="onSelect"
-      >
-        <el-option
-          v-for="n in nodes"
-          :key="n.hostname"
-          :value="n.hostname"
-          :label="n.hostname + ' (' + (n.group || 'default') + ')'"
-        />
-      </el-select>
-      <template v-if="current">
-        <span class="bc-ip mono">{{ current.ip }}</span>
-        <span class="status-pill" :class="currentStatus">
-          <i class="dot"></i>{{ currentStatus === 'online' ? '在线' : '离线' }}
-        </span>
+    <!-- 页面头：原来这里是一条自写的面包屑，与顶栏面包屑重复；
+         现在统一为 PageHeader，右侧保留最有用的「切换主机」与状态。 -->
+    <!-- 对象头：标题用主机名而不是固定的"主机详情"，右侧直接给出四个关键指标，
+         不切 Tab 就知道这台机器现在什么状态。 -->
+    <PageHeader :title="current ? hostTitle(current) : '主机详情'" :desc="hostDesc">
+      <template #actions>
+        <div v-if="current && currentStatus === 'online'" class="obj-kpis">
+          <div><div class="obj-kpi-label">CPU</div><div class="obj-kpi-value" :class="rateClass(rt.cpu)">{{ num(rt.cpu) }}<small>%</small></div></div>
+          <div><div class="obj-kpi-label">内存</div><div class="obj-kpi-value" :class="rateClass(rt.mem)">{{ num(rt.mem) }}<small>%</small></div></div>
+          <div><div class="obj-kpi-label">磁盘</div><div class="obj-kpi-value" :class="rateClass(rt.disk)">{{ num(rt.disk) }}<small>%</small></div></div>
+          <div><div class="obj-kpi-label">负载</div><div class="obj-kpi-value">{{ rt.load1 ?? '-' }}</div></div>
+        </div>
+        <el-select
+          v-model="selected"
+          filterable
+          size="small"
+          placeholder="切换主机"
+          class="bc-host-select"
+          @change="onSelect"
+        >
+          <el-option
+            v-for="n in nodes"
+            :key="n.hostname"
+            :value="n.hostname"
+            :label="n.hostname + ' (' + (n.group || 'default') + ')'"
+          />
+        </el-select>
+        <StatusPill v-if="current" :tone="currentStatus === 'online' ? 'ok' : 'muted'" dot>
+          {{ currentStatus === 'online' ? '在线' : '离线' }}
+        </StatusPill>
       </template>
-    </div>
+    </PageHeader>
 
     <el-tabs v-model="activeTab" type="border-card" class="node-tabs">
       <!-- ============ Tab 1：主机概览 ============ -->
       <el-tab-pane label="主机概览" name="overview">
         <!-- 设备信息 -->
         <div class="section-title">设备信息</div>
-        <div class="device-grid">
-          <div class="dev-item"><span>主机名</span><strong class="with-copy">{{ hostTitle(current) }}<el-icon class="copy-btn" title="复制" @click="copyText(current?.hostname)"><DocumentCopy /></el-icon></strong></div>
-          <div class="dev-item"><span>IP 地址</span><strong class="with-copy mono">{{ current?.ip || '-' }}<el-icon class="copy-btn" title="复制" @click="copyText(current?.ip)"><DocumentCopy /></el-icon></strong></div>
-          <div class="dev-item"><span>操作系统</span><strong>{{ current?.os || '-' }}</strong></div>
-          <div class="dev-item"><span>运行天数</span><strong class="mono">{{ uptimeDays }} 天（{{ bootTimeText }}）</strong></div>
-          <div class="dev-item"><span>Agent 版本</span><strong class="mono">v{{ current?.version || '-' }}</strong></div>
-          <div class="dev-item"><span>CPU 型号</span><strong :title="hostInfo?.cpuModel">{{ hostInfo?.cpuModel || '-' }}</strong></div>
-          <div class="dev-item"><span>CPU 核数</span><strong class="mono">{{ hostInfo?.cpuCores || '-' }} 核</strong></div>
-          <div class="dev-item">
-            <span>系统负载</span>
-            <strong class="mono">{{ rt.load1 }} / {{ rt.load5 }} / {{ rt.load15 }}</strong>
-          </div>
-        </div>
+        <!-- 定义列表：标签固定宽度左对齐、值紧随其后，比四列平铺更容易纵向扫读 -->
+        <dl class="def-list def-2col">
+          <dt>主机名</dt>
+          <dd class="with-copy">{{ hostTitle(current) }}<el-icon class="copy-btn" title="复制" @click="copyText(current?.hostname)"><DocumentCopy /></el-icon></dd>
+          <dt>IP 地址</dt>
+          <dd class="with-copy mono">{{ current?.ip || '-' }}<el-icon class="copy-btn" title="复制" @click="copyText(current?.ip)"><DocumentCopy /></el-icon></dd>
+          <dt>操作系统</dt>
+          <dd>{{ current?.os || '-' }}</dd>
+          <dt>运行天数</dt>
+          <dd class="mono">{{ uptimeDays }} 天（{{ bootTimeText }}）</dd>
+          <dt>Agent 版本</dt>
+          <dd class="mono">v{{ current?.version || '-' }}</dd>
+          <dt>CPU 型号</dt>
+          <dd :title="hostInfo?.cpuModel">{{ hostInfo?.cpuModel || '-' }}</dd>
+          <dt>CPU 核数</dt>
+          <dd class="mono">{{ hostInfo?.cpuCores || '-' }} 核</dd>
+          <dt>系统负载</dt>
+          <dd class="mono">{{ rt.load1 }} / {{ rt.load5 }} / {{ rt.load15 }}</dd>
+        </dl>
 
         <!-- 系统情况：环形图 -->
         <div class="section-title">系统情况</div>
@@ -183,7 +194,12 @@
                 </template>
               </el-table-column>
             </el-table>
-            <el-empty v-if="!filteredProcs.length" description="无进程数据" :image-size="50" />
+            <EmptyState
+              v-if="!filteredProcs.length"
+              :icon="List"
+              title="无进程数据"
+              :hints="['该主机尚未上报进程明细', '确认 Agent 运行正常；若上方填了关键字，先清空再试']"
+            />
           </div>
           <div class="bottom-col">
             <div class="section-title">
@@ -196,7 +212,12 @@
               <el-table-column prop="loginAt" label="登录时间" min-width="150" />
               <el-table-column prop="from" label="来源 IP" min-width="130" show-overflow-tooltip />
             </el-table>
-            <el-empty v-else description="无在线用户" :image-size="60" />
+            <EmptyState
+              v-else
+              :icon="Monitor"
+              title="无在线用户"
+              :hints="['当前没有登录会话，或 Agent 未采集到 utmp 记录', '确实无人登录时这里为空是正常的']"
+            />
 
             <div class="section-title" style="margin-top: 16px">告警事件</div>
             <el-table :data="alertEvents" stripe size="small" max-height="220">
@@ -215,7 +236,12 @@
                 </template>
               </el-table-column>
             </el-table>
-            <el-empty v-if="!alertEvents.length" description="暂无告警" :image-size="50" />
+            <EmptyState
+              v-if="!alertEvents.length"
+              :icon="Bell"
+              title="暂无告警"
+              :hints="['该主机当前没有告警事件', '可在「告警中心」查看全部历史事件与已恢复告警']"
+            />
           </div>
         </div>
       </el-tab-pane>
@@ -302,7 +328,12 @@
         <div class="process-footer" v-if="processFullList.length > 0">
           <span class="process-count">共 {{ processFullList.length }} 条进程</span>
         </div>
-        <el-empty v-if="!loadingProcessFull && !filteredProcessFull.length" description="无进程数据" :image-size="50" />
+        <EmptyState
+          v-if="!loadingProcessFull && !filteredProcessFull.length"
+          :icon="List"
+          title="无进程数据"
+          :hints="['点右上角「刷新」重新拉取进程明细', '确认 Agent 版本支持进程明细上报']"
+        />
       </el-tab-pane>
 
       <!-- ============ Tab 4：端口监控 ============ -->
@@ -346,7 +377,12 @@
         <div class="process-footer" v-if="listenerList.length > 0">
           <span class="process-count">共 {{ listenerList.length }} 条监听</span>
         </div>
-        <el-empty v-if="!loadingListeners && !filteredListeners.length" description="无监听端口数据" :image-size="50" />
+        <EmptyState
+          v-if="!loadingListeners && !filteredListeners.length"
+          :icon="Connection"
+          title="无监听端口数据"
+          :hints="['点右上角「刷新」重新拉取监听端口', '以非 root 运行的 Agent 可能读不到全部端口，确认 Agent 以 root 运行']"
+        />
       </el-tab-pane>
 
       <!-- ============ Tab 5：防火墙监控 ============ -->
@@ -387,8 +423,18 @@
             </div>
             <div class="fw-status-msg" v-if="firewallStatus.message">{{ firewallStatus.message }}</div>
           </template>
-          <el-empty v-else-if="loadErrors.firewallStatus && !loadingFirewallStatus" description="防火墙状态加载失败" :image-size="40" />
-          <el-empty v-else-if="!loadingFirewallStatus" description="无防火墙状态数据（旧版本 Agent 或未上报）" :image-size="40" />
+          <EmptyState
+            v-else-if="loadErrors.firewallStatus && !loadingFirewallStatus"
+            :icon="Lock"
+            title="防火墙状态加载失败"
+            :hints="['Agent 未响应或超时，可点「刷新」重试', '确认目标机 Agent 进程存活并已连上 Server']"
+          />
+          <EmptyState
+            v-else-if="!loadingFirewallStatus"
+            :icon="Lock"
+            title="无防火墙状态数据"
+            :hints="['旧版本 Agent 不采集防火墙状态', '把该主机上的 Agent 升级到当前版本后即可看到']"
+          />
         </div>
         <div class="tab-header">
           <span class="panel-title" style="margin: 0">防火墙规则</span>
@@ -438,7 +484,12 @@
         <div class="process-footer" v-if="firewallRuleList.length > 0">
           <span class="process-count">共 {{ firewallRuleList.length }} 条规则（{{ firewallBackend }}）</span>
         </div>
-        <el-empty v-if="!loadingFirewall && !filteredFirewall.length" description="无防火墙数据或未启用防火墙" :image-size="50" />
+        <EmptyState
+          v-if="!loadingFirewall && !filteredFirewall.length"
+          :icon="Lock"
+          title="无防火墙规则"
+          :hints="['主机未启用 iptables / firewalld 时为空是正常的', '读取规则需要 root 权限，确认 Agent 以 root 运行']"
+        />
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -446,7 +497,10 @@
 
 <script setup>
 import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { HomeFilled, ArrowRight, DocumentCopy, Search, Refresh } from '@element-plus/icons-vue'
+import { DocumentCopy, Search, Refresh, Monitor, List, Connection, Lock, Bell } from '@element-plus/icons-vue'
+import PageHeader from './common/PageHeader.vue'
+import EmptyState from './common/EmptyState.vue'
+import StatusPill from './common/StatusPill.vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import http from '../api/http'
@@ -593,6 +647,13 @@ function hostTitle(n) {
 }
 
 const current = computed(() => nodes.value.find((n) => n.hostname === selected.value) || null)
+
+// 页头描述：把原来散在面包屑里的 IP / 状态收敛成一句话
+const hostDesc = computed(() => {
+  if (!current.value) return '选择一台主机查看详情'
+  const ip = current.value.ip || '-'
+  return `${hostTitle(current.value)} · ${ip} · Agent v${current.value.version || '-'}`
+})
 const currentStatus = computed(() => (current.value?.status === 'online' ? 'online' : 'offline'))
 const hostInfo = computed(() => current.value?.hostInfo || null)
 const uptimeDays = computed(() => {
@@ -1274,14 +1335,33 @@ onUnmounted(() => {
 <style scoped>
 .node-view { display: flex; flex-direction: column; gap: 16px; }
 
+/* 设备信息：两列定义列表（原为四列平铺网格，标签与值混排不好扫读） */
+.def-2col { grid-template-columns: 76px minmax(0, 1fr) 76px minmax(0, 1fr); }
+@media (max-width: 1100px) {
+  .def-2col { grid-template-columns: 76px minmax(0, 1fr); }
+}
+
+/* 对象头关键指标：颜色只标异常（>=90 红 / >=70 琥珀），正常值保持中性 */
+.obj-kpis { margin-left: 0; gap: 18px; }
+.obj-kpi-value { font-size: 17px; }
+.obj-kpi-value small { font-size: 11px; color: var(--t3); margin-left: 1px; }
+.obj-kpi-value.red { color: var(--danger); }
+.obj-kpi-value.amber { color: var(--warn); }
+.obj-kpi-value.green { color: var(--t1); }
+
+/* 端口：改为紧凑药丸，比原来的大列表项更省空间 */
+.port-item { padding: 3px 10px; background: var(--fill-2); border: 1px solid var(--bd); }
+.port-item.up { border-left: none; }
+.port-item.down { border-left: none; }
+
 /* Tabs */
 .node-tabs { border-radius: 8px; overflow: hidden; }
-.node-tabs :deep(.el-tabs__header) { background: rgba(255,255,255,0.04); margin: 0; }
+.node-tabs :deep(.el-tabs__header) { background: var(--fill-1); margin: 0; }
 .node-tabs :deep(.el-tabs__content) { padding: 16px 20px; }
 .tab-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .port-section { margin-top: 16px; }
 .port-list { display: flex; flex-wrap: wrap; gap: 8px; }
-.port-item { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; font-size: 13px; background: rgba(255,255,255,0.04); }
+.port-item { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--r-sm); font-size: 13px; background: var(--fill-1); }
 .port-item.up { border-left: 3px solid var(--accent); }
 .port-item.down { border-left: 3px solid var(--danger); opacity: 0.7; }
 .port-dot { width: 6px; height: 6px; border-radius: 50%; }
@@ -1302,14 +1382,13 @@ onUnmounted(() => {
 .section-head { display: flex; align-items: center; justify-content: space-between; }
 .proc-search { width: 220px; }
 
-/* 设备信息 */
-.device-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+/* 设备信息（已改为定义列表，见 .def-2col；以下 .dev-item 保留给其它复用的字段块） */
 .dev-item {
   min-width: 0;
   padding: 10px 12px;
-  border-radius: 6px;
-  background: rgba(255,255,255,0.035);
-  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--fill-1);
+  border: 1px solid var(--bd);
 }
 .dev-item span { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 400; color: var(--label); }
 .dev-item strong {
@@ -1325,14 +1404,8 @@ onUnmounted(() => {
 
 /* 环形图 */
 /* 面包屑 */
-.breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; color: var(--text-dim); padding: 0 2px; }
-.breadcrumb .bc-host-select { width: 220px; }
-.breadcrumb .bc-ip { margin-left: 2px; color: var(--text-muted); font-size: 13px; }
-.breadcrumb .bc-home { color: var(--el-color-primary); }
-.breadcrumb .bc-sep { font-size: 13px; opacity: 0.6; }
-.breadcrumb .bc-item { color: var(--text-dim); }
-.breadcrumb .bc-link { cursor: pointer; transition: color 0.15s; }
-.breadcrumb .bc-link:hover { color: var(--el-color-primary); }
+/* 主机切换下拉：现在挂在 PageHeader 的操作区里 */
+.bc-host-select { width: 240px; }
 
 .status-pill { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
 .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
@@ -1351,9 +1424,9 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   padding: 12px;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--fill-1);
+  border: 1px solid var(--bd);
 }
 .gauge { width: 100%; height: 130px; }
 .gauge-label { text-align: center; margin-top: 4px; font-size: 13px; color: var(--text-dim); }
@@ -1361,7 +1434,7 @@ onUnmounted(() => {
 
 /* 实时趋势 */
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-.metric-card { padding: 14px 16px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-soft); }
+.metric-card { padding: 14px 16px; border-radius: var(--r-md); background: var(--fill-1); border: 1px solid var(--bd); }
 .mc-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .mc-label { font-size: 14px; font-weight: 400; color: var(--label); letter-spacing: 0.2px; }
 .mc-value { font-size: 26px; font-weight: 700; font-family: var(--mono); line-height: 1.1; }
@@ -1395,7 +1468,7 @@ onUnmounted(() => {
 .user-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; }
 .user-tag { font-family: var(--mono); }
 .proc-bar { display: flex; align-items: center; gap: 8px; }
-.proc-bar .bar { flex: 1; height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
+.proc-bar .bar { flex: 1; height: 5px; background: var(--fill-2); border-radius: 3px; overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 3px; }
 .bar-fill.green { background: var(--accent); }
 .bar-fill.amber { background: var(--warn); }
@@ -1404,7 +1477,7 @@ onUnmounted(() => {
 
 /* 基础监控 */
 .monitor-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-.monitor-panel { padding: 12px 14px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-soft); }
+.monitor-panel { padding: 12px 14px; border-radius: var(--r-md); background: var(--fill-1); border: 1px solid var(--bd); }
 .monitor-panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 8px; }
 .monitor-panel-tools { margin-bottom: 6px; }
 .monitor-panel-title { font-size: 13px; color: var(--text-main); font-weight: 600; }
@@ -1431,9 +1504,9 @@ onUnmounted(() => {
 .fw-status-card {
   margin-bottom: 14px;
   padding: 12px 16px;
-  border: 1px solid var(--border, #2a3346);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-md);
+  background: var(--fill-1);
   min-height: 56px;
 }
 .fw-status-row { display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: center; }

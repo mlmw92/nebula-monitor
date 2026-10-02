@@ -132,14 +132,14 @@ watch(() => props.panel, () => load(), { deep: true })
 .panel-title {
   font-size: 14px;
   font-weight: 600;
-  color: #e5edf7;
+  color: var(--t1);
 }
 .chart {
   flex: 1;
   min-height: 180px;
 }
 .panel-error {
-  color: #f87171;
+  color: var(--danger);
   font-size: 13px;
   margin-top: 4px;
 }

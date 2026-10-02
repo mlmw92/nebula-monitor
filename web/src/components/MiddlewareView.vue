@@ -1,17 +1,10 @@
 <template>
   <div class="middleware-view">
-    <!-- 页面标题 -->
-    <div class="page-header">
-      <div class="header-left">
-        <h2 class="page-title">中间件监控</h2>
-        <p class="page-desc">
-          各类中间件实例监控与可视化。未部署的类型可在右侧「展示类型」中隐藏。
-        </p>
-      </div>
-      <div class="header-actions">
+    <PageHeader title="中间件监控" desc="各类中间件实例监控与可视化。未部署的类型可在右侧「展示类型」中隐藏。">
+      <template #actions>
         <el-button @click="viewDialog = true">展示类型</el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 展示类型配置 -->
     <el-dialog v-model="viewDialog" title="选择展示的中间件类型" width="480">
@@ -26,8 +19,9 @@
       </template>
     </el-dialog>
 
-    <!-- 中间件类型 Tab -->
-    <el-tabs v-model="activeTab" class="mw-tabs" type="border-card">
+    <!-- 中间件类型 Tab：去掉 border-card（深色下它与内部卡片形成双层边框），
+         统一为下划线型；内容区的底色由各 Tab 自己的 .card 提供。 -->
+    <el-tabs v-model="activeTab" class="mw-tabs">
       <el-tab-pane label="Redis" name="redis">
         <template #label>
           <span class="tab-label">
@@ -124,7 +118,10 @@
 <script setup>
 import { ref, watch, defineAsyncComponent, h, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { WarningFilled } from '@element-plus/icons-vue'
 import http from '../api/http'
+import PageHeader from './common/PageHeader.vue'
+import EmptyState from './common/EmptyState.vue'
 import './mw/mw.css'
 
 // 各中间件 Tab 改为异步组件，拆分为独立 chunk，避免进入中间件页面时
@@ -133,7 +130,17 @@ const tabLoader = (loader) => defineAsyncComponent({
   loader,
   delay: 120,
   loadingComponent: { render: () => h('div', { class: 'tab-loading' }, '加载中…') },
-  errorComponent: { render: () => h('div', { class: 'tab-error' }, '页面加载失败，请刷新页面重试') },
+  errorComponent: {
+    render: () =>
+      h(EmptyState, {
+        icon: WarningFilled,
+        title: '页面加载失败',
+        hints: [
+          '刷新浏览器重试；仍未恢复时确认 Server 服务处于运行状态',
+          '升级后首次访问时旧缓存的分包会 404，强制刷新（Ctrl+F5）即可',
+        ],
+      }),
+  },
 })
 const RedisTab = tabLoader(() => import('./redis/RedisTab.vue'))
 const MySQLTab = tabLoader(() => import('./mysql/MySQLTab.vue'))
@@ -243,33 +250,25 @@ onMounted(async () => {
 .middleware-view {
   padding: 4px 0 16px;
 }
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 16px;
-}
-.page-title {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  background: linear-gradient(135deg, var(--text) 0%, var(--text-dim) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-.page-desc {
-  font-size: 13px;
-  color: var(--text-dim);
-  margin-top: 4px;
-}
-.header-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .view-config-tip { font-size: 13px; color: var(--text-dim); margin-bottom: 12px; }
 .view-cb { display: block; margin: 0 0 4px 0; }
 .tab-emoji { font-size: 15px; }
+/* 下划线型 Tab 不再需要外层圆角盒子；底部留一条分隔线，
+   让 Tab 行与下方内容区在视觉上分属两层。 */
 .mw-tabs {
-  border-radius: var(--radius);
-  overflow: hidden;
+  border-radius: 0;
+  margin-bottom: 16px;
+}
+.mw-tabs :deep(.el-tabs__header) {
+  border-bottom: 1px solid var(--bd);
+  margin-bottom: 0;
+}
+.mw-tabs :deep(.el-tabs__nav-wrap)::after {
+  height: 0;
+}
+.mw-tabs :deep(.el-tabs__item) {
+  height: 44px;
+  font-size: var(--fs-base);
 }
 .tab-label {
   display: inline-flex;
@@ -290,12 +289,6 @@ onMounted(async () => {
   padding: 40px 0;
   text-align: center;
   color: var(--text-dim);
-  font-size: 14px;
-}
-.tab-error {
-  padding: 40px 0;
-  text-align: center;
-  color: var(--danger);
   font-size: 14px;
 }
 .tab-dot {
@@ -322,7 +315,7 @@ onMounted(async () => {
   box-shadow: none;
 }
 :deep(.el-tabs__header) {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--fill-1);
   border-bottom: 1px solid var(--border);
 }
 :deep(.el-tabs__item) {

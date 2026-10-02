@@ -1,15 +1,14 @@
 <template>
   <div class="notify-view">
-    <div class="page-head">
-      <div>
-        <h2>通知配置</h2>
-        <p class="sub">配置告警通知渠道，保存后立即生效（热加载，无需重启）。配置独立存储，不修改 server.yaml。</p>
-      </div>
-      <div class="head-actions">
+    <PageHeader
+      title="通知配置"
+      desc="配置告警通知渠道，保存后立即生效（热加载，无需重启）；配置独立存储，不修改 server.yaml"
+    >
+      <template #actions>
         <el-button :loading="testing" :disabled="loading" @click="testNotify">发送测试邮件</el-button>
         <el-button type="primary" :loading="saving" :disabled="loading" @click="save">保存并生效</el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <el-form v-loading="loading" :model="notify" label-position="top" class="cards">
       <!-- 邮件 -->
@@ -109,6 +108,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
 import StringListInput from './StringListInput.vue'
+import PageHeader from './common/PageHeader.vue'
 
 const loading = ref(false)
 const saving = ref(false)

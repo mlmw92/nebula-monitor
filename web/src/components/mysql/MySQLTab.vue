@@ -2,7 +2,7 @@
   <div class="mw-tab">
     <RefreshBar :loading="loading" @refresh="load" />
     <!-- 空状态 -->
-    <div v-if="!loading && instances.length === 0" class="empty-guide glass">
+    <div v-if="!loading && instances.length === 0" class="empty-guide card">
       <div class="empty-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">
           <ellipse cx="12" cy="5" rx="9" ry="3"/>
@@ -24,7 +24,7 @@
         <KpiCard :value="stats.up" label="在线实例" tone="up">
           <template #icon><el-icon :size="20"><CircleCheck /></el-icon></template>
         </KpiCard>
-        <KpiCard :value="stats.down" label="离线实例" tone="down">
+        <KpiCard :value="stats.down" label="离线实例" :tone="stats.down > 0 ? 'down' : 'total'">
           <template #icon><el-icon :size="20"><CircleClose /></el-icon></template>
         </KpiCard>
         <KpiCard :value="formatNum(stats.totalConnections)" label="总连接数" tone="conn">
@@ -33,13 +33,13 @@
         <KpiCard :value="formatNum(stats.totalQPS)" label="总 QPS" tone="ops">
           <template #icon><el-icon :size="20"><DataLine /></el-icon></template>
         </KpiCard>
-        <KpiCard :value="stats.totalSlowQueries" label="慢查询累计" tone="alert">
+        <KpiCard :value="stats.totalSlowQueries" label="慢查询累计" tone="total">
           <template #icon><el-icon :size="20"><Bell /></el-icon></template>
         </KpiCard>
       </div>
 
       <!-- 实例拓扑：与 Redis 对齐的主从/集群关系视图 -->
-      <div class="chart-section glass" v-if="instances.length">
+      <div class="chart-section card" v-if="instances.length">
         <div class="section-title">实例拓扑</div>
 
         <!-- 集群组（Group Replication / InnoDB Cluster，多节点多主） -->
@@ -195,7 +195,7 @@
       </div>
 
       <!-- 实例列表 -->
-      <div class="mw-list glass">
+      <div class="mw-list card">
         <div class="mw-list-title">实例列表</div>
         <el-table :data="pagedInstances" class="mysql-table" style="width: 100%" @row-click="openDetail" :row-class-name="rowClass" size="small" stripe @sort-change="onSortChange">
           <el-table-column prop="instance" label="实例地址" min-width="180" show-overflow-tooltip />
@@ -288,6 +288,8 @@ import {
   Bell,
   QuestionFilled,
 } from '@element-plus/icons-vue'
+import { tokenColor } from '../../charts/echarts'
+const AXIS_COLOR = tokenColor('t2', '#9fb3c8')
 
 const loading = ref(true)
 const instances = ref([])
@@ -428,7 +430,7 @@ async function loadTrendChart(row) {
     }
     chartInstance.setOption({
       tooltip: { trigger: 'axis' },
-      legend: { data: series.map(s => s.name), textStyle: { color: '#8b949e' } },
+      legend: { data: series.map(s => s.name), textStyle: { color: AXIS_COLOR } },
       grid: { left: 50, right: 50, top: 40, bottom: 30 },
       xAxis: { type: 'time' },
       yAxis: [
@@ -472,7 +474,7 @@ onMounted(load)
 .mw-tab { padding: 4px 0; }
 .empty-guide { text-align: center; padding: 48px 24px; }
 .empty-icon { color: var(--text-muted); margin-bottom: 16px; }
-.empty-title { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
+.empty-title { font-size: var(--fs-lg); font-weight: 600; margin: 0 0 8px; }
 .empty-desc { color: var(--text-dim); margin: 0 0 8px; font-size: 13px; }
 .empty-hint { color: var(--text-muted); font-size: 13px; }
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
@@ -481,34 +483,34 @@ onMounted(load)
 .mysql-table :deep(th) { white-space: nowrap; }
 .text-muted { color: var(--text-muted); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-.dot.up { background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.5); }
-.dot.down { background: #f87171; }
-.metric-good { color: #4ade80; }
+.dot.up { background: var(--ok); box-shadow: 0 0 6px var(--ok-dim); }
+.dot.down { background: var(--danger); }
+.metric-good { color: var(--ok); }
 .metric-warn { color: var(--warn); }
-.metric-bad { color: #f87171; }
+.metric-bad { color: var(--danger); }
 :deep(.row-down) { opacity: 0.6; }
 .detail-content { padding: 0 20px; }
-.detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; }
+.detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: var(--fill-1); border-radius: var(--r-md); }
 .meta-item { font-size: 13px; }
 .meta-label { color: var(--text-muted); margin-right: 6px; }
 .mono { font-family: var(--mono); }
 .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
-.metric-cell { padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; text-align: center; }
+.metric-cell { padding: 12px; background: var(--fill-1); border-radius: var(--r-md); text-align: center; }
 .mc-label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
 .mc-value { font-size: 18px; font-weight: 600; }
 .chart-box { width: 100%; height: 300px; }
 
 /* ===== 实例拓扑（对齐 Redis 拓扑展示） ===== */
-.topo-group { margin-bottom: 22px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.02); }
+.topo-group { margin-bottom: 22px; padding: 14px; border: 1px solid var(--bd); border-radius: var(--r-md); background: var(--fill-1); }
 .topo-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
 .topo-group-title { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
 .topo-group-title .el-icon { color: var(--accent); }
 .topo-meta { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; }
 .dim { color: var(--text-muted); }
 .badge { padding: 2px 8px; border-radius: 10px; font-size: 13px; font-weight: 600; }
-.badge-ok { color: #4ade80; background: rgba(34, 197, 94, 0.15); }
-.badge-warn { color: #fbbf24; background: rgba(234, 179, 8, 0.15); }
-.badge-down { color: #f87171; background: rgba(239, 68, 68, 0.18); }
+.badge-ok { color: var(--ok); background: rgba(34, 197, 94, 0.15); }
+.badge-warn { color: var(--warn); background: rgba(234, 179, 8, 0.15); }
+.badge-down { color: var(--danger); background: rgba(239, 68, 68, 0.18); }
 .badge-unknown { color: var(--text-muted); background: rgba(148, 163, 184, 0.12); }
 
 .topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }

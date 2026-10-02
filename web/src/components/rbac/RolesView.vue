@@ -1,14 +1,13 @@
 <template>
   <div class="rbac-view">
-    <div class="page-head">
-      <div>
-        <h2 class="page-title">角色与权限</h2>
-        <p class="page-sub">
-          角色是一组权限点与默认数据范围的集合。内置角色不可删除；自定义角色可自由编辑，其数据范围不得超过创建者自身范围。
-        </p>
-      </div>
-      <el-button type="primary" :icon="Plus" @click="openCreate" v-if="auth.can('roles:manage')">新建角色</el-button>
-    </div>
+    <PageHeader
+      title="角色与权限"
+      desc="角色是一组权限点与默认数据范围的集合；内置角色不可删除，自定义角色的数据范围不得超过创建者自身范围"
+    >
+      <template #actions>
+        <el-button type="primary" :icon="Plus" @click="openCreate" v-if="auth.can('roles:manage')">新建角色</el-button>
+      </template>
+    </PageHeader>
 
     <el-alert
       v-if="!auth.can('roles:manage')"
@@ -130,6 +129,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import http from '../../api/http'
+import PageHeader from '../common/PageHeader.vue'
 import { useAuth } from '../../composables/useAuth'
 
 const auth = useAuth()
@@ -340,7 +340,7 @@ onMounted(loadAll)
   font-size: 13px;
   font-weight: 600;
   padding-left: 4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--bd);
 }
 .perm-collapse :deep(.el-collapse-item__wrap) {
   background: transparent;
@@ -377,7 +377,7 @@ onMounted(loadAll)
   user-select: none;
 }
 .perm-check:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--fill-2);
 }
 .check-box {
   flex-shrink: 0;

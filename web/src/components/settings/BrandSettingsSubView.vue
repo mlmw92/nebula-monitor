@@ -204,7 +204,7 @@ async function save() {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: var(--bg-soft, rgba(255, 255, 255, 0.04));
+  background: var(--bg-soft, var(--fill-1));
   flex-shrink: 0;
 }
 .logo-preview img {
@@ -233,7 +233,7 @@ async function save() {
   padding: 16px 20px;
   border-radius: 8px;
   border: 1px dashed var(--border);
-  background: var(--bg-soft, rgba(255, 255, 255, 0.04));
+  background: var(--bg-soft, var(--fill-1));
   text-align: center;
   color: var(--text-dim);
   font-size: 13px;

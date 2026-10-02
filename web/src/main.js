@@ -7,6 +7,8 @@ import './assets/style.css'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
+// 打印层：必须排在 EP dark css-vars 之后，否则 --el-* 深色变量会盖回来
+import './assets/print.css'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 

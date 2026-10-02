@@ -1,18 +1,17 @@
 <template>
   <div class="overview">
-    <div class="ov-header">
-      <div>
-        <h2 class="page-title">系统概览</h2>
-        <p class="page-desc">主机、中间件与告警的实时健康总览</p>
-      </div>
-      <div class="ov-actions">
+    <PageHeader title="系统概览" desc="主机、中间件与告警的实时健康总览">
+      <template #actions>
         <el-button v-if="editing" size="small" @click="reset">重置布局</el-button>
         <el-button size="small" :type="editing ? 'primary' : 'default'" @click="setEditing(!editing)">
           {{ editing ? '完成编辑' : '自定义布局' }}
         </el-button>
         <el-button size="small" :icon="RefreshRight" @click="refresh" :loading="loading">刷新</el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
+
+    <!-- 研判条：有活跃告警才渲染，直接回答"最该处理什么" -->
+    <TriageBar :alerts="alertsAll" :nodes="nodes" :latest-map="latestMap" />
 
     <div v-if="editing" class="ov-edit-hint">
       编辑模式：使用各区块右上角的 ↑ / ↓ 调整顺序，点击「隐藏」可关闭该区块；「智能运维」固定置顶，不可移动或隐藏。配置自动保存到本地。
@@ -25,9 +24,9 @@
         class="ov-block"
         :style="{ gridColumn: 'span ' + b.span }"
       >
-        <div class="ov-card">
+        <div class="card ov-card">
           <div class="ov-card-head">
-            <h3 class="ov-card-title">{{ b.title }}</h3>
+            <h3 class="ov-card-title"><span class="ov-card-bar"></span>{{ b.title }}</h3>
             <div v-if="editing" class="ov-edit-tools">
               <template v-if="pinnedKeys.includes(b.key)">
                 <span class="ov-pinned" title="该区块固定置顶">固定置顶</span>
@@ -59,6 +58,8 @@ import { formatMetric } from './overview/format'
 import { useOverviewLayout } from './overview/useOverviewLayout'
 import { calculateSystemHealth } from '../composables/healthScore'
 
+import PageHeader from './common/PageHeader.vue'
+import TriageBar from './overview/TriageBar.vue'
 import HealthBlock from './overview/HealthBlock.vue'
 import KpiBlock from './overview/KpiBlock.vue'
 import CriticalAlerts from './overview/CriticalAlerts.vue'
@@ -295,32 +296,6 @@ onBeforeUnmount(() => {
 .overview {
   padding: 4px;
 }
-.ov-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-.page-title {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  background: linear-gradient(135deg, var(--text) 0%, var(--text-dim) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-.page-desc {
-  font-size: 13px;
-  color: var(--text-dim);
-  margin-top: 4px;
-}
-.ov-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
 .ov-edit-hint {
   font-size: 13px;
   color: var(--accent);
@@ -339,11 +314,10 @@ onBeforeUnmount(() => {
 .ov-block {
   min-width: 0;
 }
+/* 外观来自全局 .card（统一容器），这里只负责布局 */
 .ov-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 16px 18px;
+  border-radius: var(--r-lg);
+  padding: 16px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -352,12 +326,24 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 .ov-card-title {
-  font-size: 15px;
-  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  letter-spacing: 0.01em;
   margin: 0;
+}
+.ov-card-bar {
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--accent);
+  flex-shrink: 0;
 }
 .ov-edit-tools {
   display: flex;

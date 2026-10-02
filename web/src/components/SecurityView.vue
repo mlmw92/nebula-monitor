@@ -1,5 +1,7 @@
 <template>
   <div class="security-view">
+    <PageHeader title="安全中心" desc="入侵防御、基线合规、文件完整性与安全事件的统一视图" />
+
     <RefreshBar :loading="refreshing" @refresh="refreshAll" />
 
     <!-- 加载失败提示：与「能力未启用」区分开，避免把失败当空数据 -->
@@ -16,7 +18,7 @@
     </el-alert>
 
     <!-- 顶部 KPI 概览 -->
-    <div class="glass panel kpi-row" v-loading="loading">
+    <div class="card kpi-row" v-loading="loading">
       <div class="kpi-card score-kpi" :class="scoreClass">
         <div class="kpi-ring" :style="ringStyle">
           <div class="kpi-score">{{ summary.score.toFixed(0) }}</div>
@@ -27,7 +29,7 @@
         </div>
       </div>
 
-      <KpiCard :value="summary.eventCount" label="安全事件" tone="alert">
+      <KpiCard :value="summary.eventCount" label="安全事件" :tone="summary.eventCount > 0 ? 'alert' : 'total'">
         <template #icon>⚠</template>
       </KpiCard>
 
@@ -41,11 +43,10 @@
     </div>
 
     <!-- 入侵防御（受控 fail2ban 专属 SSH 防护） -->
-    <div class="glass panel section" v-loading="defenseLoading">
-      <div class="panel-title-row">
-        <span class="panel-title">入侵防御</span>
+    <SectionCard title="入侵防御" dense v-loading="defenseLoading">
+      <template #actions>
         <span class="defense-tip">仅托管 nebula-monitor-sshd 专属 jail，不覆盖既有 fail2ban 配置</span>
-      </div>
+      </template>
 
       <div class="defense-kpi" v-if="defenseSummary">
         <div class="dk-card"><span class="dk-val ok">{{ defenseSummary.protected }}</span><span class="dk-label">已防护</span></div>
@@ -54,7 +55,14 @@
         <div class="dk-card"><span class="dk-val bad">{{ defenseSummary.exception }}</span><span class="dk-label">异常</span></div>
       </div>
 
-      <el-table :data="pagedDefenses" style="width: 100%; margin-top: 12px" empty-text="暂无节点">
+      <el-table :data="pagedDefenses" style="width: 100%; margin-top: 12px">
+        <template #empty>
+          <EmptyState
+            :icon="Lock"
+            title="暂无可防护节点"
+            :hints="['Agent 需先上报才能托管专属 jail', '确认目标机已安装 fail2ban，且 Agent 以 root 运行']"
+          />
+        </template>
         <el-table-column label="节点" min-width="200">
           <template #default="{ row }">
             <div class="node-cell">
@@ -118,7 +126,7 @@
           background
         />
       </div>
-    </div>
+    </SectionCard>
 
     <!-- 防护操作确认 -->
     <el-dialog v-model="defDialogVisible" title="入侵防御操作确认" width="460px">
@@ -139,9 +147,8 @@
     </el-dialog>
 
     <!-- 安全事件区 -->
-    <div class="glass panel section" v-loading="loading">
-      <div class="panel-title-row">
-        <span class="panel-title">安全事件</span>
+    <SectionCard title="安全事件" dense v-loading="loading">
+      <template #actions>
         <div class="filters">
           <el-select v-model="filterCategory" placeholder="全部类别" clearable size="small" style="width: 160px" @change="loadEvents">
             <el-option v-for="c in categoryOptions" :key="c.value" :label="c.label" :value="c.value" />
@@ -149,9 +156,16 @@
           <el-input v-model="filterNode" placeholder="按节点筛选" clearable size="small" style="width: 150px" @change="loadEvents" @clear="loadEvents" />
           <el-button size="small" @click="refreshAll">刷新</el-button>
         </div>
-      </div>
+      </template>
 
-      <el-table :data="pagedEvents" style="width: 100%" empty-text="暂无安全事件" :row-class-name="rowClass" max-height="460">
+      <el-table :data="pagedEvents" style="width: 100%" :row-class-name="rowClass" max-height="460">
+        <template #empty>
+          <EmptyState
+            :icon="Lock"
+            :title="filterCategory || filterNode ? '当前筛选下没有安全事件' : '暂无安全事件'"
+            :hints="eventHints"
+          />
+        </template>
         <el-table-column label="级别" width="90">
           <template #default="{ row }">
             <span class="sev-tag" :class="'sev-' + row.severity">{{ sevLabel(row.severity) }}</span>
@@ -192,14 +206,13 @@
           background
         />
       </div>
-    </div>
+    </SectionCard>
 
     <!-- 基线与 FIM 区 -->
     <div class="grid-2">
       <!-- 基线合规明细 -->
-      <div class="glass panel section" v-loading="loading">
-        <div class="panel-title-row">
-          <span class="panel-title">基线合规明细</span>
+      <SectionCard title="基线合规明细" dense v-loading="loading">
+        <template #actions>
           <div class="panel-tools">
             <el-switch
               v-model="onlyFailedBaseline"
@@ -209,8 +222,17 @@
               inactive-text="全部"
             />
           </div>
-        </div>
-        <el-empty v-if="!filteredBaselines.length" :description="baselines.length ? '没有未通过的节点' : '暂无基线数据'" :image-size="60" />
+        </template>
+        <EmptyState
+          v-if="!filteredBaselines.length"
+          :icon="Lock"
+          :title="baselines.length ? '没有未通过的节点' : '暂无基线数据'"
+          :hints="
+            baselines.length
+              ? ['当前所有节点都通过基线检查，关闭「仅未通过」可看全量明细']
+              : ['基线数据来自配置巡检的 L2 快照，先跑一次巡检生成基线', '未产生快照的资产不会出现在这里']
+          "
+        />
         <div class="baseline-scroll">
           <div v-for="b in filteredBaselines" :key="b.node" class="baseline-node">
             <div class="baseline-head">
@@ -226,14 +248,16 @@
             </div>
           </div>
         </div>
-      </div>
+      </SectionCard>
 
       <!-- FIM 变化时间线 -->
-      <div class="glass panel section" v-loading="loading">
-        <div class="panel-title-row">
-          <span class="panel-title">文件完整性变化</span>
-        </div>
-        <el-empty v-if="!fimEvents.length" description="暂无文件变化记录" :image-size="60" />
+      <SectionCard title="文件完整性变化" dense v-loading="loading">
+        <EmptyState
+          v-if="!fimEvents.length"
+          :icon="Lock"
+          title="暂无文件变化记录"
+          :hints="['Agent 每轮上报时比对配置文件的 md5，变化才产生记录', '确认该节点已开启文件完整性采集']"
+        />
         <div class="timeline">
           <div v-for="e in fimEvents" :key="e.id" class="tl-item">
             <span class="tl-dot" :class="'tl-' + e.detail.action"></span>
@@ -243,7 +267,7 @@
             </div>
           </div>
         </div>
-      </div>
+      </SectionCard>
     </div>
   </div>
 </template>
@@ -252,8 +276,12 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getSecuritySummary, getSecurityEvents, getSecurityBaselines, getDefenseStatuses, postDefenseAction } from '../api/security'
+import { Lock } from '@element-plus/icons-vue'
 import RefreshBar from './RefreshBar.vue'
 import KpiCard from './KpiCard.vue'
+import PageHeader from './common/PageHeader.vue'
+import SectionCard from './common/SectionCard.vue'
+import EmptyState from './common/EmptyState.vue'
 
 const loading = ref(false)
 const refreshing = ref(false)
@@ -261,6 +289,17 @@ const loadError = ref('')
 const summary = ref({ score: 0, eventCount: 0, riskNodes: 0, fimChanges: 0, baselineHosts: 0 })
 const events = ref([])
 const baselines = ref([])
+
+// 安全事件空态：区分「确实没有事件」与「被筛选掉了」
+const eventHints = computed(() => {
+  if (filterCategory.value || filterNode.value) {
+    return ['清空「类别」与「节点」筛选后再看一次', '也可以直接到「告警中心」「操作审计」交叉查证']
+  }
+  return [
+    '没有事件通常是好事：安全模块未检测到异常',
+    '若刚部署，确认目标机 Agent 已上报且安全采集项已开启',
+  ]
+})
 const onlyFailedBaseline = ref(false)
 const filteredBaselines = computed(() => {
   if (!onlyFailedBaseline.value) return baselines.value
@@ -402,9 +441,9 @@ const scoreClass = computed(() => {
 
 const ringStyle = computed(() => {
   const pct = Math.max(0, Math.min(100, summary.value.score))
-  const color = pct >= 80 ? '#00D9A3' : pct >= 60 ? '#FFB454' : '#FF5D6C'
+  const color = pct >= 80 ? 'var(--ok)' : pct >= 60 ? 'var(--warn)' : 'var(--danger)'
   return {
-    background: `conic-gradient(${color} ${pct * 3.6}deg, rgba(255,255,255,0.06) 0deg)`,
+    background: `conic-gradient(${color} ${pct * 3.6}deg, var(--fill-2) 0deg)`,
   }
 })
 
@@ -526,7 +565,7 @@ onMounted(async () => {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: var(--bg-deep, #070D1A);
+  background: var(--s0);
   display: grid;
   place-items: center;
   font-size: 22px;
@@ -546,34 +585,11 @@ onMounted(async () => {
   font-size: 13px;
   color: var(--text-muted);
 }
-.score-kpi.good .kpi-score { color: #00D9A3; }
-.score-kpi.warn .kpi-score { color: #FFB454; }
-.score-kpi.bad .kpi-score { color: #FF5D6C; }
+.score-kpi.good .kpi-score { color: var(--ok); }
+.score-kpi.warn .kpi-score { color: var(--warn); }
+.score-kpi.bad .kpi-score { color: var(--danger); }
 
-.panel-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-.panel-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-  position: relative;
-  padding-left: 12px;
-}
-.panel-title::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 14px;
-  background: linear-gradient(180deg, #4A9DF0, #2E7FD6);
-  border-radius: 2px;
-}
+/* 卡片标题统一走 SectionCard，不再自写 .panel-title / .panel-title-row */
 .filters {
   display: flex;
   gap: 8px;
@@ -596,16 +612,16 @@ onMounted(async () => {
   font-size: 13px;
   font-weight: 600;
 }
-.sev-tag.sev-critical { background: rgba(255, 93, 108, 0.18); color: #FF5D6C; }
-.sev-tag.sev-warning { background: rgba(255, 180, 84, 0.18); color: #FFB454; }
-.sev-tag.sev-info { background: rgba(74, 157, 240, 0.18); color: #4A9DF0; }
+.sev-tag.sev-critical { background: var(--danger-dim); color: var(--danger); }
+.sev-tag.sev-warning { background: var(--warn-dim); color: var(--warn); }
+.sev-tag.sev-info { background: var(--accent-dim); color: var(--accent); }
 
 .cat-tag {
   font-size: 13px;
   color: var(--text-dim);
 }
-.row-critical :deep(.el-table__row) { box-shadow: inset 3px 0 0 #FF5D6C; }
-.row-warning :deep(tr) { border-left: 3px solid #FFB454; }
+.row-critical :deep(.el-table__row) { box-shadow: inset 3px 0 0 var(--danger); }
+.row-warning :deep(tr) { border-left: 3px solid var(--warn); }
 
 .dim { color: var(--text-dim); font-size: 13px; }
 .muted { color: var(--text-muted); font-size: 13px; }
@@ -619,7 +635,7 @@ onMounted(async () => {
   padding: 0 6px;
   border-radius: 4px;
   background: rgba(74, 157, 240, 0.15);
-  color: #6DB3F2;
+  color: var(--accent);
   font-size: 13px;
   line-height: 18px;
   white-space: nowrap;
@@ -640,11 +656,11 @@ onMounted(async () => {
   padding-right: 4px;
 }
 .baseline-node {
-  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border: 1px solid var(--bd);
   border-radius: 10px;
   padding: 12px;
   margin-bottom: 12px;
-  background: rgba(255,255,255,0.02);
+  background: var(--fill-1);
 }
 .baseline-head {
   display: flex;
@@ -668,9 +684,9 @@ onMounted(async () => {
   padding: 2px 10px;
   border-radius: 20px;
 }
-.score-pill.good { background: rgba(0, 217, 163, 0.16); color: #00D9A3; }
-.score-pill.warn { background: rgba(255, 180, 84, 0.16); color: #FFB454; }
-.score-pill.bad { background: rgba(255, 93, 108, 0.16); color: #FF5D6C; }
+.score-pill.good { background: var(--ok-dim); color: var(--ok); }
+.score-pill.warn { background: var(--warn-dim); color: var(--warn); }
+.score-pill.bad { background: var(--danger-dim); color: var(--danger); }
 
 .baseline-items {
   display: flex;
@@ -686,19 +702,19 @@ onMounted(async () => {
   border-radius: 6px;
   transition: background 0.15s;
 }
-.bl-item:hover { background: rgba(255,255,255,0.04); }
+.bl-item:hover { background: var(--fill-1); }
 .bl-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
 }
-.bl-item.pass .bl-dot { background: #00D9A3; box-shadow: 0 0 8px rgba(0,217,163,0.6); }
-.bl-item.fail .bl-dot { background: #FF5D6C; box-shadow: 0 0 8px rgba(255,93,108,0.6); }
+.bl-item.pass .bl-dot { background: var(--ok); box-shadow: 0 0 8px var(--ok-dim); }
+.bl-item.fail .bl-dot { background: var(--danger); box-shadow: 0 0 8px var(--danger-dim); }
 .bl-name { color: var(--text-dim); flex: 1; }
-.bl-item.fail .bl-name { color: #FFB454; }
+.bl-item.fail .bl-name { color: var(--warn); }
 .bl-state { font-size: 13px; color: var(--text-muted); }
-.bl-item.fail .bl-state { color: #FF5D6C; }
+.bl-item.fail .bl-state { color: var(--danger); }
 
 /* FIM 时间线 */
 .timeline {
@@ -712,7 +728,7 @@ onMounted(async () => {
   display: flex;
   gap: 12px;
   padding: 8px 0;
-  border-left: 2px solid var(--border, rgba(255,255,255,0.08));
+  border-left: 2px solid var(--bd);
   padding-left: 14px;
   position: relative;
 }
@@ -723,11 +739,11 @@ onMounted(async () => {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  border: 2px solid var(--bg-deep, #070D1A);
+  border: 2px solid var(--s0);
 }
-.tl-dot.tl-added { background: #4A9DF0; box-shadow: 0 0 8px rgba(74,157,240,0.7); }
-.tl-dot.tl-modified { background: #FFB454; box-shadow: 0 0 8px rgba(255,180,84,0.7); }
-.tl-dot.tl-deleted { background: #FF5D6C; box-shadow: 0 0 8px rgba(255,93,108,0.7); }
+.tl-dot.tl-added { background: var(--accent); box-shadow: 0 0 8px var(--accent-dim); }
+.tl-dot.tl-modified { background: var(--warn); box-shadow: 0 0 8px var(--warn-dim); }
+.tl-dot.tl-deleted { background: var(--danger); box-shadow: 0 0 8px rgba(255,93,108,0.7); }
 .tl-body { min-width: 0; }
 .tl-msg {
   font-size: 13px;
@@ -745,13 +761,9 @@ onMounted(async () => {
   .grid-2 { grid-template-columns: 1fr; }
 }
 
-/* 入侵防御面板 */
-.panel-title-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+/* 网格里的卡片等高，避免左右两张卡底部参差 */
+.grid-2 :deep(.sec-card) {
+  height: 100%;
 }
 .defense-tip {
   font-size: 13px;
@@ -763,8 +775,8 @@ onMounted(async () => {
   gap: 12px;
 }
 .dk-card {
-  background: rgba(255,255,255,0.03);
-  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  background: var(--fill-1);
+  border: 1px solid var(--bd);
   border-radius: 10px;
   padding: 12px;
   display: flex;
@@ -777,9 +789,9 @@ onMounted(async () => {
   font-weight: 700;
   color: var(--text);
 }
-.dk-val.ok { color: #00D9A3; }
-.dk-val.warn { color: #FFB454; }
-.dk-val.bad { color: #FF5D6C; }
+.dk-val.ok { color: var(--ok); }
+.dk-val.warn { color: var(--warn); }
+.dk-val.bad { color: var(--danger); }
 .dk-label {
   font-size: 13px;
   color: var(--text-muted);
@@ -790,21 +802,21 @@ onMounted(async () => {
   border-radius: 20px;
   font-weight: 600;
 }
-.def-badge.good { background: rgba(0,217,163,0.16); color: #00D9A3; }
-.def-badge.warn { background: rgba(255,180,84,0.16); color: #FFB454; }
-.def-badge.bad { background: rgba(255,93,108,0.16); color: #FF5D6C; }
-.def-badge.neutral { background: rgba(255,255,255,0.08); color: var(--text-dim); }
+.def-badge.good { background: var(--ok-dim); color: var(--ok); }
+.def-badge.warn { background: var(--warn-dim); color: var(--warn); }
+.def-badge.bad { background: var(--danger-dim); color: var(--danger); }
+.def-badge.neutral { background: var(--fill-3); color: var(--text-dim); }
 .node-cell { font-weight: 600; color: var(--text); margin-right: 8px; }
-.need-upgrade { font-size: 13px; color: #FFB454; border: 1px solid rgba(255,180,84,0.4); border-radius: 10px; padding: 1px 8px; }
+.need-upgrade { font-size: 13px; color: var(--warn); border: 1px solid var(--warn-bd); border-radius: 10px; padding: 1px 8px; }
 .jail-tag {
   font-size: 13px;
-  color: #00D9A3;
+  color: var(--ok);
   background: rgba(0,217,163,0.12);
   border-radius: 8px;
   padding: 2px 8px;
 }
 .defense-action, .ban-ips { margin-top: 4px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ban-count { color: #FFB454; font-size: 13px; font-weight: 600; }
+.ban-count { color: var(--warn); font-size: 13px; font-weight: 600; }
 .dim { color: var(--text-dim); }
 .muted { color: var(--text-muted); }
 .def-confirm {
@@ -815,9 +827,9 @@ onMounted(async () => {
   line-height: 1.7;
 }
 .def-confirm code {
-  background: rgba(255,255,255,0.08);
+  background: var(--fill-3);
   padding: 0 4px;
   border-radius: 4px;
-  color: #4A9DF0;
+  color: var(--accent);
 }
 </style>

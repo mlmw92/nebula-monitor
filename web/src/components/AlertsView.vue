@@ -1,48 +1,54 @@
 <template>
-  <div>
+  <div class="alerts-view">
+    <PageHeader title="告警中心" desc="活跃告警、告警事件、规则与抑制策略的统一入口">
+      <template #actions>
+        <el-button size="small" plain :icon="Printer" @click="printList">打印</el-button>
+      </template>
+    </PageHeader>
+
     <!-- 告警统计看板 -->
-    <div class="glass panel" style="margin-bottom: 16px">
-      <div class="panel-title" style="margin-bottom: 12px">告警概览</div>
+    <SectionCard title="告警概览">
       <div v-if="statsError" class="alert-refresh-error">{{ statsError }}</div>
+      <!-- 颜色只表达风险等级，不表达类别：只有「活跃告警」与「紧急」会整块变红，
+           警告用琥珀，其余保持中性——否则六个数字一起上色，等于没有重点。 -->
       <div class="alert-stats" v-loading="statsLoading">
-        <div class="glass panel kpi">
+        <div class="kpi" :class="{ 'kpi-alert': stats.firing > 0 }">
           <div class="kpi-label">活跃告警</div>
-          <div class="kpi-value red">{{ stats.firing }}</div>
+          <div class="kpi-value" :class="{ red: stats.firing > 0 }">{{ stats.firing }}</div>
         </div>
-        <div class="glass panel kpi">
+        <div class="kpi" :class="{ 'kpi-alert': stats.bySeverity.critical > 0 }">
           <div class="kpi-label">紧急</div>
-          <div class="kpi-value red">{{ stats.bySeverity.critical }}</div>
+          <div class="kpi-value" :class="{ red: stats.bySeverity.critical > 0 }">{{ stats.bySeverity.critical }}</div>
         </div>
-        <div class="glass panel kpi">
+        <div class="kpi">
           <div class="kpi-label">警告</div>
-          <div class="kpi-value amber">{{ stats.bySeverity.warning }}</div>
+          <div class="kpi-value" :class="{ amber: stats.bySeverity.warning > 0 }">{{ stats.bySeverity.warning }}</div>
         </div>
-        <div class="glass panel kpi">
+        <div class="kpi">
           <div class="kpi-label">信息</div>
-          <div class="kpi-value cyan">{{ stats.bySeverity.info }}</div>
+          <div class="kpi-value">{{ stats.bySeverity.info }}</div>
         </div>
-        <div class="glass panel kpi">
+        <div class="kpi">
           <div class="kpi-label">已抑制</div>
           <div class="kpi-value gray">{{ stats.suppressed }}</div>
         </div>
-        <div class="glass panel kpi">
+        <div class="kpi">
           <div class="kpi-label">24h 事件</div>
-          <div class="kpi-value cyan">{{ stats.total }}</div>
+          <div class="kpi-value gray">{{ stats.total }}</div>
         </div>
       </div>
-    </div>
+    </SectionCard>
 
     <!-- 维护窗口 -->
-    <div class="glass panel" style="margin-bottom: 16px">
-      <div class="panel-title-row">
-        <span class="panel-title" style="margin-bottom: 0">维护窗口</span>
+    <SectionCard title="维护窗口">
+      <template #actions>
         <el-switch
           v-model="maintenance.enabled"
           active-text="已开启"
           inactive-text="已关闭"
           @change="saveMaintenance"
         />
-      </div>
+      </template>
       <template v-if="maintenance.enabled">
         <div class="maintenance-row">
           <div class="maintenance-item">
@@ -74,13 +80,12 @@
         </div>
         <div class="maintenance-hint">维护窗口期间，所有告警通知将被抑制，告警事件仍会正常记录</div>
       </template>
-    </div>
+      <div v-else class="maintenance-hint">开启后所有告警通知将被抑制，告警事件仍会正常记录</div>
+    </SectionCard>
 
     <!-- 告警事件：概览与维护状态之后优先展示，便于快速处置 -->
-    <div class="glass panel" style="margin-bottom: 16px">
-      <div v-if="refreshError" class="alert-refresh-error">{{ refreshError }}</div>
-      <div class="panel-title-row">
-        <span class="panel-title" style="margin-bottom: 0">告警事件</span>
+    <SectionCard title="告警事件" dense>
+      <template #actions>
         <div class="event-toolbar">
           <el-radio-group v-model="eventFilter" size="small">
             <el-radio-button value="firing">活跃</el-radio-button>
@@ -91,20 +96,29 @@
           <span class="muted event-toolbar-hint">确认后将从活跃列表移除，仍可在“全部”中查看</span>
           <el-button v-if="can('notify:write')" size="small" :loading="testing" @click="testAlert">测试事件</el-button>
         </div>
-      </div>
+      </template>
+      <div v-if="refreshError" class="alert-refresh-error">{{ refreshError }}</div>
       <el-table
         :data="pagedAlerts"
         stripe
         style="width: 100%"
-        empty-text="暂无告警事件"
         @selection-change="onSelect"
         @row-dblclick="openDetail"
       >
+        <template #empty>
+          <EmptyState
+            :icon="Bell"
+            :title="eventFilter ? '当前筛选下没有告警事件' : '暂无告警事件'"
+            :hints="eventHints"
+          />
+        </template>
         <el-table-column type="selection" width="45" :selectable="selectableAlert" />
         <el-table-column prop="ruleName" label="规则" min-width="140" />
         <el-table-column prop="node" label="节点" min-width="130" />
-        <el-table-column label="级别" width="80">
+        <!-- 级别：左侧 3px 色条 + 描边药丸。色条在纵向扫读时比色块更快定位。 -->
+        <el-table-column label="级别" width="84">
           <template #default="{ row }">
+            <span class="state-bar" :class="sevBar(row.severity)"></span>
             <el-tag :type="sevType(row.severity)" size="small" effect="dark">{{ sevLabel(row.severity) }}</el-tag>
           </template>
         </el-table-column>
@@ -129,8 +143,9 @@
         <el-table-column label="时间" width="160">
           <template #default="{ row }">{{ fmt(row.startsAt || row.endsAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="80">
+        <el-table-column label="操作" width="132">
           <template #default="{ row }">
+            <el-button v-if="row.state === 'firing'" link size="small" @click="ackEvent(row)">确认</el-button>
             <el-button link size="small" @click="openDetail(row)">详情</el-button>
           </template>
         </el-table-column>
@@ -145,12 +160,11 @@
           background
         />
       </div>
-    </div>
+    </SectionCard>
 
     <!-- 告警规则 -->
-    <div class="glass panel" style="margin-bottom: 16px">
-      <div class="panel-title-row">
-        <span class="panel-title" style="margin-bottom: 0">告警规则</span>
+    <SectionCard title="告警规则" dense>
+      <template #actions>
         <div style="display: flex; gap: 8px; align-items: center">
           <el-button size="small" @click="exportRules">导出</el-button>
           <el-button size="small" @click="fileInput.click()">导入</el-button>
@@ -176,7 +190,7 @@
           </template>
         </el-dropdown>
         </div>
-      </div>
+      </template>
       <el-alert
         v-if="ruleLoadError"
         type="error"
@@ -209,7 +223,14 @@
         </el-select>
         <span class="muted" style="font-size: 13px">共 {{ filteredRules.length }} 条</span>
       </div>
-      <el-table :data="pagedRules" stripe style="width: 100%" empty-text="暂无规则">
+      <el-table :data="pagedRules" stripe style="width: 100%">
+        <template #empty>
+          <EmptyState
+            :icon="Bell"
+            :title="rules.length ? '没有匹配的告警规则' : '暂无告警规则'"
+            :hints="ruleHints"
+          />
+        </template>
         <el-table-column prop="name" label="名称" min-width="140" />
         <el-table-column label="类型" width="120">
           <template #default="{ row }">
@@ -285,7 +306,7 @@
           background
         />
       </div>
-    </div>
+    </SectionCard>
 
     <!-- 告警规则导入 -->
     <el-dialog v-model="importDialog" title="导入告警规则" width="440px">
@@ -306,9 +327,7 @@
     </el-dialog>
 
     <!-- 高级：抑制与分组（P4） -->
-    <div class="glass panel" style="margin-bottom: 16px">
-      <div class="panel-title" style="margin-bottom: 12px">高级设置 · 抑制与分组</div>
-
+    <SectionCard title="高级设置 · 抑制与分组" dense>
       <div class="adv-section">
         <div class="adv-title">告警分组</div>
         <div class="adv-row">
@@ -372,7 +391,17 @@
           <span class="adv-title" style="margin: 0">抑制规则</span>
           <el-button size="small" type="primary" @click="newInhibit">新增规则</el-button>
         </div>
-        <el-table :data="inhibits" stripe style="width: 100%; margin-top: 8px" empty-text="暂无抑制规则">
+        <el-table :data="inhibits" stripe style="width: 100%; margin-top: 8px">
+          <template #empty>
+            <EmptyState
+              :icon="Bell"
+              title="暂无抑制规则"
+              :hints="[
+                '抑制规则用于「A 触发时压掉 B 的噪音」，例如主机离线时不再逐个报服务离线',
+                '点右上角「新增抑制规则」添加，未配置时不会影响告警本身的产生',
+              ]"
+            />
+          </template>
           <el-table-column label="源匹配（触发时）" min-width="200">
             <template #default="{ row }">{{ inhibitText(row.source) }}</template>
           </el-table-column>
@@ -393,7 +422,7 @@
           </el-table-column>
         </el-table>
       </div>
-    </div>
+    </SectionCard>
 
     <RuleModal v-if="editing" :rule="editing" :groups="groups" :channels="channelOptions" @close="editing = null" @saved="onSaved" />
 
@@ -523,12 +552,16 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Bell, Printer } from '@element-plus/icons-vue'
+import PageHeader from './common/PageHeader.vue'
+import SectionCard from './common/SectionCard.vue'
+import EmptyState from './common/EmptyState.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import http, { getToken } from '../api/http'
 import RuleModal from './RuleModal.vue'
 import useAuth from '../composables/useAuth'
+import { printPage } from '../utils/print'
 
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 const router = useRouter()
@@ -540,6 +573,33 @@ const currentPage = ref(1)
 const pageSize = ref(10)
 const ruleSearch = ref('')
 const ruleTypeFilter = ref('')
+// 空态提示：说清"为什么空"+"下一步做什么"，而不是只写"暂无数据"
+const eventHints = computed(() => {
+  if (eventFilter.value === 'firing') {
+    return ['当前没有活跃告警，说明所有已启用规则都未触发', '切到「全部」可查看历史事件（含已恢复）']
+  }
+  if (eventFilter.value === 'resolved') {
+    return ['还没有恢复记录', '活跃告警恢复后会出现在这里']
+  }
+  return [
+    '还没有产生过告警事件：确认至少有一条处于启用状态的告警规则',
+    '规则依赖的指标需要有数据，可在「指标浏览」确认对应指标有上报',
+  ]
+})
+
+const ruleHints = computed(() => {
+  if (!rules.value.length) {
+    return [
+      '点右上角「新建规则」，或从按钮右侧下拉的模板库里挑一条（含阈值依据）',
+      '规则需要处于启用状态才会参与评估',
+    ]
+  }
+  return [
+    `共 ${rules.value.length} 条规则，当前筛选条件下没有匹配项`,
+    '清空搜索关键词，或把类型切回「阈值」',
+  ]
+})
+
 const filteredRules = computed(() => {
   const kw = ruleSearch.value.trim().toLowerCase()
   const t = ruleTypeFilter.value
@@ -611,6 +671,18 @@ function emptyInhibitForm() {
   return { sourceRule: '', sourceSeverity: '', sourceMetricRegex: '', targetSeverity: '', targetMetricRegex: '', equal: [] }
 }
 
+// 值班交接、事后复盘最常用的出口就是"把当前告警打出来"
+function printList() {
+  const s = stats.value
+  printPage({
+    title: '告警中心',
+    meta: [
+      `活跃 ${s.firing} · 已抑制 ${s.suppressed} · 累计 ${s.total}`,
+      `紧急 ${s.bySeverity.critical} · 警告 ${s.bySeverity.warning} · 提示 ${s.bySeverity.info}`,
+    ],
+  })
+}
+
 const activeCount = computed(() => alerts.value.filter((a) => a.state === 'firing').length)
 const criticalCount = computed(() => alerts.value.filter((a) => a.state === 'firing' && a.severity === 'critical').length)
 const warningCount = computed(() => alerts.value.filter((a) => a.state === 'firing' && a.severity === 'warning').length)
@@ -661,6 +733,10 @@ function sevType(s) {
 }
 function sevLabel(s) {
   return { critical: '紧急', warning: '警告', info: '信息' }[s] || s
+}
+// 级别色条：与 StatusPill 同一套语义（danger / warn / off）
+function sevBar(s) {
+  return { critical: 'danger', warning: 'warn' }[s] || 'off'
 }
 function stateLabel(e) {
   if (e.state === 'firing') return ackStatusLabel(e)
@@ -1279,6 +1355,24 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.alerts-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* 概览卡内嵌的指标格：用 s2 表达层级，去掉阴影避免"卡片叠卡片" */
+.alert-stats {
+  margin-bottom: 0;
+}
+.alert-stats .kpi {
+  background: var(--s2);
+  box-shadow: none;
+}
+/* 异常指标整块变红：不用色条，避免与"选中/激活"语义混淆 */
+.alert-stats .kpi.kpi-alert {
+  background: var(--danger-dim);
+  border-color: var(--danger-bd);
+}
 .alert-refresh-error {
   color: var(--danger);
   font-size: 13px;
@@ -1458,9 +1552,9 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .inh-block {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: var(--fill-1);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-md);
   padding: 12px;
   margin-bottom: 12px;
 }

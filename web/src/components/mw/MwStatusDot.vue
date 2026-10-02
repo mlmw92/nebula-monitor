@@ -44,18 +44,18 @@ const defaultLabel = computed(() => (type.value === 'normal' ? '正常' : '异�
 }
 /* 正常：绿灯 + 绿色字体 */
 .mw-status.normal {
-  color: #4ade80;
+  color: var(--ok);
 }
 .mw-status.normal .mw-status-dot {
-  background: #4ade80;
+  background: var(--ok);
   box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
 }
 /* 异常：黄灯 + 黄色字体 */
 .mw-status.abnormal {
-  color: #fbbf24;
+  color: var(--warn);
 }
 .mw-status.abnormal .mw-status-dot {
-  background: #fbbf24;
+  background: var(--warn);
   box-shadow: 0 0 6px rgba(245, 158, 11, 0.55);
 }
 /* 大号 */

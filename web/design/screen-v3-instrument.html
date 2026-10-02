@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>NebulaEye 大屏 v3 · 仪表化指挥屏</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#04060b; --bg2:#070b13;
+  --line:rgba(150,190,235,.11);
+  --line2:rgba(150,190,235,.055);
+  --t1:#eaf3fc; --t2:#a8bdd4; --t3:#7b90a8; --t4:#4f6076;
+  --acc:#34dcf0; --acc2:#4d9dff;
+  --ok:#2fe3a6; --warn:#ffb02e; --bad:#ff4d63;
+  --mono:'JetBrains Mono','SFMono-Regular','Roboto Mono','DejaVu Sans Mono',Consolas,'PingFang SC','Microsoft YaHei',sans-serif;
+  --sans:'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+}
+body{background:#080b12;color:#8fa6bd;font-family:var(--sans);-webkit-font-smoothing:antialiased}
+
+.bar{position:sticky;top:0;z-index:99;display:flex;gap:18px;align-items:center;flex-wrap:wrap;
+  padding:11px 20px;background:#0b1019;border-bottom:1px solid rgba(255,255,255,.07);
+  font:12px/1 var(--mono);letter-spacing:.06em}
+.seg{display:flex;border:1px solid rgba(255,255,255,.12);border-radius:5px;overflow:hidden}
+.seg button{background:transparent;border:0;border-right:1px solid rgba(255,255,255,.12);
+  color:#7b90a8;padding:7px 15px;font:12px/1 var(--mono);cursor:pointer;letter-spacing:.08em}
+.seg button:last-child{border-right:0}
+.seg button.on{background:#153044;color:#8fe6f5}
+.bar .lb{color:#4f6076;letter-spacing:.16em}
+.bar .ti{color:#eaf3fc;letter-spacing:.22em;font-size:13px}
+
+.wrap{width:calc(1920px * var(--s,.56));height:calc(1080px * var(--s,.56));position:relative}
+.stage{width:1920px;height:1080px;transform:scale(var(--s,.56));transform-origin:top left;
+  position:relative;overflow:hidden;background:var(--bg);color:var(--t1);
+  display:flex;flex-direction:column}
+
+.bg-glow{position:absolute;inset:0;background:
+  radial-gradient(1250px 560px at 50% -10%, rgba(52,220,240,.14), transparent 70%),
+  radial-gradient(900px 620px at 6% 110%, rgba(77,157,255,.10), transparent 72%),
+  radial-gradient(900px 620px at 94% 110%, rgba(52,220,240,.08), transparent 72%)}
+.bg-grid{position:absolute;inset:0;
+  background-image:linear-gradient(rgba(150,190,235,.032) 1px,transparent 1px),
+                   linear-gradient(90deg, rgba(150,190,235,.032) 1px,transparent 1px);
+  background-size:60px 60px;
+  -webkit-mask-image:radial-gradient(1150px 820px at 50% 44%, #000 18%, transparent 86%);
+  mask-image:radial-gradient(1150px 820px at 50% 44%, #000 18%, transparent 86%)}
+.bg-scan{position:absolute;inset:0;opacity:.65;
+  background-image:repeating-linear-gradient(0deg, rgba(255,255,255,.017) 0 1px, transparent 1px 3px)}
+.bg-noise{position:absolute;inset:0;opacity:.045;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/></filter><rect width='200' height='200' filter='url(%23n)'/></svg>")}
+.bg-vig{position:absolute;inset:0;background:radial-gradient(1050px 780px at 50% 46%, transparent 38%, rgba(0,0,0,.6) 100%)}
+.wash{position:absolute;inset:0;opacity:0;transition:opacity .5s;
+  background:radial-gradient(1100px 640px at 50% 30%, rgba(255,77,99,.13), transparent 70%)}
+.stage.alarm .wash{opacity:1}
+
+.hud{position:absolute;inset:0;z-index:6;pointer-events:none}
+.hud .cn{position:absolute;width:54px;height:54px;border:1.5px solid var(--acc);opacity:.5}
+.hud .tl{top:20px;left:20px;border-right:0;border-bottom:0}
+.hud .tr{top:20px;right:20px;border-left:0;border-bottom:0}
+.hud .bl{bottom:20px;left:20px;border-right:0;border-top:0}
+.hud .br{bottom:20px;right:20px;border-left:0;border-top:0}
+.stage.alarm .hud .cn{border-color:var(--bad);opacity:.75}
+.ruler{position:absolute;top:0;left:120px;right:120px;height:9px;opacity:.5;
+  background-image:repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 20px)}
+.ruler2{position:absolute;top:0;left:120px;right:120px;height:16px;opacity:.75;
+  background-image:repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 100px)}
+.rbot{position:absolute;bottom:0;left:120px;right:120px;height:9px;opacity:.4;
+  background-image:repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 20px)}
+.stage.alarm .ruler,.stage.alarm .ruler2{background-image:repeating-linear-gradient(90deg, rgba(255,77,99,.45) 0 1px, transparent 1px 20px)}
+.stage.alarm .ruler2{background-image:repeating-linear-gradient(90deg, rgba(255,77,99,.6) 0 1px, transparent 1px 100px)}
+.tops{position:absolute;top:0;left:0;right:0;height:3px;background:var(--bad);opacity:0;transition:opacity .4s}
+.stage.alarm .tops{opacity:.9}
+
+.hd{position:relative;z-index:9;height:106px;flex:none;display:flex;align-items:center;padding:0 78px;gap:34px}
+.hd::after{content:'';position:absolute;left:78px;right:78px;bottom:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--line) 14%,var(--line) 86%,transparent)}
+.mark{width:28px;height:28px;border:1px solid rgba(52,220,240,.42);position:relative;flex:none}
+.mark::before{content:'';position:absolute;inset:8px;background:var(--acc);transform:rotate(45deg);
+  box-shadow:0 0 14px rgba(52,220,240,.75)}
+.stage.alarm .mark{border-color:rgba(255,77,99,.5)}
+.stage.alarm .mark::before{background:var(--bad);box-shadow:0 0 14px rgba(255,77,99,.8)}
+.bn{font-family:var(--sans);font-size:24px;letter-spacing:.14em;font-weight:600;color:var(--t1);line-height:1.1}
+.bn em{font-style:normal;color:var(--acc)}
+.stage.alarm .bn em{color:var(--bad)}
+.bs{font-family:var(--sans);font-size:12px;letter-spacing:.3em;color:var(--t4);margin-top:6px}
+.hd .sp{flex:1}
+.nav{display:flex;align-items:center;gap:0}
+.nv{font-family:var(--sans);font-size:12.5px;letter-spacing:.14em;color:var(--t4);
+  padding:0 14px;border-right:1px solid var(--line2)}
+.nv:last-of-type{border-right:0}
+.nv.on{color:var(--acc)}
+.stage.alarm .nv.on{color:var(--bad)}
+.nav .tk{width:112px;height:2px;background:var(--line2);margin:0 16px;position:relative;overflow:hidden}
+.nav .tk i{position:absolute;left:0;top:0;bottom:0;width:26px;background:var(--acc);
+  animation:tk 30s linear infinite}
+@keyframes tk{from{transform:translateX(-30px)}to{transform:translateX(112px)}}
+.nav .au{font-family:var(--sans);font-size:11.5px;letter-spacing:.16em;color:var(--t4)}
+.stat{display:flex;align-items:center;gap:11px;font-family:var(--sans);font-size:12.5px;letter-spacing:.14em}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok);
+  animation:br 2.4s ease-in-out infinite}
+@keyframes br{0%,100%{opacity:1}50%{opacity:.35}}
+.stage.alarm .dot{background:var(--bad);box-shadow:0 0 12px var(--bad);animation:br .9s ease-in-out infinite}
+.stat .a{color:var(--ok)} .stage.alarm .stat .a{color:var(--bad)}
+.stat .b{color:var(--t4)}
+.clk{text-align:right;padding-left:30px;border-left:1px solid var(--line2)}
+.clk .t{font-family:var(--mono);font-size:46px;line-height:1;letter-spacing:.02em;
+  font-variant-numeric:tabular-nums;color:var(--t1)}
+.clk .d{font-family:var(--sans);font-size:11.5px;letter-spacing:.14em;color:var(--t4);margin-top:7px}
+
+.mn{position:relative;z-index:9;flex:1;min-height:0;display:grid;
+  grid-template-columns:404px 1fr 404px;gap:52px;padding:26px 78px 0}
+.col{min-width:0;display:flex;flex-direction:column;gap:34px}
+.zh{display:flex;align-items:baseline;gap:11px;margin-bottom:16px}
+.zh b{font-size:15px;font-weight:600;letter-spacing:.18em;color:var(--t1)}
+.zh s{text-decoration:none;font-family:var(--sans);font-size:11.5px;letter-spacing:.1em;color:var(--t4)}
+.zh i{flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent);margin-bottom:4px}
+
+.mrow{padding:15px 0 13px;border-bottom:1px solid var(--line2);display:grid;
+  grid-template-columns:1fr auto;align-items:end;gap:6px}
+.mrow .lb{font-family:var(--sans);font-size:13px;letter-spacing:.12em;color:var(--t3)}
+.mrow .vl{font-family:var(--mono);font-size:35px;line-height:.95;font-variant-numeric:tabular-nums;color:var(--t1)}
+.mrow .vl u{text-decoration:none;font-size:13px;color:var(--t4);margin-left:5px}
+.mrow.hot .vl{color:var(--warn)}
+.mrow.crit .vl{color:var(--bad)}
+.spec{grid-column:1/-1;display:flex;align-items:flex-end;gap:2px;height:38px;margin-top:12px}
+.spec i{flex:1;min-width:0;background:var(--acc);opacity:.26;border-radius:1px}
+.stage.alarm .spec i{background:var(--acc2);opacity:.22}
+.mrow.hot .spec i{background:var(--warn);opacity:.3}
+.mrow.crit .spec i{background:var(--bad);opacity:.34}
+
+.nrow{display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--line2)}
+.nd{width:6px;height:6px;border-radius:50%;background:var(--t3);flex:none}
+.nd.ok{background:var(--ok);box-shadow:0 0 8px rgba(47,227,166,.6)}
+.nd.warn{background:var(--warn);box-shadow:0 0 8px rgba(255,176,46,.6)}
+.nrow .nm{flex:1;font-family:var(--mono);font-size:12.5px;letter-spacing:.08em;color:var(--t2)}
+.nrow .mt{font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums;color:var(--t3)}
+
+.mid{display:flex;flex-direction:column;min-width:0}
+.orb{flex:1;min-height:0;position:relative}
+.orb svg{width:100%;height:100%;display:block}
+.scan{transform-origin:440px 306px;animation:spin 11s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.fl{stroke-dasharray:3 46;animation:flow 2.4s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-49}}
+.rip{transform-origin:center;transform-box:fill-box;animation:rip 2.6s ease-out infinite}
+@keyframes rip{0%{r:9;opacity:.55}100%{r:46;opacity:0}}
+.pulse{animation:pl 1.5s ease-in-out infinite}
+@keyframes pl{0%,100%{opacity:1}50%{opacity:.4}}
+
+.read{display:flex;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.ro{flex:1;padding:13px 20px;border-right:1px solid var(--line2)}
+.ro:first-child{padding-left:0}
+.ro:last-child{border-right:0;padding-right:0}
+.ro .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;color:var(--t4)}
+.ro .v{font-family:var(--mono);font-size:27px;line-height:1;margin-top:5px;
+  font-variant-numeric:tabular-nums;color:var(--t1)}
+.ro.act .v{color:var(--bad)}
+.ro .v u{text-decoration:none;font-size:13px;color:var(--t4);margin-left:3px}
+
+.arow{position:relative;padding:13px 0 13px 15px;border-bottom:1px solid var(--line2)}
+.arow::before{content:'';position:absolute;left:0;top:15px;bottom:15px;width:2px}
+.arow.crit::before{background:var(--bad);box-shadow:0 0 9px var(--bad);animation:pl 1.5s ease-in-out infinite}
+.arow.warn::before{background:var(--warn)}
+.arow.info::before{background:var(--acc2)}
+.arow .t{font-family:var(--sans);font-size:11.5px;letter-spacing:.08em;color:var(--t4)}
+.arow .h{font-size:14.5px;font-weight:500;color:var(--t1);margin:4px 0 3px;letter-spacing:.02em}
+.arow .d{font-size:12.5px;color:var(--t3);line-height:1.5}
+.arow.crit .h{color:#ffdde1}
+
+.ft{position:relative;z-index:9;height:120px;flex:none}
+.ft::before{content:'';position:absolute;left:78px;right:78px;top:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--line) 20%,var(--line) 80%,transparent)}
+.flab{position:absolute;left:78px;right:78px;top:13px;display:flex;align-items:center;gap:26px;
+  font-family:var(--sans);font-size:11.5px;letter-spacing:.1em;color:var(--t4)}
+.flab b{color:var(--t2);font-weight:600;font-size:12.5px;letter-spacing:.14em}
+.flab em{font-style:normal;color:var(--t2);font-variant-numeric:tabular-nums;letter-spacing:.04em}
+.flab .sp{flex:1}
+.fspec{position:absolute;left:78px;right:78px;bottom:22px;height:56px;display:flex;align-items:flex-end;gap:2px}
+.fspec i{flex:1;min-width:0;background:var(--acc);opacity:.24;border-radius:1px}
+.stage.alarm .fspec i{background:var(--acc2);opacity:.22}
+.fbase{position:absolute;left:78px;right:78px;bottom:22px;height:1px;background:rgba(150,190,235,.16)}
+.fpk{position:absolute;left:78px;right:78px;bottom:66px;height:1px;
+  background:repeating-linear-gradient(90deg, rgba(255,176,46,.55) 0 6px, transparent 6px 13px)}
+.fpk b{position:absolute;right:0;bottom:5px;font-family:var(--sans);font-size:10.5px;
+  font-weight:400;color:var(--warn);letter-spacing:.08em}
+.fax{position:absolute;left:78px;right:78px;bottom:4px;display:flex;justify-content:space-between;
+  font-family:var(--sans);font-size:10.5px;letter-spacing:.08em;color:var(--t4)}
+
+.stage.duty .scan,.stage.duty .fl,.stage.duty .rip,.stage.duty .pulse,
+.stage.duty .dot,.stage.duty .nav .tk i{animation:none}
+.stage.duty .bg-scan,.stage.duty .bg-noise{opacity:0}
+
+.notes{display:none;max-width:1120px;margin:0 auto;padding:34px 20px 90px;color:#a8bdd4;
+  font-size:14px;line-height:1.85}
+.notes.on{display:block}
+.notes h2{font-size:20px;color:#eaf3fc;font-weight:600;margin:38px 0 14px;letter-spacing:.04em}
+.notes h2:first-child{margin-top:0}
+.notes h3{font-size:15px;color:#cfe2f5;font-weight:600;margin:24px 0 8px;letter-spacing:.04em}
+.notes p{margin:0 0 12px}
+.notes ul{margin:0 0 14px;padding-left:20px}
+.notes li{margin-bottom:7px}
+.notes code{font-family:var(--mono);font-size:12.5px;background:#111a26;padding:2px 6px;border-radius:4px;color:#8fe6f5}
+.notes table{width:100%;border-collapse:collapse;margin:12px 0 20px;font-size:13px}
+.notes th,.notes td{text-align:left;padding:9px 12px;border-bottom:1px solid rgba(150,190,235,.11);vertical-align:top}
+.notes th{font-family:var(--mono);font-size:11px;letter-spacing:.16em;color:#4f6076;font-weight:400}
+.notes .no{color:#ff8f9c;font-weight:600}
+.notes .yes{color:#5fdcb4;font-weight:600}
+.kill{background:#1a0f14;border-left:3px solid #ff4d63;padding:14px 18px;margin:16px 0 22px;border-radius:0 6px 6px 0}
+.keep{background:#0d1a18;border-left:3px solid #2fe3a6;padding:14px 18px;margin:16px 0 22px;border-radius:0 6px 6px 0}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <span class="ti">星云之眼 · 大屏 v3</span>
+  <span class="lb">视图</span>
+  <span class="seg" id="segTab">
+    <button class="on" data-t="normal">常态</button>
+    <button data-t="alarm">告警态</button>
+    <button data-t="notes">设计逻辑</button>
+  </span>
+  <span class="lb">档位</span>
+  <span class="seg" id="segMode">
+    <button class="on" data-m="show">演示档</button>
+    <button data-m="duty">值班档</button>
+  </span>
+  <span class="lb">缩放</span>
+  <span class="seg" id="segScale">
+    <button data-s=".42">42%</button>
+    <button class="on" data-s=".56">56%</button>
+    <button data-s=".78">78%</button>
+    <button data-s="1">100%</button>
+  </span>
+</div>
+
+<div class="wrap" id="wrap">
+<div class="stage" id="stage">
+
+  <div class="bg-glow"></div>
+  <div class="bg-grid"></div>
+  <div class="bg-scan"></div>
+  <div class="bg-noise"></div>
+  <div class="bg-vig"></div>
+  <div class="wash"></div>
+  <div class="tops"></div>
+
+  <div class="hud">
+    <i class="cn tl"></i><i class="cn tr"></i><i class="cn bl"></i><i class="cn br"></i>
+    <div class="ruler"></div><div class="ruler2"></div><div class="rbot"></div>
+  </div>
+
+  <header class="hd">
+    <div class="mark"></div>
+    <div>
+      <div class="bn">星云<em>之眼</em></div>
+      <div class="bs">深空运维指挥台</div>
+    </div>
+    <div class="sp"></div>
+    <nav class="nav">
+      <span class="nv on">概览</span><span class="nv">主机</span><span class="nv">中间件</span>
+      <span class="nv">告警</span><span class="nv">业务</span>
+      <span class="tk"><i></i></span>
+      <span class="au">自动轮播 30 秒</span>
+    </nav>
+    <div class="stat">
+      <span class="dot"></span>
+      <span class="a" id="stTxt">系统正常</span>
+      <span class="b">|</span>
+      <span class="b">可用性 99.98%</span>
+    </div>
+    <div class="clk">
+      <div class="t" id="clk">19:38:51</div>
+      <div class="d">2026-10-01 星期四 · 北京时间</div>
+    </div>
+  </header>
+
+  <main class="mn">
+
+    <section class="col">
+      <div>
+        <div class="zh"><b>资源态势</b><s>集群均值</s><i></i></div>
+        <div class="mrow"><span class="lb">处理器</span><span class="vl">41.6<u>%</u></span><div class="spec"></div></div>
+        <div class="mrow"><span class="lb">内存</span><span class="vl">67.3<u>%</u></span><div class="spec"></div></div>
+        <div class="mrow hot"><span class="lb">磁盘</span><span class="vl">84.2<u>%</u></span><div class="spec"></div></div>
+        <div class="mrow"><span class="lb">网络吞吐</span><span class="vl">2.41<u>Gb/s</u></span><div class="spec"></div></div>
+      </div>
+      <div>
+        <div class="zh"><b>采集通道</b><s>四条链路</s><i></i></div>
+        <div class="nrow"><span class="nd ok"></span><span class="nm">prometheus-main</span><span class="mt">1.2s</span></div>
+        <div class="nrow"><span class="nd ok"></span><span class="nm">zabbix-proxy-01</span><span class="mt">2.8s</span></div>
+        <div class="nrow"><span class="nd ok"></span><span class="nm">log-agent-cluster</span><span class="mt">0.6s</span></div>
+        <div class="nrow"><span class="nd warn"></span><span class="nm">synthetic-probe</span><span class="mt">7.4s</span></div>
+      </div>
+    </section>
+
+    <section class="col mid">
+      <div class="orb" id="orb"></div>
+      <div class="read">
+        <div class="ro"><div class="k">在线主机</div><div class="v">12<u>/13</u></div></div>
+        <div class="ro act"><div class="k">活跃告警</div><div class="v">3</div></div>
+        <div class="ro"><div class="k">采集延迟</div><div class="v">1.2<u>s</u></div></div>
+        <div class="ro"><div class="k">今日事件</div><div class="v">7</div></div>
+      </div>
+    </section>
+
+    <section class="col">
+      <div>
+        <div class="zh"><b>告警队列</b><s>未恢复 3 条</s><i></i></div>
+        <div class="arow crit"><div class="t">严重 · 12:04:33 · db-prod-01</div>
+          <div class="h">磁盘使用率 91%</div>
+          <div class="d">按当前增速约 6 小时后写满，建议清理归档表或扩容 200GB</div></div>
+        <div class="arow warn"><div class="t">警告 · 12:22:07 · app-node-03</div>
+          <div class="h">内存占用 87%</div>
+          <div class="d">连续 40 分钟高于 85%，疑似堆内存回收不及时</div></div>
+        <div class="arow warn"><div class="t">警告 · 12:31:50 · gw-edge-01</div>
+          <div class="h">出口丢包 3.2%</div>
+          <div class="d">仅影响备用链路，主链路正常</div></div>
+        <div class="arow info"><div class="t">已恢复 · 11:48:12 · k8s-worker-02</div>
+          <div class="h">节点已自动恢复</div>
+          <div class="d">容器重启后恢复正常，故障持续 4 分 12 秒</div></div>
+      </div>
+      <div>
+        <div class="zh"><b>容量预测</b><s>未来 24 小时</s><i></i></div>
+        <svg viewBox="0 0 404 186" width="100%" height="186">
+          <defs>
+            <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#34dcf0" stop-opacity=".30"/>
+              <stop offset="1" stop-color="#34dcf0" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="M40,142 L40,120 L62,117 L84,113 L106,110 L128,105 L150,101 L172,96 L194,90 L216,84 L216,142 Z" fill="url(#ag)"/>
+          <path d="M40,120 L62,117 L84,113 L106,110 L128,105 L150,101 L172,96 L194,90 L216,84"
+                fill="none" stroke="#34dcf0" stroke-width="1.6"/>
+          <path d="M216,84 L240,79 L264,75 L288,70 L312,65 L336,60 L360,55 L384,50"
+                fill="none" stroke="#ffb02e" stroke-width="1.5" stroke-dasharray="5 4"/>
+          <line x1="40" y1="60" x2="384" y2="60" stroke="#ff4d63" stroke-width="1" stroke-dasharray="3 5" opacity=".75"/>
+          <text x="42" y="54" font-family="system-ui, sans-serif" font-size="10.5" fill="#ff8f9c" letter-spacing=".5">阈值 85%</text>
+          <line x1="216" y1="20" x2="216" y2="142" stroke="rgba(150,190,235,.16)" stroke-width="1"/>
+          <text x="220" y="30" font-family="system-ui, sans-serif" font-size="10.5" fill="#7b90a8" letter-spacing=".5">现在</text>
+          <circle cx="313" cy="64" r="4.5" fill="#ff4d63"/>
+          <circle cx="313" cy="64" r="9" fill="none" stroke="#ff4d63" stroke-width="1" opacity=".45" class="pulse"/>
+          <text x="262" y="82" font-family="system-ui, sans-serif" font-size="10.5" fill="#ff8f9c" letter-spacing=".5">预计 6 小时后触顶</text>
+          <line x1="40" y1="142" x2="384" y2="142" stroke="rgba(150,190,235,.14)" stroke-width="1"/>
+          <text x="40" y="158" font-family="system-ui, sans-serif" font-size="10.5" fill="#4f6076" letter-spacing=".5">12 小时前</text>
+          <text x="200" y="158" font-family="system-ui, sans-serif" font-size="10.5" fill="#4f6076" letter-spacing=".5">现在</text>
+          <text x="326" y="158" font-family="system-ui, sans-serif" font-size="10.5" fill="#4f6076" letter-spacing=".5">24 小时后</text>
+          <text x="40" y="180" font-family="system-ui, sans-serif" font-size="10.5" fill="#4f6076" letter-spacing=".5">对象 db-prod-01 · 数据盘</text>
+        </svg>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="ft">
+    <div class="flab">
+      <b>实时入向吞吐</b>
+      <em>最近 5 分钟 · 每秒 1 个采样点</em>
+      <span class="sp"></span>
+      <em>均值 2.41 Gb/s</em><em>峰值 3.20 Gb/s</em><em>出向 864 Mb/s</em>
+      <em>包速率 12.84 万/秒</em><em>会话 3,182</em>
+    </div>
+    <div class="fspec" id="fspec"></div>
+    <div class="fbase"></div>
+    <div class="fpk"><b>峰值 3.20 Gb/s</b></div>
+    <div class="fax"><span>5 分钟前</span><span>2 分钟前</span><span>现在</span></div>
+  </footer>
+
+</div>
+</div>
+
+<div class="notes" id="notes">
+  <h2>这一版改了什么：从「放大的仪表盘」到「一整块仪表台」</h2>
+  <p>上一版我把「大气」理解成尺度——把数字放大到 120px、把环放大到 400px。那只是把仪表盘放大，本质没变：元素一样多、一样挤，只有「大而全」，没有「从容」。</p>
+  <p>这一版的核心动作只有一句话：<strong>拆掉所有卡片</strong>。卡片网格是网页的语言，一整块被发丝线切分的连续画布才是仪器的语言。卡片一拆，留白立刻有了张力，元素数量也自然减半。</p>
+
+  <h2>科技感的五个来源（都不是光效）</h2>
+  <table>
+    <tr><th>来源</th><th>具体做法</th><th>为什么有效</th></tr>
+    <tr><td><span class="yes">等宽数字</span></td><td>所有数值用等宽字体 + <code>tabular-nums</code>，界面文案全中文、不出现英文标签</td><td>数字跳动时不位移；等宽数字是「仪器/终端」的视觉母语，成本最低、效果最强。科技感不依赖英文——中文字距收紧后同样成立</td></tr>
+    <tr><td><span class="yes">发丝线</span></td><td>1px / 0.055 透明度的线取代全部卡片边框，区域靠线切分而非框包围</td><td>细线需要精度才画得准，「精度」就是科技感的心理基础</td></tr>
+    <tr><td><span class="yes">刻度与角标</span></td><td>顶/底边缘刻度尺（20px 细刻度、100px 粗刻度），四角 54px 直角角标</td><td>刻度尺是测量仪器的独有元素；出血到边缘才有指挥屏感，留一圈 padding 就还是网页</td></tr>
+    <tr><td><span class="yes">数据即纹理</span></td><td>每个指标下方 38px 频谱条、底栏 56px 吞吐频谱（含峰值虚线、基线、时间轴）——全是真实数据，不是装饰</td><td>远看是材质，近看是数据。装饰要花钱维护，数据纹理零成本且永远在变</td></tr>
+    <tr><td><span class="yes">动效即信息</span></td><td>轨道扫描扇 11s 一圈、连线上的数据包流动、告警节点脉冲 + 涟漪</td><td>动的是「状态」不是「装饰」；三条循环动效是节奏，超过三条就开始干扰阅读</td></tr>
+  </table>
+
+  <h2>大气的四个体验来源</h2>
+  <ul>
+    <li><strong>从容</strong>——元素从 7 个区块减到 5 个，留白面积增加约 40%。画面不急于填满，才显得这个系统游刃有余。</li>
+    <li><strong>掌控</strong>——中央轨道拓扑是唯一主角，左右两列在字号和线的强度上明确降级为它的注释。三栏平权等于没有主角。</li>
+    <li><strong>精准</strong>——所有发丝线、刻度、角标对齐同一套 60px 栅格；数字全部等宽右对齐。对齐本身会传递「可靠」。</li>
+    <li><strong>克制</strong>——整屏只有一种主色（青），只有异常才允许彩色。13 个节点里 11 个是中性色，只有 2 个有问题的是琥珀/红。</li>
+  </ul>
+
+  <div class="keep">
+    <strong>中央轨道拓扑在表达什么</strong>：三条同心轨道 = 三个区域（核心区 / 应用区 / 边缘区），节点在轨道上的位置 = 部署位置，节点大小 = 规格权重，连线上的流动数据包 = 实时流量。它不是装饰盘，是 13 台主机的真实拓扑——这也替代了原来的地图模块（13 台主机的地理分布信息量极低，却要占四成面积，还有地图合规成本）。
+  </div>
+
+  <h2>底部那条频谱是什么</h2>
+  <p>它是<strong>实时入向吞吐</strong>——每根柱子是一个采样点的网络入向流量，整条随时间向左滚动，覆盖最近 5 分钟。上方标了均值、峰值、出向、包速率与会话数，橙色虚线是峰值参考线，下方有「5 分钟前 / 2 分钟前 / 现在」的时间轴。</p>
+  <p>它同时承担两个作用：一是给底栏一条真实、永远在变的<strong>数据纹理</strong>（比任何装饰都耐看，且零维护成本）；二是让「流量是否异常」在余光里就能感知——当大量柱子顶破峰值线时，不用读数字也知道出问题了。</p>
+  <p>第一版它只是一排随机柱子、没有任何标注，所以需要解释才看得懂。<strong>需要解释的设计就是没传达出去的设计</strong>，这一版已补齐标题、单位、时间轴与峰值线。真实实现接采集接口的时间序列即可，不需要新增字段。</p>
+
+  <h2>全中文界面</h2>
+  <p>界面文案统一中文：标题、指标名、状态语、告警等级、时间轴全部中文化；节点代号用「库1 / 应3 / 网1」这类两字缩写，可读性优于英文缩写。仅保留两类例外：数值单位（<code>%</code>、<code>Gb/s</code>、<code>ms</code>）与真实主机名（<code>db-prod-01</code>）——这两类在中文运维界面里替换成中文反而更难读。</p>
+  <p>字距同步调整：中文在 0.2em 以上的字距会散架，全部收到 0.08–0.14em；等宽字体栈末尾补了中文字体，避免中文回退到不匹配的默认字体。</p>
+
+  <h2>告警态：整屏换温，不是局部换色</h2>
+  <p>切到告警态后变化的不是某一个组件：顶部 3px 红边、四角角标变红、刻度尺变红、背景光晕转红、中央环内数字变琥珀、严重告警节点红色脉冲 + 涟漪扩散、底栏遥测流转蓝。三米外一眼能看出出事了——这是大屏真正的价值时刻。</p>
+  <p>同时右侧队列第一条直接给研判结论（「约 6 小时后写满，建议清理归档表或扩容 200GB」），容量预测图上也标出了触顶点。让人不用自己从 3 条告警里找答案。</p>
+
+  <div class="kill">
+    <strong>仍然不做的三件事</strong>：粒子连线背景（7×24 投屏常驻逐帧重绘，显卡开销换不来任何信息量，且是 2018 年的标志性元素）、渐变发光标题字（它会让全屏信息量最低的东西最抢眼）、旋转地球 / 3D 城市（信息量低 + 地图合规）。<br>
+    <strong>但补回了材质的「物理感」</strong>：噪点 4.5% + 扫描线 1.7% + 三层径向光晕 + 四周暗角。这四层极淡，单独看几乎不可见，合在一起让屏幕从「平面色块」变成「有厚度的发光体」。上一版我为了去俗套把它们一起删了，那是错的——去掉装饰不等于获得气质，结果是干净但冰冷。
+  </div>
+
+  <h2>双档：演示档 / 值班档</h2>
+  <p>顶部可切换。<strong>演示档</strong>开扫描、数据流、脉冲、噪点扫描线（展厅、参观、截图）；<strong>值班档</strong>关掉全部循环动效与背景材质层，但构图与字号完全不变。持续运动的元素盯两小时会让人眼疲劳。默认值建议演示档——大屏在这个项目里更多承担展示职能，值班同学真正盯的是主站。</p>
+
+  <h2>施工清单（约 3.5 天，纯样式层，不碰数据逻辑）</h2>
+  <table>
+    <tr><th>批次</th><th>内容</th><th>成本</th></tr>
+    <tr><td>1 材质层</td><td>背景五层（光晕/网格/扫描线/噪点/暗角）、直角角标与刻度尺、告警换温层</td><td>1 天</td></tr>
+    <tr><td>2 布局层</td><td>拆卡片改连续画布、发丝线切分、等宽数字全量替换、字号阶梯</td><td>1 天</td></tr>
+    <tr><td>3 中央仪表</td><td>轨道拓扑 SVG 生成、扫描扇、连线数据流、节点状态与涟漪</td><td>1 天</td></tr>
+    <tr><td>4 细节层</td><td>频谱条与底栏遥测流、容量预测图、演示/值班双档、自动轮播</td><td>0.5 天</td></tr>
+  </table>
+  <p>依赖的 <code>severity</code> 与 <code>startsAt</code> 后端已有，不需要等接口。批次 1、2 独立于 3、4，可并行。</p>
+</div>
+
+<script>
+(function(){
+  var stage=document.getElementById('stage'), wrap=document.getElementById('wrap'), notes=document.getElementById('notes');
+
+  document.getElementById('segTab').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return;
+    [].forEach.call(this.children,function(x){x.classList.remove('on')}); b.classList.add('on');
+    var t=b.dataset.t;
+    stage.classList.toggle('alarm', t==='alarm');
+    notes.classList.toggle('on', t==='notes');
+    wrap.style.display = t==='notes' ? 'none' : '';
+    document.getElementById('stTxt').textContent = t==='alarm' ? 'CRITICAL · 3 ACTIVE' : 'SYSTEM NOMINAL';
+  });
+  document.getElementById('segMode').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return;
+    [].forEach.call(this.children,function(x){x.classList.remove('on')}); b.classList.add('on');
+    stage.classList.toggle('duty', b.dataset.m==='duty');
+    if(b.dataset.m==='duty'){ if(window.__t){clearInterval(window.__t);window.__t=null;} }
+    else if(!window.__t){ window.__t=setInterval(stream,220); }
+  });
+  document.getElementById('segScale').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return;
+    [].forEach.call(this.children,function(x){x.classList.remove('on')}); b.classList.add('on');
+    wrap.style.setProperty('--s', b.dataset.s);
+  });
+
+  function tick(){ var d=new Date(), p=function(n){return n<10?'0'+n:''+n};
+    document.getElementById('clk').textContent=p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); }
+  tick(); setInterval(tick,1000);
+
+  var SP=[[22,30,26,38,44,33,40,52,46,35,29,41,55,48,37,31,45,58,39,27,34,49,61,42,36,28,47,53,32,25,43,57,38,30,51,44,35,29,46,60,33,26,41,54,37,31,48,62,39,28,44,50,34,27,42,56,36,30],
+         [45,52,48,58,61,55,63,67,64,59,57,66,70,62,54,49,60,72,65,53,47,58,68,61,52,46,63,71,56,50,64,74,60,51,66,69,55,48,61,76,57,45,59,70,54,49,65,78,58,47,62,67,51,44,60,73,53,46],
+         [70,74,78,82,80,84,86,83,88,91,87,85,90,93,89,86,92,95,90,88,94,96,91,87,93,97,92,89,95,98,93,90,96,99,94,91,97,100,95,92,98,100,96,93,99,100,97,94,99,100,98,95,99,100,99,96,99,100],
+         [30,42,36,28,48,54,33,60,45,38,52,66,41,30,57,49,35,63,44,32,55,68,47,37,59,50,34,61,43,29,53,64,46,36,58,51,33,62,48,31,56,69,42,35,54,60,45,30,57,63,39,33,51,65,44,34]];
+  document.querySelectorAll('.spec').forEach(function(el,i){
+    var a=SP[i%4];
+    el.innerHTML=a.map(function(h){return '<i style="height:'+h+'%"></i>'}).join('');
+  });
+
+  var fs=document.getElementById('fspec'), N=320, H=[];
+  for(var i=0;i<N;i++){ H.push(10+Math.random()*70); }
+  fs.innerHTML=H.map(function(h){return '<i style="height:'+h+'%"></i>'}).join('');
+  var bars=[].slice.call(fs.children);
+  function stream(){
+    for(var i=0;i<N-1;i++){ H[i]=H[i+1]; }
+    H[N-1]=10+Math.random()*70;
+    for(var i=0;i<N;i++){ bars[i].style.height=H[i]+'%'; }
+  }
+  window.__t=setInterval(stream,220);
+
+  var CX=440, CY=306;
+  var NODES=[
+    {r:132,a:-90,c:'库1',s:'bad',w:11},
+    {r:132,a:-18,c:'库2',s:'ok',w:10},
+    {r:132,a:62, c:'缓1',s:'ok',w:8},
+    {r:132,a:142,c:'消1',s:'ok',w:8},
+    {r:198,a:-142,c:'应1',s:'ok',w:9},
+    {r:198,a:-72, c:'应2',s:'ok',w:9},
+    {r:198,a:-8,  c:'应3',s:'warn',w:9},
+    {r:198,a:74,  c:'容1',s:'ok',w:8},
+    {r:198,a:158, c:'容2',s:'ok',w:8},
+    {r:262,a:-116,c:'网1',s:'warn',w:8},
+    {r:262,a:-46, c:'边1',s:'ok',w:7},
+    {r:262,a:34,  c:'边2',s:'ok',w:7},
+    {r:262,a:120, c:'存1',s:'ok',w:7}
+  ];
+  function pt(r,ad){ var t=ad*Math.PI/180; return [CX+r*Math.cos(t), CY+r*Math.sin(t)]; }
+  var s='<svg viewBox="0 0 880 620" preserveAspectRatio="xMidYMid meet">';
+  s+='<defs>';
+  s+='<radialGradient id="wg" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#34dcf0" stop-opacity=".22"/><stop offset="70%" stop-color="#34dcf0" stop-opacity=".05"/><stop offset="100%" stop-color="#34dcf0" stop-opacity="0"/></radialGradient>';
+  s+='<radialGradient id="cg" cx="50%" cy="42%" r="60%"><stop offset="0%" stop-color="#0d2b3a"/><stop offset="100%" stop-color="#05080e"/></radialGradient>';
+  s+='<linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#34dcf0"/><stop offset="100%" stop-color="#4d9dff"/></linearGradient>';
+  s+='</defs>';
+
+  var ticks='';
+  for(var a=0;a<360;a+=5){ var big=(a%30===0);
+    var r1=big?286:294, r2=302;
+    var p1=pt(r1,a), p2=pt(r2,a);
+    ticks+='<line x1="'+p1[0].toFixed(1)+'" y1="'+p1[1].toFixed(1)+'" x2="'+p2[0].toFixed(1)+'" y2="'+p2[1].toFixed(1)+'" stroke="'+(big?'rgba(52,220,240,.42)':'rgba(150,190,235,.16)')+'" stroke-width="'+(big?1.4:1)+'"/>';
+  }
+  s+='<g class="ticks">'+ticks+'</g>';
+  s+='<circle cx="'+CX+'" cy="'+CY+'" r="302" fill="none" stroke="rgba(150,190,235,.10)" stroke-width="1"/>';
+  [0,120,240].forEach(function(a){ var p1=pt(302,a), p2=pt(302,a+26);
+    s+='<path d="M'+p1[0].toFixed(1)+','+p1[1].toFixed(1)+' A302,302 0 0 1 '+p2[0].toFixed(1)+','+p2[1].toFixed(1)+'" fill="none" stroke="#34dcf0" stroke-width="2" opacity=".55"/>';
+  });
+  [132,198,262].forEach(function(r){ s+='<circle cx="'+CX+'" cy="'+CY+'" r="'+r+'" fill="none" stroke="rgba(150,190,235,.11)" stroke-width="1" stroke-dasharray="2 7"/>'; });
+  [132,198,262].forEach(function(r,i){ var p=pt(r,-90); s+='<text x="'+p[0].toFixed(1)+'" y="'+(p[1]-10).toFixed(1)+'" font-family="system-ui, sans-serif" font-size="11" fill="#4f6076" letter-spacing=".6" text-anchor="middle">'+['核心区','应用区','边缘区'][i]+'</text>'; });
+
+  var R0=64, R1=298, SW=44;
+  function wpt(r,a){ var t=a*Math.PI/180; return [CX+r*Math.cos(t), CY+r*Math.sin(t)]; }
+  var A=wpt(R0,0), B=wpt(R1,0), C=wpt(R1,SW), D=wpt(R0,SW);
+  s+='<g class="scan"><path d="M'+A[0].toFixed(1)+','+A[1].toFixed(1)+' L'+B[0].toFixed(1)+','+B[1].toFixed(1)+' A'+R1+','+R1+' 0 0 1 '+C[0].toFixed(1)+','+C[1].toFixed(1)+' L'+D[0].toFixed(1)+','+D[1].toFixed(1)+' A'+R0+','+R0+' 0 0 0 '+A[0].toFixed(1)+','+A[1].toFixed(1)+' Z" fill="url(#wg)"/></g>';
+
+  NODES.forEach(function(n){
+    var p=pt(n.r,n.a);
+    s+='<line x1="'+CX+'" y1="'+CY+'" x2="'+p[0].toFixed(1)+'" y2="'+p[1].toFixed(1)+'" stroke="url(#lg)" stroke-width="1" opacity=".22"/>';
+    s+='<line class="fl" x1="'+CX+'" y1="'+CY+'" x2="'+p[0].toFixed(1)+'" y2="'+p[1].toFixed(1)+'" stroke="#8ff0fb" stroke-width="1.4" opacity=".8"/>';
+  });
+
+  NODES.forEach(function(n){
+    var p=pt(n.r,n.a), col = n.s==='bad'?'#ff4d63':(n.s==='warn'?'#ffb02e':'rgba(168,205,235,.8)');
+    if(n.s==='bad'){ s+='<circle class="rip" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="9" fill="none" stroke="#ff4d63" stroke-width="1.2"/>'; }
+    if(n.s!=='ok'){ s+='<circle class="pulse" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(n.w+6)+'" fill="'+col+'" opacity=".12"/>'; }
+    s+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+n.w+'" fill="'+col+'"'+(n.s==='ok'?'':' filter="none"')+'/>';
+    s+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+n.w+'" fill="none" stroke="'+(n.s==='ok'?'rgba(52,220,240,.35)':col)+'" stroke-width="1" opacity=".8"/>';
+    var lp=pt(n.r+30,n.a);
+    s+='<text x="'+lp[0].toFixed(1)+'" y="'+(lp[1]+4).toFixed(1)+'" font-family="system-ui, sans-serif" font-size="11" letter-spacing=".3" text-anchor="middle" fill="'+(n.s==='ok'?'#7b90a8':col)+'">'+n.c+'</text>';
+  });
+
+  s+='<circle cx="'+CX+'" cy="'+CY+'" r="64" fill="url(#cg)" stroke="rgba(52,220,240,.5)" stroke-width="1.2"/>';
+  s+='<circle cx="'+CX+'" cy="'+CY+'" r="52" fill="none" stroke="rgba(52,220,240,.18)" stroke-width="1"/>';
+  s+='<text id="core" x="'+CX+'" y="'+(CY+16)+'" text-anchor="middle" font-family="monospace" font-size="62" fill="#eaf3fc" letter-spacing="-1">92</text>';
+  s+='<text x="'+CX+'" y="'+(CY-26)+'" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#7b90a8" letter-spacing="2">系统健康</text>';
+  s+='<text x="'+CX+'" y="'+(CY+40)+'" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11.5" fill="#4f6076" letter-spacing="1">综合评分</text>';
+  s+='</svg>';
+  document.getElementById('orb').innerHTML=s;
+
+  var tab=document.getElementById('segTab');
+  var orig=tab.addEventListener.bind(tab);
+  document.querySelectorAll('#segTab button').forEach(function(b){
+    b.addEventListener('click',function(){
+      var core=document.getElementById('core');
+      if(core) { core.textContent = b.dataset.t==='alarm' ? '76' : '92';
+        core.setAttribute('fill', b.dataset.t==='alarm' ? '#ffb02e' : '#eaf3fc'); }
+    });
+  });
+})();
+</script>
+</body>
+</html>

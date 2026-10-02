@@ -1,14 +1,11 @@
 <template>
   <div class="report-view">
-    <div class="page-header">
-      <div class="header-left">
-        <h2 class="page-title">巡检报告</h2>
-        <p class="page-desc">日报/周报/月报，含主机资源趋势图、中间件监控指标与健康巡检发现</p>
-      </div>
-    </div>
+    <PageHeader
+      title="巡检报告"
+      desc="日报 / 周报 / 月报，含主机资源趋势图、中间件监控指标与健康巡检发现"
+    />
 
-    <div class="chart-section glass">
-      <div class="section-title">生成报告</div>
+    <SectionCard title="生成报告">
       <div class="generate-row">
         <el-select v-model="reportType" style="width: 200px">
           <el-option label="日报" value="daily" />
@@ -25,10 +22,9 @@
         title="报告内容"
         description="报告包含资源趋势柱状图/折线图、各主机健康评分、中间件连接数/响应时间/内存使用率/命中率明细，以及按严重程度排序的巡检发现（问题描述 / 影响范围 / 修复建议）。"
       />
-    </div>
+    </SectionCard>
 
-    <div class="chart-section glass">
-      <div class="section-title">历史报告</div>
+    <SectionCard title="历史报告">
       <el-alert
         v-if="historyError"
         type="error"
@@ -58,23 +54,23 @@
           </template>
         </el-table-column>
       </el-table>
-      <el-empty
+      <EmptyState
         v-else-if="!historyError"
-        description="暂无历史报告，点击上方「生成报告」创建第一份巡检报告"
-        :image-size="60"
+        title="暂无历史报告"
+        :hints="['在上方选择日报 / 周报 / 月报，点「生成报告」创建第一份']"
+        action-text="生成报告"
+        @action="generate"
       />
-    </div>
+    </SectionCard>
 
-    <div class="chart-section glass report-frame" v-if="previewUrl">
-      <div class="section-title frame-head">
-        <span>报告预览</span>
-        <div class="frame-actions">
-          <el-button size="small" @click="openNewTabById(currentId)">新标签页打开</el-button>
-          <el-button size="small" type="primary" @click="download(currentId)">下载 HTML</el-button>
-        </div>
-      </div>
+    <SectionCard v-if="previewUrl" title="报告预览" class="report-frame">
+      <template #actions>
+        <el-button size="small" @click="openNewTabById(currentId)">新标签页打开</el-button>
+        <el-button size="small" @click="printReport(currentId)">打印</el-button>
+        <el-button size="small" type="primary" @click="download(currentId)">下载 HTML</el-button>
+      </template>
       <iframe :src="previewUrl" class="report-iframe" title="巡检报告预览"></iframe>
-    </div>
+    </SectionCard>
   </div>
 </template>
 
@@ -82,6 +78,9 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import http from '../api/http'
+import PageHeader from './common/PageHeader.vue'
+import SectionCard from './common/SectionCard.vue'
+import EmptyState from './common/EmptyState.vue'
 
 const reportType = ref('daily')
 const generating = ref(false)
@@ -128,6 +127,18 @@ function preview(id) {
 
 function openNewTab(id) { window.open(`/api/v1/report/download?id=${encodeURIComponent(id)}`, '_blank') }
 function openNewTabById(id) { if (id) openNewTab(id) }
+
+// 报告本身是独立 HTML（自带 @media print），必须在新窗口里打，
+// 直接 window.print() 会把外层深色控制台一起印出来。
+function printReport(id) {
+  if (!id) return
+  const w = window.open(`/api/v1/report/download?id=${encodeURIComponent(id)}`, '_blank')
+  if (!w) {
+    ElMessage.warning('浏览器拦截了弹窗，请允许弹出窗口后重试，或先点「新标签页打开」再 Ctrl+P')
+    return
+  }
+  w.addEventListener('load', () => { w.focus(); w.print() }, { once: true })
+}
 function download(id) {
   const a = document.createElement('a')
   a.href = `/api/v1/report/download?id=${encodeURIComponent(id)}`

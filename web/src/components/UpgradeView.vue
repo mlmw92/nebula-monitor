@@ -1,8 +1,12 @@
 <template>
   <div class="upgrade-view">
+    <PageHeader
+      title="版本升级"
+      desc="上传服务端升级包并完成升级；升级前建议先查看当前版本与构建时间"
+    />
+
     <!-- 当前版本 -->
-    <div class="glass panel">
-      <div class="panel-title">当前版本</div>
+    <SectionCard title="当前版本">
       <div class="ver-grid">
         <div class="ver-item">
           <span class="ver-label">版本</span>
@@ -13,11 +17,10 @@
           <span class="ver-val">{{ fmtBuildTime(currentVersion.buildTime) }}</span>
         </div>
       </div>
-    </div>
+    </SectionCard>
 
     <!-- 上传 -->
-    <div class="glass panel">
-      <div class="panel-title">上传升级包</div>
+    <SectionCard title="上传升级包">
       <el-upload
         drag
         :show-file-list="false"
@@ -47,11 +50,10 @@
           {{ uploadProgress >= 100 ? '服务端解析中…' : '上传中 ' + uploadProgress + '%' }}
         </div>
       </div>
-    </div>
+    </SectionCard>
 
     <!-- 待应用 -->
-    <div class="glass panel" v-if="pending">
-      <div class="panel-title">待升级</div>
+    <SectionCard v-if="pending" title="待升级">
       <div class="pending-grid">
         <div class="pending-row">
           <span class="r-label">新版本</span>
@@ -111,15 +113,20 @@
         :closable="false"
         style="margin-top: 12px"
       />
-    </div>
+    </SectionCard>
 
     <!-- 历史 -->
-    <div class="glass panel">
-      <div class="panel-title-row">
-        <span class="panel-title">升级历史</span>
+    <SectionCard title="升级历史">
+      <template #actions>
         <el-button size="small" link @click="loadHistory">刷新</el-button>
-      </div>
-      <el-table :data="pagedHistory" v-loading="loadingHistory" empty-text="暂无升级记录">
+      </template>
+      <el-table :data="pagedHistory" v-loading="loadingHistory">
+        <template #empty>
+          <EmptyState
+            title="暂无升级记录"
+            :hints="['上传升级包并应用后，这里会记录每一次升级与回退']"
+          />
+        </template>
         <el-table-column label="时间" width="180">
           <template #default="{ row }">{{ fmtTime(row.at) }}</template>
         </el-table-column>
@@ -160,14 +167,13 @@
         @current-change="(p) => (historyPage = p)"
         @size-change="(s) => { historyPageSize = s; historyPage = 1 }"
       />
-    </div>
+    </SectionCard>
 
     <!-- IP 地理库（独立入口：只替换归属地数据，不影响 Server/Web/Agent，不重启服务） -->
-    <div class="glass panel">
-      <div class="panel-title-row">
-        <span class="panel-title">IP 地理库</span>
+    <SectionCard title="IP 地理库">
+      <template #actions>
         <el-button size="small" link @click="loadGeoip">刷新</el-button>
-      </div>
+      </template>
       <div class="pending-grid" v-loading="geoipLoading">
         <div class="pending-row">
           <span class="r-label">当前库</span>
@@ -279,7 +285,7 @@
           恢复程序内置库
         </el-button>
       </div>
-    </div>
+    </SectionCard>
   </div>
 </template>
 
@@ -288,6 +294,9 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import http from '../api/http'
+import PageHeader from './common/PageHeader.vue'
+import SectionCard from './common/SectionCard.vue'
+import EmptyState from './common/EmptyState.vue'
 import { WEB_VERSION } from '../version'
 
 const currentVersion = ref({ server: WEB_VERSION }) // 初始用构建内嵌版本，加载后覆盖为 Server 实际运行版本
@@ -665,7 +674,7 @@ onUnmounted(() => {
   font-size: 14px;
 }
 .upload-area :deep(.el-upload-dragger) {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--fill-1);
   border: 1px dashed rgba(0, 200, 150, 0.3);
 }
 .upload-progress {

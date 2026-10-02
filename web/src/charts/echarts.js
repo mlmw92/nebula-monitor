@@ -2,7 +2,13 @@
 import * as echarts from 'echarts'
 import { geoCoord } from './geoCoords'
 
-export const COLORS = {
+// =========================================================
+// 图表配色跟随主题
+// 以前这里是一组写死的十六进制常量，切到青绿/紫色主题时图表颜色纹丝不动，
+// 于是每个页面各自复制一份色值（RedisTab 一处就有 47 个）。
+// 现在统一从 CSS 令牌 --chart-* 读取，切主题自动失效重取。
+// =========================================================
+const FALLBACK = {
   cyan: '#22d3ee',
   blue: '#3b82f6',
   purple: '#a855f7',
@@ -10,9 +16,61 @@ export const COLORS = {
   red: '#ef4444',
   green: '#22c55e',
 }
+const VAR_OF = {
+  cyan: '--chart-cyan',
+  blue: '--chart-blue',
+  purple: '--chart-purple',
+  amber: '--chart-orange',
+  red: '--chart-red',
+  green: '--chart-green',
+}
+
+export function cssVar(name, fallback) {
+  if (typeof document === 'undefined') return fallback
+  const v = getComputedStyle(document.body).getPropertyValue(name).trim()
+  return v || fallback
+}
+// 语义色的便捷读取：danger / warn / ok / info / t1 / t2 / t3
+export function tokenColor(name, fallback) {
+  return cssVar(`--${name}`, fallback)
+}
+
+let _colors = null
+export function chartColors() {
+  if (!_colors) {
+    _colors = {}
+    for (const k of Object.keys(FALLBACK)) {
+      _colors[k] = cssVar(VAR_OF[k], FALLBACK[k])
+    }
+  }
+  return _colors
+}
+
+// 主题切换后清空缓存与渐变对象（渐变是按颜色字符串缓存的，必须一起失效）
+export function invalidateChartColors() {
+  _colors = null
+  gradientCache.clear()
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('nebula:theme-changed', invalidateChartColors)
+}
+
+// 代理让既有的 COLORS.cyan 这类写法零改动即可跟随主题
+export const COLORS = new Proxy(
+  {},
+  {
+    get: (_, key) => chartColors()[key] || FALLBACK.cyan,
+    has: (_, key) => key in FALLBACK,
+    ownKeys: () => Object.keys(FALLBACK),
+    getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+  }
+)
 
 const AXIS = '#9fb3c8'
 const SPLIT = 'rgba(34,211,238,0.08)'
+// 坐标轴与分割线同样走令牌（惰性读取，切主题后下一次取色即生效）
+const axisColor = () => cssVar('--t2', AXIS)
+const splitColor = () => cssVar('--grid-line', SPLIT)
 
 // 渐变对象缓存：同色系渐变复用同一个 LinearGradient 实例，
 // 避免实时图每秒多次 setOption 反复构造对象造成 GC 压力
@@ -60,7 +118,7 @@ export function areaOption(color, unit) {
       min: isPct ? 0 : undefined,
       max: isPct ? 100 : undefined,
       splitNumber: 2,
-      axisLabel: { color: AXIS, fontSize: 10 },
+      axisLabel: { color: axisColor(), fontSize: 10 },
       splitLine: { show: false },
     },
     series: [gradientSeries('', color, [])],
@@ -76,15 +134,15 @@ export function areaMultiOption(defs, opts) {
     grid: { left: 48, right: 14, top: 22, bottom: showX ? 26 : 6 },
     tooltip: { trigger: 'axis', backgroundColor: 'rgba(11,17,32,0.9)', textStyle: { color: '#e5edf7' } },
     xAxis: showX
-      ? { type: 'time', axisLine: { lineStyle: { color: AXIS } }, axisLabel: { color: AXIS, fontSize: 11, hideOverlap: true }, splitLine: { show: false } }
+      ? { type: 'time', axisLine: { lineStyle: { color: axisColor() } }, axisLabel: { color: axisColor(), fontSize: 11, hideOverlap: true }, splitLine: { show: false } }
       : { type: 'time', show: false },
     yAxis: {
       type: 'value', min: 0,
       splitNumber: 2,
-      axisLabel: { color: AXIS, fontSize: 10 },
+      axisLabel: { color: axisColor(), fontSize: 10 },
       splitLine: { show: false },
     },
-    legend: { top: 0, right: 4, itemWidth: 10, itemHeight: 6, itemGap: 10, textStyle: { color: AXIS, fontSize: 10 }, data: names },
+    legend: { top: 0, right: 4, itemWidth: 10, itemHeight: 6, itemGap: 10, textStyle: { color: axisColor(), fontSize: 10 }, data: names },
     series: defs.map((d) => gradientSeries(d.name, d.color, [])),
   }
 }
@@ -94,8 +152,8 @@ export function trendOption() {
   return {
     grid: baseGrid(),
     tooltip: { trigger: 'axis', backgroundColor: 'rgba(11,17,32,0.9)', textStyle: { color: '#e5edf7' } },
-    xAxis: { type: 'time', axisLine: { lineStyle: { color: AXIS } }, axisLabel: { color: AXIS }, splitLine: { show: false } },
-    yAxis: { type: 'value', axisLabel: { color: AXIS }, splitLine: { lineStyle: { color: SPLIT } } },
+    xAxis: { type: 'time', axisLine: { lineStyle: { color: axisColor() } }, axisLabel: { color: axisColor() }, splitLine: { show: false } },
+    yAxis: { type: 'value', axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
     series: [gradientSeries('CPU', COLORS.cyan, []), gradientSeries('内存', COLORS.purple, [])],
   }
 }
@@ -104,10 +162,10 @@ export function trendOption() {
 export function historyOption() {
   return {
     grid: baseGrid({ top: 40 }),
-    legend: { textStyle: { color: AXIS }, top: 4 },
+    legend: { textStyle: { color: axisColor() }, top: 4 },
     tooltip: { trigger: 'axis', backgroundColor: 'rgba(11,17,32,0.9)', textStyle: { color: '#e5edf7' } },
-    xAxis: { type: 'time', axisLine: { lineStyle: { color: AXIS } }, axisLabel: { color: AXIS }, splitLine: { show: false } },
-    yAxis: { type: 'value', axisLabel: { color: AXIS }, splitLine: { lineStyle: { color: SPLIT } } },
+    xAxis: { type: 'time', axisLine: { lineStyle: { color: axisColor() } }, axisLabel: { color: axisColor() }, splitLine: { show: false } },
+    yAxis: { type: 'value', axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
     series: [
       gradientSeries('CPU', COLORS.cyan, []),
       gradientSeries('内存', COLORS.purple, []),
@@ -207,8 +265,8 @@ export function monitorOption(opts) {
         borderColor: 'rgba(34,211,238,0.3)',
         textStyle: { color: '#e5edf7', fontSize: 12 },
       },
-      xAxis: { type: 'category', data: latest.map((s) => s.name), axisLine: { lineStyle: { color: AXIS } }, axisLabel: { color: AXIS, fontSize: 11, hideOverlap: true } },
-      yAxis: { type: 'value', min: o.yMin != null ? o.yMin : 0, max: o.yMax, axisLabel: { color: AXIS, fontSize: 11, formatter: o.yFormatter || ((v) => axisValueFormatter(v, o.unit)) }, splitLine: { lineStyle: { color: SPLIT } } },
+      xAxis: { type: 'category', data: latest.map((s) => s.name), axisLine: { lineStyle: { color: axisColor() } }, axisLabel: { color: axisColor(), fontSize: 11, hideOverlap: true } },
+      yAxis: { type: 'value', min: o.yMin != null ? o.yMin : 0, max: o.yMax, axisLabel: { color: axisColor(), fontSize: 11, formatter: o.yFormatter || ((v) => axisValueFormatter(v, o.unit)) }, splitLine: { lineStyle: { color: splitColor() } } },
       series: [{
         type: 'bar',
         data: latest.map((s) => ({ value: s.value, itemStyle: { color: s.color, borderRadius: [4, 4, 0, 0] } })),
@@ -231,7 +289,7 @@ export function monitorOption(opts) {
         progress: { show: true, width: 20, roundCap: true, itemStyle: { color: current.color } },
         axisLine: { lineStyle: { width: 20, color: [[1, 'rgba(255,255,255,0.08)']] } },
         axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, anchor: { show: false },
-        title: { show: true, color: AXIS, offsetCenter: [0, '52%'], fontSize: 13 },
+        title: { show: true, color: axisColor(), offsetCenter: [0, '52%'], fontSize: 13 },
         detail: {
           valueAnimation: true,
           color: current.color,
@@ -248,7 +306,7 @@ export function monitorOption(opts) {
   if (chartType === 'pie') {
     return {
       tooltip: { trigger: 'item', backgroundColor: 'rgba(11,17,32,0.92)', textStyle: { color: '#e5edf7', fontSize: 12 }, formatter: '{b}<br/>当前值: {c} ({d}%)' },
-      legend: { bottom: 4, type: 'scroll', textStyle: { color: AXIS, fontSize: 11 } },
+      legend: { bottom: 4, type: 'scroll', textStyle: { color: axisColor(), fontSize: 11 } },
       series: [{
         type: 'pie', radius: ['42%', '70%'], center: ['50%', '46%'], avoidLabelOverlap: true,
         itemStyle: { borderColor: '#0b1120', borderWidth: 2 },
@@ -260,7 +318,7 @@ export function monitorOption(opts) {
 
   return {
     grid: baseGrid({ top: 38, left: 56, right: 18, bottom: 28 }),
-    legend: { textStyle: { color: AXIS, fontSize: 11 }, top: 4, icon: 'roundRect', itemWidth: 14, itemHeight: 8 },
+    legend: { textStyle: { color: axisColor(), fontSize: 11 }, top: 4, icon: 'roundRect', itemWidth: 14, itemHeight: 8 },
     tooltip: {
       trigger: 'axis',
       backgroundColor: 'rgba(11,17,32,0.92)',
@@ -272,16 +330,16 @@ export function monitorOption(opts) {
       type: 'time',
       min: o.xMin != null ? o.xMin : undefined,
       max: o.xMax != null ? o.xMax : undefined,
-      axisLine: { lineStyle: { color: AXIS } },
-      axisLabel: { color: AXIS, fontSize: 11, hideOverlap: true, formatter: o.xFormatter },
+      axisLine: { lineStyle: { color: axisColor() } },
+      axisLabel: { color: axisColor(), fontSize: 11, hideOverlap: true, formatter: o.xFormatter },
       splitLine: { show: false },
     },
     yAxis: {
       type: 'value',
       min: o.yMin != null ? o.yMin : 0,
       max: o.yMax,
-      axisLabel: { color: AXIS, fontSize: 11, formatter: o.yFormatter || ((v) => axisValueFormatter(v, o.unit)) },
-      splitLine: { show: true, lineStyle: { color: SPLIT } },
+      axisLabel: { color: axisColor(), fontSize: 11, formatter: o.yFormatter || ((v) => axisValueFormatter(v, o.unit)) },
+      splitLine: { show: true, lineStyle: { color: splitColor() } },
     },
     series: series.map((s, i) => gradientSeries(s.name, s.color || (colors && colors[i]) || COLORS.cyan, s.data, chartType === 'area' || (chartType === 'line' && o.area !== false))),
   }

@@ -22,7 +22,7 @@
         <KpiCard label="在线实例" :value="stats.up" tone="up">
           <template #icon><el-icon :size="20"><CircleCheck /></el-icon></template>
         </KpiCard>
-        <KpiCard label="离线实例" :value="stats.down" tone="down">
+        <KpiCard label="离线实例" :value="stats.down" :tone="stats.down > 0 ? 'down' : 'total'">
           <template #icon><el-icon :size="20"><CircleClose /></el-icon></template>
         </KpiCard>
         <KpiCard label="在线 Storage" :value="formatNum(stats.onlineStorage)" tone="conn">
@@ -31,7 +31,7 @@
         <KpiCard label="总空间" :value="formatMB(stats.totalSpace)" tone="ops">
           <template #icon><el-icon :size="20"><Coin /></el-icon></template>
         </KpiCard>
-        <KpiCard label="已用空间" :value="formatMB(stats.usedSpace)" tone="alert">
+        <KpiCard label="已用空间" :value="formatMB(stats.usedSpace)" tone="total">
           <template #icon><el-icon :size="20"><DataLine /></el-icon></template>
         </KpiCard>
       </div>
@@ -98,6 +98,8 @@ import KpiCard from '../KpiCard.vue'
 import MwStatusDot from '../mw/MwStatusDot.vue'
 import MwRoleTag from '../mw/MwRoleTag.vue'
 import { Grid, CircleCheck, CircleClose, Monitor, Coin, DataLine } from '@element-plus/icons-vue'
+import { tokenColor } from '../../charts/echarts'
+const AXIS_COLOR = tokenColor('t2', '#9fb3c8')
 
 const loading = ref(true)
 const instances = ref([])
@@ -152,7 +154,7 @@ async function loadTrendChart(row) {
     }
     chartInstance.setOption({
       tooltip: { trigger: 'axis' },
-      legend: { data: ['总空间(GB)', '已用空间(GB)'], textStyle: { color: '#8b949e' } },
+      legend: { data: ['总空间(GB)', '已用空间(GB)'], textStyle: { color: AXIS_COLOR } },
       grid: { left: 55, right: 30, top: 40, bottom: 30 },
       xAxis: { type: 'time' },
       yAxis: { type: 'value', name: 'GB' },
@@ -201,12 +203,12 @@ onMounted(load)
 .fastdfs-table :deep(td) { white-space: nowrap; }
 :deep(.row-down) { opacity: 0.6; }
 .detail-content { padding: 0 20px; }
-.detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; }
+.detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: var(--fill-1); border-radius: 8px; }
 .meta-item { font-size: 13px; }
 .meta-label { color: var(--text-muted); margin-right: 6px; }
 .mono { font-family: var(--mono); }
 .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
-.metric-cell { padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; text-align: center; }
+.metric-cell { padding: 12px; background: var(--fill-1); border-radius: 8px; text-align: center; }
 .mc-label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
 .mc-value { font-size: 18px; font-weight: 600; }
 .chart-box { width: 100%; height: 300px; }

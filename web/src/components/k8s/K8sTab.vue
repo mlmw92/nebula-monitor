@@ -30,10 +30,10 @@
         <KpiCard :value="stats.podsTotal" label="Pod 总数" tone="total">
           <template #icon><BoxIcon /></template>
         </KpiCard>
-        <KpiCard :value="stats.podsAbnormal" label="异常 Pod" tone="down">
+        <KpiCard :value="stats.podsAbnormal" label="异常 Pod" :tone="stats.podsAbnormal > 0 ? 'down' : 'total'">
           <template #icon><AlertIcon /></template>
         </KpiCard>
-        <KpiCard :value="stats.workloadsUnhealthy" label="不健康工作负载" tone="alert">
+        <KpiCard :value="stats.workloadsUnhealthy" label="不健康工作负载" :tone="stats.workloadsUnhealthy > 0 ? 'alert' : 'total'">
           <template #icon><ActivityIcon /></template>
         </KpiCard>
       </div>
@@ -198,20 +198,20 @@ onMounted(load)
   border-radius: 2px;
 }
 .host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-.host-card { padding: 14px; background: rgba(255,255,255,0.03); border-radius: 10px; border: 1px solid var(--border); }
+.host-card { padding: 14px; background: var(--fill-1); border-radius: 10px; border: 1px solid var(--border); }
 .host-card.is-down { opacity: 0.6; }
 .host-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .host-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.host-dot.up { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.5); }
-.host-dot.down { background: #f87171; }
+.host-dot.up { background: var(--ok); box-shadow: 0 0 6px rgba(74,222,128,0.5); }
+.host-dot.down { background: var(--danger); }
 .host-node { font-weight: 600; font-size: 14px; }
-.host-version { font-size: 13px; color: var(--text-muted); margin-left: auto; padding: 2px 8px; background: rgba(255,255,255,0.05); border-radius: 4px; }
+.host-version { font-size: 13px; color: var(--text-muted); margin-left: auto; padding: 2px 8px; background: var(--fill-2); border-radius: 4px; }
 .host-stats { display: flex; flex-wrap: wrap; gap: 12px; }
 .stat-item { display: flex; flex-direction: column; gap: 2px; }
 .stat-label { font-size: 13px; color: var(--text-muted); }
 .stat-val { font-size: 14px; font-weight: 600; font-family: var(--mono); }
-.stat-val.ok { color: #4ade80; }
-.stat-val.warn { color: #fbbf24; }
+.stat-val.ok { color: var(--ok); }
+.stat-val.warn { color: var(--warn); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
 .dot.up { background: var(--accent); }
 .dot.down { background: var(--danger); }

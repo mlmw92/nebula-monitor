@@ -1,0 +1,441 @@
+/* =========================================================
+ * 打印层（全站）
+ * 设计前提：平台主视觉是深色，直接 Ctrl+P 出来是一张"黑底 + 花屏"的废纸。
+ * 本文件的策略不是逐个组件写打印样式，而是——
+ *
+ *   在 @media print 里把整套设计令牌反转成「纸张色」。
+ *   所有用 var(--t1) / var(--bd) / var(--el-*) 的组件自动变浅色；
+ *   剩下的才是隐藏浏览器 chrome（侧边栏/顶栏/浮层）和处理表格分页。
+ *
+ * 依赖：必须在 element-plus dark css-vars 之后加载（见 main.js 的 import 顺序），
+ *       否则 EP 的深色变量会盖回来。
+ * ========================================================= */
+
+@page {
+  size: A4;
+  margin: 12mm 10mm;
+}
+
+@media print {
+  /* ---------------------------------------------------------
+   * 0. 保留背景色：默认浏览器会丢弃 background，状态色条 / 药丸会全丢
+   * --------------------------------------------------------- */
+  html,
+  body,
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* ---------------------------------------------------------
+   * 1. 令牌反转（纸张色）
+   *    选择器特意写成 html.dark body（特异性 0-1-2），
+   *    压过 body[data-theme="b"]（0-1-1）里的深色定义。
+   * --------------------------------------------------------- */
+  html body,
+  html.dark body {
+    /* 表面：全部落到白 / 极浅灰，四级层次靠灰度阶梯区分 */
+    --s0: #ffffff;
+    --s1: #ffffff;
+    --s2: #f8fafc;
+    --s3: #f1f5f9;
+    --bg: #ffffff;
+    --bg-elev: #ffffff;
+    --bg-card: #ffffff;
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8fafc;
+    --panel-bg: #ffffff;
+
+    /* 描边：深色下用 rgba 半透明是对的，打印下半透明会被 CMYK 冲淡成"看不见"，
+       所以这里全部换成实色 */
+    --bd: #cbd5e1;
+    --bd-strong: #94a3b8;
+    --bd-hi: #64748b;
+    --border: #cbd5e1;
+    --border-color: #cbd5e1;
+    --border-strong: #94a3b8;
+
+    /* 文本：三级灰阶，保证最小 4.5:1 对比度 */
+    --t1: #0f172a;
+    --t2: #334155;
+    --t3: #5b6a80;
+    --text: #0f172a;
+    --text-main: #0f172a;
+    --text-dim: #334155;
+    --label: #1e293b;
+    --text-muted: #5b6a80;
+
+    /* 语义色：深色下的亮色（#22c55e / #ffb454）在白纸上对比度不够，
+       统一降一到两级明度 */
+    --accent: #1d4ed8;
+    --accent-dim: rgba(29, 78, 216, 0.08);
+    --accent-glow: rgba(29, 78, 216, 0.10);
+    --brand-ink: #ffffff;
+
+    --ok: #15803d;
+    --ok-dim: rgba(21, 128, 61, 0.10);
+    --ok-bd: #86c9a2;
+
+    --warn: #b45309;
+    --warn-dim: rgba(180, 83, 9, 0.10);
+    --warn-bd: #e3b07c;
+
+    --danger: #b91c1c;
+    --danger-dim: rgba(185, 28, 28, 0.09);
+    --danger-bd: #e69b9b;
+
+    --info: #0369a1;
+    --info-dim: rgba(3, 105, 161, 0.09);
+    --info-bd: #93c5e0;
+
+    /* 填充：深色下的"微亮叠加"意义消失，直接用浅灰 */
+    --fill-1: #f8fafc;
+    --fill-2: #f1f5f9;
+    --fill-3: #eaf0f6;
+    --fill-hover: #f1f5f9;
+
+    --grid-line: rgba(15, 23, 42, 0.08);
+    --glow-acc: transparent;
+
+    /* 图表色板：跟着降明度，否则折线在白纸上发灰 */
+    --chart-cyan: #0e7490;
+    --chart-blue: #2563eb;
+    --chart-green: #16a34a;
+    --chart-red: #dc2626;
+    --chart-orange: #ea580c;
+    --chart-purple: #7c3aed;
+    --chart-indigo: #4f46e5;
+    --violet: #6d28d9;
+
+    /* Element Plus：必须同步覆盖，否则 dark/css-vars.css 会把表格拉回深色 */
+    --el-bg-color: #ffffff;
+    --el-bg-color-page: #ffffff;
+    --el-bg-color-overlay: #ffffff;
+    --el-text-color-primary: #0f172a;
+    --el-text-color-regular: #334155;
+    --el-text-color-secondary: #5b6a80;
+    --el-text-color-placeholder: #94a3b8;
+    --el-text-color-disabled: #b6c2d1;
+    --el-border-color: #cbd5e1;
+    --el-border-color-light: #d9e1ea;
+    --el-border-color-lighter: #e6ecf3;
+    --el-border-color-extra-light: #eef2f7;
+    --el-border-color-dark: #94a3b8;
+    --el-border-color-darker: #64748b;
+    --el-fill-color: #f1f5f9;
+    --el-fill-color-light: #f6f9fc;
+    --el-fill-color-lighter: #fafcfd;
+    --el-fill-color-blank: #ffffff;
+    --el-fill-color-dark: #e2e8f0;
+    --el-fill-color-darker: #cbd5e1;
+    --el-mask-color: rgba(255, 255, 255, 0.6);
+    --el-color-primary: #1d4ed8;
+    --el-color-primary-light-3: #4b78e3;
+    --el-color-primary-light-5: #7a9bec;
+    --el-color-primary-light-7: #adc0f4;
+    --el-color-primary-light-8: #c5d3f8;
+    --el-color-primary-light-9: #dde6fb;
+    --el-color-success: #15803d;
+    --el-color-success-light-9: #e4f3ea;
+    --el-color-warning: #b45309;
+    --el-color-warning-light-9: #fbf0e0;
+    --el-color-danger: #b91c1c;
+    --el-color-danger-light-9: #fbe5e5;
+    --el-color-error: #b91c1c;
+    --el-color-error-light-9: #fbe5e5;
+    --el-color-info: #0369a1;
+    --el-color-info-light-9: #e2f1fa;
+    --el-table-bg-color: #ffffff;
+    --el-table-tr-bg-color: #ffffff;
+    --el-table-header-bg-color: #f1f5f9;
+    --el-table-header-text-color: #334155;
+    --el-table-text-color: #0f172a;
+    --el-table-border-color: #d9e1ea;
+    --el-table-row-hover-bg-color: #f6f9fc;
+  }
+
+  /* ---------------------------------------------------------
+   * 2. 纸张基础
+   * --------------------------------------------------------- */
+  html,
+  body {
+    width: 100%;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #0f172a;
+    font-size: 10.5pt;
+    line-height: 1.5;
+  }
+  body {
+    /* 深色主题常见的 backdrop 毛玻璃在打印时会整块发黑 */
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  /* ---------------------------------------------------------
+   * 3. 隐藏浏览器 chrome（侧边栏 / 顶栏 / 页脚 / 浮层 / 操作条）
+   * --------------------------------------------------------- */
+  .no-print,
+  .sidebar,
+  .sidebar-footer,
+  .sidebar-mask,
+  .topbar,
+  .site-footer,
+  .command-palette,
+  .batch-bar,
+  /* 次级导航 / Tab 条：纸上点不动，当前视图由打印抬头说明 */
+  .subnav,
+  .subnav-right,
+  .el-tabs__header,
+  .el-tabs__nav-wrap,
+  /* 页头与卡片右上角的操作按钮组：纸上是无效控件 */
+  .ph-actions,
+  .sec-actions,
+  .toolbar,
+  .head-actions,
+  .filters,
+  .filter-row,
+  .view-actions,
+  .panel-actions,
+  /* 交互提示 / 浮层 */
+  .el-overlay,
+  .el-dialog,
+  .el-drawer,
+  .el-message,
+  .el-notification,
+  .el-popper,
+  .el-popover,
+  .el-tooltip__trigger,
+  .el-backtop,
+  .el-loading-mask,
+  /* 分页器：纸上是第 1 页？第 3 页？信息已经失真 */
+  .el-pagination,
+  .pagination-wrap,
+  /* 滚动容器 / 变换动画 */
+  .el-scrollbar__bar,
+  .animate-pulse,
+  .sk,
+  .partial-bar {
+    display: none !important;
+  }
+
+  /* ---------------------------------------------------------
+   * 4. 布局：把内容区从 flex 侧栏结构里释放出来
+   * --------------------------------------------------------- */
+  .layout {
+    display: block !important;
+    min-height: 0 !important;
+  }
+  .main-wrap,
+  .main-wrap.collapsed {
+    display: block !important;
+    margin-left: 0 !important;
+    width: 100% !important;
+  }
+  .content,
+  .view,
+  .page-wrap,
+  .page {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* ---------------------------------------------------------
+   * 5. 卡片：去阴影去圆角去毛玻璃，改成有边框的白块
+   * --------------------------------------------------------- */
+  .sec-card,
+  .card,
+  .glass,
+  .panel,
+  .el-card,
+  .kpi-card,
+  .ov-card,
+  .stat-card,
+  .chart-box {
+    background: #ffffff !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    border: 1px solid var(--bd) !important;
+    border-radius: 4px !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .sec-head {
+    padding: 7px 10px !important;
+    border-bottom: 1px solid var(--bd) !important;
+  }
+  .sec-title {
+    font-size: 12pt;
+  }
+  .sec-body {
+    padding: 10px !important;
+  }
+
+  /* ---------------------------------------------------------
+   * 6. 表格：打印最容易翻车的三件事
+   *    ① 容器 overflow 导致只印出列的前半截
+   *    ② 行被拦腰撕断在两页之间
+   *    ③ 表头不重复（EP 表格是 div 结构，thead 复用无解，只能靠分页规则缓解）
+   * --------------------------------------------------------- */
+  .el-table {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .el-table__inner-wrapper,
+  .el-table__header-wrapper,
+  .el-table__body-wrapper,
+  .el-table__footer-wrapper,
+  .el-scrollbar,
+  .el-scrollbar__wrap,
+  .el-scrollbar__view {
+    overflow: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    /* 移除 EP 内容区高度限制，长表格才能自然流到下一页 */
+  }
+  .el-table table,
+  .el-table__header,
+  .el-table__body {
+    width: 100% !important;
+    table-layout: auto !important;
+  }
+  .el-table colgroup,
+  .el-table colgroup col {
+    /* EP 用 JS 按屏幕像素写死 col 宽度；纸上要按内容重排 */
+    width: auto !important;
+  }
+  .el-table .el-table__cell {
+    /* 屏幕上用 ellipsis 截断很合理，纸上必须把内容放出来 */
+    white-space: normal !important;
+    word-break: break-word;
+    padding: 4px 6px !important;
+    font-size: 9.5pt;
+    color: #0f172a !important;
+  }
+  .el-table th.el-table__cell {
+    background: #f1f5f9 !important;
+    color: #334155 !important;
+    font-weight: 600;
+    border-bottom: 1px solid #94a3b8 !important;
+  }
+  .el-table__body tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .el-table__body tr.current-row > td.el-table__cell,
+  .el-table__body tr:hover > td.el-table__cell {
+    background: #ffffff !important;
+  }
+  .el-table__append-wrapper,
+  .el-table__empty-block {
+    display: none !important;
+  }
+
+  /* ---------------------------------------------------------
+   * 6.5 图表：ECharts 在页面加载时按深色令牌一次性绘制，CSS 改变量不会让它重绘。
+   *     打印前强行改色做不到（除非引入浅色主题并按 beforeprint 重绘），
+   *     所以这里诚实处理——把深色画布摘掉，留一句出口指引，而不是给一张黑块。
+   * --------------------------------------------------------- */
+  canvas {
+    display: none !important;
+  }
+  .vue-echarts,
+  .chart,
+  .chart-wrap,
+  .chart-box,
+  .echarts {
+    min-height: 76px;
+    border: 1px solid var(--bd) !important;
+    background: #fbfcfe !important;
+  }
+  .vue-echarts::after,
+  .chart::after,
+  .chart-wrap::after,
+  .chart-box::after,
+  .echarts::after {
+    content: '趋势图为交互式视图（深色底不适合打印）。需要纸质趋势请到「巡检报告」生成后打印。';
+    display: block;
+    padding: 10px 12px;
+    color: var(--t3) !important;
+    font-size: 9pt;
+    line-height: 1.6;
+  }
+
+  /* ---------------------------------------------------------
+   * 7. 组件微调
+   * --------------------------------------------------------- */
+  /* 状态药丸 / 徽标：实心改成 1px 描边，省墨且清晰 */
+  .el-tag,
+  .status-pill,
+  .sev-tag,
+  .sev-badge {
+    border: 1px solid currentColor !important;
+    background: transparent !important;
+    color: #1e293b !important;
+    box-shadow: none !important;
+  }
+
+  /* 表单控件：纸上是死控件，只留文本 */
+  .el-checkbox,
+  .el-radio,
+  .el-switch,
+  .el-input__wrapper,
+  .el-select__wrapper {
+    display: none !important;
+  }
+
+  /* KPI 数字：屏幕上靠色条区分，纸上靠数字本身 */
+  .kpi-card {
+    padding: 8px 10px !important;
+  }
+
+  /* 进度条 / 迷你图：容器要有边框才看得出是个条 */
+  .el-progress-bar__outer,
+  .progress-bar,
+  .usage-bar,
+  .bar-track {
+    border: 1px solid var(--bd) !important;
+    background: #f1f5f9 !important;
+  }
+
+  /* 链接：屏幕上靠颜色，纸上加下划线 */
+  a {
+    color: #0f172a !important;
+    text-decoration: underline;
+  }
+
+  /* ---------------------------------------------------------
+   * 8. 工具类
+   * --------------------------------------------------------- */
+  .print-only {
+    display: block !important;
+  }
+  .print-title {
+    /* 页面上不显示，只在打印时作为文档抬头出现一次 */
+    margin: 0 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #0f172a;
+    font-size: 15pt;
+    font-weight: 700;
+  }
+  .print-meta {
+    margin: 0 0 12px;
+    color: #5b6a80;
+    font-size: 9pt;
+  }
+}
+
+/* 非打印环境下隐藏 .print-only */
+.print-only,
+.print-title,
+.print-meta {
+  display: none;
+}

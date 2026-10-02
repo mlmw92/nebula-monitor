@@ -21,7 +21,7 @@
         <KpiCard label="在线实例" :value="stats.up" tone="up">
           <template #icon><el-icon :size="20"><CircleCheck /></el-icon></template>
         </KpiCard>
-        <KpiCard label="离线实例" :value="stats.down" tone="down">
+        <KpiCard label="离线实例" :value="stats.down" :tone="stats.down > 0 ? 'down' : 'total'">
           <template #icon><el-icon :size="20"><CircleClose /></el-icon></template>
         </KpiCard>
         <KpiCard label="总 Broker 数" :value="stats.totalBrokers" tone="cluster">
@@ -30,7 +30,7 @@
         <KpiCard label="总 Topic 数" :value="stats.totalTopics" tone="ops">
           <template #icon><el-icon :size="20"><Document /></el-icon></template>
         </KpiCard>
-        <KpiCard label="总消费延迟" :value="formatNum(stats.totalLag)" tone="alert">
+        <KpiCard label="总消费延迟" :value="formatNum(stats.totalLag)" tone="total">
           <template #icon><el-icon :size="20"><Bell /></el-icon></template>
         </KpiCard>
       </div>
@@ -111,6 +111,8 @@ import RefreshBar from '../RefreshBar.vue'
 import KpiCard from '../KpiCard.vue'
 import MwStatusDot from '../mw/MwStatusDot.vue'
 import MwRoleTag from '../mw/MwRoleTag.vue'
+import { tokenColor } from '../../charts/echarts'
+const AXIS_COLOR = tokenColor('t2', '#9fb3c8')
 
 const loading = ref(true)
 const instances = ref([])
@@ -161,7 +163,7 @@ async function loadTrendChart(row) {
     }
     chartInstance.setOption({
       tooltip: { trigger: 'axis' },
-      legend: { data: ['消费延迟'], textStyle: { color: '#8b949e' } },
+      legend: { data: ['消费延迟'], textStyle: { color: AXIS_COLOR } },
       grid: { left: 60, right: 30, top: 40, bottom: 30 },
       xAxis: { type: 'time' },
       yAxis: { type: 'value', name: '延迟' },
@@ -215,18 +217,18 @@ onMounted(load)
 .kafka-table :deep(td) { white-space: nowrap; }
 :deep(.row-down) { opacity: 0.6; }
 .detail-content { padding: 0 20px; }
-.detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; }
+.detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; padding: 16px; background: var(--fill-1); border-radius: 8px; }
 .meta-item { font-size: 13px; }
 .meta-label { color: var(--text-muted); margin-right: 6px; }
 .mono { font-family: var(--mono); }
 .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
-.metric-cell { padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; text-align: center; }
+.metric-cell { padding: 12px; background: var(--fill-1); border-radius: 8px; text-align: center; }
 .mc-label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
 .mc-value { font-size: 18px; font-weight: 600; }
 .chart-box { width: 100%; height: 300px; }
 
 /* 实例拓扑 */
-.topo-group { margin-bottom: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.02); }
+.topo-group { margin-bottom: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--fill-1); }
 .topo-group:last-child { margin-bottom: 0; }
 .topo-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
 .topo-group-title { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
@@ -243,8 +245,8 @@ onMounted(load)
 
 /* 列表状态点 */
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-.status-dot.up { background: #4ade80; }
-.status-dot.down { background: #f87171; }
+.status-dot.up { background: var(--ok); }
+.status-dot.down { background: var(--danger); }
 .status-text { display: inline-flex; align-items: center; font-size: 13px; }
-.status-text.status-issue { color: #f87171; }
+.status-text.status-issue { color: var(--danger); }
 </style>

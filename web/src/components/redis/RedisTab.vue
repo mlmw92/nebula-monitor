@@ -2,7 +2,7 @@
   <div class="redis-tab">
     <RefreshBar :loading="loading" :intervals="redisIntervals" v-model:interval="refreshInterval" @refresh="loadInstances" />
     <!-- 空状态：无实例时引导用户配置 -->
-    <div v-if="!loading && instances.length === 0" class="empty-guide glass">
+    <div v-if="!loading && instances.length === 0" class="empty-guide card">
       <div class="empty-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64">
           <ellipse cx="12" cy="5" rx="9" ry="3"/>
@@ -35,7 +35,7 @@
       <KpiCard :value="stats.up" label="在线实例" tone="up">
         <template #icon><CheckCircleIcon /></template>
       </KpiCard>
-      <KpiCard :value="stats.down" label="离线实例" tone="down">
+      <KpiCard :value="stats.down" label="离线实例" :tone="stats.down > 0 ? 'down' : 'total'">
         <template #icon><XCircleIcon /></template>
       </KpiCard>
       <KpiCard :value="formatBytes(stats.totalMemory)" label="总内存使用" tone="mem">
@@ -55,7 +55,7 @@
       </KpiCard>
     </div>
 
-    <div v-if="stats.alertCount > 0" class="alert-summary glass">
+    <div v-if="stats.alertCount > 0" class="alert-summary card">
       <div class="alert-summary-head">
         <AlertIcon />
         <span>检测到 {{ stats.alertCount }} 个实例存在健康风险</span>
@@ -71,7 +71,7 @@
     </div>
 
     <!-- ===== 区块1.5：实例拓扑与集群关系 ===== -->
-    <div class="chart-section glass" v-if="instances.length">
+    <div class="chart-section card" v-if="instances.length">
       <div class="section-title">实例拓扑</div>
 
       <!-- 集群组（多集群横向并排，单集群自适应宽度） -->
@@ -315,7 +315,7 @@
     </div>
 
     <!-- ===== 区块2：实例列表 ===== -->
-    <div class="mw-list glass">
+    <div class="mw-list card">
       <div class="table-toolbar">
         <div>
           <div class="section-title no-bar">实例列表</div>
@@ -417,7 +417,7 @@
       </div>
 
     <!-- ===== 区块3：性能排行（横向柱状图）===== -->
-    <div class="chart-section glass">
+    <div class="chart-section card">
       <div class="section-title">性能排行 Top 10</div>
       <div class="section-desc">用于快速定位资源占用和请求压力最高的实例，排序随自动刷新增量更新。</div>
       <div class="bar-row">
@@ -435,7 +435,7 @@
     </div>
 
     <!-- ===== 区块4：缓存命中率 ===== -->
-    <div class="chart-section glass">
+    <div class="chart-section card">
       <div class="section-title">缓存命中率</div>
       <div class="section-desc">命中率低通常表示缓存穿透、过期策略或业务访问模式需要检查。</div>
       <div :ref="el => setChartRef(el, 'hitRateBar')" class="hitrate-chart"></div>
@@ -586,7 +586,13 @@ function instStatus(i) {
   return { status: 'normal', label: '正常' }
 }
 import http from '../../api/http'
-import { echarts, initChart, COLORS } from '../../charts/echarts'
+import {echarts, initChart, COLORS, tokenColor } from '../../charts/echarts'
+const AXIS_COLOR = tokenColor('t2', '#9fb3c8')
+
+// 图表配色从 CSS 令牌读取：切主题后 nebula:theme-changed 会失效重取
+const TEXT_COLOR = tokenColor('t1', '#e5edf7')
+const MUTED_COLOR = tokenColor('t3', '#94a3b8')
+
 
 // ---- 图标组件（内联 SVG，渲染函数规避 runtime-only 无法编译 { template } 的问题） ----
 function svgIcon(s) {
@@ -765,7 +771,7 @@ const topologyGroups = computed(() => {
 
 // ---- 集群 Slot 分片视图 ----
 const CLUSTER_SLOT_TOTAL = 16384
-const SLOT_PALETTE = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#22d3ee', '#fb923c', '#4ade80', '#818cf8', '#f87171']
+const SLOT_PALETTE = [COLORS.blue, COLORS.purple, COLORS.green, COLORS.amber, COLORS.purple, COLORS.cyan, COLORS.amber, COLORS.green, COLORS.blue, COLORS.red]
 
 // slotColor 返回组内第 idx 个 master 的分配色（与分片条/图例/master 卡片同色）
 function slotColor(grp, idx) {
@@ -839,13 +845,12 @@ const chartRefs = {}
 const chartInstances = {}
 const trendRefs = {}
 const trendChartsMap = {}
-const CHART_PALETTE = ['#38bdf8', '#22c55e', '#f59e0b', '#94a3b8', '#64748b']
-const AXIS_COLOR = '#8aa0b8'
+const CHART_PALETTE = [COLORS.blue, COLORS.green, COLORS.amber, MUTED_COLOR, MUTED_COLOR]
 const SPLIT_COLOR = 'rgba(148, 163, 184, 0.12)'
 const TOOLTIP_STYLE = {
   backgroundColor: 'rgba(11,17,32,0.94)',
   borderColor: 'rgba(148,163,184,0.24)',
-  textStyle: { color: '#e5edf7' },
+  textStyle: { color: TEXT_COLOR },
 }
 
 function setChartRef(el, key) {
@@ -922,7 +927,7 @@ function renderMemBar() {
   updateChart(chart, {
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
-      backgroundColor: 'rgba(11,17,32,0.92)', borderColor: 'rgba(34,211,238,0.3)', textStyle: { color: '#e5edf7' },
+      backgroundColor: 'rgba(11,17,32,0.92)', borderColor: 'rgba(34,211,238,0.3)', textStyle: { color: TEXT_COLOR },
       formatter: (p) => `${p[0].name}<br/>${formatBytes(p[0].value)}`,
     },
     grid: { left: 10, right: 60, top: 8, bottom: 8, containLabel: true },
@@ -936,9 +941,9 @@ function renderMemBar() {
           const val = params.value
           const max = sorted.length > 0 ? sorted[sorted.length - 1].usedMemory : 1
           const ratio = val / max
-          if (ratio > 0.8) return '#ef4444'
-          if (ratio > 0.6) return '#f59e0b'
-          return '#22d3ee'
+          if (ratio > 0.8) return COLORS.red
+          if (ratio > 0.6) return COLORS.amber
+          return COLORS.cyan
         },
       },
     }],
@@ -952,15 +957,15 @@ function renderOpsBar() {
   updateChart(chart, {
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
-      backgroundColor: 'rgba(11,17,32,0.92)', borderColor: 'rgba(34,211,238,0.3)', textStyle: { color: '#e5edf7' },
+      backgroundColor: 'rgba(11,17,32,0.92)', borderColor: 'rgba(34,211,238,0.3)', textStyle: { color: TEXT_COLOR },
       formatter: (p) => `${p[0].name}<br/>${formatNum(p[0].value)} ops/s`,
     },
     grid: { left: 10, right: 50, top: 8, bottom: 8, containLabel: true },
-    xAxis: { type: 'value', axisLabel: { color: '#9fb3c8', fontSize: 10, formatter: (v) => formatNum(v) }, splitLine: { lineStyle: { color: 'rgba(34,211,238,0.08)' } } },
-    yAxis: { type: 'category', data: sorted.map(i => i.name || i.instance), axisLabel: { color: '#9fb3c8', fontSize: 11, width: 120, overflow: 'truncate' }, axisLine: { lineStyle: { color: '#9fb3c8' } } },
+    xAxis: { type: 'value', axisLabel: { color: AXIS_COLOR, fontSize: 10, formatter: (v) => formatNum(v) }, splitLine: { lineStyle: { color: 'rgba(34,211,238,0.08)' } } },
+    yAxis: { type: 'category', data: sorted.map(i => i.name || i.instance), axisLabel: { color: AXIS_COLOR, fontSize: 11, width: 120, overflow: 'truncate' }, axisLine: { lineStyle: { color: AXIS_COLOR } } },
     series: [{
       type: 'bar', data: sorted.map(i => i.ops), barWidth: '55%',
-      itemStyle: { borderRadius: [0, 4, 4, 0], color: '#3b82f6' },
+      itemStyle: { borderRadius: [0, 4, 4, 0], color: COLORS.blue },
     }],
   })
 }
@@ -972,21 +977,21 @@ function renderHitRateBar() {
   updateChart(chart, {
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
-      backgroundColor: 'rgba(11,17,32,0.92)', borderColor: 'rgba(34,211,238,0.3)', textStyle: { color: '#e5edf7' },
+      backgroundColor: 'rgba(11,17,32,0.92)', borderColor: 'rgba(34,211,238,0.3)', textStyle: { color: TEXT_COLOR },
       formatter: (p) => `${p[0].name}<br/>命中率 ${p[0].value}%`,
     },
     grid: { left: 10, right: 30, top: 8, bottom: 8, containLabel: true },
-    xAxis: { type: 'category', data: sorted.map(i => i.name || i.instance), axisLabel: { color: '#9fb3c8', fontSize: 10, interval: 0, rotate: sorted.length > 8 ? 30 : 0 }, axisLine: { lineStyle: { color: '#9fb3c8' } } },
-    yAxis: { type: 'value', min: 0, max: 100, axisLabel: { color: '#9fb3c8', fontSize: 10, formatter: '{value}%' }, splitLine: { lineStyle: { color: 'rgba(34,211,238,0.08)' } } },
+    xAxis: { type: 'category', data: sorted.map(i => i.name || i.instance), axisLabel: { color: AXIS_COLOR, fontSize: 10, interval: 0, rotate: sorted.length > 8 ? 30 : 0 }, axisLine: { lineStyle: { color: AXIS_COLOR } } },
+    yAxis: { type: 'value', min: 0, max: 100, axisLabel: { color: AXIS_COLOR, fontSize: 10, formatter: '{value}%' }, splitLine: { lineStyle: { color: 'rgba(34,211,238,0.08)' } } },
     series: [{
       type: 'bar', data: sorted.map(i => i.hitRate), barWidth: '40%',
       itemStyle: {
         borderRadius: [4, 4, 0, 0],
         color: (params) => {
           const v = params.value
-          if (v < 50) return '#ef4444'
-          if (v < 80) return '#f59e0b'
-          return '#22c55e'
+          if (v < 50) return COLORS.red
+          if (v < 80) return COLORS.amber
+          return COLORS.green
         },
       },
     }],
@@ -1017,17 +1022,17 @@ function openDetail(row) {
 
 function buildTrendCharts(row) {
   const list = [
-    { key: 'mem', label: '内存使用率', metric: 'redis_used_memory_percent', unit: '%', color: '#38bdf8', current: row.memPercent, currentText: row.memPercent + '%' },
-    { key: 'clients', label: '连接客户端数', metric: 'redis_connected_clients', unit: '', color: '#22c55e', current: row.clients, currentText: formatNum(row.clients) },
-    { key: 'ops', label: '命令速率(OPS)', metric: 'redis_ops_per_sec', unit: '', color: '#f59e0b', current: row.ops, currentText: formatNum(row.ops) },
-    { key: 'hitrate', label: '缓存命中率', metric: 'redis_hit_rate', unit: '%', color: '#22c55e', current: row.hitRate, currentText: row.hitRate + '%' },
-    { key: 'keys', label: '键数量', metric: 'redis_keys', unit: '', color: '#94a3b8', current: row.keys, currentText: formatNum(row.keys) },
-    { key: 'frag', label: '内存碎片率', metric: 'redis_memory_fragmentation_ratio', unit: '', color: '#64748b', current: null, currentText: '-' },
-    { key: 'evicted', label: '淘汰键数', metric: 'redis_evicted_keys', unit: '', color: '#ef4444', current: null, currentText: '-' },
-    { key: 'uptime', label: '运行时长', metric: 'redis_uptime_in_seconds', unit: 's', color: '#94a3b8', current: row.uptime, currentText: formatUptime(row.uptime) },
+    { key: 'mem', label: '内存使用率', metric: 'redis_used_memory_percent', unit: '%', color: COLORS.blue, current: row.memPercent, currentText: row.memPercent + '%' },
+    { key: 'clients', label: '连接客户端数', metric: 'redis_connected_clients', unit: '', color: COLORS.green, current: row.clients, currentText: formatNum(row.clients) },
+    { key: 'ops', label: '命令速率(OPS)', metric: 'redis_ops_per_sec', unit: '', color: COLORS.amber, current: row.ops, currentText: formatNum(row.ops) },
+    { key: 'hitrate', label: '缓存命中率', metric: 'redis_hit_rate', unit: '%', color: COLORS.green, current: row.hitRate, currentText: row.hitRate + '%' },
+    { key: 'keys', label: '键数量', metric: 'redis_keys', unit: '', color: MUTED_COLOR, current: row.keys, currentText: formatNum(row.keys) },
+    { key: 'frag', label: '内存碎片率', metric: 'redis_memory_fragmentation_ratio', unit: '', color: MUTED_COLOR, current: null, currentText: '-' },
+    { key: 'evicted', label: '淘汰键数', metric: 'redis_evicted_keys', unit: '', color: COLORS.red, current: null, currentText: '-' },
+    { key: 'uptime', label: '运行时长', metric: 'redis_uptime_in_seconds', unit: 's', color: MUTED_COLOR, current: row.uptime, currentText: formatUptime(row.uptime) },
   ]
   if (row.role === 'slave') {
-    list.push({ key: 'lag', label: '复制延迟(秒)', metric: 'redis_replication_lag', unit: 's', color: '#ef4444', current: null, currentText: '-' })
+    list.push({ key: 'lag', label: '复制延迟(秒)', metric: 'redis_replication_lag', unit: 's', color: COLORS.red, current: null, currentText: '-' })
   }
   trendCharts.value = list
 }
@@ -1285,9 +1290,9 @@ function handleResize() {
   font-weight: 600;
 }
 .role-tag.master { background: rgba(220, 56, 45, 0.15); color: #ff6b6b; }
-.role-tag.slave { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
-.role-tag.sentinel { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
-.role-tag.unknown { background: rgba(107, 124, 147, 0.15); color: #94a3b8; }
+.role-tag.slave { background: rgba(34, 197, 94, 0.15); color: var(--ok); }
+.role-tag.sentinel { background: rgba(245, 158, 11, 0.15); color: var(--warn); }
+.role-tag.unknown { background: rgba(107, 124, 147, 0.15); color: var(--t3); }
 .topo-tag {
   display: inline-block;
   padding: 2px 8px;
@@ -1316,7 +1321,7 @@ function handleResize() {
   box-shadow: 0 0 6px rgba(245, 158, 11, 0.55);
 }
 .status-issue {
-  color: #fbbf24;
+  color: var(--warn);
 }
 .status-dot.lg {
   width: 12px;
@@ -1330,7 +1335,7 @@ function handleResize() {
 .mem-cell .bar {
   flex: 1;
   height: 5px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-2);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -1352,7 +1357,7 @@ function handleResize() {
   text-align: right;
 }
 .issue-reasons {
-  color: #fbbf24;
+  color: var(--warn);
   font-size: 13px;
 }
 .dim-text {
@@ -1368,7 +1373,7 @@ function handleResize() {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #fbbf24;
+  color: var(--warn);
   font-weight: 600;
   font-size: 14px;
 }
@@ -1408,7 +1413,7 @@ function handleResize() {
   cursor: default;
 }
 .issue-chip-reason {
-  color: #fbbf24;
+  color: var(--warn);
 }
 :deep(.row-down) {
   opacity: 0.6;
@@ -1459,7 +1464,7 @@ function handleResize() {
   gap: 14px;
 }
 .trend-card {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--fill-1);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px 14px;
@@ -1496,7 +1501,7 @@ function handleResize() {
   margin-bottom: 16px;
 }
 .empty-title {
-  font-size: 18px;
+  font-size: var(--fs-lg);
   font-weight: 600;
   color: var(--text);
   margin-bottom: 8px;
@@ -1553,7 +1558,7 @@ function handleResize() {
   font-family: var(--mono);
   font-size: 13px;
   color: var(--text-dim);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--fill-2);
   padding: 1px 6px;
   border-radius: 3px;
 }
@@ -1567,22 +1572,22 @@ function handleResize() {
 }
 
 /* ==== 实例拓扑与集群关系 ==== */
-.topo-group { margin-top: 16px; padding: 12px 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; }
+.topo-group { margin-top: 16px; padding: 12px 14px; background: var(--fill-1); border: 1px solid var(--fill-2); border-radius: 10px; }
 .topo-group:first-child { margin-top: 0; }
 .topo-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 12px; flex-wrap: wrap; }
 .topo-group-title { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
 .topo-group-title svg { width: 18px; height: 18px; color: #93c5fd; }
 .topo-meta { font-size: 13px; display: inline-flex; align-items: center; gap: 10px; }
-.topo-meta .dim { color: rgba(255,255,255,0.45); }
+.topo-meta .dim { color: var(--t3); }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 13px; font-weight: 500; }
-.badge-ok { background: rgba(34,197,94,0.15); color: #4ade80; }
-.badge-warn { background: rgba(234,179,8,0.15); color: #fbbf24; }
-.badge-down { background: rgba(239,68,68,0.18); color: #f87171; }
+.badge-ok { background: rgba(34,197,94,0.15); color: var(--ok); }
+.badge-warn { background: rgba(234,179,8,0.15); color: var(--warn); }
+.badge-down { background: rgba(239,68,68,0.18); color: var(--danger); }
 
 /* cluster 关系：center + 外围 master */
 .topo-relation { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.rel-node { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 14px; min-width: 160px; cursor: pointer; transition: all .2s ease; }
-.rel-node:hover { background: rgba(255,255,255,0.08); border-color: rgba(99,179,237,0.4); }
+.rel-node { background: var(--fill-2); border: 1px solid var(--fill-3); border-radius: 10px; padding: 10px 14px; min-width: 160px; cursor: pointer; transition: all .2s ease; }
+.rel-node:hover { background: var(--fill-3); border-color: var(--accent); }
 .rel-node.is-down { opacity: .55; }
 .rel-node.is-alert { border-color: rgba(239,68,68,0.5); box-shadow: 0 0 0 1px rgba(239,68,68,0.2); }
 .rel-center { background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.18)); border-color: rgba(139,92,246,0.4); font-weight: 600; }
@@ -1598,28 +1603,28 @@ function handleResize() {
 .rel-arrow { color: rgba(234,179,8,0.8); font-weight: 600; font-size: 13px; padding: 0 4px; white-space: nowrap; }
 .topo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .rel-node-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; word-break: break-all; }
-.rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: rgba(255,255,255,0.75); flex-wrap: wrap; }
-.rel-node-meta .dim { color: rgba(255,255,255,0.4); }
+.rel-node-meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--t2); flex-wrap: wrap; }
+.rel-node-meta .dim { color: var(--t3); }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot.up { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.5); }
-.dot.down { background: #f87171; }
+.dot.up { background: var(--ok); box-shadow: 0 0 6px rgba(74,222,128,0.5); }
+.dot.down { background: var(--danger); }
 
 /* ==== 详情抽屉：关键指标快照 ==== */
 .snapshot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin: 16px 0 4px; }
-.snap-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px 14px; }
+.snap-card { background: var(--fill-1); border: 1px solid var(--fill-3); border-radius: 10px; padding: 12px 14px; }
 .snap-card-wide { grid-column: span 2; }
-.snap-label { font-size: 13px; color: rgba(255,255,255,0.55); margin-bottom: 6px; }
+.snap-label { font-size: 13px; color: var(--t2); margin-bottom: 6px; }
 .snap-value { font-size: 18px; font-weight: 600; font-family: 'JetBrains Mono', ui-monospace, monospace; }
-.snap-value.ok { color: #4ade80; }
-.snap-value.warn { color: #f87171; }
+.snap-value.ok { color: var(--ok); }
+.snap-value.warn { color: var(--danger); }
 
 /* 实例列表：碎片率告警色 */
-.rate-warn { color: #f87171; }
+.rate-warn { color: var(--danger); }
 
 /* ==== Cluster 拓扑：master → replicas（旧样式保留，兼容哨兵组）==== */
 .rel-edges { align-items: flex-start; }
 .rel-master-block { display: flex; flex-direction: column; gap: 8px; min-width: 180px; }
-.rel-slaves { display: flex; flex-direction: column; gap: 6px; padding-left: 14px; border-left: 2px dashed rgba(99,179,237,0.35); }
+.rel-slaves { display: flex; flex-direction: column; gap: 6px; padding-left: 14px; border-left: 2px dashed var(--accent); }
 .rel-slave { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 10px; background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.2); border-radius: 8px; cursor: pointer; transition: all .2s ease; flex-wrap: wrap; }
 .rel-slave:hover { background: rgba(99,102,241,0.14); border-color: rgba(99,102,241,0.45); }
 .rel-slave.is-down { opacity: .55; }
@@ -1627,10 +1632,10 @@ function handleResize() {
 
 /* ==== Slot 分片条 ==== */
 .slot-section { margin-bottom: 14px; }
-.slot-section-label { font-size: 13px; color: rgba(255,255,255,0.55); margin-bottom: 8px; letter-spacing: 0.02em; }
+.slot-section-label { font-size: 13px; color: var(--t2); margin-bottom: 8px; letter-spacing: 0.02em; }
 .slot-bar {
   display: flex; height: 16px; border-radius: 6px; overflow: hidden;
-  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+  background: var(--fill-2); border: 1px solid var(--fill-3);
   flex-basis: 0;
 }
 .slot-seg { min-width: 2px; flex-shrink: 1; flex-basis: 0; cursor: pointer; transition: filter .15s ease; }
@@ -1641,11 +1646,11 @@ function handleResize() {
 .slot-legend-item {
   display: inline-flex; align-items: center; gap: 6px; font-size: 13px;
   padding: 3px 8px; border-radius: 6px; cursor: pointer;
-  background: rgba(255,255,255,0.03); border: 1px solid transparent;
+  background: var(--fill-1); border: 1px solid transparent;
   transition: all .15s ease;
 }
-.slot-legend-item:hover { border-color: rgba(99,179,237,0.35); background: rgba(255,255,255,0.06); }
-.slot-legend-item .dim { color: rgba(255,255,255,0.4); }
+.slot-legend-item:hover { border-color: var(--accent); background: var(--fill-2); }
+.slot-legend-item .dim { color: var(--t3); }
 .slot-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 
 /* ==== Master-Slave 层次树（复制 + 故障转移）==== */
@@ -1659,7 +1664,7 @@ function handleResize() {
   font-size: 13px; font-weight: 700; flex-shrink: 0;
 }
 .role-badge-m { background: rgba(220,56,45,0.22); color: #ff8a80; border: 1px solid rgba(220,56,45,0.4); }
-.role-badge-s { background: rgba(34,197,94,0.18); color: #4ade80; border: 1px solid rgba(34,197,94,0.35); width: 16px; height: 16px; font-size: 13px; border-radius: 4px; }
+.role-badge-s { background: rgba(34,197,94,0.18); color: var(--ok); border: 1px solid rgba(34,197,94,0.35); width: 16px; height: 16px; font-size: 13px; border-radius: 4px; }
 .slot-chip {
   font-size: 13px; font-family: var(--mono);
   padding: 1px 8px; border-radius: 4px; border: 1px dashed;
@@ -1671,17 +1676,17 @@ function handleResize() {
 .ms-slave { position: relative; }
 .ms-slave::before {
   content: ''; position: absolute; left: -10px; top: 50%;
-  width: 10px; height: 1px; background: rgba(99,179,237,0.45);
+  width: 10px; height: 1px; background: var(--accent);
 }
 
 /* ==== 拓扑图例 ==== */
 .topo-legend {
   display: flex; gap: 20px; margin-top: 12px; padding-top: 10px;
-  border-top: 1px dashed rgba(255,255,255,0.08);
+  border-top: 1px dashed var(--fill-3);
 }
-.topo-legend-item { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,0.5); }
+.topo-legend-item { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--t3); }
 .legend-line { display: inline-block; width: 24px; height: 0; }
-.legend-solid { border-top: 2px solid rgba(99,179,237,0.65); }
+.legend-solid { border-top: 2px solid var(--accent); }
 .legend-dash { border-top: 2px dashed rgba(245,158,11,0.65); }
 
 /* ==== 多集群横向并排（auto-fill），单集群自适应 ==== */
@@ -1700,8 +1705,8 @@ function handleResize() {
   height: fit-content;
 }
 .name-source-hint {
-  font-size: 13px; color: rgba(255,255,255,0.4);
-  border: 1px dashed rgba(255,255,255,0.18); padding: 1px 7px;
+  font-size: 13px; color: var(--t3);
+  border: 1px dashed var(--bd-strong); padding: 1px 7px;
   border-radius: 4px; cursor: help; margin-left: 4px;
   white-space: nowrap;
 }
@@ -1731,8 +1736,8 @@ function handleResize() {
 .ms-slave-card:hover { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.5); }
 .ms-slave-card.is-down { opacity: .55; background: rgba(239,68,68,0.05); border-color: rgba(239,68,68,0.3); border-left-color: rgba(239,68,68,0.55); }
 .ms-slave-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
-.ms-slave-meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: rgba(255,255,255,0.75); flex-wrap: wrap; }
-.ms-slave-meta .dim { color: rgba(255,255,255,0.4); }
+.ms-slave-meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--t2); flex-wrap: wrap; }
+.ms-slave-meta .dim { color: var(--t3); }
 
 /* ==== 未关联主节点的从节点（replicaOf 为空）==== */
 .unlinked-block {
@@ -1741,7 +1746,7 @@ function handleResize() {
   border-radius: 8px;
 }
 .unlinked-label {
-  font-size: 13px; color: rgba(255,255,255,0.55); margin-bottom: 8px;
+  font-size: 13px; color: var(--t2); margin-bottom: 8px;
   display: flex; align-items: center; gap: 6px;
 }
 .unlinked-list { display: flex; flex-wrap: wrap; gap: 8px; }

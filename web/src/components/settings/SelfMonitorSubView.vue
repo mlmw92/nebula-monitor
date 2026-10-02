@@ -111,6 +111,8 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import http from '../../api/http'
+import { tokenColor } from '../../charts/echarts'
+const AXIS_COLOR = tokenColor('t2', '#9fb3c8')
 
 const loading = ref(false)
 const error = ref('')
@@ -208,7 +210,7 @@ async function renderTrend() {
     chartInstance = echarts.init(chartRef.value)
     chartInstance.setOption({
       tooltip: { trigger: 'axis' },
-      legend: { data: series.map((s) => s.name), textStyle: { color: '#8b949e' } },
+      legend: { data: series.map((s) => s.name), textStyle: { color: AXIS_COLOR } },
       grid: { left: 55, right: 60, top: 40, bottom: 30 },
       xAxis: { type: 'time' },
       yAxis: [

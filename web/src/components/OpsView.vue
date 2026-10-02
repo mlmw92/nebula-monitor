@@ -1,15 +1,13 @@
 <template>
   <section class="view">
-    <header class="view-head">
-      <div class="head-row">
-        <h2>节点操作</h2>
-        <span class="muted">
-          平台下发一条白名单动作 → 目标节点执行 → 回执与审计。可一次选多个节点（按分组整选）。
-          指令随节点下一次上报下发（默认 15s 内），因此<b class="warn-text">离线节点无法下发</b>；
-          能否真正执行还取决于每台机器自己的 agent.yaml（guards.ops）。
-        </span>
-      </div>
-      <div class="head-row head-actions">
+    <!-- 页头统一为 PageHeader：原来这里是自写的 h2 + 说明 + 两行操作区，
+         与全站其它页面的标题字号（18px）和间距都不一致。
+         长说明里的"离线节点无法下发"是真正的注意事项，保留在 desc 末尾而不是塞进 tooltip。 -->
+    <PageHeader
+      title="节点操作"
+      desc="平台下发白名单动作 → 节点执行 → 回执与审计；指令随节点下一次上报下发，离线节点无法下发"
+    >
+      <template #actions>
         <span v-if="autoRefresh" class="muted">有任务未结束，已开启自动刷新</span>
         <el-button :loading="loading" @click="reload">
           <el-icon :size="13"><Refresh /></el-icon><span class="btn-txt">刷新</span>
@@ -18,8 +16,8 @@
           <el-icon :size="13"><Plus /></el-icon><span class="btn-txt">下发操作</span>
         </el-button>
         <span v-else class="muted">当前账号只读：缺 ops:exec 权限（下发属高风险操作）</span>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" class="alert-gap" />
 
@@ -421,6 +419,7 @@ import {
 } from '@element-plus/icons-vue'
 import BatchBar from './BatchBar.vue'
 import KpiCard from './KpiCard.vue'
+import PageHeader from './common/PageHeader.vue'
 import { cancelOpsTasks, createOpsBatch, createOpsTask, deleteOpsTask, listOpsActions, listOpsTasks } from '../api/ops'
 import http from '../api/http'
 import { useAuth } from '../composables/useAuth'
@@ -1132,21 +1131,10 @@ const resultSections = computed(() => {
 <style scoped>
 /* 页面外壳：与资产台账 / 日志检索等页面保持同一套（此前本页漏了这几个类，
    于是标题下的说明文字其实**没有**变灰——文字层级全靠字号撑着）。 */
+/* 内边距由 MainLayout 的 .content 统一提供，页面自己再加 16px 会形成双层留白，
+   与主机列表等页面不一致。 */
 .view {
-  padding: 16px;
-}
-.view-head {
-  margin-bottom: 12px;
-}
-.view-head .head-row {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.view-head h2 {
-  margin: 0;
-  font-size: 18px;
+  padding: 0;
 }
 .head-actions {
   margin-top: 10px;
@@ -1260,7 +1248,7 @@ const resultSections = computed(() => {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--fill-1);
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.5;

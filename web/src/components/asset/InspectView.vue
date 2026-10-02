@@ -1,17 +1,16 @@
 <template>
   <section class="view">
-    <header class="view-head">
-      <div class="head-row">
-        <h2>配置巡检</h2>
-        <span class="muted">
-          把每个资产的配置快照与上一次快照比（新增 / 变更 / 缺失），再与「标杆资产」的期望值比合规偏差；
-          只给结论，不自动修复
-        </span>
-      </div>
-    </header>
+    <PageHeader
+      title="配置巡检"
+      desc="把每个资产的配置快照与上一次快照比（新增 / 变更 / 缺失），再与「标杆资产」的期望值比合规偏差；只给结论，不自动修复"
+    >
+      <template #actions>
+        <el-button size="small" plain :icon="Printer" @click="printList">打印</el-button>
+      </template>
+    </PageHeader>
 
     <!-- 执行区：范围复用台账筛选（服务端仍按资源范围裁剪，前端只是体验） -->
-    <div class="panel">
+    <div class="card panel">
       <div class="filter-bar">
         <div class="field">
           <span class="field-label">类型</span>
@@ -34,15 +33,23 @@
     </div>
 
     <!-- 巡检记录 -->
-    <div class="panel">
-      <div class="panel-title">巡检记录</div>
+    <SectionCard title="巡检记录" dense>
       <el-table
         :data="runs"
         v-loading="loading"
         highlight-current-row
-        empty-text="还没有巡检记录"
         style="width: 100%"
         @row-click="selectRun"
+      >
+        <template #empty>
+          <EmptyState
+            title="还没有巡检记录"
+            :hints="[
+              '先选定上方的类型 / 归属节点范围，再点「执行巡检」',
+              '首次巡检只会建立基线，不产出差异；第二次起才会比对',
+            ]"
+          />
+        </template>
       >
         <el-table-column label="时间" width="180">
           <template #default="{ row }">{{ fmtTime(row.startedAt) }}</template>
@@ -74,14 +81,16 @@
         </el-table-column>
       </el-table>
       <p v-if="runs.length" class="muted note">点击一行查看该次巡检的差异项。</p>
-    </div>
+    </SectionCard>
 
     <!-- 差异项 -->
-    <div v-if="selectedRun" class="panel">
-      <div class="panel-title">
-        差异项（{{ findings.length }}）
-        <span class="muted">· 记录 #{{ selectedRun.id }} · {{ fmtTime(selectedRun.startedAt) }}</span>
-      </div>
+    <SectionCard v-if="selectedRun" dense>
+      <template #actions>
+        <div class="panel-title" style="margin: 0">
+          差异项（{{ findings.length }}）
+          <span class="muted">· 记录 #{{ selectedRun.id }} · {{ fmtTime(selectedRun.startedAt) }}</span>
+        </div>
+      </template>
       <el-alert
         v-if="selectedRun.baselined > 0"
         type="info"
@@ -91,7 +100,13 @@
         :title="`本次有 ${selectedRun.baselined} 个资产是首次见到，只建立了基线`"
         description="数据不足不等于不合规：首次巡检没有可比对的上一份快照，所以它们不会产出差异。下一次巡检起就会比对。"
       />
-      <el-table :data="findings" v-loading="findingLoading" empty-text="本次没有差异" style="width: 100%">
+      <el-table :data="findings" v-loading="findingLoading" style="width: 100%">
+        <template #empty>
+          <EmptyState
+            title="本次没有差异"
+            :hints="['所选范围内所有资产的配置与上一次快照一致，也没有偏离标杆']"
+          />
+        </template>
         <el-table-column label="级别" width="90">
           <template #default="{ row }">
             <span class="tag" :class="row.level">{{ levelLabel(row.level) }}</span>
@@ -124,16 +139,24 @@
           </template>
         </el-table-column>
       </el-table>
-    </div>
+    </SectionCard>
 
     <!-- 期望值（标杆） -->
-    <div class="panel">
-      <div class="panel-title">期望值（标杆资产）</div>
+    <SectionCard title="期望值（标杆资产）" dense>
       <p class="muted note">
         合规偏差（deviation）的期望值来自「标杆」：在资产台账详情里把一台标准机设为该类型的期望值。
         每个资产类型只保留一个标杆；未设置标杆时只做快照前后比对。
       </p>
-      <el-table :data="baselines" empty-text="还没有设置任何期望值" style="width: 100%">
+      <el-table :data="baselines" style="width: 100%">
+        <template #empty>
+          <EmptyState
+            title="还没有设置任何期望值"
+            :hints="[
+              '在资产台账详情里把一台标准机设为该类型的期望值',
+              '未设置标杆时，巡检只做快照前后比对，不做合规偏差判断',
+            ]"
+          />
+        </template>
         <el-table-column label="资产类型" width="160">
           <template #default="{ row }">{{ row.typeKey === 'host' ? '主机' : '中间件实例' }}</template>
         </el-table-column>
@@ -153,13 +176,17 @@
           </template>
         </el-table-column>
       </el-table>
-    </div>
+    </SectionCard>
   </section>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Printer } from '@element-plus/icons-vue'
+import PageHeader from '../common/PageHeader.vue'
+import SectionCard from '../common/SectionCard.vue'
+import EmptyState from '../common/EmptyState.vue'
 import {
   runInspect as runInspectApi,
   listInspectRuns,
@@ -168,6 +195,7 @@ import {
   clearAssetBaseline,
 } from '../../api/asset'
 import { useAuth } from '../../composables/useAuth'
+import { printPage } from '../../utils/print'
 
 const auth = useAuth()
 // 前端隐藏仅为体验：服务端 inspect:run / assets:write 才是边界
@@ -191,6 +219,20 @@ const levelLabel = (l) => LEVEL_LABELS[l] || l
 function fmtTime(ts) {
   if (!ts) return '—'
   return new Date(ts).toLocaleString('zh-CN', { hour12: false })
+}
+
+// 巡检结论经常要作为整改工单的附件；选中了某次巡检就只打那次的差异项
+function printList() {
+  const meta = []
+  if (selectedRun.value) {
+    meta.push(`巡检记录 #${selectedRun.value.id} · ${fmtTime(selectedRun.value.startedAt)}`)
+    meta.push(`差异项 ${findings.value.length} 条`)
+  } else {
+    meta.push(`巡检记录 ${runs.value.length} 条`)
+    if (filter.value.type) meta.push(`类型=${filter.value.type}`)
+    if (filter.value.keyword) meta.push(`关键词=${filter.value.keyword}`)
+  }
+  printPage({ title: '配置巡检', meta })
 }
 
 async function loadRuns() {
@@ -271,12 +313,10 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.view { padding: 16px; }
-.view-head { margin-bottom: 12px; }
-.head-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.head-row h2 { margin: 0; font-size: 18px; }
+/* 内边距由 MainLayout 的 .content 统一提供，页面不再自己套一层 */
+.view { padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .muted { color: var(--text-dim); font-size: 13px; }
-.panel + .panel { margin-top: 12px; }
+.panel { padding: 12px 16px; }
 .panel-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
 .panel-title .muted { font-weight: 400; font-size: 13px; }
 .filter-bar {
@@ -287,7 +327,7 @@ onMounted(() => {
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--fill-1);
 }
 .field { display: inline-flex; align-items: center; gap: 6px; }
 .field-label { font-size: 13px; color: var(--text-dim); white-space: nowrap; }
@@ -300,7 +340,7 @@ onMounted(() => {
 .sub { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
 /* 级别标签：与台账页同一套语义配色 */
 .tag { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 20px; font-size: 13px; font-weight: 500; }
-.tag.info { background: rgba(255, 255, 255, 0.06); color: var(--text-dim); }
+.tag.info { background: var(--fill-2); color: var(--text-dim); }
 .tag.warning { background: var(--warn-dim); color: var(--warn); }
 .tag.critical { background: var(--danger-dim); color: var(--danger); }
 </style>
