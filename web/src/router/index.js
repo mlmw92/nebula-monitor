@@ -30,6 +30,10 @@ const routes = [
       { path: 'hosts', name: 'hosts', component: () => import('../components/HostsView.vue'), meta: { perm: 'nodes:read' } },
       { path: 'node/:name', name: 'node', component: () => import('../components/NodeView.vue'), props: true, meta: { perm: 'nodes:read' } },
       { path: 'middleware', name: 'middleware', component: () => import('../components/MiddlewareView.vue'), meta: { perm: 'middleware:read' } },
+      // 容器只读管理面（D3）：读需 container:read——刻意与 middleware:read 分开，
+      // 它读的是集群内部对象（工作负载/Pod/事件/详情）而不只是指标曲线；
+      // 下发 container.* 查询动作仍走 ops:exec（异步任务，凭据只在 Agent 本地）。
+      { path: 'container', name: 'container', component: () => import('../components/container/ContainerView.vue'), meta: { perm: 'container:read' } },
       // 资产台账（D2）：读取需 assets:read；人工维护由后端 assets:write 校验（前端按钮同权限门控）
       { path: 'assets', name: 'assets', component: () => import('../components/asset/AssetListView.vue'), meta: { perm: 'assets:read' } },
       // 配置巡检（D2）：看记录/差异需 inspect:read；触发巡检是独立权限点 inspect:run（页面内门控）

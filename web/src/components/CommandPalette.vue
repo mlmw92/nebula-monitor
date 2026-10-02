@@ -69,6 +69,7 @@ const TITLES = {
   overview: '首页概览',
   hosts: '主机列表',
   middleware: '中间件监控',
+  container: '容器与工作负载',
   logs: '集中日志',
   dialtest: '服务拨测',
   'metrics-explore': '指标浏览',
@@ -93,6 +94,7 @@ const ICONS = {
   overview: Odometer,
   hosts: Monitor,
   middleware: Connection,
+  container: Grid,
   logs: List,
   dialtest: Aim,
   'metrics-explore': DataLine,
@@ -117,6 +119,7 @@ const GROUP_ORDER = ['概览', '观测监控', '资产与配置', '运维操作'
 const GROUP_BY_PREFIX = [
   ['hosts', '观测监控'],
   ['middleware', '观测监控'],
+  ['container', '观测监控'],
   ['logs', '观测监控'],
   ['dialtest', '观测监控'],
   ['metrics/', '观测监控'],

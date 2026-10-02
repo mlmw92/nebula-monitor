@@ -162,6 +162,8 @@ const groups = [
     items: [
       { key: 'hosts', to: '/hosts', label: '主机列表', icon: Monitor, perm: 'nodes:read' },
       { key: 'middleware', to: '/middleware', label: '中间件监控', icon: Connection, perm: 'middleware:read' },
+      // 容器只读管理面：读权限是 container:read（与 middleware:read 分开，见路由注释）
+      { key: 'container', to: '/container', label: '容器与工作负载', icon: Grid, perm: 'container:read' },
       { key: 'logs', to: '/logs', label: '集中日志', icon: List, perm: 'logs:read' },
       { key: 'dialtest', to: '/dialtest', label: '服务拨测', icon: Aim, perm: 'probe:read' },
       // 对外状态页入口：页面本身免登录、且在管理壳之外（/status 与 /screen 同级），
