@@ -96,6 +96,12 @@ func (e *Executor) Supported() []string {
 	if e.guards.OpsReadOnlyEnabled() && e.guards.OpsContainerEnabled() && e.k8s != nil {
 		out = append(out, containerKinds...)
 	}
+	// 文件分发是写动作里最强的一类（直接改磁盘上的文件），因此有自己的开关：
+	// write 与 dirs 都就位才声明能力——宁可让界面显示"该节点未放行"，
+	// 也不要下发一条注定被拒的指令（那会让用户以为是平台坏了）。
+	if e.guards.File.OpsFileEnabled() {
+		out = append(out, model.OpsKindFilePush)
+	}
 	return out
 }
 
@@ -162,6 +168,9 @@ func (e *Executor) run(cmd model.OpsCommand) model.OpsResult {
 		model.OpsKindContainerDescribe, model.OpsKindContainerEvents:
 		// 容器类动作全部只读，参数与护栏集中在 runContainer（见 container.go）。
 		return e.runContainer(cmd)
+	case model.OpsKindFilePush:
+		// 护栏与落盘细节集中在 runFilePush（见 file.go）。
+		return e.runFilePush(cmd)
 	default:
 		// 旧 Server 下发了本 Agent 不认识的动作：明确回绝，不要静默忽略。
 		return fail("本机不支持该动作：" + cmd.Kind)

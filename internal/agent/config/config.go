@@ -97,6 +97,52 @@ type OpsGuards struct {
 	//
 	// 升级不改变既有行为：不写这项时与只读类动作一样默认放行。
 	Container *bool `yaml:"container"`
+
+	// File 是文件分发（file.push）的本机护栏，默认**不放行**。
+	//
+	// 为什么不复用上面的 Write/Units：那是"允许重启哪些服务"的同意，而文件分发是
+	// "允许往我的磁盘上写什么"——后者更强，两者的同意是两件事（与 Container 单设开关同一个理由）。
+	File OpsFileGuards `yaml:"file"`
+}
+
+// OpsFileGuards 是文件分发（file.push）的本机护栏。
+//
+// 默认不放行，且必须**列出允许写入的目录**：只开一个 write 开关等于把这台机器的整个
+// 文件系统交出去，而文件分发的典型需求是"只许往 /opt/app/conf 放配置"。
+type OpsFileGuards struct {
+	// Write 是否允许向本机分发文件。默认 false。
+	Write bool `yaml:"write"`
+	// Dirs 是允许写入的**目录前缀**清单（必须绝对路径）。
+	// 为空时即使 write=true 也不放行任何分发。
+	Dirs []string `yaml:"dirs"`
+}
+
+// OpsFileEnabled 返回是否放行文件分发（默认不放行，且必须给出目录清单）。
+func (g OpsFileGuards) OpsFileEnabled() bool {
+	return g.Write && len(g.OpsAllowedDirs()) > 0
+}
+
+// OpsAllowedDirs 返回归一化后的允许目录。
+//
+// 归一化在这里做一次：配置里写 `/opt/app/` 与 `/opt/app` 必须等价，否则"我明明加了却还是被拒"
+// 会变成一个纯拼写的谜题（与 OpsAllowedUnits 同一个理由）。
+// 非绝对路径一律忽略：相对路径的含义取决于进程的工作目录，拿它当白名单等于没有白名单。
+func (g OpsFileGuards) OpsAllowedDirs() []string {
+	out := make([]string, 0, len(g.Dirs))
+	for _, d := range g.Dirs {
+		d = strings.TrimSpace(d)
+		if d == "" || !strings.HasPrefix(d, "/") {
+			continue
+		}
+		// 根目录的判断放在**归一化之前**：`filepath.Clean("/")` 在 Windows 上会返回 `\`，
+		// 按归一化后的值判会让这一条漏过去（配置里的路径永远是 POSIX 形态，按原文判才对）。
+		trimmed := strings.TrimRight(d, "/")
+		if trimmed == "" {
+			continue // 根目录不做白名单项：那等于把它下面的所有东西都放开
+		}
+		out = append(out, filepath.Clean(trimmed))
+	}
+	return out
 }
 
 // OpsReadOnlyEnabled 返回是否放行只读动作（默认放行）。
