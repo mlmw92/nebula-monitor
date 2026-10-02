@@ -18,8 +18,8 @@ import (
 	"github.com/nebula/monitor/internal/agent/collector"
 	"github.com/nebula/monitor/internal/agent/config"
 	"github.com/nebula/monitor/internal/agent/defense"
-	opsagent "github.com/nebula/monitor/internal/agent/ops"
 	"github.com/nebula/monitor/internal/agent/logship"
+	opsagent "github.com/nebula/monitor/internal/agent/ops"
 	"github.com/nebula/monitor/internal/agent/proxy"
 	"github.com/nebula/monitor/internal/agent/reporter"
 	"github.com/nebula/monitor/internal/agent/upgrader"
@@ -168,6 +168,12 @@ func main() {
 	// 未配置时既不构造也不注入，与改造前完全等价。
 	if len(cfg.LogSources) > 0 {
 		coll.SetLogSink(logship.New(cfg.ServerURL, cfg.Secret, coll.NodeName(), cfg.Group).Sink())
+	}
+	// 容器只读查询：把本机 K8s 采集器（已持有 k8sInstances 与凭据解析）接到下行通道上。
+	// 未配集群时 coll.K8s() 为 nil，容器类动作因此不进能力清单——
+	// 界面上显示"该节点不支持"，好过下发一条注定失败的任务。
+	if k := coll.K8s(); k != nil {
+		opsExec.SetK8sQuerier(k)
 	}
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
@@ -371,36 +377,36 @@ func collectAndReport(ctx context.Context, coll *collector.Collector, rep *repor
 	}
 
 	payload := model.ReportPayload{
-		Node:              cfg.Node,
-		Mode:              modeForModel(cfg),
-		IP:                res.IP,
-		OS:                res.OS,
-		Arch:              res.Arch,
-		Group:             cfg.Group,
-		Labels:            cfg.Labels,
-		Version:           version.Version,
-		BinSHA256:         agentBinSHA,
-		HostInfo:          res.HostInfo,
-		Metrics:           res.Metrics,
-		Processes:         res.Processes,
-		RedisInstances:    res.Redis,
-		MySQLInstances:    res.MySQL,
-		PostgresInstances: res.Postgres,
-		NginxInstances:    res.Nginx,
-		KafkaInstances:    res.Kafka,
-		DockerInstances:   res.Docker,
-		RocketMQInstances: res.RocketMQ,
-		K8sInstances:      res.K8s,
-		MongoDBInstances:  res.MongoDB,
-		FastDFSInstances:  res.FastDFS,
-		RabbitMQInstances:    res.RabbitMQ,
+		Node:                   cfg.Node,
+		Mode:                   modeForModel(cfg),
+		IP:                     res.IP,
+		OS:                     res.OS,
+		Arch:                   res.Arch,
+		Group:                  cfg.Group,
+		Labels:                 cfg.Labels,
+		Version:                version.Version,
+		BinSHA256:              agentBinSHA,
+		HostInfo:               res.HostInfo,
+		Metrics:                res.Metrics,
+		Processes:              res.Processes,
+		RedisInstances:         res.Redis,
+		MySQLInstances:         res.MySQL,
+		PostgresInstances:      res.Postgres,
+		NginxInstances:         res.Nginx,
+		KafkaInstances:         res.Kafka,
+		DockerInstances:        res.Docker,
+		RocketMQInstances:      res.RocketMQ,
+		K8sInstances:           res.K8s,
+		MongoDBInstances:       res.MongoDB,
+		FastDFSInstances:       res.FastDFS,
+		RabbitMQInstances:      res.RabbitMQ,
 		ElasticsearchInstances: res.Elasticsearch,
-		ClickHouseInstances:  res.ClickHouse,
-		NacosInstances:       res.Nacos,
-		ZooKeeperInstances:   res.ZooKeeper,
-		NginxAccessStats:  res.NginxAccess,
-		SecurityEvents:    res.SecurityEvents,
-		SecurityBaseline:  res.SecurityBaseline,
+		ClickHouseInstances:    res.ClickHouse,
+		NacosInstances:         res.Nacos,
+		ZooKeeperInstances:     res.ZooKeeper,
+		NginxAccessStats:       res.NginxAccess,
+		SecurityEvents:         res.SecurityEvents,
+		SecurityBaseline:       res.SecurityBaseline,
 		// 声明 Agent 能力：支持结构化入侵防护指令（旧 Server 忽略此字段）
 		Capabilities: &model.ClientCapability{
 			Defense: true,

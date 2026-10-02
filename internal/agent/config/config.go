@@ -27,35 +27,35 @@ const (
 
 // Config 是 Agent 运行配置。
 type Config struct {
-	Mode              string                         `yaml:"mode"`              // 运行模式：collect(默认) | edge | hub
-	ServerURL         string                         `yaml:"serverURL"`         // Server 接收地址，如 http://10.0.0.1:8080
-	Node              string                         `yaml:"node"`              // 节点名（默认自动取 hostname）
-	Group             string                         `yaml:"group"`             // 默认分组
-	Secret            string                         `yaml:"secret"`            // 接入授权密钥（与 Server agentAuth.secret 一致）
-	Labels            map[string]string              `yaml:"labels"`            // 自定义标签
-	Interval          int                            `yaml:"interval"`          // 采集间隔（秒）
-	BatchSize         int                            `yaml:"batchSize"`         // 单批最大指标数
-	CollectTimeout    int                            `yaml:"collectTimeout"`    // 单个采集任务超时（秒），默认 8；0 表示不限制
-	Collectors        CollectorToggle                `yaml:"collectors"`        // 采集项开关
-	RedisInstances    []model.RedisInstanceConfig    `yaml:"redisInstances"`    // Redis 实例连接配置
-	MySQLInstances    []model.MySQLInstanceConfig    `yaml:"mysqlInstances"`    // MySQL 实例连接配置
-	PostgresInstances []model.PostgresInstanceConfig `yaml:"postgresInstances"` // PostgreSQL 实例连接配置
-	NginxInstances    []model.NginxInstanceConfig    `yaml:"nginxInstances"`    // Nginx 实例连接配置
-	KafkaInstances    []model.KafkaInstanceConfig    `yaml:"kafkaInstances"`    // Kafka 实例连接配置
-	DockerInstances   []model.DockerInstanceConfig   `yaml:"dockerInstances"`   // Docker 连接配置
-	RocketMQInstances []model.RocketMQInstanceConfig `yaml:"rocketmqInstances"` // RocketMQ 实例连接配置
-	K8sInstances      []model.K8sInstanceConfig      `yaml:"k8sInstances"`      // Kubernetes 集群连接配置
-	MongoDBInstances  []model.MongoDBInstanceConfig  `yaml:"mongoInstances"`    // MongoDB 实例连接配置
-	FastDFSInstances  []model.FastDFSInstanceConfig  `yaml:"fastdfsInstances"`  // FastDFS 实例连接配置
-	RabbitMQInstances []model.RabbitMQInstanceConfig `yaml:"rabbitmqInstances"` // RabbitMQ 实例连接配置
+	Mode                   string                              `yaml:"mode"`                   // 运行模式：collect(默认) | edge | hub
+	ServerURL              string                              `yaml:"serverURL"`              // Server 接收地址，如 http://10.0.0.1:8080
+	Node                   string                              `yaml:"node"`                   // 节点名（默认自动取 hostname）
+	Group                  string                              `yaml:"group"`                  // 默认分组
+	Secret                 string                              `yaml:"secret"`                 // 接入授权密钥（与 Server agentAuth.secret 一致）
+	Labels                 map[string]string                   `yaml:"labels"`                 // 自定义标签
+	Interval               int                                 `yaml:"interval"`               // 采集间隔（秒）
+	BatchSize              int                                 `yaml:"batchSize"`              // 单批最大指标数
+	CollectTimeout         int                                 `yaml:"collectTimeout"`         // 单个采集任务超时（秒），默认 8；0 表示不限制
+	Collectors             CollectorToggle                     `yaml:"collectors"`             // 采集项开关
+	RedisInstances         []model.RedisInstanceConfig         `yaml:"redisInstances"`         // Redis 实例连接配置
+	MySQLInstances         []model.MySQLInstanceConfig         `yaml:"mysqlInstances"`         // MySQL 实例连接配置
+	PostgresInstances      []model.PostgresInstanceConfig      `yaml:"postgresInstances"`      // PostgreSQL 实例连接配置
+	NginxInstances         []model.NginxInstanceConfig         `yaml:"nginxInstances"`         // Nginx 实例连接配置
+	KafkaInstances         []model.KafkaInstanceConfig         `yaml:"kafkaInstances"`         // Kafka 实例连接配置
+	DockerInstances        []model.DockerInstanceConfig        `yaml:"dockerInstances"`        // Docker 连接配置
+	RocketMQInstances      []model.RocketMQInstanceConfig      `yaml:"rocketmqInstances"`      // RocketMQ 实例连接配置
+	K8sInstances           []model.K8sInstanceConfig           `yaml:"k8sInstances"`           // Kubernetes 集群连接配置
+	MongoDBInstances       []model.MongoDBInstanceConfig       `yaml:"mongoInstances"`         // MongoDB 实例连接配置
+	FastDFSInstances       []model.FastDFSInstanceConfig       `yaml:"fastdfsInstances"`       // FastDFS 实例连接配置
+	RabbitMQInstances      []model.RabbitMQInstanceConfig      `yaml:"rabbitmqInstances"`      // RabbitMQ 实例连接配置
 	ElasticsearchInstances []model.ElasticsearchInstanceConfig `yaml:"elasticsearchInstances"` // Elasticsearch 实例连接配置
-	ClickHouseInstances []model.ClickHouseInstanceConfig  `yaml:"clickhouseInstances"`  // ClickHouse 实例连接配置
-	NacosInstances    []model.NacosInstanceConfig    `yaml:"nacosInstances"`    // Nacos 实例连接配置
-	ZooKeeperInstances []model.ZooKeeperInstanceConfig `yaml:"zookeeperInstances"` // ZooKeeper 实例连接配置
-	PortChecks        []string                       `yaml:"portChecks"`        // TCP 端口存活检测列表，如 ["80","443","3306"]
-	Proxy             ProxyConfig                    `yaml:"proxy"`             // 代理模式配置，mode=edge/hub 时生效
-	Security          SecurityConfig                 `yaml:"security"`          // 安全采集配置（collectors.security 开启时生效）
-	CryptoKey         string                         `yaml:"cryptoKey"`         // 中间件密码 AES-GCM 主密钥（留空用内置默认密钥；配置密文以 enc: 前缀标识）
+	ClickHouseInstances    []model.ClickHouseInstanceConfig    `yaml:"clickhouseInstances"`    // ClickHouse 实例连接配置
+	NacosInstances         []model.NacosInstanceConfig         `yaml:"nacosInstances"`         // Nacos 实例连接配置
+	ZooKeeperInstances     []model.ZooKeeperInstanceConfig     `yaml:"zookeeperInstances"`     // ZooKeeper 实例连接配置
+	PortChecks             []string                            `yaml:"portChecks"`             // TCP 端口存活检测列表，如 ["80","443","3306"]
+	Proxy                  ProxyConfig                         `yaml:"proxy"`                  // 代理模式配置，mode=edge/hub 时生效
+	Security               SecurityConfig                      `yaml:"security"`               // 安全采集配置（collectors.security 开启时生效）
+	CryptoKey              string                              `yaml:"cryptoKey"`              // 中间件密码 AES-GCM 主密钥（留空用内置默认密钥；配置密文以 enc: 前缀标识）
 
 	// LogSources 是集中日志的采集来源（C2），**默认为空 = 不采集任何日志**。
 	LogSources []LogSourceConfig `yaml:"logSources"`
@@ -87,11 +87,26 @@ type OpsGuards struct {
 	// Units 是允许写操作的 systemd 单元清单（可省略 `.service` 后缀）。
 	// 为空时即使 write=true 也不放行任何写操作。
 	Units []string `yaml:"units"`
+
+	// Container 是否允许容器/K8s 只读查询（工作负载 / Pod / 事件 / 对象详情）。默认 true。
+	//
+	// 为什么在 ReadOnly 之外再单设一个开关：容器查询读的不是**本机**，而是这台机器的 Agent
+	// 凭据能够到的**整个集群内部结构**（命名空间、工作负载、镜像、事件、对象详情）。
+	// 一台机器愿意交出自己的负载与磁盘，不等于它愿意交出集群结构——两者的同意是两件事，
+	// 所以"机器自身的同意优先于中心的授权"这条原则要求它们各有一个开关。
+	//
+	// 升级不改变既有行为：不写这项时与只读类动作一样默认放行。
+	Container *bool `yaml:"container"`
 }
 
 // OpsReadOnlyEnabled 返回是否放行只读动作（默认放行）。
 func (g OpsGuards) OpsReadOnlyEnabled() bool {
 	return g.ReadOnly == nil || *g.ReadOnly
+}
+
+// OpsContainerEnabled 返回是否放行容器/K8s 只读查询（默认放行）。
+func (g OpsGuards) OpsContainerEnabled() bool {
+	return g.Container == nil || *g.Container
 }
 
 // OpsAllowedUnits 返回归一化后的允许单元集合（统一补 .service 后缀）。
@@ -206,30 +221,30 @@ type ProxyConfig struct {
 
 // CollectorToggle 控制各采集器是否启用。
 type CollectorToggle struct {
-	CPU      bool `yaml:"cpu"`
-	Memory   bool `yaml:"memory"`
-	Disk     bool `yaml:"disk"`
-	Network  bool `yaml:"network"`
-	Process  bool `yaml:"process"`
-	Load     bool `yaml:"load"`
-	Redis    bool `yaml:"redis"`    // Redis 中间件监控，默认关闭
-	MySQL    bool `yaml:"mysql"`    // MySQL 中间件监控，默认关闭
-	Postgres bool `yaml:"postgres"` // PostgreSQL 中间件监控，默认关闭
-	Nginx    bool `yaml:"nginx"`    // Nginx 中间件监控，默认关闭
-	NginxLog bool `yaml:"nginxLog"` // Nginx access log 访问日志解析（需实例配置 accessLog 路径），默认关闭
-	Kafka    bool `yaml:"kafka"`    // Kafka 中间件监控，默认关闭
-	Docker   bool `yaml:"docker"`   // Docker 容器监控，默认关闭
-	RocketMQ bool `yaml:"rocketmq"` // RocketMQ 中间件监控，默认关闭
-	K8s      bool `yaml:"k8s"`      // Kubernetes 集群监控，默认关闭
-	MongoDB  bool `yaml:"mongodb"`  // MongoDB 中间件监控，默认关闭
-	FastDFS  bool `yaml:"fastdfs"`  // FastDFS 中间件监控，默认关闭
-	RabbitMQ bool `yaml:"rabbitmq"` // RabbitMQ 中间件监控，默认关闭
+	CPU           bool `yaml:"cpu"`
+	Memory        bool `yaml:"memory"`
+	Disk          bool `yaml:"disk"`
+	Network       bool `yaml:"network"`
+	Process       bool `yaml:"process"`
+	Load          bool `yaml:"load"`
+	Redis         bool `yaml:"redis"`         // Redis 中间件监控，默认关闭
+	MySQL         bool `yaml:"mysql"`         // MySQL 中间件监控，默认关闭
+	Postgres      bool `yaml:"postgres"`      // PostgreSQL 中间件监控，默认关闭
+	Nginx         bool `yaml:"nginx"`         // Nginx 中间件监控，默认关闭
+	NginxLog      bool `yaml:"nginxLog"`      // Nginx access log 访问日志解析（需实例配置 accessLog 路径），默认关闭
+	Kafka         bool `yaml:"kafka"`         // Kafka 中间件监控，默认关闭
+	Docker        bool `yaml:"docker"`        // Docker 容器监控，默认关闭
+	RocketMQ      bool `yaml:"rocketmq"`      // RocketMQ 中间件监控，默认关闭
+	K8s           bool `yaml:"k8s"`           // Kubernetes 集群监控，默认关闭
+	MongoDB       bool `yaml:"mongodb"`       // MongoDB 中间件监控，默认关闭
+	FastDFS       bool `yaml:"fastdfs"`       // FastDFS 中间件监控，默认关闭
+	RabbitMQ      bool `yaml:"rabbitmq"`      // RabbitMQ 中间件监控，默认关闭
 	Elasticsearch bool `yaml:"elasticsearch"` // Elasticsearch 中间件监控，默认关闭
-	ClickHouse bool `yaml:"clickhouse"` // ClickHouse 中间件监控，默认关闭
-	Nacos   bool `yaml:"nacos"`    // Nacos 中间件监控，默认关闭
-	ZooKeeper bool `yaml:"zookeeper"` // ZooKeeper 中间件监控，默认关闭
-	Port     bool `yaml:"port"`     // 端口存活检测，默认关闭
-	Security bool `yaml:"security"` // 安全采集（SSH 审计/FIM/基线/异常进程/sudo），默认关闭
+	ClickHouse    bool `yaml:"clickhouse"`    // ClickHouse 中间件监控，默认关闭
+	Nacos         bool `yaml:"nacos"`         // Nacos 中间件监控，默认关闭
+	ZooKeeper     bool `yaml:"zookeeper"`     // ZooKeeper 中间件监控，默认关闭
+	Port          bool `yaml:"port"`          // 端口存活检测，默认关闭
+	Security      bool `yaml:"security"`      // 安全采集（SSH 审计/FIM/基线/异常进程/sudo），默认关闭
 }
 
 // Default 返回默认配置。

@@ -47,6 +47,10 @@ type Executor struct {
 	// 不重复执行——"重启服务"这种动作重复执行的后果不是多一次，而是把刚起来的服务再打一次。
 	statePath string
 
+	// k8s 是容器只读查询的实现（可空：未配置 k8sInstances 时为空）。
+	// 为空时容器类动作既不声明也不执行，由能力协商如实告诉中心"这台机器不支持"。
+	k8s K8sQuerier
+
 	mu       sync.Mutex
 	executed map[string]model.OpsResult
 }
@@ -86,6 +90,11 @@ func (e *Executor) Supported() []string {
 	if e.opWriteAllowed("") {
 		// 只有存在允许清单时才声明写动作能力（units 为空时 opWriteAllowed 为假）
 		out = append(out, model.OpsKindSvcRestart)
+	}
+	// 容器查询读的不是本机而是整个集群内部结构，因此除了只读总开关，还有它自己的开关
+	// （guards.ops.container）与实现是否就位（k8s == nil 表示本机没配集群）。
+	if e.guards.OpsReadOnlyEnabled() && e.guards.OpsContainerEnabled() && e.k8s != nil {
+		out = append(out, containerKinds...)
 	}
 	return out
 }
@@ -149,6 +158,10 @@ func (e *Executor) run(cmd model.OpsCommand) model.OpsResult {
 			return fail("本机护栏未把 " + unit + " 列入 guards.ops.units，拒绝执行重启")
 		}
 		return e.svcRestart(unit)
+	case model.OpsKindContainerWorkloads, model.OpsKindContainerPods,
+		model.OpsKindContainerDescribe, model.OpsKindContainerEvents:
+		// 容器类动作全部只读，参数与护栏集中在 runContainer（见 container.go）。
+		return e.runContainer(cmd)
 	default:
 		// 旧 Server 下发了本 Agent 不认识的动作：明确回绝，不要静默忽略。
 		return fail("本机不支持该动作：" + cmd.Kind)
