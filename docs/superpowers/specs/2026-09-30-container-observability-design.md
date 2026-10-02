@@ -194,3 +194,29 @@ GET    /api/v1/logs?from=&to=&q=&regex=&nodes=&sources=&fields=key:value&limit=&
 | 抽 `LogStore` 抽象引入打包复杂度 | 接口与第二适配器一起落地；默认不引入外部后端（ADR-0002） |
 | `exec` 被当作"顺手功能"提前做 | 明确 P2 + 独立高危权限点 + 显式开启 + 审计，进入路线图而非首批 |
 | 与集中日志职责混淆 | 用 §4.4 的边界表固化：历史检索 vs 按需拉取 vs 长期保留三条路径 |
+
+## 实施记录（按批次追加）
+
+### 批次 1（2026-10-02）：容器只读管理面
+
+ADR-0003 那条通路上的第一批只读能力：集群清单 + 工作负载 + Pod + 事件 + 对象详情。
+
+| 层 | 改动 |
+|---|---|
+| 协议 | `internal/model/ops.go`：4 个 kind 常量 + 集群/命名空间/对象名/资源类型四个白名单正则；`OpsResult` 新增可选 `JSON`（结构化载荷，与 `Data` 的分节文本并存、不互相替代）；新增 `ContainerQueryResult`（列名 + 行的通用表格形态；放 model 是因为它**是协议载荷**） |
+| Server | `internal/server/ops/catalog.go` 新增「容器」分组 4 个**只读**动作（参数规格即校验）；`internal/server/api/container_api.go` 提供 `GET /api/v1/container/k8s/clusters`；权限点 `container:read` 并入内置「全局运维管理员」，与 `middleware:read` 刻意分开 |
+| Agent | 护栏新增 `guards.ops.container`（三态 `*bool`，默认放行）；`internal/agent/collector/k8s_query.go` 复用既有 `buildK8sConn` / `getJSON` 实现只读查询；`internal/agent/ops/container.go` 负责护栏 + **参数本地复校** + 分派；`cmd/agent/main.go` 仅在配了 `k8sInstances` 时注入 |
+| 前端 | `web/src/components/container/ContainerView.vue`（集群选择 / 三个 Tab / 提交-轮询 / 详情抽屉）；路由 `/container`（`perm: container:read`）；侧栏「观测监控」与命令面板入口 |
+
+**关键取舍（都写进了代码注释）**：
+
+1. **不做原始 YAML**：`container.describe` 是白名单投影。把对象 JSON 脱敏后原样透出，只要漏一个字段就是一次凭据泄露——Pod 的 `env[].value`、ConfigMap 的 `data`、注解里的 `last-applied-configuration` 都可能含明文。`secrets` 因此不在可选资源类型里（要看 Secret 请直接上 `kubectl`）。
+2. **行数有界**：所有列表都用 apiserver 的 `limit` + 自己的行上限（工作负载 300 / Pod 500 / 事件 200），超出即 `truncated` 并显式回传。绝不"先全拉回来再截断"。
+3. **能力随实现就位**：没配集群的机器 `coll.K8s()` 返回 nil → 不声明容器能力 → 中心不下发。**宁可让界面显示"该节点不支持"，也不要下发一条注定失败的任务**。
+4. **容器单独一个本机开关**：它读的是整个集群结构而不是本机；"愿意交出自己的负载"和"愿意交出集群结构"是两件事，所以各有一个开关。
+5. **撤回语义照旧诚实**：只有 `queued` 能撤回，已领取的如实说"无法撤回"。
+
+**本批未做（仍在路线图）**：`container.logs`（Pod 日志拉取——用户 2026-09-30 明确说"后面再考虑"）、`container.exec`（P2，需独立高危权限点与显式开启）、§4 的日志结构化解析与字段检索、`LogStore` 后端抽象（ADR-0002，随第二适配器一起做）。
+
+**验证**：`go test ./...` 全绿；`npm --prefix web run build` 与 `npm --prefix web test`（38 例）通过。新增用例：动作目录与参数注入（`internal/server/ops/catalog_test.go`）、集群清单的权限 / 资源范围 / 凭据字段边界（`internal/server/api/container_api_test.go`）、护栏三态与「参数不合法时一次都不调用查询实现」（`internal/agent/ops/container_test.go`）。
+**尚未在 dev-server 做实机端到端验证**（需一台配了 `k8sInstances` 的节点）。
