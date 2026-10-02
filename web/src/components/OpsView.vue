@@ -279,7 +279,27 @@
           </div>
         </el-form-item>
         <el-form-item v-for="p in paramSpecs" :key="p.name" :label="p.title || p.name" :required="p.required">
-          <el-input v-model="form.params[p.name]" :placeholder="p.example || p.desc" />
+          <!-- fileId 不给手输：它必须来自一次真实上传，手填只会得到一个不存在的引用号 -->
+          <template v-if="p.name === 'fileId'">
+            <el-upload
+              :show-file-list="false"
+              :http-request="onFileUpload"
+              :before-upload="beforeFileUpload"
+              :disabled="uploading"
+            >
+              <el-button :loading="uploading">
+                {{ uploadedFile ? '重新选择文件' : '选择要分发的文件' }}
+              </el-button>
+            </el-upload>
+            <div v-if="uploadedFile" class="field-hint">
+              已上传 <b>{{ uploadedFile.name }}</b>（{{ fmtBytes(uploadedFile.size) }}，sha256 {{ String(uploadedFile.sha256 || '').slice(0, 12) }}…）
+              —— 引用号 <code>{{ form.params[p.name] }}</code>
+            </div>
+            <div v-else class="field-hint">
+              单文件上限 256 KiB，覆盖不了的大文件请先自行拆分。上传后由服务端保管，下发时随目标机器的上报响应送达。
+            </div>
+          </template>
+          <el-input v-else v-model="form.params[p.name]" :placeholder="p.example || p.desc" />
           <div v-if="p.desc" class="field-hint">{{ p.desc }}</div>
         </el-form-item>
         <el-form-item label="原因">
@@ -288,7 +308,12 @@
       </el-form>
       <template #footer>
         <el-button @click="dispatchVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" :disabled="!form.nodes.length || !form.kind" @click="submitDispatch">
+        <el-button
+          type="primary"
+          :loading="submitting"
+          :disabled="!form.nodes.length || !form.kind || (form.kind === 'file.push' && !form.params.fileId)"
+          @click="submitDispatch"
+        >
           下发到 {{ form.nodes.length }} 个节点
         </el-button>
       </template>
@@ -420,7 +445,7 @@ import {
 import BatchBar from './BatchBar.vue'
 import KpiCard from './KpiCard.vue'
 import PageHeader from './common/PageHeader.vue'
-import { cancelOpsTasks, createOpsBatch, createOpsTask, deleteOpsTask, listOpsActions, listOpsTasks } from '../api/ops'
+import { cancelOpsTasks, createOpsBatch, createOpsTask, deleteOpsTask, listOpsActions, listOpsTasks, uploadOpsFile } from '../api/ops'
 import http from '../api/http'
 import { useAuth } from '../composables/useAuth'
 
@@ -575,7 +600,59 @@ function actionUsable(a) {
 }
 const anyUsable = computed(() => actions.value.some((a) => actionUsable(a)))
 
+/* ---- 文件分发：上传拿到引用号，再随任务下发 ---- */
+const uploading = ref(false)
+const uploadedFile = ref(null)
+
+// 与服务端上限一致（model.OpsFileMaxBytes = 256KiB）：本地先拦一道，
+// 免得用户等一次完整的失败往返才知道文件太大。
+const FILE_MAX_BYTES = 256 * 1024
+
+function fmtBytes(n) {
+  if (!n) return '0 B'
+  if (n < 1024) return n + ' B'
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
+  return (n / 1024 / 1024).toFixed(1) + ' MB'
+}
+
+function beforeFileUpload(file) {
+  if (!file.size) {
+    ElMessage.error('文件是空的，拒绝分发（空内容会直接把目标文件清空）')
+    return false
+  }
+  if (file.size > FILE_MAX_BYTES) {
+    ElMessage.error(`文件 ${fmtBytes(file.size)} 超过单次分发上限 ${fmtBytes(FILE_MAX_BYTES)}`)
+    return false
+  }
+  return true
+}
+
+async function onFileUpload(option) {
+  const fd = new FormData()
+  fd.append('file', option.file)
+  uploading.value = true
+  try {
+    const rec = await uploadOpsFile(fd)
+    uploadedFile.value = rec
+    form.params.fileId = rec.ref
+    ElMessage.success('文件已上传：' + rec.name)
+    option.onSuccess && option.onSuccess(rec)
+  } catch (e) {
+    uploadedFile.value = null
+    form.params.fileId = ''
+    ElMessage.error(e.message || '上传失败')
+    option.onError && option.onError(e)
+  } finally {
+    uploading.value = false
+  }
+}
+
 function kindSummary(row) {
+  // 文件分发：文件名 + 目标路径比引用号有意义得多（引用号是机器看的）
+  if (row.file && row.file.name) {
+    const path = (row.params || {}).path
+    return path ? `${row.file.name} → ${path}` : row.file.name
+  }
   const params = row.params || {}
   const keys = Object.keys(params)
   if (!keys.length) return row.kind
@@ -587,6 +664,7 @@ async function openDispatch() {
   form.kind = ''
   form.params = {}
   form.reason = ''
+  uploadedFile.value = null
   capsLoaded.value = false
   support.value = {}
   dispatchVisible.value = true
@@ -633,6 +711,8 @@ function onNodesChange() {
 
 function onActionChange() {
   form.params = {}
+  // 换动作时清掉已选文件：留着它会让"上一条动作选的文件"看起来像是本条动作要用的
+  uploadedFile.value = null
   for (const p of paramSpecs.value) form.params[p.name] = ''
 }
 
@@ -647,6 +727,12 @@ async function submitDispatch() {
   const lines = [
     `将对 ${form.nodes.length} 个节点下发「${a.title}」${a.readOnly ? '（只读）' : '——这会改变这些机器的运行状态'}`,
   ]
+  // 文件分发把话说具体：写的是哪个文件、写到哪、原文件会不会被覆盖——
+  // 这是本通道里唯一"直接替换机器上文件"的动作，含糊的确认框等于没有确认。
+  if (a.kind === 'file.push') {
+    const fname = uploadedFile.value ? uploadedFile.value.name : '所选文件'
+    lines.push(`会把 ${fname} 写入各节点的 ${form.params.path || '（未填目标路径）'}；目标位置上已有的文件会先改名备份`)
+  }
   if (covered < form.nodes.length) {
     lines.push(`其中只有 ${covered} 台放行了该动作，其余会被跳过（逐台给出原因）`)
   }

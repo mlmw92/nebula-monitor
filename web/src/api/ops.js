@@ -40,3 +40,14 @@ export const cancelOpsTasks = (payload) => http.post('/api/v1/ops/tasks/cancel',
 
 // 删除一条**已结束**的任务记录（排队中/执行中的删不掉，服务端返回 409）
 export const deleteOpsTask = (id) => http.del('/api/v1/ops/tasks/' + encodeURIComponent(id))
+
+// ---- 文件分发（file.push）----
+//
+// 上传与下发是两个步骤：先拿到引用号（fileId），再用它创建任务。
+// 不把内容塞进任务参数，是因为服务端的任务存储是**每次状态流转都整体重写**的一份 JSON，
+// 内容进去会让它按「条数 × 文件大小」的量级膨胀（见 internal/server/ops/files.go）。
+// 单文件上限 256KiB：内容要 base64 后随一轮上报响应下发。
+export const uploadOpsFile = (formData, onProgress) => http.upload('/api/v1/ops/files', formData, onProgress)
+
+// 已上传的待分发文件（供复用，不必为同一次分发重复上传）。
+export const listOpsFiles = () => http.get('/api/v1/ops/files')
