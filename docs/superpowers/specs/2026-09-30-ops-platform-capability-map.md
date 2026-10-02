@@ -49,7 +49,7 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 | 1 | 监控告警 | 10 | 7 | 0 | 3 | P1 |
 | 2 | 资产 / CMDB | 9 | 7 | 2 | 0 | **P0** |
 | 3 | 配置管理 | 6 | 2 | 0 | 4 | P2 |
-| 4 | 自动化执行 | 6 | 2 | 2 | 2 | P1 |
+| 4 | 自动化执行 | 6 | 3 | 1 | 2 | P1 |
 | 5 | 发布部署 | 4 | 1 | 0 | 3 | P2 |
 | 6 | 工单流程 | 4 | 0 | 1 | 3 | P2 |
 | 7 | 堡垒机 / PAM | 7 | 3 | 0 | 4 | P2 |
@@ -60,7 +60,7 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 | 12 | 报表大屏 | 8 | 6 | 0 | 2 | P2 |
 | 13 | 权限审计 | 7 | 5 | 0 | 2 | P0 |
 | 14 | 开放集成 | 7 | 4 | 0 | 3 | P2 |
-| | **合计** | **93** | **49** | **9** | **35** | |
+| | **合计** | **93** | **50** | **8** | **35** | |
 
 **一句话结论**：采集、告警、存储、权限、审计、离线交付这一侧**已经很扎实**（47 项已实现多集中于此）；缺口集中在**"从数据到管理"的四件事——模型化（资产）、操作面（容器/执行）、索引化（日志/检索）、闭环化（工单/审批/自愈）**。2026-09-30 补：**操作面的地基（统一下行通道 + 四道护栏）已就位**，批量执行/脚本/文件分发/在线终端都可以直接挂上去。
 
@@ -112,11 +112,11 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 
 | 功能点 | 状态 | 现状与依据 | 优先级 | 复杂度 | 前置依赖 | 归属 |
 |---|---|---|---|---|---|---|
-| 任务下发通道（Server → Agent 执行后回传） | 已实现 | **已泛化**：`internal/server/ops/`（动作目录 + 任务状态机 `queued→delivered→running→succeeded/failed/expired` + 能力协商 + 超时回收）、`internal/agent/ops/`（执行器 + 幂等落盘）、receiver 响应体搭车下发 `resp["ops"]`、回执 `payload.opsResult`；首批 3 个动作（诊断包、查服务状态为只读；重启服务为写）。原两条专用链路（升级、fail2ban）保留 | — | — | — | D1 |
-| 执行护栏（本机护栏/能力协商/中心授权+审计） | 已实现 | 四道护栏均落地：① 本机护栏 `agent.yaml guards.ops`（默认只读；写动作需 `write:true` **且** 单元在 `units` 清单）② 能力协商 `Capabilities.Ops`（只声明本机放行的动作）③ `ops:read`/`ops:exec` 权限点 + 参数校验 + 审计（`ops:exec` 已入 `auth/policy.go:HighRiskPermissions`）④ 默认只读。注：`HighRiskPermissions` 本身仍是**声明式**标记（不额外拦截），二次确认按只读/写动作区分 | — | — | — | D1 |
+| 任务下发通道（Server → Agent 执行后回传） | 已实现 | **已泛化**：`internal/server/ops/`（动作目录 + 任务状态机 `queued→delivered→running→succeeded/failed/expired` + 能力协商 + 超时回收）、`internal/agent/ops/`（执行器 + 幂等落盘）、receiver 响应体搭车下发 `resp["ops"]`、回执 `payload.opsResult`；当前 8 个动作：`node.diagnostics` / `svc.status`（只读）、`svc.restart`（写）、`container.workloads|pods|describe|events`（只读）、`file.push`（写，独立护栏）。原两条专用链路（升级、fail2ban）保留 | — | — | — | D1 |
+| 执行护栏（本机护栏/能力协商/中心授权+审计） | 已实现 | 四道护栏均落地：① 本机护栏 `agent.yaml guards.ops`（默认只读；写动作需 `write:true` **且** 单元在 `units` 清单）② 能力协商 `Capabilities.Ops`（只声明本机放行的动作）③ `ops:read`/`ops:exec` 权限点 + 参数校验 + 审计（`ops:exec` 已入 `auth/policy.go:HighRiskPermissions`）④ 默认只读。**护栏按"同意的性质"分设**：容器查询有 `guards.ops.container`、文件分发有 `guards.ops.file{write,dirs}`——它们各自独立于只读总开关与 `write/units`。注：`HighRiskPermissions` 本身仍是**声明式**标记（不额外拦截），二次确认按只读/写动作区分 | — | — | — | D1 |
 | 批量命令 / 脚本执行 | 部分实现 | **批量下发已实现**：`POST /api/v1/ops/tasks/batch`（逐节点结论、200 台/次上限、批次号聚合、仅排队中可撤回），依据 `internal/server/ops/batch_test.go`；**任意命令/脚本执行仍未实现**（动作是白名单，参数两端校验），属独立评估项 | P1 | L | 任务下发通道 + 护栏 | — |
 | Web 在线终端 | 未实现 | 前端无终端组件；`grep` 无实现 | P2 | L | 批量执行通道 | — |
-| 文件分发 | 未实现 | — | P2 | M | 任务下发通道 | — |
+| 文件分发 | 已实现 | `file.push` 动作 + `POST /api/v1/ops/files`（multipart 上传，`ops:exec`）。**内容与任务分离**：内容落 `ops_files/<ref>.bin`，任务里只留 `fileId`，领取时注入下发的副本（`internal/server/ops/files.go`；不这么做 `ops_tasks.json` 会按「条数 × 文件大小」膨胀，而它每次状态流转都整体重写）。**本机护栏独立**：`guards.ops.file{write,dirs}`，默认不放行且必须列出允许目录（与「重启服务」是两个独立的同意）。Agent 侧三道约束：目录白名单（含父目录软链解析，防 `/opt/app/conf → /etc` 逃逸）、sha256 + 长度校验、**先备份再原子替换**（`internal/agent/ops/file.go`）。**单文件上限 256KiB**；大文件、目录递归、"执行分发后的文件"未做，理由见 `2026-09-30-ops-platform-evolution-design.md` 的文件分发实施记录 | P2 | M | 任务下发通道 | D1 |
 | 定时计划任务 | 部分实现 | 仅拨测有调度器：`internal/server/dialtest/scheduler.go`；无通用作业调度 | P2 | M | 任务下发通道 | — |
 
 ### 3.5 发布部署
