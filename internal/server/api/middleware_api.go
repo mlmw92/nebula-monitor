@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/alert"
@@ -1755,12 +1756,36 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 		Phase  string `json:"phase"`
 		Status string `json:"status"`
 	}
-	var podOut []k8sPodInfo
-	if phaseSeries, err := a.store.QueryAllLatest("k8s_pod_phase", nil); err == nil {
+	// 异常 Pod 明细。这里**不能**用 QueryAllLatest（即时查询）：
+	//
+	// VictoriaMetrics 的即时查询把返回的时间戳设成**求值时刻**而不是样本时间
+	// （见 storage/querier.go 的 QueryInstantWithLookback 注释与 alert/engine.go 的
+	// freshSampleWindow），于是同一 Pod 的历史序列（ContainerCreating / ErrImagePull /
+	// ImagePullBackOff ...）时间戳完全相同，"按时间戳取最新"彻底失效；而且指标序列
+	// 只要写过就不会消失，即时查询会一直把它们返回。实机验证看到的现象就是：
+	// 一个 Pod 在列表里出现多行，而且已经跑起来的健康 Pod 也永久留在"异常"里。
+	//
+	// QueryInstantWithLookback 走 range-vector（expr[窗口]）：窗口内没有采样的陈旧
+	// 序列直接不返回，且返回的是**真实样本时间戳**。窗口沿用告警引擎 freshSampleWindow
+	// 的口径（90s ≈ 6 个采集周期，足以容忍抖动），再按 node|instance|namespace|pod
+	// 取时间戳最新的一条，解决同一 Pod 在窗口内发生状态迁移时的重复行。
+	const detailWindow = 90 * time.Second
+	latestTS := map[string]int64{}
+	bestPod := map[string]k8sPodInfo{}
+	if phaseSeries, err := a.store.QueryInstantWithLookback("", "k8s_pod_phase", nil, detailWindow); err == nil {
 		for _, s := range phaseSeries {
-			instance := s.Labels["instance"]
+			node, instance := s.Labels["node"], s.Labels["instance"]
 			pod := s.Labels["pod"]
-			if instance == "" || pod == "" || len(s.Points) == 0 || s.Points[len(s.Points)-1].Value == 0 {
+			if instance == "" || pod == "" || len(s.Points) == 0 {
+				continue
+			}
+			last := s.Points[len(s.Points)-1]
+			if last.Value == 0 {
+				continue
+			}
+			key := node + "|" + instance + "|" + s.Labels["namespace"] + "|" + pod
+			// 同一 Pod 只采纳数据点时间戳最新的一条（约定见 mw_newest.go）。
+			if !newestSampleKept(latestTS, key, last.Timestamp) {
 				continue
 			}
 			// 旧 Agent 不产出 status 标签，退回 phase——显示得糙一点，好过显示空白。
@@ -1768,15 +1793,19 @@ func (a *API) handleK8sInstances(w http.ResponseWriter, r *http.Request) {
 			if status == "" {
 				status = s.Labels["phase"]
 			}
-			podOut = append(podOut, k8sPodInfo{
+			bestPod[key] = k8sPodInfo{
 				Cluster:   s.Labels["name"],
 				Instance:  instance,
 				Namespace: s.Labels["namespace"],
 				Pod:       pod,
 				Phase:     s.Labels["phase"],
 				Status:    status,
-			})
+			}
 		}
+	}
+	podOut := make([]k8sPodInfo, 0, len(bestPod))
+	for _, p := range bestPod {
+		podOut = append(podOut, p)
 	}
 	sort.Slice(podOut, func(i, j int) bool { return podOut[i].Pod < podOut[j].Pod })
 
