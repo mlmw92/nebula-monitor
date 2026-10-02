@@ -222,6 +222,10 @@ func PermissionCatalog() []permDomain {
 			{"ops:read", "查看操作任务"},
 			{"ops:exec", "下发操作任务（高风险）"},
 		}},
+		// 容器只读管理面：集群清单 / 工作负载 / Pod / 事件 / 对象详情。
+		// 与 middleware:read 分开，是因为它读的是**集群内部对象**（工作负载、事件里带镜像与节点名
+		// 等运行细节），与"看指标曲线"不是一个信息面；下发容器动作仍走 ops:exec。
+		{Domain: "容器", Items: []Permission{{"container:read", "查看容器与工作负载"}}},
 		// 日志内容可能含密码/个人信息/业务数据，因此单独设权限点：不默认给只读角色，按需授予
 		{Domain: "集中日志", Items: []Permission{{"logs:read", "查看集中日志"}}},
 		{Domain: "Agent", Items: []Permission{{"agent:read", "查看"}, {"agent:upgrade", "升级"}}},
@@ -264,7 +268,7 @@ func BuiltinRoles() []Role {
 			Permissions: []string{
 				"dashboard:read", "dashboard:write", "nodes:read", "nodes:write", "groups:read", "groups:write",
 				"middleware:read", "middleware:write", "assets:read", "assets:write", "assets:export",
-			"inspect:read", "inspect:run", "probe:read", "probe:write",
+				"inspect:read", "inspect:run", "probe:read", "probe:write",
 				// 集中日志（C2）：运维是排查问题的人，默认给全局运维角色；
 				// 刻意不给只读/告警/安全/审计角色——日志内容可能含敏感数据，按需单独授予。
 				"logs:read",
@@ -272,6 +276,9 @@ func BuiltinRoles() []Role {
 				// 这不等于"能随便改机器"——目标机器自己的 guards.ops 还要再放行一次，
 				// 而写动作默认是被那台机器拒绝的。
 				"ops:read", "ops:exec",
+				// 容器只读管理面：与 ops 同一取舍——运维是排障的人，默认给全局运维角色；
+				// 刻意不给只读/告警/安全角色：它读的是集群内部对象（工作负载、事件里的镜像与节点名）。
+				"container:read",
 				"report:read", "report:export", "metrics:export", "agent:read", "agent:upgrade",
 				"alerts:read", "roles:read", "system:config",
 			},

@@ -46,8 +46,10 @@ type Task struct {
 	model.OpsCommand
 	State   string `json:"state"`
 	Message string `json:"message,omitempty"`
-	// Data 是执行产出的结构化结果（分节文本）。
+	// Data 是执行产出的分节文本结果（人读）。
 	Data map[string]string `json:"data,omitempty"`
+	// JSON 是同一份结果的结构化形态（容器查询的表格载荷），见 model.OpsResult.JSON 的说明。
+	JSON string `json:"json,omitempty"`
 	// Operator / OperatorIP 是触发操作的管理员与来源 IP（审计用）。
 	Operator   string `json:"operator,omitempty"`
 	OperatorIP string `json:"operatorIP,omitempty"`
@@ -101,9 +103,9 @@ func (s *Store) load() {
 		return
 	}
 	var snap struct {
-		Tasks []*Task              `json:"tasks"`
-		Caps  map[string][]string  `json:"caps"`
-		Seq   int64                `json:"seq"`
+		Tasks []*Task             `json:"tasks"`
+		Caps  map[string][]string `json:"caps"`
+		Seq   int64               `json:"seq"`
 	}
 	if err := json.Unmarshal(data, &snap); err != nil {
 		slog.Warn("操作任务存储加载失败，忽略旧数据", "path", s.path, "err", err)
@@ -414,6 +416,7 @@ func (s *Store) ApplyResult(res model.OpsResult) {
 	if res.Data != nil {
 		t.Data = res.Data
 	}
+	t.JSON = res.JSON
 	t.DurationMs = res.DurationMs
 	s.mu.Unlock()
 	s.save()

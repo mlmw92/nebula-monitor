@@ -291,6 +291,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/ops/tasks/cancel", a.permit(a.handleOpsCancel, "ops:exec"))
 	mux.HandleFunc("DELETE /api/v1/ops/tasks/{id}", a.permit(a.handleOpsDelete, "ops:exec"))
 
+	// 容器管理面（只读）。集群清单与中间件的 /middleware/k8s/instances 同源（都来自
+	// instancereg 的 K8sInstance 上报），但**不合并**：容器管理面的权限点是 container:read，
+	// 不该要求运维为了看工作负载额外拿到 middleware:read。集群标识用上报里的 name
+	// （agent.yaml 的 k8sInstances[].name），凭据始终只在 Agent 本地。
+	mux.HandleFunc("GET /api/v1/container/k8s/clusters", a.permit(a.handleContainerClusters, "container:read"))
+
 	// 安装信息含 Agent 长期密钥 → agent:secret:read（高危）；version 登录即可；agent/check 走 X-Agent-Secret（公开）
 	mux.HandleFunc("GET /api/v1/install-info", a.permit(a.handleInstallInfo, "agent:secret:read"))
 	mux.HandleFunc("GET /api/v1/version", a.handleVersion)

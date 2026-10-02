@@ -38,10 +38,23 @@ const (
 	KindSvcStatus = model.OpsKindSvcStatus
 	// KindSvcRestart 重启 systemd 单元（**写**，默认被本机护栏挡下）。
 	KindSvcRestart = model.OpsKindSvcRestart
+
+	// 容器/K8s 只读查询。集群标识取 Agent 本地的 k8sInstances[].name——
+	// 凭据只在 Agent 本地，Server 侧只知道"有这么个集群"，不知道它的 kubeconfig。
+	KindContainerWorkloads = model.OpsKindContainerWorkloads
+	KindContainerPods      = model.OpsKindContainerPods
+	KindContainerDescribe  = model.OpsKindContainerDescribe
+	KindContainerEvents    = model.OpsKindContainerEvents
 )
 
-// unitPattern 是 systemd 单元名的白名单字符集（与 Agent 侧共用同一个正则）。
-var unitPattern = model.OpsUnitPattern
+// 参数白名单字符集（与 Agent 侧共用同一批正则）。
+var (
+	unitPattern       = model.OpsUnitPattern
+	clusterPattern    = model.OpsClusterPattern
+	namespacePattern  = model.OpsNamespacePattern
+	objectNamePattern = model.OpsObjectNamePattern
+	resourcePattern   = model.OpsContainerResourcePattern
+)
 
 // Param 是一个动作参数的规格。
 type Param struct {
@@ -92,6 +105,48 @@ var catalog = []Action{
 				Example: "nginx.service", Desc: "systemd 单元名，需以 .service 结尾，且必须在目标机器的允许清单里"},
 		},
 	},
+	{
+		Kind: KindContainerWorkloads, Title: "查询工作负载", Group: "容器", ReadOnly: true,
+		Desc: "列出集群（可指定命名空间）下的 Deployment / StatefulSet / DaemonSet / Job 与副本就绪情况。凭据只在 Agent 本地，指令延迟约为一个上报周期",
+		Params: []Param{
+			{Name: "cluster", Title: "集群", Required: true, Pattern: clusterPattern.String(),
+				Example: "prod-k8s", Desc: "目标机器 agent.yaml 里 k8sInstances[].name 的取值"},
+			{Name: "namespace", Title: "命名空间", Pattern: namespacePattern.String(),
+				Example: "default", Desc: "留空表示全部命名空间"},
+		},
+	},
+	{
+		Kind: KindContainerPods, Title: "查询 Pod", Group: "容器", ReadOnly: true,
+		Desc: "列出 Pod 的状态、重启次数、所在节点与所属工作负载，用于快速定位 CrashLoopBackOff / Pending 之类的异常",
+		Params: []Param{
+			{Name: "cluster", Title: "集群", Required: true, Pattern: clusterPattern.String(), Example: "prod-k8s"},
+			{Name: "namespace", Title: "命名空间", Pattern: namespacePattern.String(),
+				Example: "default", Desc: "留空表示全部命名空间"},
+		},
+	},
+	{
+		Kind: KindContainerDescribe, Title: "查看对象详情", Group: "容器", ReadOnly: true,
+		Desc: "单个对象的只读详情（状态、条件、容器镜像与最近事件摘要）。Secret 类敏感字段一律以占位符替换，且 secret 资源本身不在可选范围内",
+		Params: []Param{
+			{Name: "cluster", Title: "集群", Required: true, Pattern: clusterPattern.String(), Example: "prod-k8s"},
+			{Name: "namespace", Title: "命名空间", Required: true, Pattern: namespacePattern.String(), Example: "default"},
+			{Name: "resource", Title: "资源类型", Required: true, Pattern: resourcePattern.String(),
+				Example: "pods", Desc: "pods / deployments / statefulsets / daemonsets / jobs / services / configmaps"},
+			{Name: "name", Title: "对象名", Required: true, Pattern: objectNamePattern.String(),
+				Example: "web-7d9f8c6b5-x2k4p"},
+		},
+	},
+	{
+		Kind: KindContainerEvents, Title: "查询事件", Group: "容器", ReadOnly: true,
+		Desc: "列出命名空间（或指定对象）的事件，按时间倒序。事件量大，Agent 侧只返回最近若干条并标注是否被截断",
+		Params: []Param{
+			{Name: "cluster", Title: "集群", Required: true, Pattern: clusterPattern.String(), Example: "prod-k8s"},
+			{Name: "namespace", Title: "命名空间", Pattern: namespacePattern.String(),
+				Example: "default", Desc: "留空表示全部命名空间"},
+			{Name: "name", Title: "对象名", Pattern: objectNamePattern.String(),
+				Example: "web-7d9f8c6b5-x2k4p", Desc: "留空表示该命名空间的全部事件"},
+		},
+	},
 }
 
 func init() {
@@ -116,7 +171,7 @@ func init() {
 //
 // 不按字符串排序：中文按字节序排出来的顺序是随机的（"服务"恰好排在"节点"前面纯属字节巧合），
 // 用户看到的分组顺序会因为新增一个分组而整体变化。这里显式声明，未列出的分组排在最后。
-var groupOrder = []string{"节点", "服务"}
+var groupOrder = []string{"节点", "服务", "容器"}
 
 func groupRank(g string) int {
 	for i, name := range groupOrder {

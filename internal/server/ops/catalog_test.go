@@ -92,6 +92,99 @@ func TestCatalog_ReadOnlyFirstWithinGroup(t *testing.T) {
 	}
 }
 
+// 容器/K8s 只读查询：首批必须**全是只读**，且参数被钉在白名单字符集里。
+//
+// 这些参数会被拼进 apiserver 的 URL 路径，所以"能通过校验"就等于"能构造出的请求"。
+func TestValidate_ContainerActions(t *testing.T) {
+	ok := []struct {
+		name   string
+		kind   string
+		params map[string]string
+	}{
+		{"工作负载（全命名空间）", KindContainerWorkloads, map[string]string{"cluster": "prod-k8s"}},
+		{"工作负载（指定命名空间）", KindContainerWorkloads, map[string]string{"cluster": "prod-k8s", "namespace": "kube-system"}},
+		{"Pod 列表", KindContainerPods, map[string]string{"cluster": "prod-k8s", "namespace": "default"}},
+		{"对象详情", KindContainerDescribe, map[string]string{
+			"cluster": "prod-k8s", "namespace": "default", "resource": "pods", "name": "web-7d9f8c6b5-x2k4p",
+		}},
+		{"事件（全命名空间）", KindContainerEvents, map[string]string{"cluster": "prod-k8s"}},
+	}
+	for _, tc := range ok {
+		t.Run(tc.name, func(t *testing.T) {
+			action, params, err := Validate(tc.kind, tc.params)
+			if err != nil {
+				t.Fatalf("合法参数不应报错: %v", err)
+			}
+			if !action.ReadOnly {
+				t.Fatalf("容器查询动作 %s 必须标记为只读", action.Kind)
+			}
+			if action.Group != "容器" {
+				t.Fatalf("动作 %s 应归入「容器」分组，实际 %q", action.Kind, action.Group)
+			}
+			// 可选参数留空时不应出现在归一化结果里（否则 Agent 会收到空串并去拼 `namespaces//pods`）
+			for k, v := range params {
+				if v == "" {
+					t.Fatalf("参数 %q 不应以空值下发", k)
+				}
+			}
+		})
+	}
+
+	reject := []struct {
+		name   string
+		kind   string
+		params map[string]string
+		wantIn string
+	}{
+		{"缺集群", KindContainerPods, map[string]string{"namespace": "default"}, "缺少必填参数"},
+		{"缺对象名", KindContainerDescribe, map[string]string{
+			"cluster": "c", "namespace": "n", "resource": "pods"}, "缺少必填参数"},
+		{"未知参数", KindContainerPods, map[string]string{"cluster": "c", "label": "app=web"}, "不支持参数"},
+		// describe 刻意不放开 secret：脱敏规则漏一个字段就是一次凭据泄露
+		{"describe 拒绝 secret", KindContainerDescribe, map[string]string{
+			"cluster": "c", "namespace": "n", "resource": "secrets", "name": "db"}, "不合法"},
+		// 路径穿越与查询串注入：这些值会被拼进 apiserver 的 URL
+		{"命名空间路径穿越", KindContainerPods, map[string]string{"cluster": "c", "namespace": "../../etc"}, "不合法"},
+		{"命名空间带斜杠", KindContainerPods, map[string]string{"cluster": "c", "namespace": "a/b"}, "不合法"},
+		{"命名空间查询串注入", KindContainerPods, map[string]string{"cluster": "c", "namespace": "a?watch=1"}, "不合法"},
+		{"对象名路径穿越", KindContainerDescribe, map[string]string{
+			"cluster": "c", "namespace": "n", "resource": "pods", "name": "../secrets"}, "不合法"},
+		{"对象名大写", KindContainerDescribe, map[string]string{
+			"cluster": "c", "namespace": "n", "resource": "pods", "name": "Web"}, "不合法"},
+		{"集群名带空格", KindContainerWorkloads, map[string]string{"cluster": "prod k8s"}, "不合法"},
+		{"集群名是选项", KindContainerWorkloads, map[string]string{"cluster": "--server"}, "不合法"},
+	}
+	for _, tc := range reject {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := Validate(tc.kind, tc.params)
+			if err == nil {
+				t.Fatalf("应当拒绝（%s），却通过了", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantIn) {
+				t.Fatalf("错误信息应包含 %q，实际 %q", tc.wantIn, err.Error())
+			}
+		})
+	}
+}
+
+// 容器分组排在最后，且组内只有只读动作；顺序稳定是界面可预期的前提。
+func TestCatalog_ContainerGroupIsReadOnlyAndLast(t *testing.T) {
+	groups := []string{}
+	seen := map[string]bool{}
+	for _, a := range Catalog() {
+		if !seen[a.Group] {
+			seen[a.Group] = true
+			groups = append(groups, a.Group)
+		}
+		if a.Group == "容器" && !a.ReadOnly {
+			t.Fatalf("容器分组内出现写动作 %s：exec 属 P2，首批只放只读", a.Kind)
+		}
+	}
+	if len(groups) == 0 || groups[len(groups)-1] != "容器" {
+		t.Fatalf("容器分组应排在最后，实际顺序 %v", groups)
+	}
+}
+
 // 每个动作都要有唯一的 Kind（重复会让 Lookup 静默命中第一个）。
 func TestCatalog_KindsUnique(t *testing.T) {
 	seen := map[string]bool{}
