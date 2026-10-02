@@ -189,7 +189,17 @@ func main() {
 
 	// 统一下行操作通道：任务落盘在数据目录（与防护任务同处），receiver 用它领取/回执/回收，
 	// API 用它创建与查询。两端都注入同一份实例——分开注入会得到"创建了却永远不下发"的哑功能。
-	opsSvc := ops.NewService(ops.NewStore(filepath.Join(filepath.Dir(cfg.SecurityStoreFile), "ops_tasks.json")))
+	opsDataDir := filepath.Dir(cfg.SecurityStoreFile)
+	opsSvc := ops.NewService(ops.NewStore(filepath.Join(opsDataDir, "ops_tasks.json")))
+	// 文件分发的内容存储（ops_files/）：内容与任务分开存，任务里只留引用，
+	// 否则 ops_tasks.json 会以「条数 × 文件大小」的量级膨胀（见 ops/files.go 的说明）。
+	// 打不开时只记一条并继续：受影响的是文件分发（创建任务时会明确报错），
+	// 其余下行动作不受影响——不该因为它让整个服务起不来。
+	if opsFiles, err := ops.OpenFileStore(filepath.Join(opsDataDir, "ops_files")); err != nil {
+		slog.Error("操作文件存储初始化失败，文件分发不可用", "err", err)
+	} else {
+		opsSvc.SetFileStore(opsFiles)
+	}
 	recv.SetOps(opsSvc)
 
 	// 集中日志（C2）：目录留空时取 <DataDir>/logs；未配置时该能力关闭（接口回 503）。

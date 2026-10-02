@@ -16,7 +16,15 @@ import (
 func opsTestAPI(t *testing.T) (*API, *ops.Service) {
 	t.Helper()
 	a := scopeTestAPI(t)
-	svc := ops.NewService(ops.NewStore(filepath.Join(t.TempDir(), "ops_tasks.json")))
+	dir := t.TempDir()
+	svc := ops.NewService(ops.NewStore(filepath.Join(dir, "ops_tasks.json")))
+	// 文件分发的内容存储也一并接上：不接的话 file.push 会在"服务端未启用操作文件存储"上失败，
+	// 那条路径另有专门的用例，不该在这里冒充"节点不支持"。
+	fs, err := ops.OpenFileStore(filepath.Join(dir, "ops_files"))
+	if err != nil {
+		t.Fatalf("打开操作文件存储失败: %v", err)
+	}
+	svc.SetFileStore(fs)
 	a.SetOpsService(svc)
 	return a, svc
 }

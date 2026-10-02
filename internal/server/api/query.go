@@ -298,6 +298,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/ops/tasks/batch", a.permit(a.handleOpsCreateBatch, "ops:exec"))
 	mux.HandleFunc("POST /api/v1/ops/tasks/cancel", a.permit(a.handleOpsCancel, "ops:exec"))
 	mux.HandleFunc("DELETE /api/v1/ops/tasks/{id}", a.permit(a.handleOpsDelete, "ops:exec"))
+	// 文件分发的内容上传：与下发同权限（上传本身不动机器，但它决定了"能往机器上写什么"）；
+	// 列举只读，供界面复用已上传的文件而不必重复上传。
+	mux.HandleFunc("POST /api/v1/ops/files", a.permit(a.handleOpsFileUpload, "ops:exec"))
+	mux.HandleFunc("GET /api/v1/ops/files", a.permit(a.handleOpsFiles, "ops:read"))
 
 	// 容器管理面（只读）。集群清单与中间件的 /middleware/k8s/instances 同源（都来自
 	// instancereg 的 K8sInstance 上报），但**不合并**：容器管理面的权限点是 container:read，
