@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,6 +62,12 @@ type Task struct {
 	DurationMs  int64  `json:"durationMs,omitempty"`
 	// BatchID 是批量下发的批次号（单条下发为空）。用于按批次聚合结果与「整批取消」。
 	BatchID string `json:"batchId,omitempty"`
+	// File 是 file.push 任务的文件元信息快照（**不含内容**，内容在 FileStore 里按引用存）。
+	//
+	// 刻意冗余一份：任务列表要能回答"当时分发的是哪个文件、多大、摘要是什么"，
+	// 而内容本身会被淘汰（FileStore.prune）——记录不能因此变成一串看不懂的引用号。
+	// 它不参与投递：投递用的是 Params["fileId"]，见 Store.loadBlob。
+	File *FileRecord `json:"file,omitempty"`
 }
 
 // Store 持久化并管理操作任务。
@@ -73,6 +80,8 @@ type Store struct {
 	seq       int64
 	now       func() int64
 	persistMu sync.Mutex
+	// files 是文件分发的内容存储（可空：未启用时文件分发任务会在领取阶段明确失败）。
+	files *FileStore
 }
 
 // NewStore 创建操作任务存储并加载既有数据（file 为空时用默认文件名）。
@@ -384,8 +393,100 @@ func (s *Store) Take(node string, kinds []string) *model.OpsCommand {
 	cmd := picked.OpsCommand
 	s.mu.Unlock()
 	s.save()
-	cp := cmd
-	return &cp
+
+	// file.push 的内容在**领取时**才注入：任务存储里只有引用（理由见 files.go 的说明）。
+	//
+	// 注入失败必须让任务明确失败并带上原因，而不是下发一条没有内容的指令——
+	// 那样 Agent 只会回一句"缺少文件内容"，用户还得自己去猜是哪一环出的问题。
+	if cmd.Kind == model.OpsKindFilePush {
+		blob, err := s.loadBlob(cmd.Params["fileId"])
+		if err != nil {
+			s.failTask(cmd.ID, err.Error())
+			return nil
+		}
+		cmd.File = blob
+	}
+	return &cmd
+}
+
+// loadBlob 读取并编码要随指令下发的文件内容。
+func (s *Store) loadBlob(ref string) (*model.OpsFileBlob, error) {
+	if ref == "" {
+		return nil, fmt.Errorf("指令缺少文件引用（fileId），无法下发")
+	}
+	if s.files == nil {
+		return nil, fmt.Errorf("服务端未启用操作文件存储，无法下发文件分发任务")
+	}
+	content, rec := s.files.Content(ref)
+	if rec == nil {
+		return nil, fmt.Errorf("分发的文件内容已不存在（引用 %s 可能已被清理），请重新上传后再下发", ref)
+	}
+	return &model.OpsFileBlob{
+		Name:    rec.Name,
+		Size:    rec.Size,
+		SHA256:  rec.SHA256,
+		Content: base64.StdEncoding.EncodeToString(content),
+	}, nil
+}
+
+// failTask 把一条任务直接判为失败（在领取阶段就发现无法下发时用）。
+func (s *Store) failTask(id, msg string) {
+	s.mu.Lock()
+	if t, ok := s.tasks[id]; ok {
+		t.State = model.OpsStateFailed
+		t.Message = msg
+		t.DoneAt = s.now()
+	}
+	s.mu.Unlock()
+	s.save()
+}
+
+// SetFileStore 注入文件分发的内容存储。
+func (s *Store) SetFileStore(f *FileStore) { s.files = f }
+
+// AttachFileMany 给一批任务挂上同一个文件元信息快照（一次落盘）。
+//
+// 批量下发的 200 条任务要挂同一份快照：逐条挂会写 200 次 JSON 文件——
+// 与 CreateMany 存在的理由完全相同。
+func (s *Store) AttachFileMany(ids []string, rec *FileRecord) {
+	if rec == nil || len(ids) == 0 {
+		return
+	}
+	s.mu.Lock()
+	for _, id := range ids {
+		if t, ok := s.tasks[id]; ok {
+			t.File = rec
+		}
+	}
+	s.mu.Unlock()
+	s.save()
+}
+
+// AttachFile 给单条任务挂上文件元信息快照（展示与审计用，不参与投递）。
+func (s *Store) AttachFile(id string, rec *FileRecord) {
+	if rec == nil {
+		return
+	}
+	s.AttachFileMany([]string{id}, rec)
+}
+
+// FileRefInUse 报告某个上传文件是否仍被**未结束**的任务引用。
+//
+// 供 FileStore 淘汰时使用：把还在排队/领取/执行中的任务的内容删掉，会让那条任务在领取时
+// 突然没有内容可发，用户看到的是"点了分发没反应"——最难排查的一类失败。
+func (s *Store) FileRefInUse(ref string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, t := range s.tasks {
+		if t.Params["fileId"] != ref {
+			continue
+		}
+		switch t.State {
+		case model.OpsStateQueued, model.OpsStateDelivered, model.OpsStateRunning:
+			return true
+		}
+	}
+	return false
 }
 
 // ApplyResult 应用 Agent 回执（running / succeeded / failed）。

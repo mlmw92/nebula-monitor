@@ -16,10 +16,55 @@ var ErrUnsupported = errors.New("目标节点不支持该动作")
 // Service 把「校验 + 能力协商」的判断收在一处，让 API 层只关心权限与资源范围。
 type Service struct {
 	store *Store
+	// files 是文件分发的内容存储（可空：未启用时文件分发任务会被明确拒绝）。
+	files *FileStore
 }
 
 // NewService 创建服务。
 func NewService(store *Store) *Service { return &Service{store: store} }
+
+// SetFileStore 注入文件分发的内容存储，并同时接到任务存储上（领取时要注入内容）。
+func (s *Service) SetFileStore(f *FileStore) {
+	s.files = f
+	s.store.SetFileStore(f)
+}
+
+// SaveFile 保存一个待分发的文件（内容落 FileStore，返回引用记录）。
+//
+// 淘汰保护把"仍被未结束任务引用"的文件交给 Store 判断：内容存储不该知道任务的存在方式。
+func (s *Service) SaveFile(name string, content []byte, by string) (*FileRecord, error) {
+	if s.files == nil {
+		return nil, fmt.Errorf("服务端未启用操作文件存储")
+	}
+	return s.files.Save(name, content, by, s.store.FileRefInUse)
+}
+
+// ListFiles 列出已上传的待分发文件（新上传的在前）。
+func (s *Service) ListFiles() []*FileRecord {
+	if s.files == nil {
+		return nil
+	}
+	return s.files.List()
+}
+
+// resolveFile 取动作对应的上传文件元信息。
+//
+// 文件分发要求 fileId 指向一份**确实存在**的内容：等下发时才发现找不到，用户看到的是
+// "任务建好了但一直失败"，而原因（上传的文件被清理了）在界面上无从得知。
+func (s *Service) resolveFile(action Action, params map[string]string) (*FileRecord, error) {
+	if action.Kind != model.OpsKindFilePush {
+		return nil, nil
+	}
+	ref := params["fileId"]
+	if s.files == nil {
+		return nil, fmt.Errorf("服务端未启用操作文件存储，无法创建文件分发任务")
+	}
+	rec, ok := s.files.Get(ref)
+	if !ok {
+		return nil, fmt.Errorf("文件引用 %s 不存在或内容已被清理，请重新上传后再下发", ref)
+	}
+	return rec, nil
+}
 
 // Store 返回底层存储（receiver 需要用它做领取与回执）。
 func (s *Service) Store() *Store { return s.store }
@@ -37,6 +82,12 @@ func (s *Service) Create(node, kind string, params map[string]string, actor, ip,
 	if err != nil {
 		return nil, err
 	}
+	// 输入合法性（400 一类）先于能力协商（409 一类）判：引用号写错要立刻说，
+	// 否则用户会先去机器上翻护栏配置，白忙一轮。
+	fileRec, err := s.resolveFile(action, norm)
+	if err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(node) == "" {
 		return nil, fmt.Errorf("必须指定目标节点")
 	}
@@ -44,6 +95,7 @@ func (s *Service) Create(node, kind string, params map[string]string, actor, ip,
 		return nil, err
 	}
 	t := s.store.Create(model.OpsCommand{Node: node, Kind: action.Kind, Params: norm}, actor, ip, reason)
+	s.store.AttachFile(t.ID, fileRec)
 	return t, nil
 }
 
@@ -65,6 +117,13 @@ func (s *Service) checkSupport(node string, action Action) error {
 		return nil
 	}
 	if !action.ReadOnly {
+		// 提示必须指向这台机器**真正要改的那一项**：让用户按错的地方去改，比不给提示更糟。
+		if action.Kind == model.OpsKindFilePush {
+			return fmt.Errorf(
+				"%w：节点 %s 未放行文件分发——需在该节点 agent.yaml 的 guards.ops.file 中把 write 设为 true，"+
+					"并把允许写入的目录加入 dirs 清单（默认不放行；它与「重启服务」是两个独立的同意）",
+				ErrUnsupported, node)
+		}
 		return fmt.Errorf(
 			"%w：节点 %s 未放行写操作「%s」——需在该节点 agent.yaml 的 guards.ops 中把 write 设为 true，"+
 				"并把单元加入 units 清单（默认只读，写操作必须由机器自己同意）", ErrUnsupported, node, action.Title)
@@ -117,6 +176,11 @@ func (s *Service) CreateBatch(nodes []string, kind string, params map[string]str
 	if len(nodes) > maxBatchNodes {
 		return BatchResult{}, fmt.Errorf("单次批量下发最多 %d 个节点（当前 %d 个）：请按分组分批下发", maxBatchNodes, len(nodes))
 	}
+	// 文件分发：内容只需解析一次，整批共用同一份（内容不在任务里，只在领取时注入）
+	fileRec, err := s.resolveFile(action, norm)
+	if err != nil {
+		return BatchResult{}, err
+	}
 
 	batchID := s.store.NextBatchID()
 	items := make([]BatchItem, len(nodes))
@@ -140,6 +204,13 @@ func (s *Service) CreateBatch(nodes []string, kind string, params map[string]str
 		items[i].TaskID = tasks[ti].ID
 		items[i].State = tasks[ti].State
 		ti++
+	}
+	if fileRec != nil {
+		ids := make([]string, 0, len(tasks))
+		for _, t := range tasks {
+			ids = append(ids, t.ID)
+		}
+		s.store.AttachFileMany(ids, fileRec)
 	}
 
 	out := BatchResult{BatchID: batchID, Kind: action.Kind, Total: len(nodes), Items: items}
@@ -249,7 +320,9 @@ func (s *Service) Tasks(f ListFilter) []*Task { return s.store.List(f) }
 func (s *Service) ExpireOverdue() { s.store.ExpireOverdue() }
 
 // Take 领取可下发指令（receiver 调用）。
-func (s *Service) Take(node string, kinds []string) *model.OpsCommand { return s.store.Take(node, kinds) }
+func (s *Service) Take(node string, kinds []string) *model.OpsCommand {
+	return s.store.Take(node, kinds)
+}
 
 // ApplyResult 应用回执（receiver 调用）。
 func (s *Service) ApplyResult(res model.OpsResult) { s.store.ApplyResult(res) }

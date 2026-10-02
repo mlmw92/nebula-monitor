@@ -31,6 +31,14 @@ const (
 	OpsKindContainerDescribe = "container.describe"
 	// OpsKindContainerEvents 命名空间/对象的事件列表（只读，按时间倒序）。
 	OpsKindContainerEvents = "container.events"
+
+	// OpsKindFilePush 向目标机器分发一个文件（**写操作**，需目标机器显式放行）。
+	//
+	// 与 svc.restart 的差别在"写"的性质：重启是让某个已知单元回到它的标准状态，
+	// 而分发是**用中心手上的内容替换掉机器上的一个文件**——后者更强，所以它不复用
+	// guards.ops.write/units，而是有自己的一组开关（guards.ops.file.write + dirs）。
+	// 同一台机器"允许我重启 nginx"不等于"允许我往它磁盘上写文件"。
+	OpsKindFilePush = "file.push"
 )
 
 // OpsUnitPattern 是 systemd 单元名的白名单字符集，Server 与 Agent 共用。
@@ -59,7 +67,46 @@ var (
 	// 刻意**不含 secret**：虽然 describe 会做脱敏，但把 Secret 列进白名单等于给自己留一条
 	// "脱敏规则漏一个字段就泄一次"的路。真要看 Secret 应该走 kubectl 而不是监控平台。
 	OpsContainerResourcePattern = regexp.MustCompile(`^(pods|deployments|statefulsets|daemonsets|jobs|services|configmaps)$`)
+
+	// OpsFilePathPattern 是文件分发**目标路径**的白名单。
+	//
+	// 必须绝对路径，且禁止 `..` 段与结尾斜杠：这个值会被 Agent 直接用于文件系统调用。
+	// 禁止 `..` 靠"每段必须以字母/数字/下划线/短横线结尾"实现——`.` 与 `..` 都以点结尾，
+	// 因此天然被排除（Go 的 RE2 没有前瞻断言，只能用构造性写法）。
+	// 刻意不含空格与通配符：路径来自 Web 表单，宽松字符集只会让"看着对、实际写错地方"更难发现。
+	OpsFilePathPattern = regexp.MustCompile(`^/(?:[A-Za-z0-9._-]*[A-Za-z0-9_-])(?:/(?:[A-Za-z0-9._-]*[A-Za-z0-9_-]))*$`)
+	// OpsFileRefPattern 是上传文件的引用号（服务端生成，形如 obf-3）。
+	OpsFileRefPattern = regexp.MustCompile(`^obf-[0-9]{1,9}$`)
+	// OpsFileModePattern 是目标文件权限（四位八进制，如 0644 / 0600）。
+	//
+	// 只接受 0xxx：setuid/setgid/sticky（1xxx-7xxx）刻意不允许——分发一个 setuid 文件
+	// 等价于远程提权，那不该是"顺手能做的事"。
+	OpsFileModePattern = regexp.MustCompile(`^0[0-7]{3}$`)
 )
+
+// OpsFileMaxBytes 是单次分发的文件大小上限（256KiB）。
+//
+// 必须有硬上限：内容会被 base64 后塞进**一轮上报响应**，没有上限时一个几十兆的 tarball
+// 会跟着每个目标节点的那一轮响应走。要分发更大的文件应该另加一条下载通道
+// （服务端给 URL + Agent 主动拉取），而不是把这个数往上调——调大只会让"某台机器突然
+// 上报变慢/失败"重新变成可能。
+const OpsFileMaxBytes = 256 << 10
+
+// OpsFileBlob 是随指令下发给 Agent 的文件内容。
+//
+// 它**只出现在下发的那一份副本里**（Store.Take 在领取时注入），绝不落任务存储：
+// 任务存储是每次状态流转都整体重写的一份 JSON，把文件内容写进去会让文件以"条数 × 文件大小"
+// 的量级膨胀，而其中绝大多数任务早已执行完毕。
+type OpsFileBlob struct {
+	// Name 是上传时的原始文件名，仅供 Agent 写回执时说明"分发的是哪个文件"。
+	Name string `json:"name,omitempty"`
+	// Size 是内容字节数（未 base64 的原始大小），Agent 用它做一次长度校验。
+	Size int64 `json:"size,omitempty"`
+	// SHA256 是内容的十六进制摘要；Agent 必须校验通过才允许替换目标文件。
+	SHA256 string `json:"sha256,omitempty"`
+	// Content 是文件内容的 base64（标准编码，含填充）。
+	Content string `json:"content"`
+}
 
 // 下行操作（ops）通道的协议模型。
 //
@@ -82,8 +129,11 @@ type OpsCommand struct {
 	// Kind 是动作标识（如 "svc.status"），必须命中服务端动作目录。
 	Kind string `json:"kind"`
 	// Params 是动作参数（如 unit=nginx）。值由服务端按目录规格校验后才下发。
-	Params    map[string]string `json:"params,omitempty"`
-	CreatedAt int64             `json:"createdAt,omitempty"`
+	Params map[string]string `json:"params,omitempty"`
+	// File 是 file.push 的文件内容，**只在真正下发给 Agent 的那一份里非空**（Store.Take 注入）。
+	// 任务存储里只保留引用（Params["fileId"]），理由见 OpsFileBlob 的注释。
+	File      *OpsFileBlob `json:"file,omitempty"`
+	CreatedAt int64        `json:"createdAt,omitempty"`
 	// ExpireAt 是过期时刻（毫秒）：超过它的指令不再下发（由 Take 与 ExpireOverdue 回收为 expired）。
 	ExpireAt int64 `json:"expireAt,omitempty"`
 }

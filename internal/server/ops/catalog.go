@@ -45,6 +45,10 @@ const (
 	KindContainerPods      = model.OpsKindContainerPods
 	KindContainerDescribe  = model.OpsKindContainerDescribe
 	KindContainerEvents    = model.OpsKindContainerEvents
+
+	// KindFilePush 向目标机器分发文件（**写**，默认被本机护栏挡下）。
+	// 它不复用 guards.ops.write/units，而是有自己的 guards.ops.file（见 model.OpsKindFilePush）。
+	KindFilePush = model.OpsKindFilePush
 )
 
 // 参数白名单字符集（与 Agent 侧共用同一批正则）。
@@ -54,6 +58,9 @@ var (
 	namespacePattern  = model.OpsNamespacePattern
 	objectNamePattern = model.OpsObjectNamePattern
 	resourcePattern   = model.OpsContainerResourcePattern
+	filePathPattern   = model.OpsFilePathPattern
+	fileRefPattern    = model.OpsFileRefPattern
+	fileModePattern   = model.OpsFileModePattern
 )
 
 // Param 是一个动作参数的规格。
@@ -147,6 +154,18 @@ var catalog = []Action{
 				Example: "web-7d9f8c6b5-x2k4p", Desc: "留空表示该命名空间的全部事件"},
 		},
 	},
+	{
+		Kind: KindFilePush, Title: "分发文件（写操作）", Group: "文件", ReadOnly: false,
+		Desc: fmt.Sprintf("把一个已上传的文件写到目标机器的指定路径：先校验内容摘要，把原文件改名备份，再原子替换（不会留下半截文件）。默认不可用——需要目标机器在 agent.yaml 的 guards.ops.file 里显式开启并列出允许写入的目录。单文件上限 %d KiB，指令延迟约一个上报周期", model.OpsFileMaxBytes>>10),
+		Params: []Param{
+			{Name: "path", Title: "目标路径", Required: true, Pattern: filePathPattern.String(),
+				Example: "/opt/app/conf/app.conf", Desc: "必须是绝对路径，且落在目标机器允许的目录内"},
+			{Name: "fileId", Title: "文件引用", Required: true, Pattern: fileRefPattern.String(),
+				Example: "obf-3", Desc: "上传文件后得到的引用号"},
+			{Name: "mode", Title: "权限", Pattern: fileModePattern.String(), Example: "0644",
+				Desc: "留空按 0644；含密钥等敏感内容时可指定 0600"},
+		},
+	},
 }
 
 func init() {
@@ -171,7 +190,7 @@ func init() {
 //
 // 不按字符串排序：中文按字节序排出来的顺序是随机的（"服务"恰好排在"节点"前面纯属字节巧合），
 // 用户看到的分组顺序会因为新增一个分组而整体变化。这里显式声明，未列出的分组排在最后。
-var groupOrder = []string{"节点", "服务", "容器"}
+var groupOrder = []string{"节点", "服务", "容器", "文件"}
 
 func groupRank(g string) int {
 	for i, name := range groupOrder {

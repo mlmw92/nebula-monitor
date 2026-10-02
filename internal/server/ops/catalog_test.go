@@ -167,8 +167,75 @@ func TestValidate_ContainerActions(t *testing.T) {
 	}
 }
 
-// 容器分组排在最后，且组内只有只读动作；顺序稳定是界面可预期的前提。
-func TestCatalog_ContainerGroupIsReadOnlyAndLast(t *testing.T) {
+// 文件分发的参数校验：目标路径会被 Agent 直接用于文件系统调用，边界逐条钉住。
+func TestValidate_FilePush(t *testing.T) {
+	ok := []struct {
+		name   string
+		params map[string]string
+	}{
+		{"常规配置文件", map[string]string{"path": "/opt/app/conf/app.conf", "fileId": "obf-1"}},
+		{"指定权限", map[string]string{"path": "/etc/nginx/conf.d/site.conf", "fileId": "obf-12", "mode": "0600"}},
+		{"点开头的文件名", map[string]string{"path": "/opt/app/.env", "fileId": "obf-3"}},
+	}
+	for _, tc := range ok {
+		t.Run(tc.name, func(t *testing.T) {
+			action, params, err := Validate(KindFilePush, tc.params)
+			if err != nil {
+				t.Fatalf("合法参数不应报错: %v", err)
+			}
+			// 标记为写动作是界面正确置灰与提示"去改本机护栏"的前提
+			if action.ReadOnly {
+				t.Fatal("文件分发必须标记为写动作（ReadOnly=false）")
+			}
+			for k, v := range params {
+				if v == "" {
+					t.Fatalf("参数 %q 不应以空值下发", k)
+				}
+			}
+			if tc.params["mode"] == "" {
+				if _, has := params["mode"]; has {
+					t.Fatal("未指定 mode 时不应出现在下发参数里（Agent 侧按默认 0644 处理）")
+				}
+			}
+		})
+	}
+
+	reject := []struct {
+		name   string
+		params map[string]string
+		wantIn string
+	}{
+		{"相对路径", map[string]string{"path": "etc/nginx.conf", "fileId": "obf-1"}, "不合法"},
+		{"路径穿越", map[string]string{"path": "/etc/../etc/passwd", "fileId": "obf-1"}, "不合法"},
+		{"结尾斜杠", map[string]string{"path": "/etc/nginx/", "fileId": "obf-1"}, "不合法"},
+		{"路径含空格", map[string]string{"path": "/opt/my app/conf", "fileId": "obf-1"}, "不合法"},
+		{"路径含变量", map[string]string{"path": "/opt/$HOME/x", "fileId": "obf-1"}, "不合法"},
+		{"缺目标路径", map[string]string{"fileId": "obf-1"}, "缺少必填参数"},
+		{"缺文件引用", map[string]string{"path": "/opt/app.conf"}, "缺少必填参数"},
+		{"文件引用非法", map[string]string{"path": "/opt/app.conf", "fileId": "../../etc/passwd"}, "不合法"},
+		// setuid 位刻意不允许：分发一个 setuid 文件等于远程提权
+		{"权限带 setuid", map[string]string{"path": "/opt/app.conf", "fileId": "obf-1", "mode": "4755"}, "不合法"},
+		{"权限没写前导零", map[string]string{"path": "/opt/app.conf", "fileId": "obf-1", "mode": "644"}, "不合法"},
+		{"未知参数", map[string]string{"path": "/opt/app.conf", "fileId": "obf-1", "owner": "root"}, "不支持参数"},
+	}
+	for _, tc := range reject {
+		t.Run("拒绝/"+tc.name, func(t *testing.T) {
+			_, _, err := Validate(KindFilePush, tc.params)
+			if err == nil {
+				t.Fatalf("应当拒绝（%s），却通过了", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantIn) {
+				t.Fatalf("错误信息应包含 %q，实际 %q", tc.wantIn, err.Error())
+			}
+		})
+	}
+}
+
+// 容器分组内只有只读动作（exec 属 P2，首批只放只读），且界面分组顺序与声明顺序一致。
+//
+// 断言的是「顺序 == groupOrder」而不是"某个分组在最后"：后者会在新增分组时失效，
+// 而真正要守的约束是"新增一个分组不会打乱其它分组的相对位置"——那正是 groupOrder 存在的理由。
+func TestCatalog_ContainerGroupIsReadOnlyAndGroupOrderStable(t *testing.T) {
 	groups := []string{}
 	seen := map[string]bool{}
 	for _, a := range Catalog() {
@@ -179,9 +246,24 @@ func TestCatalog_ContainerGroupIsReadOnlyAndLast(t *testing.T) {
 		if a.Group == "容器" && !a.ReadOnly {
 			t.Fatalf("容器分组内出现写动作 %s：exec 属 P2，首批只放只读", a.Kind)
 		}
+		// 未在 groupOrder 里声明的分组会被排到最后，顺序就不再可预期
+		if groupRank(a.Group) >= len(groupOrder) {
+			t.Fatalf("动作 %s 的分组 %q 未在 groupOrder 中声明", a.Kind, a.Group)
+		}
 	}
-	if len(groups) == 0 || groups[len(groups)-1] != "容器" {
-		t.Fatalf("容器分组应排在最后，实际顺序 %v", groups)
+	want := []string{}
+	for _, g := range groupOrder {
+		if seen[g] {
+			want = append(want, g)
+		}
+	}
+	if len(groups) != len(want) {
+		t.Fatalf("分组数与 groupOrder 不符：实际 %v，期望 %v", groups, want)
+	}
+	for i := range want {
+		if groups[i] != want[i] {
+			t.Fatalf("分组顺序应与 groupOrder 一致：实际 %v，期望 %v", groups, want)
+		}
 	}
 }
 
