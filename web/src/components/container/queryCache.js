@@ -28,7 +28,10 @@ export function containerDetailState(clusterKey, kind, namespace, name) {
 }
 
 function newState() {
-  return { busy: false, task: null, error: '', result: null, at: 0 }
+  // ns 是这份结果**当初是按哪个命名空间查的**：结果会被保留（本地缓存或从服务端认领），
+  // 而输入框里的条件随时会变。不记下它，就会出现"输入框写着 default、表里却是全部命名空间的对象"
+  // 而界面一言不发——那比数据旧更糟。
+  return { busy: false, task: null, error: '', result: null, at: 0, ns: '' }
 }
 
 // resetContainerQueryCache 清空缓存（仅测试用：避免用例之间互相污染）。

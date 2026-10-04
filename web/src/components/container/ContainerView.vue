@@ -135,6 +135,11 @@
                 :title="'上次刷新：' + new Date(q.at).toLocaleString('zh-CN')"
               >上次刷新 {{ refreshedText(q.at) }}</span>
               <span v-if="result.truncated" class="foot-warn">结果已截断，请缩小命名空间范围</span>
+              <!-- 结果会被保留、命名空间却随时可改：条件变了必须说出来，
+                   否则就是"输入框写着 default、表里是全部命名空间的对象"而界面一言不发。 -->
+              <span v-if="q.at && q.ns !== namespace.trim()" class="foot-warn">
+                这份结果是「{{ q.ns || '全部命名空间' }}」的，改条件后请点「查询」
+              </span>
             </div>
           </template>
 
@@ -180,7 +185,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Refresh, Grid, Monitor, Bell } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import http from '../../api/http'
-import { createOpsTask, getOpsTask, cancelOpsTasks } from '../../api/ops'
+import { createOpsTask, getOpsTask, cancelOpsTasks, listOpsTasks } from '../../api/ops'
 import PageHeader from '../common/PageHeader.vue'
 import SectionCard from '../common/SectionCard.vue'
 import EmptyState from '../common/EmptyState.vue'
@@ -315,11 +320,57 @@ function onClusterChange() {
 //
 // 命名空间输入**不**触发自动查询：那是"改条件"而不是"换视图"，
 // 边打字边下发任务既吵又费，那种场景让用户点「查询」更合适。
-function autoRun(tab) {
+async function autoRun(tab) {
   const item = containerQueryState(clusterKey.value, tab)
   if (!item || item.busy || item.result) return
   if (!currentCluster.value || !currentCluster.value.up) return
+  // 先尝试认领服务端留下的上次结果（秒出），没有再下发。
+  if (await adoptLastResult(tab)) return
   run(tab)
+}
+
+// adoptLastResult 从服务端任务列表里"认领"该（集群 + 动作 + 命名空间）最近一次成功的回执。
+//
+// 为什么需要它：结果本身是**持久化**的（服务端 `ops_tasks.json` 保留最近 500 条任务，
+// 回执的结构化载荷就在每条任务的 `json` 字段里），而前端缓存只在内存里 ——
+// 浏览器刷新（F5）之后本地什么都没有，若直接自动下发，用户又要白等一个上报周期。
+// 既然那份结果还在服务端，就先把它拿来用：普通 HTTP、**不惊动 Agent**、秒出。
+//
+// 时间用任务**完成**的时刻（doneAt）而不是现在：这才是这份数据真实的新鲜度，
+// 界面照实显示"上次刷新 3 小时前"，而不是把一份旧快照说成刚查的。
+//
+// 失败一律返回 false 让调用方走正常下发：任务列表要 `ops:read`，
+// 只有 `container:read` 的账号拿不到它——那是权限差异，不该让这一页报错或空白。
+async function adoptLastResult(tab) {
+  const target = TABS.find((t) => t.key === tab)
+  const item = containerQueryState(clusterKey.value, tab)
+  const cluster = currentCluster.value
+  if (!target || !item || !cluster || item.result || item.busy) return false
+  const ns = namespace.value.trim()
+  const clusterName = cluster.name || cluster.instance
+
+  let tasks = []
+  try {
+    const res = await listOpsTasks({ node: cluster.node, kind: target.kind, state: 'succeeded', limit: 50 })
+    tasks = (res && res.tasks) || []
+  } catch (e) {
+    return false
+  }
+
+  // 命名空间必须完全一致才认领：条件是"全部命名空间"时，不能拿一条 default 的结果来顶。
+  const hit = tasks.find((t) => {
+    const p = t.params || {}
+    return (p.cluster || '') === clusterName && (p.namespace || '') === ns
+  })
+  if (!hit) return false
+  const payload = parsePayload(hit)
+  if (!payload) return false
+
+  item.result = payload
+  item.ns = ns
+  item.error = ''
+  item.at = hit.doneAt || hit.createdAt || 0
+  return true
 }
 
 // refreshedText 把"上次刷新时间"说成人话：绝对时刻 + 相对时长。
@@ -379,6 +430,8 @@ async function run(tab) {
             // 只有结果真的落地才推进"上次刷新"：失败时保留旧时间，
             // 界面才不会把一次失败说成"刚刷新过"。
             item.at = Date.now()
+            // 一并记下这份结果是按什么条件查的（见 queryCache 里 ns 的说明）
+            item.ns = ns
           }
         }
         item.busy = false
@@ -540,7 +593,7 @@ onMounted(async () => {
   await loadClusters()
   // 只在"这个（集群 + Tab）还没有结果"时查一次（不要让人对着空白面板猜）；
   // 有上次的结果就直接显示结果与刷新时间——**进页面不等于刷新**。
-  autoRun(activeTab.value)
+  await autoRun(activeTab.value)
 })
 
 // 切 Tab：同样只在没有结果时查一次。已有结果直接显示，不重复下发。
@@ -641,6 +694,7 @@ onBeforeUnmount(() => {
 .result-foot {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   margin-top: 10px;
   font-size: var(--fs-xs);

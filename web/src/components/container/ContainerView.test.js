@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import http from '../../api/http'
-import { createOpsTask, getOpsTask } from '../../api/ops'
+import { createOpsTask, getOpsTask, listOpsTasks } from '../../api/ops'
 import ContainerView from './ContainerView.vue'
 import { resetContainerQueryCache } from './queryCache'
 
@@ -21,6 +21,7 @@ vi.mock('../../api/ops', () => ({
   createOpsTask: vi.fn(),
   getOpsTask: vi.fn(),
   cancelOpsTasks: vi.fn(),
+  listOpsTasks: vi.fn(),
 }))
 
 // jsdom 未实现 ResizeObserver，Element Plus 的表格会用到它。
@@ -69,6 +70,8 @@ beforeEach(() => {
     seq += 1
     return { task: { id: 't' + seq, state: 'queued' } }
   })
+  // 默认：服务端没有可认领的历史结果（用例要认领时自行覆盖）
+  listOpsTasks.mockResolvedValue({ tasks: [] })
   // 轮询第一次就返回终态：用例关心的是"下发了几次"，不是轮询节奏。
   getOpsTask.mockImplementation(async (id) => ({
     task: {
@@ -149,6 +152,54 @@ describe('ContainerView 容器与工作负载页', () => {
     await settle(w)
     // 换集群是换视图、不是刷新：切回来应该直接看到上次的结果与时间
     expect(calls()).toBe(2)
+    expect(w.text()).toContain('row-for-t1')
+  })
+
+  // 结果本身持久化在服务端（ops_tasks.json 的 json 字段），前端缓存只在内存里。
+  // 因此浏览器刷新（F5）之后本地空了，但服务端那份还在——先去认领它，
+  // 而不是又下发一轮让用户再等一个上报周期。
+  it('本地没有缓存时先认领服务端上次的回执，不下发', async () => {
+    const doneAt = Date.now() - 5 * 60_000
+    listOpsTasks.mockResolvedValue({
+      tasks: [{
+        id: 'old-1',
+        node: CLUSTER_A.node,
+        kind: 'container.workloads',
+        state: 'succeeded',
+        doneAt,
+        params: { cluster: CLUSTER_A.name },
+        json: JSON.stringify({ columns: ['名称'], rows: [['from-server']], total: 1, truncated: false }),
+      }],
+    })
+
+    const w = mountView()
+    await settle(w)
+
+    expect(calls()).toBe(0) // 认领到了就不该再下发（不惊动 Agent）
+    expect(w.text()).toContain('from-server')
+    expect(w.text()).toContain('上次刷新')
+    // 时间取任务的**完成**时刻，不是"现在"——否则一份 5 分钟前的快照会被说成刚查的
+    expect(w.text()).toContain('5 分钟前')
+  })
+
+  it('历史结果的命名空间与当前条件不一致时不认领，退回正常下发', async () => {
+    listOpsTasks.mockResolvedValue({
+      tasks: [{
+        id: 'old-1',
+        node: CLUSTER_A.node,
+        kind: 'container.workloads',
+        state: 'succeeded',
+        doneAt: Date.now(),
+        params: { cluster: CLUSTER_A.name, namespace: 'kube-system' },
+        json: JSON.stringify({ columns: ['名称'], rows: [['wrong-ns']], total: 1, truncated: false }),
+      }],
+    })
+
+    const w = mountView()
+    await settle(w)
+
+    expect(calls()).toBe(1) // 条件对不上就不能顶替，"全部命名空间"的查询结果里不该混进某个命名空间的对象
+    expect(w.text()).not.toContain('wrong-ns')
     expect(w.text()).toContain('row-for-t1')
   })
 
