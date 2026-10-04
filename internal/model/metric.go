@@ -99,45 +99,53 @@ type FirewallStatus struct {
 
 // ReportPayload 是 Agent 上报的请求体。
 type ReportPayload struct {
-	Node              string                `json:"node"`                        // 主机名
-	Mode              string                `json:"mode,omitempty"`              // 运行模式：collect | edge | hub
-	IP                string                `json:"ip"`                          // 主机 IP
-	OS                string                `json:"os"`                          // 操作系统
-	Arch              string                `json:"arch"`                        // CPU 架构
-	Group             string                `json:"group"`                       // 节点分组
-	Secret            string                `json:"secret,omitempty"`            // 接入授权密钥（启用 agentAuth 时校验）
-	Labels            map[string]string     `json:"labels,omitempty"`            // 自定义标签
-	Version           string                `json:"version,omitempty"`           // Agent 版本号
-	BinSHA256         string                `json:"binSHA256,omitempty"`         // Agent 二进制自身 SHA256（升级成功判定依据，与版本号解耦）
-	HostInfo          HostInfo              `json:"hostInfo,omitempty"`          // 主机系统与硬件信息
-	Metrics           []Metric              `json:"metrics"`                     // 指标列表
-	Processes         []ProcessStat         `json:"processes"`                   // 资源占用 Top 进程；null 表示旧 Agent/未启用，[] 表示新 Agent 采集为空
-	RedisInstances    []RedisInstance       `json:"redisInstances,omitempty"`    // Redis 实例元信息（不含密码）
-	MySQLInstances    []MySQLInstance       `json:"mysqlInstances,omitempty"`    // MySQL 实例元信息
-	PostgresInstances []PostgresInstance    `json:"postgresInstances,omitempty"` // PostgreSQL 实例元信息
-	NginxInstances    []NginxInstance       `json:"nginxInstances,omitempty"`    // Nginx 实例元信息
-	KafkaInstances    []KafkaInstance       `json:"kafkaInstances,omitempty"`    // Kafka 实例元信息
-	DockerInstances   []DockerInstance      `json:"dockerInstances,omitempty"`   // Docker 容器元信息
-	RocketMQInstances []RocketMQInstance    `json:"rocketmqInstances,omitempty"` // RocketMQ 实例元信息
-	K8sInstances      []K8sInstance         `json:"k8sInstances,omitempty"`      // Kubernetes 集群元信息
-	MongoDBInstances  []MongoDBInstance     `json:"mongoInstances,omitempty"`    // MongoDB 实例元信息
-	FastDFSInstances  []FastDFSInstance     `json:"fastdfsInstances,omitempty"`  // FastDFS 实例元信息
-	RabbitMQInstances    []RabbitMQInstance    `json:"rabbitmqInstances,omitempty"`    // RabbitMQ 实例元信息
+	Node              string             `json:"node"`                        // 主机名
+	Mode              string             `json:"mode,omitempty"`              // 运行模式：collect | edge | hub
+	IP                string             `json:"ip"`                          // 主机 IP
+	OS                string             `json:"os"`                          // 操作系统
+	Arch              string             `json:"arch"`                        // CPU 架构
+	Group             string             `json:"group"`                       // 节点分组
+	Secret            string             `json:"secret,omitempty"`            // 接入授权密钥（启用 agentAuth 时校验）
+	Labels            map[string]string  `json:"labels,omitempty"`            // 自定义标签
+	Version           string             `json:"version,omitempty"`           // Agent 版本号
+	BinSHA256         string             `json:"binSHA256,omitempty"`         // Agent 二进制自身 SHA256（升级成功判定依据，与版本号解耦）
+	HostInfo          HostInfo           `json:"hostInfo,omitempty"`          // 主机系统与硬件信息
+	Metrics           []Metric           `json:"metrics"`                     // 指标列表
+	Processes         []ProcessStat      `json:"processes"`                   // 资源占用 Top 进程；null 表示旧 Agent/未启用，[] 表示新 Agent 采集为空
+	RedisInstances    []RedisInstance    `json:"redisInstances,omitempty"`    // Redis 实例元信息（不含密码）
+	MySQLInstances    []MySQLInstance    `json:"mysqlInstances,omitempty"`    // MySQL 实例元信息
+	PostgresInstances []PostgresInstance `json:"postgresInstances,omitempty"` // PostgreSQL 实例元信息
+	NginxInstances    []NginxInstance    `json:"nginxInstances,omitempty"`    // Nginx 实例元信息
+	KafkaInstances    []KafkaInstance    `json:"kafkaInstances,omitempty"`    // Kafka 实例元信息
+	DockerInstances   []DockerInstance   `json:"dockerInstances,omitempty"`   // Docker 容器元信息
+	RocketMQInstances []RocketMQInstance `json:"rocketmqInstances,omitempty"` // RocketMQ 实例元信息
+	K8sInstances      []K8sInstance      `json:"k8sInstances,omitempty"`      // Kubernetes 集群元信息
+	// K8sPods / K8sWorkloads 是**台账发现**用的清单（见 docs/superpowers/specs/2026-10-04-container-inventory-design.md）。
+	// 与其它清单一样是平铺的、每条自带 Cluster —— 服务端落库与截断计数都简单。
+	K8sPods      []K8sPod      `json:"k8sPods,omitempty"`      // K8s Pod 清单
+	K8sWorkloads []K8sWorkload `json:"k8sWorkloads,omitempty"` // K8s 工作负载清单
+	// 清单被单轮上限截断时置位：上报方知道"我看到 3000 个、报了 1000 个"，
+	// 服务端与界面才不会把它当成"集群里只有 1000 个"（沿用"截断显式回传"的既有约定）。
+	K8sPodsTruncated       bool                    `json:"k8sPodsTruncated,omitempty"`
+	K8sWorkloadsTruncated  bool                    `json:"k8sWorkloadsTruncated,omitempty"`
+	MongoDBInstances       []MongoDBInstance       `json:"mongoInstances,omitempty"`         // MongoDB 实例元信息
+	FastDFSInstances       []FastDFSInstance       `json:"fastdfsInstances,omitempty"`       // FastDFS 实例元信息
+	RabbitMQInstances      []RabbitMQInstance      `json:"rabbitmqInstances,omitempty"`      // RabbitMQ 实例元信息
 	ElasticsearchInstances []ElasticsearchInstance `json:"elasticsearchInstances,omitempty"` // Elasticsearch 实例元信息
-	ClickHouseInstances  []ClickHouseInstance  `json:"clickhouseInstances,omitempty"`  // ClickHouse 实例元信息
-	NacosInstances       []NacosInstance       `json:"nacosInstances,omitempty"`       // Nacos 实例元信息
-	ZooKeeperInstances   []ZooKeeperInstance   `json:"zookeeperInstances,omitempty"`   // ZooKeeper 实例元信息
-	NginxAccessStats  []NginxAccessStat     `json:"nginxAccessStats,omitempty"`  // Nginx access log 聚合统计
-	SecurityEvents    []SecurityEvent       `json:"securityEvents,omitempty"`    // 安全事件（结构化，非时序）
-	SecurityBaseline  *SecurityBaseline     `json:"securityBaseline,omitempty"`  // 安全基线检查结果
-	Capabilities      *ClientCapability     `json:"capabilities,omitempty"`      // Agent 能力声明（旧 Agent 不报此字段，前端据此判断兼容）
-	DefenseStatus     *DefenseStatus        `json:"defenseStatus,omitempty"`     // 入侵防护当前状态（由 Agent 定期采集上报）
-	DefenseResult     *DefenseCommandResult `json:"defenseResult,omitempty"`     // 防护指令执行结果回执
-	OpsResult         *OpsResult            `json:"opsResult,omitempty"`         // 下行操作任务的执行结果回执（见 ops.go）
-	Listeners         []ListenerStat        `json:"listeners"`                   // 监听端口列表（TCP/UDP）；null 表示旧 Agent，[] 表示已采集但为空
-	FirewallRules     []FirewallRule        `json:"firewallRules"`               // 防火墙规则列表；null 表示旧 Agent，[] 表示已采集但为空
-	FirewallStatus    *FirewallStatus       `json:"firewallStatus,omitempty"`    // 防火墙整体状态（由 Agent 定期采集上报）
-	ReportAt          int64                 `json:"reportAt"`                    // 上报时间（毫秒）
+	ClickHouseInstances    []ClickHouseInstance    `json:"clickhouseInstances,omitempty"`    // ClickHouse 实例元信息
+	NacosInstances         []NacosInstance         `json:"nacosInstances,omitempty"`         // Nacos 实例元信息
+	ZooKeeperInstances     []ZooKeeperInstance     `json:"zookeeperInstances,omitempty"`     // ZooKeeper 实例元信息
+	NginxAccessStats       []NginxAccessStat       `json:"nginxAccessStats,omitempty"`       // Nginx access log 聚合统计
+	SecurityEvents         []SecurityEvent         `json:"securityEvents,omitempty"`         // 安全事件（结构化，非时序）
+	SecurityBaseline       *SecurityBaseline       `json:"securityBaseline,omitempty"`       // 安全基线检查结果
+	Capabilities           *ClientCapability       `json:"capabilities,omitempty"`           // Agent 能力声明（旧 Agent 不报此字段，前端据此判断兼容）
+	DefenseStatus          *DefenseStatus          `json:"defenseStatus,omitempty"`          // 入侵防护当前状态（由 Agent 定期采集上报）
+	DefenseResult          *DefenseCommandResult   `json:"defenseResult,omitempty"`          // 防护指令执行结果回执
+	OpsResult              *OpsResult              `json:"opsResult,omitempty"`              // 下行操作任务的执行结果回执（见 ops.go）
+	Listeners              []ListenerStat          `json:"listeners"`                        // 监听端口列表（TCP/UDP）；null 表示旧 Agent，[] 表示已采集但为空
+	FirewallRules          []FirewallRule          `json:"firewallRules"`                    // 防火墙规则列表；null 表示旧 Agent，[] 表示已采集但为空
+	FirewallStatus         *FirewallStatus         `json:"firewallStatus,omitempty"`         // 防火墙整体状态（由 Agent 定期采集上报）
+	ReportAt               int64                   `json:"reportAt"`                         // 上报时间（毫秒）
 }
 
 // RedisInstanceConfig 是 Agent 本地配置的 Redis 实例连接信息。
@@ -367,17 +375,17 @@ type ClickHouseInstanceConfig struct {
 
 // ClickHouseInstance 是上报给 Server 的 ClickHouse 实例元信息。
 type ClickHouseInstance struct {
-	Instance       string  `json:"instance"`
-	Name           string  `json:"name"`
-	Node           string  `json:"node"`
-	Group          string  `json:"group"`
-	Version        string  `json:"version"`
-	TCPConnections float64 `json:"tcpConnections"`
+	Instance        string  `json:"instance"`
+	Name            string  `json:"name"`
+	Node            string  `json:"node"`
+	Group           string  `json:"group"`
+	Version         string  `json:"version"`
+	TCPConnections  float64 `json:"tcpConnections"`
 	HTTPConnections float64 `json:"httpConnections"`
-	QueriesRunning float64 `json:"queriesRunning"`
-	MergesRunning  float64 `json:"mergesRunning"`
-	UptimeSeconds  float64 `json:"uptimeSeconds"`
-	Up             bool    `json:"up"`
+	QueriesRunning  float64 `json:"queriesRunning"`
+	MergesRunning   float64 `json:"mergesRunning"`
+	UptimeSeconds   float64 `json:"uptimeSeconds"`
+	Up              bool    `json:"up"`
 }
 
 // ---- Nacos ----
@@ -551,6 +559,10 @@ type K8sInstanceConfig struct {
 	InsecureTLS   bool   `yaml:"insecureTLS"`   // 是否跳过 apiserver 证书校验
 	MetricsServer bool   `yaml:"metricsServer"` // 是否启用 metrics-server 采集 Node 资源用量
 	ExporterURL   string `yaml:"exporterURL"`   // kube-state-metrics 的 /metrics URL（留空走直连）
+	// IncludeSystemNamespaces 决定台账清单是否上报 kube-system / kube-public / kube-node-lease。
+	// 默认 false = **排除**：这几个命名空间对象数量大、几乎不由人运维，全部上报只会把台账淹掉。
+	// 只影响清单（台账发现），不影响任何指标——指标口径不因它变化。
+	IncludeSystemNamespaces bool `yaml:"includeSystemNamespaces"`
 }
 
 // K8sInstance 是上报给 Server 的 Kubernetes 集群元信息（不含凭据），供 Web 只读展示。
@@ -561,6 +573,56 @@ type K8sInstance struct {
 	Group    string `json:"group"`    // 集群分组名（= cfg.Name）
 	Version  string `json:"version"`  // K8s server 版本（来自 /version）
 	Up       bool   `json:"up"`       // apiserver 是否可达
+}
+
+// K8s 清单的单轮上限（协议常量：上报方截断并置位，服务端据此判断是否已截断）。
+//
+// 上限的理由**不是**上报体上限——1000 条 Pod 远够不上 16 MiB——而是每轮上报都是每 Agent
+// 一次的固定开销，异常大的集群不应把它持续顶大。超限必须**显式置位**而不是静默丢弃：
+// 静默丢弃会让台账看起来"集群里只有 1000 个 Pod"。
+const (
+	K8sPodsMaxPerReport      = 1000
+	K8sWorkloadsMaxPerReport = 500
+)
+
+// K8sPod 是上报给 Server 的一个 Pod 的**台账投影**。
+//
+// 刻意不含容器内环境变量、挂载、Secret 引用等与"资产"无关的字段：清单上报是**发现**，
+// 不是把 apiserver 对象整个搬到中心。要看这些细节走只读管理面的 `container.describe`。
+type K8sPod struct {
+	Cluster   string `json:"cluster"`         // 所属集群 = K8sInstance.Instance（apiserver 地址）
+	Namespace string `json:"namespace"`       // 命名空间
+	Name      string `json:"name"`            // Pod 名
+	Node      string `json:"node,omitempty"`  // spec.nodeName；未调度时为空
+	Phase     string `json:"phase,omitempty"` // 生命周期阶段：Pending / Running / Succeeded / Failed
+	// Status 是**有效状态**（对齐 kubectl get pods 的 STATUS 列）：镜像拉不动、容器崩溃重启
+	// 都体现在这里，而 phase 仍是 Pending / Running。台账要能一眼看出"这个 Pod 起不来"，
+	// 所以两个都报——判定复用采集侧同一处 podStatus，避免台账与指标页给出互相矛盾的结论。
+	Status    string `json:"status,omitempty"`
+	Ready     int    `json:"ready"`               // 就绪容器数
+	Total     int    `json:"total"`               // 声明容器总数
+	Restarts  int    `json:"restarts"`            // 各容器重启次数之和
+	Image     string `json:"image,omitempty"`     // 首个容器镜像（展示用）
+	StartedAt int64  `json:"startedAt,omitempty"` // 启动时间（毫秒）
+	// OwnerKind / OwnerName 是 Pod 归属的工作负载（deployment / statefulset / daemonset）。
+	//
+	// **采集侧已经把 ReplicaSet 那一跳解析掉了**：Pod 的直接属主是 ReplicaSet，而台账里的
+	// "工作负载"是 Deployment——少了这一跳，member_of 在最常见的 Deployment 场景下根本建不出来。
+	// 属主不是这三类（如 Job 建的 Pod）时留空：本批不给 Job 建工作负载资产，
+	// 与其编一个假属主，不如让这条边不存在。
+	OwnerKind string `json:"ownerKind,omitempty"`
+	OwnerName string `json:"ownerName,omitempty"`
+}
+
+// K8sWorkload 是上报给 Server 的一个工作负载的**台账投影**。
+type K8sWorkload struct {
+	Cluster   string `json:"cluster"`
+	Namespace string `json:"namespace"`
+	Kind      string `json:"kind"` // deployment | statefulset | daemonset
+	Name      string `json:"name"`
+	Desired   int    `json:"desired"` // 期望副本数（DaemonSet 用已调度节点数）
+	Ready     int    `json:"ready"`   // 就绪副本数
+	Image     string `json:"image,omitempty"`
 }
 
 // DiskStat 表示单个真实文件系统的容量与使用率。
@@ -690,8 +752,8 @@ type AlertRule struct {
 	// 不要复用上面的 Group（那是"作用的节点分组"）——同名不同义会让模板分组静默变成节点范围。
 	TemplateGroup string `json:"templateGroup,omitempty"` // 模板分组：主机|MySQL|Redis|…（仅展示用）
 	Desc          string `json:"desc,omitempty"`          // 模板说明：阈值依据与调整建议（仅展示用）
-	CreatedAt    int64         `json:"createdAt"`              // 创建时间（毫秒）
-	UpdatedAt    int64         `json:"updatedAt"`              // 更新时间（毫秒）
+	CreatedAt     int64  `json:"createdAt"`               // 创建时间（毫秒）
+	UpdatedAt     int64  `json:"updatedAt"`               // 更新时间（毫秒）
 }
 
 // QuietPeriod 周期静默时段：在每周指定的星期几、指定的本地时间区间内跳过该规则的评估触发。

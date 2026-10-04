@@ -32,7 +32,13 @@ const (
 // ListFilter 是资产列表的查询条件。零值表示「全部资产」，但始终受默认分页约束。
 type ListFilter struct {
 	TypeKey string
-	Node    string
+	// ExcludeTypes 排除若干资产类型：用于把**运行时短命对象**（容器 / 工作负载，
+	// 见 EphemeralTypes）挡在默认视图与健康度摘要之外。
+	//
+	// 由调用方（API 层）决定要不要设：用户**显式**按类型筛选时不该再排除——
+	// 他明确要看容器，却被他自己的筛选条件排除掉，是自相矛盾的。
+	ExcludeTypes []string
+	Node         string
 	// Keyword 匹配资产名称、自然键与**属性值**（原型：搜索资产名 / 自然键 / 属性值）。
 	Keyword string
 	// Nodes 限定归属节点集合，用于把调用方的资源范围下推到 SQL：

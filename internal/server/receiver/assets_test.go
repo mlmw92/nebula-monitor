@@ -148,3 +148,101 @@ func TestHandleReportWithoutAssetServiceStillSucceeds(t *testing.T) {
 	rec := New(&assetTestStorage{}, mgr, config.AgentAuthConfig{}, nil, nil, nil, nil)
 	postReport(t, rec, model.ReportPayload{Node: "web-02", Group: "g1"})
 }
+
+// K8s 清单落台账：工作负载先落（它是 member_of 的对端），Pod 落完再建两条边。
+//
+// 这里刻意放一个"落在未注册节点上的 Pod"：它必须照样落台账，但归属节点落空串
+// （仅全局范围可见）且**不建 runs_on**——不假装它属于某个分组，也不为它编一个主机资产。
+func TestHandleReportWritesContainerInventory(t *testing.T) {
+	dir := t.TempDir()
+	store, err := asset.Open(filepath.Join(dir, "assets.db"))
+	if err != nil {
+		t.Fatalf("打开资产库失败: %v", err)
+	}
+	defer store.Close()
+	svc := asset.NewService(store)
+
+	mgr := node.New(filepath.Join(dir, "nodes.json"), time.Minute)
+	rec := New(&assetTestStorage{}, mgr, config.AgentAuthConfig{}, nil, nil, nil, nil)
+	rec.SetAssetService(svc)
+
+	const cluster = "https://10.0.0.9:6443"
+	payload := model.ReportPayload{
+		Node:         "web-01",
+		Group:        "g1",
+		K8sInstances: []model.K8sInstance{{Instance: cluster, Name: "dev-k8s", Up: true}},
+		K8sWorkloads: []model.K8sWorkload{{
+			Cluster: cluster, Namespace: "default", Kind: "deployment", Name: "web",
+			Desired: 3, Ready: 2, Image: "nginx:1.27",
+		}},
+		K8sPods: []model.K8sPod{
+			{Cluster: cluster, Namespace: "default", Name: "web-7d9f-abc", Node: "web-01",
+				Phase: "Running", Status: "Running", Ready: 1, Total: 1,
+				OwnerKind: "deployment", OwnerName: "web", Image: "nginx:1.27"},
+			{Cluster: cluster, Namespace: "default", Name: "web-7d9f-def", Node: "worker-99",
+				Phase: "Running", Status: "Running", Ready: 1, Total: 1},
+		},
+	}
+	postReport(t, rec, payload)
+	postReport(t, rec, payload) // 第二轮：验证幂等（不应多出资产或边）
+
+	// 工作负载：跨节点、没有单一归属节点 → 范围挂在集群的上报主机上
+	wlRef := asset.Ref{
+		TypeKey:    asset.TypeWorkload,
+		NaturalKey: asset.WorkloadNaturalKey(cluster, "default", "deployment", "web"),
+	}
+	wl, ok, err := svc.Get(wlRef)
+	if err != nil || !ok {
+		t.Fatalf("工作负载资产未写入: ok=%v err=%v", ok, err)
+	}
+	if wl.Node != "web-01" {
+		t.Fatalf("工作负载的归属节点应为集群上报主机 web-01，实际 %q", wl.Node)
+	}
+	if v, _ := wl.ValueFrom("desired", asset.SourceDiscovery); v != "3" {
+		t.Fatalf("工作负载 desired 应为 3，实际 %q", v)
+	}
+
+	// 落在已注册节点上的 Pod：归属该节点，两条边都建得出来
+	podRef := asset.Ref{TypeKey: asset.TypePod, NaturalKey: asset.PodNaturalKey(cluster, "default", "web-7d9f-abc")}
+	pod, ok, err := svc.Get(podRef)
+	if err != nil || !ok {
+		t.Fatalf("容器资产未写入: ok=%v err=%v", ok, err)
+	}
+	if pod.Node != "web-01" {
+		t.Fatalf("容器应归属它实际所在的节点（web-01），实际 %q", pod.Node)
+	}
+	links, err := svc.Links(podRef)
+	if err != nil {
+		t.Fatalf("查询容器关联失败: %v", err)
+	}
+	peers := map[asset.LinkKind]string{}
+	for _, l := range links {
+		peers[l.Kind] = l.To.NaturalKey
+		if l.Source != asset.SourceDiscovery {
+			t.Fatalf("自动建立的边来源应为 discovery，实际 %q", l.Source)
+		}
+	}
+	if len(links) != 2 || peers[asset.LinkRunsOn] != "web-01" || peers[asset.LinkMemberOf] != wlRef.NaturalKey {
+		t.Fatalf("容器应同时 runs_on 主机与 member_of 工作负载，实际 %+v", links)
+	}
+
+	// 落在未注册节点上的 Pod：照样落台账，但归属节点为空、且没有 runs_on
+	orphanRef := asset.Ref{TypeKey: asset.TypePod, NaturalKey: asset.PodNaturalKey(cluster, "default", "web-7d9f-def")}
+	orphan, ok, err := svc.Get(orphanRef)
+	if err != nil || !ok {
+		t.Fatalf("未注册节点上的容器也应落台账: ok=%v err=%v", ok, err)
+	}
+	if orphan.Node != "" {
+		t.Fatalf("节点没有主机资产时应落空串（仅全局可见），实际 %q", orphan.Node)
+	}
+	if v, _ := orphan.ValueFrom("k8sNode", asset.SourceDiscovery); v != "worker-99" {
+		t.Fatalf("原始 spec.nodeName 应仍作为属性保留（用于展示），实际 %q", v)
+	}
+	orphanLinks, err := svc.Links(orphanRef)
+	if err != nil {
+		t.Fatalf("查询容器关联失败: %v", err)
+	}
+	if len(orphanLinks) != 0 {
+		t.Fatalf("未注册节点的容器不应有 runs_on（对端不存在），实际 %+v", orphanLinks)
+	}
+}

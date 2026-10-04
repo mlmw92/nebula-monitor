@@ -85,6 +85,129 @@ func (r *Receiver) applyAssets(p *model.ReportPayload) {
 			slog.Warn("建立实例 → 主机关联失败", "type", ob.Type, "instance", ob.Addr, "err", err)
 		}
 	}
+
+	// K8s 容器/工作负载清单。与上面同一套原则（只以 discovery 提交、幂等、失败只记日志），
+	// 但多一条**顺序约束**，见其函数注释。
+	r.applyContainerInventory(p)
+}
+
+// applyContainerInventory 把本轮上报的 K8s 清单落成台账资产与关系。
+//
+// **顺序是硬约束：先工作负载、后 Pod。** member_of（Pod → 工作负载）要求两端资产都已存在
+// （LinkDiscovered 的契约），顺序反了这批边就整条建不出来——这不是优化，是正确性。
+//
+// 两条边的口径见设计件 §关系设计：
+//   - runs_on：仅在 spec.nodeName 对应**已存在的主机资产**时才建。建不成不报错、也**不造占位主机**
+//     ——"我们不知道那台机器"比编一个主机资产更诚实，而且服务端本来就有一个写入失败的日志。
+//   - member_of：Pod → 所属工作负载（采集侧已把 ReplicaSet 那一跳解析掉）。
+func (r *Receiver) applyContainerInventory(p *model.ReportPayload) {
+	// 主机资产是否存在的**记忆化**查询：范围归属与 runs_on 都以它为前提，
+	// 而成百上千个 Pod 往往只分布在少数几个节点上——每个节点只查一次。
+	hostKnown := map[string]bool{}
+	hostExists := func(name string) bool {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return false
+		}
+		if v, ok := hostKnown[name]; ok {
+			return v
+		}
+		_, found, err := r.assets.Get(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: name})
+		if err != nil {
+			slog.Warn("查询主机资产失败", "host", name, "err", err)
+			found = false
+		}
+		hostKnown[name] = found
+		return found
+	}
+
+	// 1. 工作负载（必须先于 Pod：它是 member_of 的对端）
+	workloadKeys := map[string]bool{}
+	for _, w := range p.K8sWorkloads {
+		if strings.TrimSpace(w.Cluster) == "" || strings.TrimSpace(w.Name) == "" {
+			continue
+		}
+		attrs := map[string]string{}
+		putIfNotEmpty(attrs, "namespace", w.Namespace)
+		putIfNotEmpty(attrs, "kind", w.Kind)
+		putIfNotEmpty(attrs, "image", w.Image)
+		// 0 也要写：它表达的是"副本数为 0"这个事实，而不是"没采到"。
+		attrs["desired"] = strconv.Itoa(w.Desired)
+		attrs["ready"] = strconv.Itoa(w.Ready)
+		key := asset.WorkloadNaturalKey(w.Cluster, w.Namespace, w.Kind, w.Name)
+		if _, _, err := r.assets.Apply(asset.Observation{
+			TypeKey: asset.TypeWorkload, NaturalKey: key,
+			Name: w.Name,
+			// 工作负载跨节点、没有单一归属节点：范围挂在**集群的上报主机**上，
+			// 与集群资产同口径（设计件 §资源范围）。不能落空串——空串 = 受限用户一律不可见，
+			// 那等于对受限用户隐藏工作负载。
+			Node:   p.Node,
+			Source: asset.SourceDiscovery, Actor: "agent", Attrs: attrs,
+		}); err != nil {
+			slog.Warn("写入工作负载资产失败", "workload", w.Name, "err", err)
+			continue
+		}
+		workloadKeys[asset.TypeWorkload+"|"+key] = true
+	}
+
+	// 2. Pod：先落资产，再建两条边
+	for _, pod := range p.K8sPods {
+		if strings.TrimSpace(pod.Cluster) == "" || strings.TrimSpace(pod.Name) == "" {
+			continue
+		}
+		attrs := map[string]string{}
+		putIfNotEmpty(attrs, "namespace", pod.Namespace)
+		putIfNotEmpty(attrs, "phase", pod.Phase)
+		putIfNotEmpty(attrs, "status", pod.Status)
+		putIfNotEmpty(attrs, "image", pod.Image)
+		// 仅展示用：范围归属取的是下面那个 node 变量，不是这个属性。
+		putIfNotEmpty(attrs, "k8sNode", pod.Node)
+		attrs["ready"] = strconv.Itoa(pod.Ready)
+		attrs["total"] = strconv.Itoa(pod.Total)
+		attrs["restarts"] = strconv.Itoa(pod.Restarts)
+		if pod.StartedAt > 0 {
+			attrs["startedAt"] = strconv.FormatInt(pod.StartedAt, 10)
+		}
+
+		// Pod 归**它实际所在的节点**（设计件 §资源范围）：范围是"你能管的机器"，
+		// Pod 跑在哪台就归哪台，这是最不容易越权的口径。
+		// 该节点没有对应主机资产时落空串 → 仅全局范围可见：不假装它属于某个分组。
+		node := ""
+		if hostExists(pod.Node) {
+			node = strings.TrimSpace(pod.Node)
+		}
+		cur, _, err := r.assets.Apply(asset.Observation{
+			TypeKey:    asset.TypePod,
+			NaturalKey: asset.PodNaturalKey(pod.Cluster, pod.Namespace, pod.Name),
+			Name:       pod.Name, Node: node,
+			Source: asset.SourceDiscovery, Actor: "agent", Attrs: attrs,
+		})
+		if err != nil {
+			slog.Warn("写入容器资产失败", "pod", pod.Name, "err", err)
+			continue
+		}
+		podRef := asset.Ref{TypeKey: cur.TypeKey, NaturalKey: cur.NaturalKey}
+
+		if node != "" {
+			if err := r.assets.LinkDiscovered(podRef,
+				asset.Ref{TypeKey: asset.TypeHost, NaturalKey: node}, asset.LinkRunsOn); err != nil {
+				slog.Warn("建立容器 → 主机关联失败", "pod", pod.Name, "host", node, "err", err)
+			}
+		}
+
+		// 归属边只在"本轮清单里确实有这个工作负载"时才尝试：上报被截断、或工作负载落在
+		// 被排除的系统命名空间时，它本来就不在台账里。这类情况不是错误，不该刷日志。
+		// （已建成的边是持久的，不会因为某一轮缺席而消失。）
+		if pod.OwnerKind != "" && pod.OwnerName != "" {
+			key := asset.WorkloadNaturalKey(pod.Cluster, pod.Namespace, pod.OwnerKind, pod.OwnerName)
+			if workloadKeys[asset.TypeWorkload+"|"+key] {
+				if err := r.assets.LinkDiscovered(podRef,
+					asset.Ref{TypeKey: asset.TypeWorkload, NaturalKey: key}, asset.LinkMemberOf); err != nil {
+					slog.Warn("建立容器 → 工作负载关联失败", "pod", pod.Name, "workload", pod.OwnerName, "err", err)
+				}
+			}
+		}
+	}
 }
 
 func putIfNotEmpty(m map[string]string, key, value string) {

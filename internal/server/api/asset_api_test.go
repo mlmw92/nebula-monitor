@@ -918,3 +918,59 @@ func TestHandleAssetLinkWriteLifecycle(t *testing.T) {
 		t.Fatalf("DELETE 不应从请求体读寻址，期望 400，实际 %d", wNoQuery.Code)
 	}
 }
+
+// 「容器/工作负载不计入默认视图」这条策略在接口层的落点。
+//
+// 三种情形刻意分开验：默认排除（否则滚动更新掉的旧 Pod 会填满"失联"）、
+// 显式按类型不排除、**关键词也不排除**——关键词是一次定点查找，
+// 返回空会让人以为台账里没有这个对象（比列表里混进几个 Pod 糟得多）。
+func TestHandleAssetsHidesEphemeralTypesByDefault(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	podRef := asset.Ref{TypeKey: asset.TypePod, NaturalKey: asset.PodNaturalKey("c1", "default", "web-1")}
+	if _, _, err := svc.Apply(asset.Observation{
+		TypeKey: asset.TypePod, NaturalKey: podRef.NaturalKey, Name: "web-1",
+		Node: "web-01", Source: asset.SourceDiscovery, Attrs: map[string]string{"restarts": "0"},
+	}); err != nil {
+		t.Fatalf("写入容器资产失败: %v", err)
+	}
+
+	list := func(target string) ([]assetView, int) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		a.handleAssets(w, assetReq(globalPrincipal("assets:read"), target))
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s 状态码 = %d，响应 %s", target, w.Code, w.Body.String())
+		}
+		var body struct {
+			Assets []assetView `json:"assets"`
+			Total  int         `json:"total"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("解析响应失败: %v", err)
+		}
+		return body.Assets, body.Total
+	}
+	hasPod := func(items []assetView) bool {
+		for _, it := range items {
+			if it.TypeKey == asset.TypePod {
+				return true
+			}
+		}
+		return false
+	}
+
+	// 默认（无类型、无关键词）：容器被排除
+	if items, _ := list("/api/v1/assets"); hasPod(items) {
+		t.Fatalf("默认视图不应出现容器，实际 %+v", items)
+	}
+	// 显式按类型：能拿到
+	pods, _ := list("/api/v1/assets?type=pod")
+	if len(pods) != 1 || pods[0].TypeKey != asset.TypePod {
+		t.Fatalf("按类型查容器应返回 1 条，实际 %+v", pods)
+	}
+	// 关键词：也能拿到（定点查找不能返回空）
+	found, _ := list("/api/v1/assets?keyword=web-1")
+	if !hasPod(found) {
+		t.Fatalf("关键词搜索应能命中容器，实际 %+v", found)
+	}
+}

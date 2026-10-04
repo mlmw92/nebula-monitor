@@ -24,13 +24,20 @@ type Result struct {
 	Docker      []model.DockerInstance
 	RocketMQ    []model.RocketMQInstance
 	K8s         []model.K8sInstance
-	MongoDB     []model.MongoDBInstance
-	FastDFS     []model.FastDFSInstance
-	RabbitMQ    []model.RabbitMQInstance
-	Elasticsearch []model.ElasticsearchInstance
-	ClickHouse  []model.ClickHouseInstance
-	Nacos       []model.NacosInstance
-	ZooKeeper   []model.ZooKeeperInstance
+	// K8s 台账清单：Pod 与工作负载（见 docs/superpowers/specs/2026-10-04-container-inventory-design.md）。
+	// 与 K8s（集群元信息）分开：集群是"这个集群在不在"，清单是"里面有东西在跑"。
+	K8sPods      []model.K8sPod
+	K8sWorkloads []model.K8sWorkload
+	// 清单达到单轮上限被截断——必须传到上报体，否则中心会把"1000 个 Pod"当成全部。
+	K8sPodsTruncated      bool
+	K8sWorkloadsTruncated bool
+	MongoDB               []model.MongoDBInstance
+	FastDFS               []model.FastDFSInstance
+	RabbitMQ              []model.RabbitMQInstance
+	Elasticsearch         []model.ElasticsearchInstance
+	ClickHouse            []model.ClickHouseInstance
+	Nacos                 []model.NacosInstance
+	ZooKeeper             []model.ZooKeeperInstance
 
 	SecurityEvents   []model.SecurityEvent
 	SecurityBaseline *model.SecurityBaseline
@@ -153,9 +160,13 @@ func (c *Collector) tasks(res *Result, mu *sync.Mutex) []collectTask {
 			if c.k8s == nil {
 				return nil
 			}
-			m, inst := c.k8s.CollectCtx(ctx)
-			addMetrics(m)
-			res.K8s = inst
+			r := c.k8s.CollectCtx(ctx)
+			addMetrics(r.Metrics)
+			res.K8s = r.Instances
+			res.K8sPods = r.Pods
+			res.K8sWorkloads = r.Workloads
+			res.K8sPodsTruncated = r.PodsTruncated
+			res.K8sWorkloadsTruncated = r.WorkloadsTruncated
 			return nil
 		}},
 		{name: "mongodb", run: func(ctx context.Context) error {

@@ -1203,3 +1203,61 @@ func TestListStatusUsesLastSeenNotValueChange(t *testing.T) {
 		t.Fatalf("摘要应为 total=1 missing=0，实际 %+v", stats)
 	}
 }
+
+// 短命类型（容器 / 工作负载）默认不进列表与摘要。
+//
+// 理由不是"少显示几行"，而是治理数字会被 churn 冲垮：被滚动更新替换掉的旧 Pod
+// 停止上报后会被判失联，计入之后顶部会出现"失联 200"，把真实故障埋掉；
+// 而"无责任人"对短命对象也没有意义——没人会为滚动更新掉的 Pod 指派责任人。
+func TestExcludeTypesKeepsEphemeralOutOfListAndStats(t *testing.T) {
+	svc, _ := newTestService(t)
+	now := int64(1_700_000_000_000)
+	svc.now = func() int64 { return now }
+
+	mustApply := func(ob Observation) {
+		t.Helper()
+		if _, _, err := svc.Apply(ob); err != nil {
+			t.Fatalf("写入失败: %v", err)
+		}
+	}
+	mustApply(Observation{
+		TypeKey: TypeHost, NaturalKey: "web-01", Name: "web-01", Node: "web-01",
+		Source: SourceDiscovery, Attrs: map[string]string{"owner": "张三"},
+	})
+	mustApply(Observation{
+		TypeKey: TypePod, NaturalKey: PodNaturalKey("c1", "default", "web-1"), Name: "web-1",
+		Node: "web-01", Source: SourceDiscovery, Attrs: map[string]string{"restarts": "0"},
+	})
+	mustApply(Observation{
+		TypeKey: TypeWorkload, NaturalKey: WorkloadNaturalKey("c1", "default", "deployment", "web"),
+		Name: "web", Node: "web-01", Source: SourceDiscovery,
+	})
+
+	// 默认视图（带排除）：只剩主机。列表、计数、摘要必须同时只剩主机——
+	// 三者共用同一处 WHERE（assetWhere），否则会出现「摘要说 1、列表有 3 条」。
+	exclude := ListFilter{ExcludeTypes: EphemeralTypes(), StaleBefore: now - 30*60_000}
+	items, err := svc.List(exclude)
+	if err != nil {
+		t.Fatalf("列表失败: %v", err)
+	}
+	if len(items) != 1 || items[0].TypeKey != TypeHost {
+		t.Fatalf("默认视图应只剩主机，实际 %+v", items)
+	}
+	if n, err := svc.Count(exclude); err != nil || n != 1 {
+		t.Fatalf("计数应与列表同源（1），实际 n=%d err=%v", n, err)
+	}
+	stats, err := svc.Stats(exclude, 0)
+	if err != nil {
+		t.Fatalf("摘要失败: %v", err)
+	}
+	if stats.Total != 1 {
+		t.Fatalf("摘要总数应排除短命类型（1），实际 %+v", stats)
+	}
+
+	// 显式按类型查（调用方不设排除）：仍然拿得到——用户明确要看某一类时，
+	// 再把它排除掉是自相矛盾的。
+	pods, err := svc.List(ListFilter{TypeKey: TypePod})
+	if err != nil || len(pods) != 1 || pods[0].TypeKey != TypePod {
+		t.Fatalf("显式按类型查容器应返回 1 条，实际 %d err=%v", len(pods), err)
+	}
+}

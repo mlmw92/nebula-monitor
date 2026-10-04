@@ -75,7 +75,26 @@ const (
 const (
 	TypeHost           = "host"                // 主机（自然键 = hostname，与 model.Node.Hostname 一致）
 	TypeMiddlewareInst = "middleware-instance" // 中间件实例（自然键 = <类型>:<地址>）
+	// TypePod 是 K8s Pod（自然键 = <集群>/<命名空间>/pod/<名称>）。
+	//
+	// 键名用 pod 而不是 container，这是刻意的：**Pod 不是容器**（一个 Pod 可有多个容器），
+	// 而"容器"这个词在本平台已经指 Docker 容器——它们以 middleware-instance 落在台账里
+	// （自然键 docker:<容器ID>）。用一个词指两个东西，以后一定会有人按"container 类型"
+	// 去找 Docker 容器而找不到。
+	TypePod = "pod"
+	// TypeWorkload 是 K8s 工作负载（Deployment / StatefulSet / DaemonSet），
+	// 自然键 = <集群>/<命名空间>/<kind>/<名称>。
+	TypeWorkload = "workload"
 )
+
+// EphemeralTypes 是**运行时短命对象**的资产类型：它们天生高 churn（滚动更新、Job、扩缩容），
+// 与台账"长期存在、需要有人负责的配置项"不是同一类东西。
+//
+// 因此它们默认不参与台账首页的默认视图与健康度摘要（总数 / 失联 / 无责任人）：
+// 被替换掉的旧 Pod 停止上报后会被判为失联，计入之后页面顶部会出现"失联 200"，
+// 把真实故障埋掉；而没人会为滚动更新掉的 Pod 指派责任人。
+// 显式按类型筛选时仍然全量可见（含已消失的）。
+func EphemeralTypes() []string { return []string{TypePod, TypeWorkload} }
 
 // AssetType 是资产的定义：字段集合、是否内置、是否允许人工维护。
 type AssetType struct {
@@ -88,11 +107,34 @@ type AssetType struct {
 }
 
 // BuiltinTypes 返回内置资产类型，供 Store 初始化时播种。
+//
+// 这里新增类型**不需要**升 schemaVersion：类型是数据行、不是表结构，
+// 而播种语句是 `INSERT … ON CONFLICT(key) DO UPDATE SET title`（store.go），
+// 每次启动对齐一遍即可自愈。这与"给 asset_links 补 source 列"必须升版本 + 显式 ALTER 是两回事。
 func BuiltinTypes() []AssetType {
 	return []AssetType{
 		{Key: TypeHost, Title: "主机", Builtin: true},
 		{Key: TypeMiddlewareInst, Title: "中间件实例", Builtin: true},
+		{Key: TypePod, Title: "容器（Pod）", Builtin: true},
+		{Key: TypeWorkload, Title: "工作负载", Builtin: true},
 	}
+}
+
+// PodNaturalKey 由集群（apiserver 地址）、命名空间与 Pod 名拼出自然键。
+//
+// 形态与 normalizeKey 注释里预留的 <集群>/<命名空间>/<kind>/<name> 一致。
+// 集群取 apiserver 地址而不是别名：地址是唯一键，别名可变（K8sInstance 的注释已界定）。
+func PodNaturalKey(cluster, namespace, name string) string {
+	return podKeyPrefix(cluster, namespace) + "pod/" + strings.TrimSpace(name)
+}
+
+// WorkloadNaturalKey 同 PodNaturalKey，<kind> 取 deployment / statefulset / daemonset。
+func WorkloadNaturalKey(cluster, namespace, kind, name string) string {
+	return podKeyPrefix(cluster, namespace) + strings.TrimSpace(kind) + "/" + strings.TrimSpace(name)
+}
+
+func podKeyPrefix(cluster, namespace string) string {
+	return strings.TrimSpace(cluster) + "/" + strings.TrimSpace(namespace) + "/"
 }
 
 // Attr 是一条资产属性。

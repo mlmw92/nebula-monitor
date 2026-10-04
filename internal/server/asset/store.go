@@ -486,6 +486,15 @@ func assetWhere(alias string, f ListFilter) (string, []any) {
 		q += " AND " + alias + ".type_key=?"
 		args = append(args, f.TypeKey)
 	}
+	// 排除短命运行时对象（容器 / 工作负载）：默认视图与摘要都不含它们。
+	// 理由见 asset.EphemeralTypes 的注释——被滚动更新替换掉的旧 Pod 会被判失联，
+	// 计入之后顶部会出现"失联 200"，把真实故障埋掉。
+	if len(f.ExcludeTypes) > 0 {
+		q += " AND " + alias + ".type_key NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(f.ExcludeTypes)), ",") + ")"
+		for _, t := range f.ExcludeTypes {
+			args = append(args, t)
+		}
+	}
 	if f.Node != "" {
 		q += " AND " + alias + ".node=?"
 		args = append(args, f.Node)

@@ -291,6 +291,17 @@ func (a *API) assetListFilter(w http.ResponseWriter, r *http.Request) (asset.Lis
 		Limit:        assetIntParam(q.Get("limit"), 0),
 		Offset:       assetIntParam(q.Get("offset"), 0),
 	}
+	// 容器 / 工作负载是运行时短命对象，默认不进台账首页视图与健康度摘要
+	// （见 asset.EphemeralTypes）：滚动更新掉的旧 Pod 会判失联，计入后顶部会显示
+	// "失联 200"，把真实故障埋掉。
+	//
+	// 两种情况下不排除，因为那时"混进 Pod"不是风险、"搜不到"才是：
+	//   - 用户显式指定了类型：他明确要看某一类，再把它排除掉是自相矛盾的；
+	//   - 用了关键词：那是一次明确的定点查找（"拿 IP / 业务名 / 资产编号找资产"），
+	//     返回空会让人以为台账里没有这个对象——比列表里混进几个 Pod 糟得多。
+	if filter.TypeKey == "" && filter.Keyword == "" {
+		filter.ExcludeTypes = asset.EphemeralTypes()
+	}
 	status := strings.TrimSpace(q.Get("status"))
 	if !asset.ValidStatusFilter(status) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "状态取值不支持（可选 online / missing / archived）"})
