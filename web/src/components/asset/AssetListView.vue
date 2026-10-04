@@ -2,7 +2,7 @@
   <section class="view">
     <PageHeader
       title="资产台账"
-      desc="主机与中间件实例由 Agent 每轮上报自动发现；人工值不覆盖采集值，两者差异在详情里逐字段可见"
+      desc="主机、中间件实例与 K8s 容器/工作负载由 Agent 每轮上报自动发现；人工值不覆盖采集值，两者差异在详情里逐字段可见"
     />
 
     <!-- 健康度：与其它监控页统一的 KpiCard 卡片行；数字与列表同一套条件，点卡片即下钻 -->
@@ -46,6 +46,10 @@
           <el-select v-model="filter.type" placeholder="全部类型" clearable style="width: 150px">
             <el-option label="主机" value="host" />
             <el-option label="中间件实例" value="middleware-instance" />
+            <!-- 容器与工作负载是 K8s 清单上报的产物；它们**默认不计入上方数字**，
+                 选中这里才会出现在列表里（服务端 asset.EphemeralTypes 的同一条规则）。 -->
+            <el-option label="容器（Pod）" value="pod" />
+            <el-option label="工作负载" value="workload" />
           </el-select>
         </div>
         <div class="field">
@@ -104,6 +108,12 @@
         <el-tag v-if="drill.conflict" closable type="warning" @close="clearDrill">下钻：人工/采集冲突</el-tag>
         <el-tag v-if="drill.ignored" closable type="info" @close="clearDrill">下钻：已忽略</el-tag>
       </div>
+      <!-- 把"数字里为什么没有容器"说清楚：否则用户看到集群里明明有几十个 Pod、
+           顶部却只显示 12 个资产，只会怀疑数字算错。 -->
+      <p class="muted note">
+        容器与工作负载不计入上方数字：它们是滚动更新、扩缩容产生的短命对象，
+        计入后「失联」会被替换掉的旧 Pod 填满、失去意义。把「类型」选成容器（Pod）或工作负载即可查看。
+      </p>
 
       <div class="action-bar">
         <!-- 权限点不再做成按钮旁的小徽标：那是原型给开发看的标注，放在线上是噪声。
@@ -441,14 +451,14 @@
             </div>
             <p class="muted">
               人工维护的关系优先于采集自动发现：被人工认领过的边不会被采集覆盖。
-              目前只有「中间件实例 runs_on 宿主主机」由 Agent 上报后自动建立。
+              自动建立的有两类：中间件实例 / K8s 容器 runs_on 宿主主机，以及 K8s 容器 member_of 所属工作负载。
             </p>
             <el-table :data="links" style="width: 100%">
               <template #empty>
                 <EmptyState
                   :icon="Files"
                   title="暂无关联关系"
-                  :hints="['中间件实例与宿主主机的 runs_on 关系由 Agent 上报后自动建立', '也可以用上方「添加关系」人工建立']"
+                  :hints="['runs_on（实例/容器 → 主机）与 member_of（容器 → 工作负载）由 Agent 上报后自动建立', '也可以用上方「添加关系」人工建立']"
                 />
               </template>
               <el-table-column label="方向" width="105">
@@ -462,7 +472,7 @@
               <el-table-column label="对端资产" min-width="200">
                 <template #default="{ row }">
                   <span class="mono">{{ row.peerKey }}</span>
-                  <span class="muted">（{{ row.peerType === 'host' ? '主机' : '实例' }}）</span>
+                  <span class="muted">（{{ peerTypeLabel(row.peerType) }}）</span>
                 </template>
               </el-table-column>
               <el-table-column label="来源" width="80">
@@ -878,10 +888,18 @@ const INSTANCE_LABELS = {
   fastdfs: 'FastDFS', docker: 'Docker',
 }
 function typeLabel(row) {
+  // K8s 容器/工作负载的标题只能看 typeKey，**不能走下面的自然键前缀**：
+  // 它们的自然键是 <集群>/<命名空间>/<kind>/<名称>，按 ':' 切会切出 apiserver 的 scheme（https）。
+  if (row.typeKey === 'pod') return '容器（Pod）'
+  if (row.typeKey === 'workload') return '工作负载'
   if (row.typeKey === 'host') return '主机'
   const prefix = String(row.naturalKey || '').split(':')[0]
   return INSTANCE_LABELS[prefix] || prefix || '实例'
 }
+// 关系对端的类型标签：不复用 typeLabel（它要 row），但语义必须一致——
+// 否则「容器 → 主机」的 runs_on 会被显示成「实例 → 主机」。
+const PEER_TYPE_LABELS = { host: '主机', 'middleware-instance': '实例', pod: '容器', workload: '工作负载' }
+const peerTypeLabel = (t) => PEER_TYPE_LABELS[t] || t
 // 「上报状态」：描述 Agent 是否还在上报这条资产，与实例/容器自身是否可用无关。
 // 措辞刻意避开"在线/离线"——那是采集侧的探活结果，两者同词会让人觉得自相矛盾。
 const STATUS_LABELS = { online: '上报正常', missing: '失联', archived: '归档' }
@@ -902,7 +920,9 @@ function attrText(key, value) {
 }
 const SOURCE_LABELS = { auto: '自动', manual: '人工', mixed: '混合' }
 const sourceLabel = (s) => SOURCE_LABELS[s] || s
-const KIND_LABELS = { runs_on: 'runs_on 宿主机', member_of: 'member_of 集群', depends_on: 'depends_on 依赖', exposes: 'exposes 暴露' }
+// member_of 的落点从"归属集群"改成了"归属工作负载"（Pod → Deployment/StatefulSet/DaemonSet）：
+// 集群维度由自然键前缀表达，不再单独建边。标签跟着改成中性的「归属」。
+const KIND_LABELS = { runs_on: 'runs_on 运行于', member_of: 'member_of 归属', depends_on: 'depends_on 依赖', exposes: 'exposes 暴露' }
 const kindLabel = (k) => KIND_LABELS[k] || k
 
 function fmtTime(ts) {
