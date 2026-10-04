@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -19,6 +20,14 @@ const (
 	defaultDefenseStoreFile = "defense_tasks.json"
 	// defenseTaskTTL 任务从创建到过期的最长存活时间（毫秒）。超过则回收为 expired。
 	defenseTaskTTL = 30 * time.Minute
+	// maxDefenseTasks 是保留的防护任务条数上限；超出时丢弃最老的**已结束**任务。
+	//
+	// 与下行操作任务（ops.maxTasks）同一个理由，而且这里更紧迫：任务是纯追加的，
+	// 不设上限时文件会无限增长，而**每次状态变化都要全量重写整个文件**、启动时还要整个读进内存
+	// ——于是"封禁次数越多、每次写越慢、启动越慢"，且没有任何地方会提示这件事。
+	// 保留已结束的任务是为了让回执可回看；未结束的（queued/delivered/running）永不丢弃：
+	// 它们还有回执要等，丢掉就等于让操作者永远不知道结果。
+	maxDefenseTasks = 500
 )
 
 // DefenseTask 是单条防护任务的全生命周期记录。
@@ -29,16 +38,16 @@ type DefenseTask struct {
 	Operator    string `json:"operator,omitempty"`    // 触发操作的管理员账户
 	OperatorIP  string `json:"operatorIP,omitempty"`  // 操作人真实来源 IP（用于白名单与审计）
 	DeliveredAt int64  `json:"deliveredAt,omitempty"` // 领取下发时间（毫秒）
-	RunningAt   int64  `json:"runningAt,omitempty"`    // Agent 开始执行时间（毫秒）
-	DoneAt      int64  `json:"doneAt,omitempty"`       // 完成（成功/失败）时间（毫秒）
+	RunningAt   int64  `json:"runningAt,omitempty"`   // Agent 开始执行时间（毫秒）
+	DoneAt      int64  `json:"doneAt,omitempty"`      // 完成（成功/失败）时间（毫秒）
 }
 
 // DefenseStore 持久化并管理防护任务。
 type DefenseStore struct {
-	mu     sync.RWMutex
-	tasks  map[string]*DefenseTask
-	caps   map[string]bool // node -> 是否支持结构化防御指令（由 Agent 上报）
-	path   string
+	mu    sync.RWMutex
+	tasks map[string]*DefenseTask
+	caps  map[string]bool // node -> 是否支持结构化防御指令（由 Agent 上报）
+	path  string
 }
 
 // NewDefenseStore 创建防护任务存储并加载既有数据。
@@ -61,8 +70,8 @@ func (s *DefenseStore) load() {
 		return
 	}
 	var snap struct {
-		Tasks []*DefenseTask   `json:"tasks"`
-		Caps  map[string]bool  `json:"caps"`
+		Tasks []*DefenseTask  `json:"tasks"`
+		Caps  map[string]bool `json:"caps"`
 	}
 	if err := json.Unmarshal(data, &snap); err != nil {
 		slog.Warn("防护任务存储加载失败，忽略旧数据", "path", s.path, "err", err)
@@ -78,9 +87,80 @@ func (s *DefenseStore) load() {
 		s.caps = snap.Caps
 	}
 	slog.Info("已加载防护任务存储", "tasks", len(s.tasks), "caps", len(s.caps))
+
+	// 加载时顺手自愈：回收超时未结束的、裁掉超量的已结束任务。
+	//
+	// 必须在**加载时**就做，而不是等下一次防护动作：老版本没有上限，存量文件可能已经很大，
+	// 而这份文件要整个读进内存；不在这里修，它就得等到下一次有人点"封禁"才缩回去。
+	expired := s.expireOverdue(time.Now().UnixMilli())
+	dropped := s.prune()
+	if expired || dropped > 0 {
+		slog.Warn("防护任务存储已自动裁剪", "expired", expired, "dropped", dropped, "kept", len(s.tasks))
+		s.save()
+	}
+}
+
+// expireOverdue 是"超时未完成的任务回收为 expired"的**唯一实现**（返回是否有改动，
+// 由调用方决定要不要落盘）：加载与落盘前也要复用同一套判定，否则同一条超时的任务
+// 会因触发路径不同而得到不同结果。
+//
+// 为什么 prune 之外还需要它：prune 只丢**已结束**的任务，而一条 queued 的任务若该节点
+// 此后再没来领取（Agent 下线、被移除、一直忙），Take 里的过期检查永远不会被触发
+// ——它会永远停在 queued：既不结束、也不可裁，白占一条量。
+func (s *DefenseStore) expireOverdue(now int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for _, t := range s.tasks {
+		switch t.State {
+		case model.DefenseStateSucceeded, model.DefenseStateFailed, model.DefenseStateExpired:
+			continue
+		}
+		if t.ExpiresAt > 0 && now > t.ExpiresAt {
+			t.State = model.DefenseStateExpired
+			t.Message = "任务超时未完成"
+			changed = true
+		}
+	}
+	return changed
+}
+
+// prune 在任务数超限时丢弃最老的已结束任务，返回丢弃条数。
+//
+// 与 ops.Store.prune 同一套语义：**只丢已结束的**（succeeded/failed/expired）。
+// 若未结束的任务本身就超过上限（节点一直不来领取），这里是尽力而为——不会为了凑数
+// 去丢一条还在等回执的任务。
+func (s *DefenseStore) prune() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.tasks) <= maxDefenseTasks {
+		return 0
+	}
+	finished := make([]*DefenseTask, 0, len(s.tasks))
+	for _, t := range s.tasks {
+		switch t.State {
+		case model.DefenseStateSucceeded, model.DefenseStateFailed, model.DefenseStateExpired:
+			finished = append(finished, t)
+		}
+	}
+	sort.Slice(finished, func(i, j int) bool { return finished[i].CreatedAt < finished[j].CreatedAt })
+	dropped := 0
+	for _, t := range finished {
+		if len(s.tasks) <= maxDefenseTasks {
+			break
+		}
+		delete(s.tasks, t.ID)
+		dropped++
+	}
+	return dropped
 }
 
 func (s *DefenseStore) save() {
+	// 落盘前先自愈（两个函数各自加锁，此处不得持锁）：
+	// 这样"回收 + 裁剪"跟着每一次状态变化发生，而不是只在重启时发生一次。
+	s.expireOverdue(time.Now().UnixMilli())
+	s.prune()
+
 	s.mu.RLock()
 	snap := struct {
 		Tasks []*DefenseTask  `json:"tasks"`
@@ -245,21 +325,7 @@ func (s *DefenseStore) Latest(node string) *DefenseTask {
 // ExpireOverdue 将超时未完成的 queued/delivered/running 任务回收为 expired。
 // 由 receiver 在处理 report 时周期调用。
 func (s *DefenseStore) ExpireOverdue() {
-	now := time.Now().UnixMilli()
-	s.mu.Lock()
-	changed := false
-	for _, t := range s.tasks {
-		if t.State == model.DefenseStateSucceeded || t.State == model.DefenseStateFailed || t.State == model.DefenseStateExpired {
-			continue
-		}
-		if t.ExpiresAt > 0 && now > t.ExpiresAt {
-			t.State = model.DefenseStateExpired
-			t.Message = "任务超时未完成"
-			changed = true
-		}
-	}
-	s.mu.Unlock()
-	if changed {
+	if s.expireOverdue(time.Now().UnixMilli()) {
 		s.save()
 	}
 }
