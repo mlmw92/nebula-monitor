@@ -1060,8 +1060,16 @@ k8sInstances:
     token: "eyJhbGciOi..."             # 仅存本地不上报
     insecureTLS: true
     metricsServer: false
-    # exporterURL: "http://127.0.0.1:8080/metrics"  # 可选 kube-state-metrics
+    #     exporterURL: "http://127.0.0.1:8080/metrics"  # 可选 kube-state-metrics
+# includeSystemNamespaces: false   # 台账清单是否上报 kube-system / kube-public / kube-node-lease（默认 false = 排除）
 ```
+
+> **清单上报**：配了 `k8sInstances`（且不是 exporter 模式）时，Agent 会随上报周期把该集群的
+> **Pod 与工作负载清单**一并上报，Server 落成台账资产（类型 `pod` / `workload`）并建立
+> `runs_on`（Pod → 所在主机）与 `member_of`（Pod → 所属工作负载）两条关系。
+> 单轮上限 1000 个 Pod / 500 个工作负载，超限会截断并在上报体里**显式置位**（不会静默丢弃）。
+> 容器与工作负载是**短命对象**，默认不计入台账首页的「总数 / 失联 / 无责任人」——
+> 按类型筛选或关键词搜索即可看到。
 
 **MongoDB 配置示例**
 

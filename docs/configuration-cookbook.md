@@ -394,6 +394,13 @@ guards:
 配了 `k8sInstances` 且 `guards.ops.container` 未被关掉时，`supported` 里还会多出
 `container.workloads / container.pods / container.describe / container.events` 四个只读动作（见 4.5）。
 
+> **另外（不需要护栏开关）**：配了 `k8sInstances` 时，Agent 会随**上报周期**把该集群的
+> Pod 与工作负载**清单**带给 Server（与上面的下行查询是两条独立通路）。Server 把它们落成台账资产
+> （类型 `pod` / `workload`）并建立 `runs_on`（Pod → 所在主机）与 `member_of`（Pod → 所属工作负载）。
+> 单轮上限 1000 个 Pod / 500 个工作负载，超限会截断并在上报体里显式置位；
+> 系统命名空间默认排除（`includeSystemNamespaces: true` 可改成全量）。
+> 它们是**短命对象**，默认不计入台账首页的「总数 / 失联 / 无责任人」——按类型筛选或关键词搜索即可看到。
+
 ### 4.3 怎么用、怎么排障
 
 1. 「节点操作 → 下发操作」：选节点 → 选动作 → 填参数（如 `nginx.service`）→ 填原因（强烈建议）。
