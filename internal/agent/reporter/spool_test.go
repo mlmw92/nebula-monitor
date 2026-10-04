@@ -209,6 +209,42 @@ func TestSpool_TrimDropsOldest(t *testing.T) {
 	}
 }
 
+// 长时间断网（只追加、从不确认）时，**数据文件本身**也必须被限制住。
+//
+// 这条是真机实测出来的：只推进偏移等于"逻辑丢弃"，文件仍在变长——
+// 断网 7 小时后长到 113 MB，而"未确认数据"一直稳在上限内。
+// 机器磁盘小的场景下这会把盘写满，所以文件大小必须有自己的上界。
+func TestSpool_FileSizeStaysBoundedDuringLongOutage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spool.jsonl")
+	const limit = 64 << 10
+	s, err := OpenSpool(path, limit)
+	if err != nil {
+		t.Fatalf("打开缓冲失败: %v", err)
+	}
+
+	// 累计追加约 5 倍上限的量，期间从不 Ack（模拟 Server 一直不可达）
+	for i := 0; i < 50; i++ {
+		s.Append(batch(fmt.Sprintf("m%d", i), 100))
+	}
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat 失败: %v", err)
+	}
+	if fi.Size() > 3*limit {
+		t.Fatalf("数据文件不应随断网时长无限增长：实际 %d 字节，上限 %d", fi.Size(), limit)
+	}
+	if d := s.Depth(); d > limit {
+		t.Fatalf("未确认数据不应超过上限：%d > %d", d, limit)
+	}
+	// 整理之后最新的一批必须还在（丢的是最老的）
+	n := names(mustDrain(t, s))
+	if n["m49"] != 100 {
+		t.Fatalf("最新一批必须保留，实际 %v", n)
+	}
+}
+
 // 单批就超过上限：丢弃本批（留着也发不出去），且不影响后续追加。
 func TestSpool_OversizeBatchIsDropped(t *testing.T) {
 	s, _ := newSpool(t, "spool.jsonl", 200)

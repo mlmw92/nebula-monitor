@@ -239,11 +239,19 @@ func (s *Spool) lineAtLocked(off int64) ([]byte, int, bool) {
 	return tail[:i], i + 1, true
 }
 
-// trimLocked 在上限内保留**最近的**数据：超出时从最老的一行开始丢。
+// trimLocked 在上限内保留**最近的**数据：超出时从最老的一行开始丢，
+// 并在丢弃量达到一定规模时把文件真正重写一次。
 //
 // 丢最老而不是丢最新：排障时人关心的是"最近发生了什么"，
 // 而 Server 恢复后也是最近的一段数据更完整、更有对照价值。
+//
+// **为什么这里必须顺手整理**：只推进偏移等于"逻辑丢弃"，文件本身仍在变长。
+// 断网期间不会有 Ack（没有东西送出去），于是只在 Ack 里整理的话，文件会随着
+// 「追加 + 丢最老」无限增长——2026-10-04 真机实测：断网 7 小时后数据文件长到 **113 MB**，
+// 而同时"未确认数据"一直稳在上限 8 MiB。机器磁盘小的场景下这会把盘写满。
+// 现在按与 Ack 相同的阈值（已丢弃的超过一半）重写，文件被限制在约 2 倍上限以内。
 func (s *Spool) trimLocked() {
+	dropped := false
 	for s.size-s.offset > s.maxBytes {
 		_, n, ok := s.lineAtLocked(s.offset)
 		if !ok || n == 0 {
@@ -252,7 +260,15 @@ func (s *Spool) trimLocked() {
 			break
 		}
 		s.offset += int64(n)
+		dropped = true
 		slog.Warn("磁盘缓冲超出上限，已丢弃最老的一批指标", "limitMB", s.maxBytes>>20)
+	}
+	// 已丢弃的部分超过一半就重写：既发生在断网期间（本函数），也发生在补传期间（Ack）。
+	if dropped && s.offset > 0 && s.offset*2 >= s.size {
+		if err := s.compactLocked(); err != nil {
+			slog.Warn("整理磁盘缓冲失败，下次再试", "err", err)
+		}
+		return
 	}
 	if err := s.saveOffsetLocked(); err != nil {
 		slog.Warn("记录缓冲确认偏移失败", "err", err)
