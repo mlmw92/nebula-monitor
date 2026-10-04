@@ -62,6 +62,16 @@ type Config struct {
 	// LogOffsetsFile 是日志读取偏移的落盘路径（重启不丢进度、不重复上传）。
 	LogOffsetsFile string `yaml:"logOffsetsFile"`
 
+	// SpoolFile 是上报磁盘缓冲的落盘路径：Server 不可达时把**时序点**暂存在本机，
+	// 恢复后随下一次上报补传（不是新开一条补传通道，也不是把整份上报存下来）。
+	// 留空取 DefaultSpoolFile；把 SpoolMaxMB 设为 0 可整体关闭缓冲。
+	SpoolFile string `yaml:"spoolFile"`
+	// SpoolMaxMB 是磁盘缓冲的上限（MB）。留空取 DefaultSpoolMaxMB；显式写 0 表示关闭。
+	//
+	// 为什么让机器能关掉它：在磁盘上暂存数据用的是**这台机器的**资源，
+	// 与 guards 同一条原则——机器自己决定要不要接受这件事。
+	SpoolMaxMB *int `yaml:"spoolMaxMB"`
+
 	// Guards 是本机护栏：机器自己决定允不允许平台下发操作动作（见 internal/agent/ops）。
 	Guards GuardsConfig `yaml:"guards"`
 }
@@ -224,6 +234,47 @@ const (
 	MaxLogMultilineLines        = 500
 )
 
+// 上报磁盘缓冲的默认值。
+const (
+	// DefaultSpoolFile 是缓冲文件的默认位置（可被 spoolFile 覆盖）。
+	DefaultSpoolFile = "/var/lib/monitor-agent/report_spool.jsonl"
+	// DefaultSpoolMaxMB 是缓冲上限的默认值（MB）。
+	//
+	// 8 MiB 能兜住的时长完全取决于这台机器上报多少指标，**不要按经验拍**：
+	// 2026-10-04 在 dev-server（12 个中间件实例的节点）实测约 **280 KB/分钟**，
+	// 于是 8 MiB ≈ **半小时**；而指标较少的节点（两三个中间件）大约是这个的 1/4，
+	// 同样 8 MiB 能兜住两三小时。运维要覆盖更长的 Server 不可达就把 spoolMaxMB 调大。
+	//
+	// 超出后丢**最老**的一批（见 internal/agent/reporter/spool.go）——留最近的数据排障时更有用，
+	// 且"缓冲满了"这件事本身会以告警级别的日志体现出来，不会静默。
+	DefaultSpoolMaxMB = 8
+)
+
+// SpoolMaxBytes 返回磁盘缓冲上限的字节数（<=0 表示关闭缓冲）。
+func (c *Config) SpoolMaxBytes() int64 {
+	if c.SpoolMaxMB == nil {
+		return int64(DefaultSpoolMaxMB) << 20
+	}
+	return int64(*c.SpoolMaxMB) << 20
+}
+
+// normalizeSpool 补齐磁盘缓冲的默认值。
+//
+// 只补默认、不做校验：打不开缓冲不该拦住 Agent 启动（真正打不开时由 cmd/agent
+// 记一条并继续跑）——它是"断网时不丢数据"的增强，不是 Agent 工作的前提。
+//
+// 注意 SpoolMaxMB 用指针就是为了区分"没配"（→ 默认 8MB）与"显式 0"（→ 关闭）。
+// 把 0 当成"没配"会让运维的关闭动作静默失效，机器继续悄悄写磁盘。
+func normalizeSpool(cfg *Config) {
+	if cfg.SpoolFile == "" {
+		cfg.SpoolFile = DefaultSpoolFile
+	}
+	if cfg.SpoolMaxMB == nil {
+		mb := DefaultSpoolMaxMB
+		cfg.SpoolMaxMB = &mb
+	}
+}
+
 // SecurityConfig 是安全采集（SSH 审计/FIM/基线/异常进程/sudo）的可配置项。
 // 所有字段均有合理默认值，开启 collectors.security 后无需额外配置即可工作。
 type SecurityConfig struct {
@@ -382,6 +433,8 @@ func Load(path string) (*Config, error) {
 	if err := normalizeAndValidateLogSources(cfg); err != nil {
 		return nil, err
 	}
+	// 上报磁盘缓冲：只补默认值，不做校验。
+	normalizeSpool(cfg)
 	// 解密中间件连接密码：以 enc: 前缀的密文经 AES-GCM 解密为明文供采集器使用；
 	// 旧明文配置直接保留（向后兼容）。解密失败仅告警并保留原值，避免 agent 启动失败。
 	cipher, err := crypto.NewCipher([]byte(cfg.CryptoKey))

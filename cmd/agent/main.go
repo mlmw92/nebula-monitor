@@ -182,6 +182,19 @@ func main() {
 	slog.Info("下行操作能力清单已就绪", "supported", opsExec.Supported())
 	rep := reporter.New(cfg.ServerURL, cfg.Node, cfg.Group, cfg.Secret, cfg.Labels)
 
+	// 上报磁盘缓冲：Server 不可达时把**时序点**暂存在本机，恢复后随下一次上报补传
+	// （只覆盖采集模式的主上报路径；代理模式的 5 个自监控计数器不在此列）。
+	// 打不开只记一条并继续跑——受影响的是"断网期间不丢数据"，不该拦住 Agent 工作。
+	spool, serr := reporter.OpenSpool(cfg.SpoolFile, cfg.SpoolMaxBytes())
+	if serr != nil {
+		slog.Warn("上报磁盘缓冲不可用，断网期间的数据将不再补传", "path", cfg.SpoolFile, "err", serr)
+		spool = nil
+	} else if spool.Enabled() {
+		slog.Info("上报磁盘缓冲已就绪", "path", cfg.SpoolFile, "maxMB", cfg.SpoolMaxBytes()>>20)
+	} else {
+		slog.Info("上报磁盘缓冲已关闭（spoolMaxMB=0）")
+	}
+
 	// 构建已开启的采集器列表
 	var enabledCollectors []string
 	cs := cfg.Collectors
@@ -267,10 +280,10 @@ func main() {
 	ctx := context.Background()
 
 	// 立即采集一次
-	collectAndReport(ctx, coll, rep, cfg)
+	collectAndReport(ctx, coll, rep, cfg, spool)
 
 	for range ticker.C {
-		collectAndReport(ctx, coll, rep, cfg)
+		collectAndReport(ctx, coll, rep, cfg, spool)
 	}
 }
 
@@ -371,7 +384,7 @@ func reportProxyMetrics(cfg *config.Config, p proxyMetricsProvider) {
 	}
 }
 
-func collectAndReport(ctx context.Context, coll *collector.Collector, rep *reporter.Reporter, cfg *config.Config) {
+func collectAndReport(ctx context.Context, coll *collector.Collector, rep *reporter.Reporter, cfg *config.Config, spool *reporter.Spool) {
 	// 一轮采集：各来源并发执行、各自独立超时（collectTimeout），互不阻塞。
 	res := coll.CollectAll(ctx)
 
@@ -431,9 +444,20 @@ func collectAndReport(ctx context.Context, coll *collector.Collector, rep *repor
 		FirewallStatus: res.FirewallStatus,
 		ReportAt:       model.NowMillis(),
 	}
-	resp, err := rep.ReportFull(payload)
+	// 缓冲深度作为自监控指标：磁盘缓冲正在攒东西这件事要能被看见、能告警。
+	// 注意它只在**上报成功时**才送得出去，因此它反映的是"上一次上报之后积了多少"；
+	// 断网期间"积了多少"由节点在线状态体现（那才是主告警），两者分工不同。
+	if spool.Enabled() {
+		payload.Metrics = append(payload.Metrics, model.Metric{
+			Node: cfg.Node, Name: "agent_spool_bytes",
+			Value: float64(spool.Depth()), Timestamp: model.NowMillis(),
+		})
+	}
+	// 送出与缓冲的配合见 reporter.Spool.Send：成功则确认已补传的那一段，
+	// 失败则把本轮指标落盘——断网期间的数据就不再丢了。
+	resp, err := spool.Send(payload, rep.ReportFull)
 	if err != nil {
-		// 错误已在 reporter 内记录，这里仅跳过本轮
+		// 错误已在 reporter 内记录；本轮指标已落盘，恢复后会随上报一并补传
 		return
 	}
 	// 回执已随本次上报发出，清空待发结果
