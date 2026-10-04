@@ -64,6 +64,7 @@
                 type="primary"
                 :loading="q.busy"
                 :disabled="!canQuery"
+                title="按当前集群与命名空间重新下发一次查询（这是这一页唯一会重新下发的地方）"
                 @click="run(activeTab)"
               >
                 查询
@@ -125,6 +126,14 @@
               <span>
                 共 {{ result.total }} 个对象{{ result.truncated ? '，仅显示前 ' + result.rows.length + ' 条' : '' }}
               </span>
+              <!-- 数据来自异步下发，界面必须回答"这是什么时候的数据"：
+                   否则用户唯一的安全假设就是"它可能过期了，再点一次吧"，然后一直白等。 -->
+              <span v-if="q.busy" class="foot-time">正在刷新…</span>
+              <span
+                v-else-if="q.at"
+                class="foot-time"
+                :title="'上次刷新：' + new Date(q.at).toLocaleString('zh-CN')"
+              >上次刷新 {{ refreshedText(q.at) }}</span>
               <span v-if="result.truncated" class="foot-warn">结果已截断，请缩小命名空间范围</span>
             </div>
           </template>
@@ -134,8 +143,8 @@
             :icon="activeIcon"
             title="还没有查询结果"
             :hints="[
-              '已自动按当前集群提交查询，结果通常 15 秒内返回',
-              '换集群或切 Tab 会自动重查，也可以点「查询」手动刷新',
+              '已按当前集群提交一次查询，结果通常 15 秒内返回',
+              '结果会保留：切集群、切 Tab 都不会重新下发，需要最新数据时点「查询」',
             ]"
           />
         </SectionCard>
@@ -144,6 +153,15 @@
 
     <!-- 对象详情：只读投影，敏感字段不下发 -->
     <el-drawer v-model="detailVisible" :title="detailTitle" size="620px">
+      <!-- 与主表同一套规矩：点开行不重新下发，要最新的自己点「刷新」 -->
+      <div class="detail-bar">
+        <span class="muted">
+          <template v-if="detailBusy">正在刷新…</template>
+          <template v-else-if="detailState.at">上次刷新 {{ refreshedText(detailState.at) }}</template>
+          <template v-else>尚未查询</template>
+        </span>
+        <el-button size="small" :loading="detailBusy" @click="refreshDetail">刷新</el-button>
+      </div>
       <div v-if="detailBusy" class="drawer-loading">正在查询（等待 Agent 上报）…</div>
       <el-alert v-else-if="detailError" type="error" :closable="false" show-icon :title="detailError" />
       <template v-else-if="detail">
@@ -158,7 +176,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Refresh, Grid, Monitor, Bell } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import http from '../../api/http'
@@ -166,6 +184,7 @@ import { createOpsTask, getOpsTask, cancelOpsTasks } from '../../api/ops'
 import PageHeader from '../common/PageHeader.vue'
 import SectionCard from '../common/SectionCard.vue'
 import EmptyState from '../common/EmptyState.vue'
+import { containerDetailState, containerQueryState } from './queryCache'
 
 // 容器只读管理面。
 //
@@ -202,27 +221,38 @@ const clusterKey = ref('')
 const namespace = ref('')
 const activeTab = ref('workloads')
 
-const query = reactive({
-  workloads: { busy: false, task: null, error: '', result: null },
-  pods: { busy: false, task: null, error: '', result: null },
-  events: { busy: false, task: null, error: '', result: null },
-})
-
 const detailVisible = ref(false)
-const detailBusy = ref(false)
-const detailError = ref('')
-const detail = ref(null)
 const detailTitle = ref('对象详情')
 
-const timers = new Set()
-
-const activeMeta = computed(() => TABS.find((t) => t.key === activeTab.value) || TABS[0])
-const activeIcon = computed(() => activeMeta.value.icon)
-const q = computed(() => query[activeTab.value])
+// 查询状态（含结果与**结果落地时间**）存在组件之外，理由见 queryCache.js：
+// 结果来自异步下行任务（下发 → 等 Agent 上报 → 回执，通常 15 秒以上），
+// 只放在组件状态里的话，每次路由切回来都会丢掉它、于是"点进这一页"就等于重新下发一轮。
+const q = computed(() => containerQueryState(clusterKey.value, activeTab.value))
 const currentCluster = computed(() => clusters.value.find((c) => keyOf(c) === clusterKey.value) || null)
 const result = computed(() => q.value.result)
 const canQuery = computed(() => !!currentCluster.value && currentCluster.value.up && !q.value.busy)
 const canDescribe = computed(() => !!DETAIL_SPEC[activeTab.value])
+
+// 详情抽屉也走同一套缓存：重复点同一行同样是一次 15 秒的下发，没理由重来一遍。
+const detailKey = ref({ cluster: '', kind: '', namespace: '', name: '' })
+// 记住打开的是哪一行：抽屉里的「刷新」要能重新下发同一个对象。
+const detailRow = ref(null)
+const detailState = computed(() => containerDetailState(
+  detailKey.value.cluster, detailKey.value.kind, detailKey.value.namespace, detailKey.value.name
+))
+const detailBusy = computed(() => detailState.value.busy)
+const detailError = computed(() => detailState.value.error)
+const detail = computed(() => detailState.value.result)
+
+const timers = new Set()
+
+// now 只为把"上次刷新"的相对时间刷新成真话：只显示绝对时刻的话，
+// "10:31:02" 需要在脑子里减一遍才知道多久以前；只显示"3 分钟前"则不会自己走。
+const now = ref(Date.now())
+let nowTimer = null
+
+const activeMeta = computed(() => TABS.find((t) => t.key === activeTab.value) || TABS[0])
+const activeIcon = computed(() => activeMeta.value.icon)
 
 // 表格行：把 [][]string 摊成对象，模板里好取值（保留原始 cells，详情要用）。
 const resultRows = computed(() => (result.value?.rows || []).map((cells) => ({ cells })))
@@ -269,38 +299,52 @@ async function loadClusters() {
 }
 
 function onClusterChange() {
-  // 换集群后上一个结果已经没有意义：清掉，避免"看着 A 的表以为是 B 的"。
-  for (const t of TABS) {
-    query[t.key].result = null
-    query[t.key].error = ''
-    query[t.key].task = null
-  }
-  // 清完顺手把当前 Tab 查一次，免得换完集群又对着空白面板。
+  // 换集群**不清缓存**：缓存按「集群 + 动作」分键，切回来要能直接看到那个集群上次的结果与时间
+  // ——那正是"记住上次刷新的状态"。仍然不会张冠李戴：显示的结果取自
+  // (当前集群, 当前 Tab) 这一个键，结构上就不可能把 A 的表显示在 B 下面。
   autoRun(activeTab.value)
 }
 
-// autoRun 只在"这个 Tab 还没有结果"时自动发起查询。
+// autoRun 只在"这个（集群 + Tab）还没有结果"时自动发起**一次**查询。
 //
-// 为什么要自动查：全平台其它 Tab 都是自动加载，只有这一页要手点「查询」，
+// 为什么要自动查一次：全平台其它 Tab 都是自动加载，只有这一页要手点「查询」，
 // 第一眼看到「还没有查询结果」会以为功能坏了（真实用户反馈）。
+//
+// 为什么只查一次：结果是异步下发来的（通常 15 秒以上），重复下发纯属让用户白等。
+// 已经有结果时一律等用户点「查询」——数据新鲜度由界面上那句"上次刷新"负责说明。
 //
 // 命名空间输入**不**触发自动查询：那是"改条件"而不是"换视图"，
 // 边打字边下发任务既吵又费，那种场景让用户点「查询」更合适。
 function autoRun(tab) {
-  const item = query[tab]
+  const item = containerQueryState(clusterKey.value, tab)
   if (!item || item.busy || item.result) return
   if (!currentCluster.value || !currentCluster.value.up) return
   run(tab)
 }
 
+// refreshedText 把"上次刷新时间"说成人话：绝对时刻 + 相对时长。
+//
+// 两个都要：只有绝对时刻要在脑子里减一遍；只有相对时长则不会自己走（且刷新后再看还是旧文案）。
+function refreshedText(at) {
+  if (!at) return ''
+  const clock = new Date(at).toLocaleTimeString('zh-CN', { hour12: false })
+  const diff = Math.max(0, now.value - at)
+  if (diff < 60_000) return `${clock} · 刚刚`
+  if (diff < 3600_000) return `${clock} · ${Math.floor(diff / 60_000)} 分钟前`
+  if (diff < 86400_000) return `${clock} · ${Math.floor(diff / 3600_000)} 小时前`
+  return `${clock} · ${Math.floor(diff / 86400_000)} 天前`
+}
+
 /* ===== 提交与轮询 ===== */
 async function run(tab) {
   const target = TABS.find((t) => t.key === tab)
-  const item = query[tab]
+  const item = containerQueryState(clusterKey.value, tab)
   if (!target || !currentCluster.value) return
 
   item.error = ''
-  item.result = null
+  // **不清 result**：刷新期间旧结果继续留在表里（配合"上次刷新"那句），
+  // 只在成功回来后才替换。否则点一次刷新就是白屏等 15 秒，
+  // 而"看到一份略旧的数据 + 明确的刷新时间"比白屏好判断得多。
   item.task = null
   item.busy = true
   try {
@@ -329,7 +373,13 @@ async function run(tab) {
           item.error = taskFailureText(t)
         } else {
           item.result = parsePayload(t)
-          if (!item.result) item.error = t.message || '任务成功但未返回结构化结果'
+          if (!item.result) {
+            item.error = t.message || '任务成功但未返回结构化结果'
+          } else {
+            // 只有结果真的落地才推进"上次刷新"：失败时保留旧时间，
+            // 界面才不会把一次失败说成"刚刷新过"。
+            item.at = Date.now()
+          }
         }
         item.busy = false
       }
@@ -413,7 +463,11 @@ async function onRowClick(row) {
   if (canDescribe.value) await describeRow(row)
 }
 
-async function describeRow(row) {
+// describeRow 打开某个对象的详情。force=true 表示用户明确要求刷新（抽屉里的「刷新」）。
+//
+// 默认**命中缓存不再下发**：点一下行就是一次 15 秒的下发，而用户点开往往只是"看看"，
+// 来回点几行就要等好几轮。要看最新的点抽屉里的「刷新」——与主表的规矩一致。
+async function describeRow(row, force = false) {
   const spec = DETAIL_SPEC[activeTab.value]
   if (!spec || !currentCluster.value) return
   const cells = row.cells || []
@@ -423,11 +477,16 @@ async function describeRow(row) {
   if (!name || !ns || !resource) return
 
   detailTitle.value = `${resource}/${name}`
-  detail.value = null
-  detailError.value = ''
-  detailBusy.value = true
+  detailKey.value = { cluster: clusterKey.value, kind: resource, namespace: ns, name }
+  detailRow.value = row
   detailVisible.value = true
 
+  const st = containerDetailState(clusterKey.value, resource, ns, name)
+  if (st.result && !force) return // 有上次的结果：直接显示，连同它的刷新时间
+
+  st.error = ''
+  st.task = null
+  st.busy = true
   try {
     const res = await createOpsTask({
       node: currentCluster.value.node,
@@ -442,34 +501,49 @@ async function describeRow(row) {
     })
     const task = res && res.task
     if (!task || !task.id) throw new Error('服务端未返回任务 ID')
+    st.task = task
     await waitTask(
       task.id,
       () => {},
       (t, err) => {
-        detailBusy.value = false
+        st.busy = false
         if (err) {
-          detailError.value = err
+          st.error = err
         } else if (t.state !== 'succeeded') {
-          detailError.value = taskFailureText(t)
+          st.error = taskFailureText(t)
         } else {
-          detail.value = parsePayload(t)
-          if (!detail.value) detailError.value = t.message || '未返回结构化结果'
+          st.result = parsePayload(t)
+          if (!st.result) {
+            st.error = t.message || '未返回结构化结果'
+          } else {
+            st.at = Date.now()
+          }
         }
       }
     )
   } catch (e) {
-    detailError.value = e.message || '下发失败'
-    detailBusy.value = false
+    st.error = e.message || '下发失败'
+    st.busy = false
   }
 }
 
+// refreshDetail 是抽屉里的「刷新」：显式重新下发同一个对象的详情。
+function refreshDetail() {
+  if (detailRow.value) describeRow(detailRow.value, true)
+}
+
 onMounted(async () => {
+  // "上次刷新多久之前"要自己走：否则停了十分钟再看，它还会说"刚刚"。
+  nowTimer = setInterval(() => {
+    now.value = Date.now()
+  }, 30_000)
   await loadClusters()
-  // 进页面就把当前 Tab 查一次（同上：不要让人对着空白面板猜）
+  // 只在"这个（集群 + Tab）还没有结果"时查一次（不要让人对着空白面板猜）；
+  // 有上次的结果就直接显示结果与刷新时间——**进页面不等于刷新**。
   autoRun(activeTab.value)
 })
 
-// 切 Tab 时若该 Tab 还没有结果，也自动查一次；已有结果不重查，避免重复下发任务。
+// 切 Tab：同样只在没有结果时查一次。已有结果直接显示，不重复下发。
 watch(activeTab, (tab) => {
   nextTick(() => autoRun(tab))
 })
@@ -477,6 +551,7 @@ watch(activeTab, (tab) => {
 onBeforeUnmount(() => {
   for (const h of timers) clearTimeout(h)
   timers.clear()
+  if (nowTimer) clearInterval(nowTimer)
 })
 </script>
 
@@ -573,6 +648,18 @@ onBeforeUnmount(() => {
 }
 .foot-warn {
   color: var(--warn);
+}
+/* 「上次刷新」推到右侧：它是这份数据的"保质期标签"，不该和计数挤在一起。 */
+.foot-time {
+  margin-left: auto;
+}
+.detail-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: var(--fs-xs);
 }
 .drawer-loading {
   padding: 24px 0;
