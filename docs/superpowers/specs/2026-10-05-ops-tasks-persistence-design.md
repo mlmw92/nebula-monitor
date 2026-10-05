@@ -120,5 +120,19 @@ CREATE TABLE IF NOT EXISTS ops_caps(node TEXT PRIMARY KEY, kinds TEXT NOT NULL D
 原文件改名、重复启动不重复导入；② 行级差量写入：创建 / 取消 / 删除 / 能力都**直接查库**验证（不只看内存），
 并验证重启后能力仍在。`go test ./...` 全绿。
 
-**未做**：① 实机验证（dev-server 上真实的 `ops_tasks.json` 回填 + 一次真实下发）；
-② 打包；③ 前端未改（列表接口与行为完全等价，无需改）；④ SQL 分页（决策点 D4）。
+**已打包 1.30.33（`ec457f4`）并在 dev-server 实机验证通过（2026-10-05）**：
+
+| 检查 | 结果 |
+|---|---|
+| 版本 | `server: 1.30.33` |
+| 回填 | `/var/lib/monitor-server/ops_tasks.json.bak-migrated`（86,975 字节），原文件已消失 |
+| 任务读回 | `GET /ops/tasks` 返回 `ops-49`（`container.events`，含结构化 `json` 载荷）—— 任务与其载荷都完整搬进库 |
+| **节点能力** | `GET /ops/actions?nodes=VM-0-10-ubuntu` 仍返回 `node.diagnostics` / `svc.status` / `svc.restart` —— **就是本轮修的那个 bug，重启后能力没有丢** |
+| **序号接着走** | 新任务拿到 **`ops-50`**（上一个既有任务是 `ops-49`）→ 撞 ID 的风险排除 |
+| 状态流转与回执 | `svc.status(unit=nginx.service)`：`queued` → `succeeded`，回执含真实 systemd 输出，落库后可再读回 |
+
+顺带被验证到的一处：第一次下发时我把参数写成 `nginx`（少 `.service`），服务端按目录里的 pattern 直接
+400 拒绝并给出示例 —— **参数护栏在入库模式下照常生效**。
+
+**仍未做**：① 批次 18 的**回滚演练**（需临时装回 1.30.32，有破坏性，等用户点头）；
+② 审计页在浏览器里实点（只有组件用例）；③ 前端未改（列表接口与行为完全等价，无需改）；④ SQL 分页（决策点 D4）。
