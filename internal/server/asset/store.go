@@ -314,10 +314,33 @@ func (s *Store) typeExists(key string) (bool, error) {
 
 // assetByNatural 按（类型 + 自然键）取资产，找不到返回 ok=false。
 func (s *Store) assetByNatural(typeKey, naturalKey string) (Asset, bool, error) {
+	return s.assetByNaturalClause(typeKey, naturalKey, false)
+}
+
+// assetByNaturalFold 同 assetByNatural，但自然键**忽略大小写**。
+//
+// 为什么需要单独一个入口：主机名按 DNS 约定大小写不敏感，而两侧的写法由不同系统决定——
+// K8s 的节点名按 RFC 1123 一律小写（`vm-0-10-ubuntu`），而 Agent 上报的 hostname 保留系统原样
+// （`VM-0-10-ubuntu`）。严格比对会把**同一台机器**判成两台：Pod 的 `runs_on` 建不出来，
+// 且它的归属节点为空 —— **按节点分组授权的受限用户会看不到自己机器上的 Pod**。
+// 两处失效都不报错，只是"看起来没有关系"。
+//
+// 只用 ASCII 折叠（SQLite 的 NOCASE 语义）：主机名本就是 ASCII；中文主机名不参与大小写。
+func (s *Store) assetByNaturalFold(typeKey, naturalKey string) (Asset, bool, error) {
+	return s.assetByNaturalClause(typeKey, naturalKey, true)
+}
+
+func (s *Store) assetByNaturalClause(typeKey, naturalKey string, fold bool) (Asset, bool, error) {
 	var a Asset
+	cond := "natural_key=?"
+	if fold {
+		// 折叠时可能命中多条（台账里真的并存两种大小写），取 id 最小的那条让结果稳定：
+		// 否则同一份数据在两次查询之间可能给出不同的资产。
+		cond = "natural_key=? COLLATE NOCASE ORDER BY id LIMIT 1"
+	}
 	err := s.db.QueryRow(
 		`SELECT id,type_key,natural_key,name,node,created_at,updated_at
-		 FROM assets WHERE type_key=? AND natural_key=?`, typeKey, naturalKey,
+		 FROM assets WHERE type_key=? AND `+cond, typeKey, naturalKey,
 	).Scan(&a.ID, &a.TypeKey, &a.NaturalKey, &a.Name, &a.Node, &a.CreatedAt, &a.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Asset{}, false, nil

@@ -101,24 +101,30 @@ func (r *Receiver) applyAssets(p *model.ReportPayload) {
 //     ——"我们不知道那台机器"比编一个主机资产更诚实，而且服务端本来就有一个写入失败的日志。
 //   - member_of：Pod → 所属工作负载（采集侧已把 ReplicaSet 那一跳解析掉）。
 func (r *Receiver) applyContainerInventory(p *model.ReportPayload) {
-	// 主机资产是否存在的**记忆化**查询：范围归属与 runs_on 都以它为前提，
+	// 主机资产的**规范名**查询（记忆化）：Pod 的范围归属与 runs_on 都以它为前提，
 	// 而成百上千个 Pod 往往只分布在少数几个节点上——每个节点只查一次。
-	hostKnown := map[string]bool{}
-	hostExists := func(name string) bool {
+	//
+	// 返回**台账里的规范键**而不是传进来的原文，这一点是必须的：K8s 的节点名按 RFC 1123 一律小写
+	// （vm-0-10-ubuntu），Agent 上报的 hostname 保留系统原样（VM-0-10-ubuntu），两者大小写可能不同。
+	// 拿原文当归属节点，资源范围（按节点分组）会再一次对不上——那是本函数要修的问题，不能自己再犯。
+	hostCanonical := map[string]string{}
+	hostNameOf := func(name string) string {
 		name = strings.TrimSpace(name)
 		if name == "" {
-			return false
+			return ""
 		}
-		if v, ok := hostKnown[name]; ok {
+		if v, ok := hostCanonical[name]; ok {
 			return v
 		}
-		_, found, err := r.assets.Get(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: name})
+		canonical := ""
+		host, found, err := r.assets.GetHostByName(name)
 		if err != nil {
 			slog.Warn("查询主机资产失败", "host", name, "err", err)
-			found = false
+		} else if found {
+			canonical = host.NaturalKey
 		}
-		hostKnown[name] = found
-		return found
+		hostCanonical[name] = canonical
+		return canonical
 	}
 
 	// 1. 工作负载（必须先于 Pod：它是 member_of 的对端）
@@ -172,10 +178,8 @@ func (r *Receiver) applyContainerInventory(p *model.ReportPayload) {
 		// Pod 归**它实际所在的节点**（设计件 §资源范围）：范围是"你能管的机器"，
 		// Pod 跑在哪台就归哪台，这是最不容易越权的口径。
 		// 该节点没有对应主机资产时落空串 → 仅全局范围可见：不假装它属于某个分组。
-		node := ""
-		if hostExists(pod.Node) {
-			node = strings.TrimSpace(pod.Node)
-		}
+		// 大小写由 hostNameOf 折叠，且取的是台账里的规范键（否则资源范围会再一次对不上）。
+		node := hostNameOf(pod.Node)
 		cur, _, err := r.assets.Apply(asset.Observation{
 			TypeKey:    asset.TypePod,
 			NaturalKey: asset.PodNaturalKey(pod.Cluster, pod.Namespace, pod.Name),

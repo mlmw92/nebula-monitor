@@ -1204,6 +1204,30 @@ func TestListStatusUsesLastSeenNotValueChange(t *testing.T) {
 	}
 }
 
+// 主机名大小写不敏感：K8s 的节点名按 RFC 1123 一律小写，而 Agent 上报的 hostname 保留系统原样。
+// 两者关联时必须折叠大小写，否则同一台机器被判成两台（Pod 的 runs_on 与资源范围归属一起落空）。
+func TestGetHostByNameFoldsCase(t *testing.T) {
+	svc, _ := newTestService(t)
+	if _, _, err := svc.Apply(hostObservation("VM-0-10-ubuntu", nil)); err != nil {
+		t.Fatalf("写入主机失败: %v", err)
+	}
+
+	got, ok, err := svc.GetHostByName("vm-0-10-ubuntu")
+	if err != nil || !ok {
+		t.Fatalf("大小写不同也应找到：ok=%v err=%v", ok, err)
+	}
+	if got.NaturalKey != "VM-0-10-ubuntu" {
+		t.Fatalf("应返回台账里的规范键（调用方要拿它当归属节点），实际 %q", got.NaturalKey)
+	}
+
+	// 不能过度匹配：不同的主机名、空名都必须找不到
+	for _, bad := range []string{"vm-0-10-ubuntu-2", "vm-0-10", ""} {
+		if _, found, err := svc.GetHostByName(bad); err != nil || found {
+			t.Fatalf("主机名 %q 不该命中：found=%v err=%v", bad, found, err)
+		}
+	}
+}
+
 // 短命类型（容器 / 工作负载）默认不进列表与摘要。
 //
 // 理由不是"少显示几行"，而是治理数字会被 churn 冲垮：被滚动更新替换掉的旧 Pod

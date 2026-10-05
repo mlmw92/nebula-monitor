@@ -302,6 +302,23 @@ func (s *Service) Get(ref Ref) (Asset, bool, error) {
 	return s.store.assetByNatural(strings.TrimSpace(ref.TypeKey), normalizeKey(ref.NaturalKey))
 }
 
+// GetHostByName 按主机名找主机资产，**忽略大小写**；返回的是台账里的规范资产（NaturalKey 为规范写法）。
+//
+// 为什么需要它：主机名按 DNS 约定大小写不敏感，而两侧的写法由不同系统决定——K8s 的节点名按
+// RFC 1123 一律小写（`vm-0-10-ubuntu`），Agent 上报的 hostname 保留系统原样（`VM-0-10-ubuntu`）。
+// 用严格比对去关联这两侧，会把**同一台机器**判成两台：Pod 的 `runs_on` 建不出来，
+// 而且它的归属节点为空——**按节点分组授权的受限用户会看不到自己机器上的 Pod**。
+// 这两处失效都不报错，只表现为"看起来没有关系"，所以必须在关联处按约定折叠大小写。
+//
+// 调用方要用返回资产的 NaturalKey 作为归属节点：只有规范写法才能在资源范围里查到节点分组。
+func (s *Service) GetHostByName(name string) (Asset, bool, error) {
+	name = normalizeKey(name)
+	if name == "" {
+		return Asset{}, false, nil
+	}
+	return s.store.assetByNaturalFold(TypeHost, name)
+}
+
 // GetByID 按主键取资产。
 func (s *Service) GetByID(id int64) (Asset, bool, error) { return s.store.assetByID(id) }
 

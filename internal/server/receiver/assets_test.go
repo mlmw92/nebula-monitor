@@ -246,3 +246,68 @@ func TestHandleReportWritesContainerInventory(t *testing.T) {
 		t.Fatalf("未注册节点的容器不应有 runs_on（对端不存在），实际 %+v", orphanLinks)
 	}
 }
+
+// K8s 节点名与 Agent 上报的 hostname **大小写不一致**时，必须仍归到同一台主机。
+//
+// 真实情形（2026-10-05 在 dev-server 上实测到的）：k3s 的节点名按 RFC 1123 一律小写
+// （vm-0-10-ubuntu），而云主机上报的 hostname 保留系统原样（VM-0-10-ubuntu）。
+// 按原文严格比对会把**同一台机器**判成两台，于是：① Pod 的 runs_on 建不出来；
+// ② 它的归属节点为空 —— **按节点分组授权的受限用户看不到自己机器上的 Pod**。
+// 两处失效都不报错，只表现为"看起来没有关系"，所以这条必须有用例钉住。
+func TestHandleReportFoldsHostNameCase(t *testing.T) {
+	dir := t.TempDir()
+	store, err := asset.Open(filepath.Join(dir, "assets.db"))
+	if err != nil {
+		t.Fatalf("打开资产库失败: %v", err)
+	}
+	defer store.Close()
+	svc := asset.NewService(store)
+
+	mgr := node.New(filepath.Join(dir, "nodes.json"), time.Minute)
+	rec := New(&assetTestStorage{}, mgr, config.AgentAuthConfig{}, nil, nil, nil, nil)
+	rec.SetAssetService(svc)
+
+	const cluster = "https://127.0.0.1:6443"
+	// Agent 上报的 hostname 是大写；K8s 给的 spec.nodeName 是小写
+	postReport(t, rec, model.ReportPayload{
+		Node:         "VM-0-10-ubuntu",
+		K8sInstances: []model.K8sInstance{{Instance: cluster, Name: "k3s-dev", Up: true}},
+		K8sWorkloads: []model.K8sWorkload{{
+			Cluster: cluster, Namespace: "nebula-demo", Kind: "deployment", Name: "web", Desired: 1, Ready: 1,
+		}},
+		K8sPods: []model.K8sPod{{
+			Cluster: cluster, Namespace: "nebula-demo", Name: "web-abc", Node: "vm-0-10-ubuntu",
+			Phase: "Running", Status: "Running", Ready: 1, Total: 1,
+			OwnerKind: "deployment", OwnerName: "web",
+		}},
+	})
+
+	podRef := asset.Ref{TypeKey: asset.TypePod, NaturalKey: asset.PodNaturalKey(cluster, "nebula-demo", "web-abc")}
+	pod, ok, err := svc.Get(podRef)
+	if err != nil || !ok {
+		t.Fatalf("容器资产未写入: ok=%v err=%v", ok, err)
+	}
+	// 归属节点必须是**台账里的规范键**：只有规范写法才能在资源范围里查到节点分组
+	if pod.Node != "VM-0-10-ubuntu" {
+		t.Fatalf("归属节点应折叠大小写并取台账规范键 VM-0-10-ubuntu，实际 %q", pod.Node)
+	}
+	// 原文仍作为属性保留（展示用，说明它实际跑在哪个 k8s 节点上）
+	if v, _ := pod.ValueFrom("k8sNode", asset.SourceDiscovery); v != "vm-0-10-ubuntu" {
+		t.Fatalf("k8sNode 属性应保留原文，实际 %q", v)
+	}
+
+	links, err := svc.Links(podRef)
+	if err != nil {
+		t.Fatalf("查询容器关联失败: %v", err)
+	}
+	peers := map[asset.LinkKind]string{}
+	for _, l := range links {
+		peers[l.Kind] = l.To.NaturalKey
+	}
+	if peers[asset.LinkRunsOn] != "VM-0-10-ubuntu" {
+		t.Fatalf("runs_on 应指向大写的主机资产，实际 %+v", links)
+	}
+	if peers[asset.LinkMemberOf] == "" {
+		t.Fatalf("member_of 也应同时存在，实际 %+v", links)
+	}
+}
