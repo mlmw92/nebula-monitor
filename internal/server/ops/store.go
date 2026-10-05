@@ -1,13 +1,17 @@
 package ops
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -71,6 +75,14 @@ type Task struct {
 }
 
 // Store 持久化并管理操作任务。
+//
+// 两种模式（设计件批次 19）：
+//   - **入库模式**（db != nil）：任务写台账库的 ops_tasks 表，`seq` 与 `caps` 写 ops_meta / ops_caps。
+//   - **降级模式**（db == nil）：退回 ops_tasks.json（原行为）。
+//
+// 内存 map 始终是**读的唯一来源**（Take / ApplyResult / ExpireOverdue 每轮上报都调，不该每次查库）；
+// 库只在 save() 时按「与上次落盘快照的差」增量写 —— 这样十个写入点**一行都不用改**，
+// 状态机完全不受影响，也就不会出现"漏改一处导致某个状态不落盘"。
 type Store struct {
 	mu    sync.RWMutex
 	tasks map[string]*Task
@@ -82,6 +94,12 @@ type Store struct {
 	persistMu sync.Mutex
 	// files 是文件分发的内容存储（可空：未启用时文件分发任务会在领取阶段明确失败）。
 	files *FileStore
+	// db 非空时走台账库；flushed / capsFlushed / seqFlushed 是**上次落盘时的快照**，
+	// 用于把"整份重写"换成"只写变化的部分"。
+	db          *sql.DB
+	flushed     map[string]Task
+	capsFlushed map[string]string
+	seqFlushed  int64
 }
 
 // NewStore 创建操作任务存储并加载既有数据（file 为空时用默认文件名）。
@@ -104,6 +122,175 @@ func (s *Store) SetNow(fn func() int64) {
 	if fn != nil {
 		s.now = fn
 	}
+}
+
+// opsMigratedSuffix 是回填完成后原 JSON 文件的新后缀（与批次 18 同构）。
+const opsMigratedSuffix = ".bak-migrated"
+
+const upsertOpsTaskSQL = `INSERT INTO ops_tasks(
+	id, batch_id, node, kind, state, created_at, done_at, task_json
+) VALUES(?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET
+	batch_id=excluded.batch_id, node=excluded.node, kind=excluded.kind, state=excluded.state,
+	created_at=excluded.created_at, done_at=excluded.done_at, task_json=excluded.task_json`
+
+// capsSignature 把能力集合压成可比对的字符串（排序后逗号连接）：既用于落盘，
+// 也用于判断"能力有没有变"（能力每次上报都写，但只有变化时才该真的落盘）。
+func capsSignature(set map[string]bool) string { return strings.Join(sortedKeys(set), ",") }
+
+// opsTaskArgs 把一条任务摊成一行。
+//
+// **整条记录存 task_json 列**而不是逐字段建列：任务永远整体读写，
+// 而逐个映射要十几列、每加一个任务字段就得改表；索引列只留真正要用来筛的那几个。
+func opsTaskArgs(t Task) ([]any, error) {
+	data, err := json.Marshal(t)
+	if err != nil {
+		return nil, err
+	}
+	return []any{t.ID, t.BatchID, t.Node, t.Kind, t.State, t.CreatedAt, t.DoneAt, string(data)}, nil
+}
+
+// UseSQLite 把存储切到入库模式：库里为空且存在 JSON 文件时**一次性回填**
+// （幂等判据是「表为空」而不是「文件存在」），随后把原文件改名 .bak-migrated；
+// 库里已有数据则以库为准重建内存（任务 + caps + seq）。
+//
+// 回填失败**不阻断启动**：返回错误由调用方记日志，本存储继续按降级模式工作——
+// 操作任务是"不能丢"的东西，但为了它让服务起不来更糟。
+func (s *Store) UseSQLite(db *sql.DB) error {
+	if db == nil {
+		return nil
+	}
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM ops_tasks").Scan(&count); err != nil {
+		return fmt.Errorf("读取操作任务表失败: %w", err)
+	}
+	if count == 0 && s.path != "" {
+		if _, statErr := os.Stat(s.path); statErr == nil {
+			// load() 已把 JSON 读进内存，这里整份写进库（单事务，保持"要么整批成立"）。
+			if err := s.backfill(db); err != nil {
+				return err
+			}
+			if err := os.Rename(s.path, s.path+opsMigratedSuffix); err != nil {
+				return fmt.Errorf("改名已迁移的操作任务文件失败: %w", err)
+			}
+		}
+	}
+	// 无论走没走回填，都**以库为准**重建内存：能力与序号在另外两张表里，
+	// 「任务表为空」不等于「库里什么都没有」——只判任务表会让 caps 在重启后凭空消失。
+	tasks, caps, seq, err := loadOpsFromDB(db)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.tasks, s.caps, s.seq = tasks, caps, seq
+	s.mu.Unlock()
+	s.persistMu.Lock()
+	s.db = db
+	s.snapshotLocked() // 切入库模式时不该产生"待写差集"
+	s.persistMu.Unlock()
+	slog.Info("操作任务已改用数据库", "tasks", len(s.tasks), "nodes", len(s.caps))
+	return nil
+}
+
+// backfill 把内存里（刚从 JSON 读进来的）任务、caps 与 seq 整份写进库。
+func (s *Store) backfill(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("回填操作任务失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	stmt, err := tx.Prepare(upsertOpsTaskSQL)
+	if err != nil {
+		return fmt.Errorf("回填操作任务失败: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	s.mu.RLock()
+	rows := make([][]any, 0, len(s.tasks))
+	for _, t := range s.tasks {
+		row, err := opsTaskArgs(*t)
+		if err != nil {
+			s.mu.RUnlock()
+			return fmt.Errorf("回填操作任务失败: %w", err)
+		}
+		rows = append(rows, row)
+	}
+	caps := s.caps
+	seq := s.seq
+	s.mu.RUnlock()
+
+	for _, row := range rows {
+		if _, err := stmt.Exec(row...); err != nil {
+			return fmt.Errorf("回填操作任务失败: %w", err)
+		}
+	}
+	for node, set := range caps {
+		if _, err := tx.Exec(`INSERT INTO ops_caps(node, kinds) VALUES(?,?)
+			ON CONFLICT(node) DO UPDATE SET kinds=excluded.kinds`, node, capsSignature(set)); err != nil {
+			return fmt.Errorf("回填操作能力失败: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO ops_meta(key, value) VALUES('seq', ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, strconv.FormatInt(seq, 10)); err != nil {
+		return fmt.Errorf("回填操作任务序号失败: %w", err)
+	}
+	return tx.Commit()
+}
+
+func loadOpsFromDB(db *sql.DB) (map[string]*Task, map[string]map[string]bool, int64, error) {
+	tasks := map[string]*Task{}
+	rows, err := db.Query("SELECT task_json FROM ops_tasks")
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("读取操作任务失败: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, nil, 0, fmt.Errorf("读取操作任务失败: %w", err)
+		}
+		var t Task
+		if err := json.Unmarshal([]byte(raw), &t); err != nil || t.ID == "" {
+			// 单条坏记录不该让整份任务列表读不出来。
+			continue
+		}
+		tasks[t.ID] = &t
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, 0, err
+	}
+
+	caps := map[string]map[string]bool{}
+	capsRows, err := db.Query("SELECT node, kinds FROM ops_caps")
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("读取操作能力失败: %w", err)
+	}
+	defer capsRows.Close()
+	for capsRows.Next() {
+		var node, kinds string
+		if err := capsRows.Scan(&node, &kinds); err != nil {
+			return nil, nil, 0, fmt.Errorf("读取操作能力失败: %w", err)
+		}
+		set := map[string]bool{}
+		for _, k := range strings.Split(kinds, ",") {
+			if k != "" {
+				set[k] = true
+			}
+		}
+		caps[node] = set
+	}
+	if err := capsRows.Err(); err != nil {
+		return nil, nil, 0, err
+	}
+
+	seq := int64(0)
+	var seqRaw string
+	if err := db.QueryRow("SELECT value FROM ops_meta WHERE key='seq'").Scan(&seqRaw); err == nil {
+		if n, convErr := strconv.ParseInt(seqRaw, 10, 64); convErr == nil {
+			seq = n
+		}
+	}
+	return tasks, caps, seq, nil
 }
 
 func (s *Store) load() {
@@ -142,6 +329,11 @@ func (s *Store) save() {
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
 
+	if s.db != nil {
+		s.saveSQLiteLocked()
+		return
+	}
+
 	s.mu.RLock()
 	snap := struct {
 		Tasks []*Task             `json:"tasks"`
@@ -174,6 +366,112 @@ func (s *Store) save() {
 	if err := os.Rename(tmp, s.path); err != nil {
 		slog.Warn("操作任务存储落盘失败", "err", err)
 	}
+}
+
+// snapshotLocked 记下「当前状态 = 已落盘」（调用方须持有 persistMu）。
+func (s *Store) snapshotLocked() {
+	s.mu.RLock()
+	flushed := make(map[string]Task, len(s.tasks))
+	for id, t := range s.tasks {
+		flushed[id] = *t
+	}
+	capsFlushed := make(map[string]string, len(s.caps))
+	for node, set := range s.caps {
+		capsFlushed[node] = capsSignature(set)
+	}
+	seq := s.seq
+	s.mu.RUnlock()
+	s.flushed, s.capsFlushed, s.seqFlushed = flushed, capsFlushed, seq
+}
+
+// saveSQLiteLocked 按「与上次落盘快照的差」增量写库（调用方须持有 persistMu）。
+//
+// 差量而不是整份重写：调用方（十个写入点）只改了内存里的 map，与其在每处补一行"写这一条"，
+// 不如在这里比对——状态机一行都不用动，也就不会出现"漏改一处导致某个状态不落盘"。
+// 没有任何变化时**一次写都不做**（能力每次上报都写，但绝大多数轮次是没变的）。
+func (s *Store) saveSQLiteLocked() {
+	s.mu.RLock()
+	upserts := make([]Task, 0, 4)
+	for id, t := range s.tasks {
+		if old, ok := s.flushed[id]; !ok || !reflect.DeepEqual(old, *t) {
+			upserts = append(upserts, *t)
+		}
+	}
+	removals := make([]string, 0, 4)
+	for id := range s.flushed {
+		if _, ok := s.tasks[id]; !ok {
+			removals = append(removals, id)
+		}
+	}
+	capsUpserts := make(map[string]string, 2)
+	for node, set := range s.caps {
+		if sig := capsSignature(set); s.capsFlushed[node] != sig {
+			capsUpserts[node] = sig
+		}
+	}
+	capsRemovals := make([]string, 0, 2)
+	for node := range s.capsFlushed {
+		if _, ok := s.caps[node]; !ok {
+			capsRemovals = append(capsRemovals, node)
+		}
+	}
+	seq := s.seq
+	s.mu.RUnlock()
+
+	if len(upserts) == 0 && len(removals) == 0 && len(capsUpserts) == 0 &&
+		len(capsRemovals) == 0 && seq == s.seqFlushed {
+		return
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		slog.Warn("操作任务入库失败", "err", err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, id := range removals {
+		if _, err := tx.Exec("DELETE FROM ops_tasks WHERE id=?", id); err != nil {
+			slog.Warn("操作任务删除失败", "id", id, "err", err)
+			return
+		}
+	}
+	for _, t := range upserts {
+		row, err := opsTaskArgs(t)
+		if err != nil {
+			slog.Warn("操作任务序列化失败", "id", t.ID, "err", err)
+			return
+		}
+		if _, err := tx.Exec(upsertOpsTaskSQL, row...); err != nil {
+			slog.Warn("操作任务写入失败", "id", t.ID, "err", err)
+			return
+		}
+	}
+	for node, sig := range capsUpserts {
+		if _, err := tx.Exec(`INSERT INTO ops_caps(node, kinds) VALUES(?,?)
+			ON CONFLICT(node) DO UPDATE SET kinds=excluded.kinds`, node, sig); err != nil {
+			slog.Warn("操作能力写入失败", "node", node, "err", err)
+			return
+		}
+	}
+	for _, node := range capsRemovals {
+		if _, err := tx.Exec("DELETE FROM ops_caps WHERE node=?", node); err != nil {
+			slog.Warn("操作能力删除失败", "node", node, "err", err)
+			return
+		}
+	}
+	if seq != s.seqFlushed {
+		if _, err := tx.Exec(`INSERT INTO ops_meta(key, value) VALUES('seq', ?)
+			ON CONFLICT(key) DO UPDATE SET value=excluded.value`, strconv.FormatInt(seq, 10)); err != nil {
+			slog.Warn("操作任务序号写入失败", "err", err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		slog.Warn("操作任务入库提交失败", "err", err)
+		return
+	}
+	// 提交成功后才刷新快照：失败时下次 save 会重试同一批差集，不会静默丢状态。
+	s.snapshotLocked()
 }
 
 // nextID 生成任务 ID（形如 ops-7：可读、可在界面与日志里直接引用）。

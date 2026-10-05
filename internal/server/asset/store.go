@@ -223,6 +223,28 @@ var schemaStatements = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_alert_acks_time ON alert_acks(time_ms DESC)`,
 	`CREATE INDEX IF NOT EXISTS idx_alert_acks_status ON alert_acks(status, time_ms DESC)`,
+	// ops_tasks / ops_meta / ops_caps：操作任务从 JSON 文件搬进本库（设计件批次 19，2026-10-05）。
+	//
+	// **整条任务存 task_json 列**，只把真正要用来筛的字段（node/kind/state/时间/批次）提成索引列：
+	// 任务永远整体读写，逐字段建十几列只会让"每加一个任务字段就要改表"。
+	// 与批次 18 同理：纯附加表、**不升 schemaVersion**。
+	`CREATE TABLE IF NOT EXISTS ops_tasks(
+		id         TEXT PRIMARY KEY,
+		batch_id   TEXT NOT NULL DEFAULT '',
+		node       TEXT NOT NULL DEFAULT '',
+		kind       TEXT NOT NULL DEFAULT '',
+		state      TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL DEFAULT 0,
+		done_at    INTEGER NOT NULL DEFAULT 0,
+		task_json  TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_ops_tasks_created ON ops_tasks(created_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS idx_ops_tasks_state ON ops_tasks(state)`,
+	// 「认领上次结果」按 节点+动作+状态 找最近一条成功回执，这个索引就是为它建的。
+	`CREATE INDEX IF NOT EXISTS idx_ops_tasks_pick ON ops_tasks(node, kind, state, done_at DESC)`,
+	// seq 与 caps 是**有界元数据**（一个序号、每个节点一行），单独两张小表，让 ops_tasks.json 彻底退休。
+	`CREATE TABLE IF NOT EXISTS ops_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`,
+	`CREATE TABLE IF NOT EXISTS ops_caps(node TEXT PRIMARY KEY, kinds TEXT NOT NULL DEFAULT '')`,
 }
 
 // DB 返回底层连接，供**同库的其它持久化**复用（审计事件与告警处置，见设计件批次 18）。

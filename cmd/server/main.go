@@ -190,7 +190,9 @@ func main() {
 	// 统一下行操作通道：任务落盘在数据目录（与防护任务同处），receiver 用它领取/回执/回收，
 	// API 用它创建与查询。两端都注入同一份实例——分开注入会得到"创建了却永远不下发"的哑功能。
 	opsDataDir := filepath.Dir(cfg.SecurityStoreFile)
-	opsSvc := ops.NewService(ops.NewStore(filepath.Join(opsDataDir, "ops_tasks.json")))
+	// 单独取一个变量：台账库打开后要把这个存储切到入库模式（见下方 assetStore 分支）。
+	opsStore := ops.NewStore(filepath.Join(opsDataDir, "ops_tasks.json"))
+	opsSvc := ops.NewService(opsStore)
 	// 文件分发的内容存储（ops_files/）：内容与任务分开存，任务里只留引用，
 	// 否则 ops_tasks.json 会以「条数 × 文件大小」的量级膨胀（见 ops/files.go 的说明）。
 	// 打不开时只记一条并继续：受影响的是文件分发（创建任务时会明确报错），
@@ -235,6 +237,11 @@ func main() {
 		// 回填失败**不阻断启动**：记日志，继续按 JSON 降级模式工作。
 		if err := ackStore.UseSQLite(assetStore.DB()); err != nil {
 			slog.Error("告警处置改用数据库失败，继续按 JSON 文件工作", "err", err)
+		}
+		// 操作任务同理（设计件批次 19）。首次启动会把既有 ops_tasks.json 回填进库并改名
+		// .bak-migrated；回填失败不阻断启动，继续按 JSON 降级模式工作。
+		if err := opsStore.UseSQLite(assetStore.DB()); err != nil {
+			slog.Error("操作任务改用数据库失败，继续按 JSON 文件工作", "err", err)
 		}
 	}
 	// 中间件类型注册表：内置类型清单的唯一来源
