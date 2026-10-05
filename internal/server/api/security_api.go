@@ -33,7 +33,7 @@ func (a *API) handleSecuritySummary(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAuditEvents 返回管理操作审计记录（JSON），支持 limit/user/path/category 筛选。
+// handleAuditEvents 返回管理操作审计记录（JSON），支持 limit/user/path/category/from/to/offset 筛选。
 // 需 audit:read。兼容历史调用方：带 ?format=csv 时按导出处理并额外要求 audit:export；
 // 新调用方请直接使用 GET /api/v1/audit/export。
 func (a *API) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
@@ -45,38 +45,87 @@ func (a *API) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.audit == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"events": []interface{}{}})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"events": []interface{}{}, "total": 0})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"events": a.auditEvents(r)})
+	events, total, err := a.auditQuery(auditFilter(r, 0))
+	if err != nil {
+		// **不降级成空列表**：审计查询失败却返回空，界面会显示"没有任何操作记录"——
+		// 对审计来说这是一句谎话（等于说"没人干过事"），比报错糟得多。
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询审计事件失败"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"events": events, "total": total})
 }
 
 // handleAuditExport 导出管理操作审计记录为 CSV（需 audit:export，属高危权限点）。
-// GET /api/v1/audit/export?limit=&user=&path=&category=
+// GET /api/v1/audit/export?limit=&user=&path=&category=&from=&to=
 func (a *API) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 	a.auditExportCSV(w, r)
 }
 
-// auditEvents 按查询参数读取审计事件并补全来源 IP 属地。
-func (a *API) auditEvents(r *http.Request) []audit.Event {
-	if a.audit == nil {
-		return nil
-	}
+// auditFilter 解析审计查询参数（列表与导出共用）。
+//
+// from/to 是毫秒时间戳；offset 与资产列表同款——审计是低频写入的"翻页查阅"场景，
+// 不存在集中日志那种"翻页途中文件增长"的漂移，用不上游标。
+// defaultLimit 为 0 时按请求参数（缺省 100 条）；导出传 MaxEvents 作为上限。
+func auditFilter(r *http.Request, defaultLimit int) audit.QueryFilter {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	events := a.audit.ListFiltered(limit, q.Get("user"), q.Get("path"), q.Get("category"))
+	if defaultLimit > 0 && limit <= 0 {
+		limit = defaultLimit
+	}
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	from, _ := strconv.ParseInt(q.Get("from"), 10, 64)
+	to, _ := strconv.ParseInt(q.Get("to"), 10, 64)
+	return audit.QueryFilter{
+		User: q.Get("user"), Path: q.Get("path"), Category: q.Get("category"),
+		From: from, To: to, Limit: limit, Offset: offset,
+	}
+}
+
+// auditQuery 按条件读取审计事件（含**同条件总数**）并补全来源 IP 属地。
+func (a *API) auditQuery(f audit.QueryFilter) ([]audit.Event, int, error) {
+	events, total, err := a.audit.Query(f)
+	if err != nil {
+		return nil, 0, err
+	}
 	// 补全来源 IP 属地（经已集成的 ip2region 库），旧数据或缺失字段同样实时补全。
 	for i := range events {
 		if events[i].SourceLocation == "" && events[i].RemoteIP != "" {
 			events[i].SourceLocation = geoLocation(events[i].RemoteIP)
 		}
 	}
+	return events, total, nil
+}
+
+// auditEvents 兼容既有调用方：只要事件列表，不要总数。查询失败返回 nil（调用方自行决定怎么报）。
+func (a *API) auditEvents(r *http.Request) []audit.Event {
+	if a.audit == nil {
+		return nil
+	}
+	events, _, err := a.auditQuery(auditFilter(r, 0))
+	if err != nil {
+		return nil
+	}
 	return events
 }
 
 // auditExportCSV 以 CSV 形式写出审计事件（/audit/export 与 /audit/events?format=csv 共用）。
+//
+// 导出上限取 audit.MaxEvents（2000）：与入库前的内存上限同档，避免一次导出把库读爆。
+// 要导出更多就按时间范围分批——这也是分页参数存在的原因。
 func (a *API) auditExportCSV(w http.ResponseWriter, r *http.Request) {
-	writeAuditCSV(w, a.auditEvents(r))
+	if a.audit == nil {
+		writeAuditCSV(w, nil)
+		return
+	}
+	events, _, err := a.auditQuery(auditFilter(r, audit.MaxEvents))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询审计事件失败"})
+		return
+	}
+	writeAuditCSV(w, events)
 }
 
 func writeAuditCSV(w http.ResponseWriter, events []audit.Event) {

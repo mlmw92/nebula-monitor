@@ -219,13 +219,23 @@ func main() {
 	if assetPath == "" {
 		assetPath = filepath.Join(cfg.DataDir, "assets.db")
 	}
-	if assetStore, err := asset.Open(assetPath); err != nil {
+	// 库句柄要在**审计与告警处置**之后还要用（它们与台账共用同一个库），故提到外层作用域。
+	var assetStore *asset.Store
+	if s, err := asset.Open(assetPath); err != nil {
 		slog.Error("资产台账库不可用，资产能力已关闭", "path", assetPath, "err", err)
 	} else {
-		defer func() { _ = assetStore.Close() }()
+		assetStore = s
+		defer func() { _ = s.Close() }()
 		assetSvc = asset.NewService(assetStore)
 		recv.SetAssetService(assetSvc)
 		slog.Info("资产台账已启用", "path", assetPath)
+		// 告警处置与台账**共用同一个库**（设计件批次 18）：写入频率是人工操作级
+		// （每分钟几条到几十条），单连接下这点增量可忽略，换来一个备份文件、一套迁移机制。
+		// 首次启动会把既有 alert_acks.json 回填进库并改名 .bak-migrated。
+		// 回填失败**不阻断启动**：记日志，继续按 JSON 降级模式工作。
+		if err := ackStore.UseSQLite(assetStore.DB()); err != nil {
+			slog.Error("告警处置改用数据库失败，继续按 JSON 文件工作", "err", err)
+		}
 	}
 	// 中间件类型注册表：内置类型清单的唯一来源
 	//（api 的类型清单、报告分节、告警的服务类型校验都读它）。
@@ -306,6 +316,14 @@ func main() {
 
 	// API
 	auditStore := audit.New(filepath.Join(filepath.Dir(*cfgPath), "audit_events.json"))
+	// 审计与台账**共用同一个库**（设计件批次 18）。这里才注入是因为审计存储在本行才创建。
+	// 首次启动会把既有 audit_events.json 回填进库并改名 .bak-migrated（幂等：判据是表为空）。
+	// 台账库不可用（assetStore == nil）时保持 JSON 降级模式，审计不跟着失效。
+	if assetStore != nil {
+		if err := auditStore.UseSQLite(assetStore.DB()); err != nil {
+			slog.Error("审计事件改用数据库失败，继续按 JSON 文件工作", "err", err)
+		}
+	}
 	// 数据保留策略：清理本地可清理的数据（告警处置记录、巡检报告），
 	// 并只读呈现时序库保留期与内置上限的现状。
 	retentionFile := cfg.RetentionFile

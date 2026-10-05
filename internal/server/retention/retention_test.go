@@ -209,7 +209,8 @@ func TestManager_StatusAndSkipped(t *testing.T) {
 	if st.Acks.Total != 1 || st.Acks.Handled != 1 {
 		t.Fatalf("处置记录统计不符：%+v", st.Acks)
 	}
-	if st.Audit.Count != 1 || st.Audit.Cap != audit.MaxEvents {
+	// 入库后审计的保留主口径是时间（AuditDays），Cap 显示的是兜底条数上限。
+	if st.Audit.Count != 1 || st.Audit.Cap != audit.MaxRows {
 		t.Fatalf("审计统计不符：%+v", st.Audit)
 	}
 	if st.Security.Cap != security.MaxEvents {
@@ -221,7 +222,7 @@ func TestManager_StatusAndSkipped(t *testing.T) {
 
 	// 各类保留天数都为 0 时不做任何清理，但应说明原因
 	cfg := DefaultConfig()
-	cfg.AcksDays, cfg.ReportsDays, cfg.LogsDays = 0, 0, 0
+	cfg.AcksDays, cfg.ReportsDays, cfg.LogsDays, cfg.AuditDays = 0, 0, 0, 0
 	if err := m.Save(cfg); err != nil {
 		t.Fatalf("保存失败: %v", err)
 	}
@@ -231,7 +232,7 @@ func TestManager_StatusAndSkipped(t *testing.T) {
 	// 天数 > 0 但该类数据源未接入时同样是「什么也没做」，也要给原因
 	// （否则界面会显示一次「清理完成」，而实际上没有清理任何东西）
 	cfg = DefaultConfig()
-	cfg.AcksDays, cfg.ReportsDays = 0, 0
+	cfg.AcksDays, cfg.ReportsDays, cfg.AuditDays = 0, 0, 0
 	cfg.LogsDays = 7 // 本测试未给 Manager 注入日志存储 → 该类无法执行
 	if err := m.Save(cfg); err != nil {
 		t.Fatalf("保存失败: %v", err)

@@ -40,6 +40,11 @@ const (
 	DefaultAcksDays = 90
 	// DefaultReportsDays 巡检报告的默认保留天数。
 	DefaultReportsDays = 180
+	// DefaultAuditDays 审计事件的默认保留天数。
+	//
+	// 取 180 天（与巡检报告同档）：入库之后审计的保留口径从「最近 2000 条」改成**时间**，
+	// 意义就在"能查到多久以前"（设计件批次 18）。磁盘安全另由 audit.MaxRows 兜底。
+	DefaultAuditDays = 180
 	// DefaultLogsDays 集中日志的默认保留天数（C2）。
 	// 取 7 天：日志量远大于其它类别，而「刚过去的这一周」覆盖了绝大多数排查场景；
 	// 与 reports 的量级一致，避免「一个新开关悄悄吃掉磁盘」。
@@ -60,6 +65,8 @@ type Config struct {
 	AcksDays int `yaml:"acksDays" json:"acksDays"`
 	// ReportsDays 巡检报告的保留天数；0 表示不清理该类。
 	ReportsDays int `yaml:"reportsDays" json:"reportsDays"`
+	// AuditDays 审计事件的保留天数；0 表示不清理该类。
+	AuditDays int `yaml:"auditDays" json:"auditDays"`
 	// LogsDays 集中日志的保留天数（C2）；0 表示不清理该类。
 	LogsDays int `yaml:"logsDays" json:"logsDays"`
 	// IntervalHours 自动清理周期（小时）。
@@ -72,6 +79,7 @@ func DefaultConfig() Config {
 		Enabled:       true,
 		AcksDays:      DefaultAcksDays,
 		ReportsDays:   DefaultReportsDays,
+		AuditDays:     DefaultAuditDays,
 		LogsDays:      DefaultLogsDays,
 		IntervalHours: DefaultIntervalHours,
 	}
@@ -86,6 +94,9 @@ func (c *Config) normalize() {
 	}
 	if c.LogsDays < 0 {
 		c.LogsDays = 0
+	}
+	if c.AuditDays < 0 {
+		c.AuditDays = 0
 	}
 	if c.IntervalHours < minIntervalHours {
 		c.IntervalHours = DefaultIntervalHours
@@ -110,6 +121,9 @@ type CleanupResult struct {
 	At                   int64  `json:"at"`
 	AcksRemoved          int    `json:"acksRemoved"`
 	AcksCutoff           int64  `json:"acksCutoff,omitempty"`
+	AuditRemoved         int    `json:"auditRemoved"`
+	AuditCutoff          int64  `json:"auditCutoff,omitempty"`
+	AuditRowsRemoved     int    `json:"auditRowsRemoved,omitempty"` // 兜底条数上限裁掉的条数
 	ReportFilesRemoved   int    `json:"reportFilesRemoved"`
 	ReportHistoryRemoved int    `json:"reportHistoryRemoved"`
 	ReportsCutoff        int64  `json:"reportsCutoff,omitempty"`
@@ -169,7 +183,11 @@ func New(path string, initial Config, acks *alert.AckStore, reports *report.Gene
 		}
 		return m, nil
 	}
-	var cfg Config
+	// 从**默认值**起解，而不是从零值起：否则配置文件里**没有**的字段会解成 0，而 0 在本
+	// 配置里的含义是「不清理该类」——新增一个保留类（本批的 auditDays、C2 的 logsDays）后，
+	// 存量部署会静默地永远不清理它，看起来像"清理跑了但什么都没做"。
+	// 显式写 0 仍然是"不清理"，语义不变。
+	cfg := initial
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("解析数据保留配置失败: %w", err)
 	}
@@ -224,7 +242,8 @@ func (m *Manager) Status() Status {
 		out.Reports = m.reports.Stats()
 	}
 	if m.audit != nil {
-		out.Audit = BuiltinLimit{Count: m.audit.Count(), Cap: audit.MaxEvents}
+		// 入库后审计的保留主口径是**时间**（config.auditDays），这里的 Cap 是兜底条数上限。
+		out.Audit = BuiltinLimit{Count: m.audit.Count(), Cap: audit.MaxRows}
 	}
 	if m.security != nil {
 		out.Security = BuiltinLimit{Count: m.security.Count(), Cap: security.MaxEvents}
@@ -256,9 +275,10 @@ func (m *Manager) cleanup(cfg Config) CleanupResult {
 	// 实际什么都不会发生——此时不给原因，会让人以为清理已经跑过了。
 	actionable := (cfg.AcksDays > 0 && m.acks != nil) ||
 		(cfg.ReportsDays > 0 && m.reports != nil) ||
-		(cfg.LogsDays > 0 && m.logs != nil)
+		(cfg.LogsDays > 0 && m.logs != nil) ||
+		(cfg.AuditDays > 0 && m.audit != nil)
 	switch {
-	case m.acks == nil && m.reports == nil && m.logs == nil:
+	case m.acks == nil && m.reports == nil && m.logs == nil && m.audit == nil:
 		res.Skipped = "未接入可清理的数据源"
 	case !actionable:
 		res.Skipped = "保留天数均为 0 或对应数据源未接入（无可清理内容）"
@@ -267,6 +287,17 @@ func (m *Manager) cleanup(cfg Config) CleanupResult {
 		cutoff := now.AddDate(0, 0, -cfg.AcksDays)
 		res.AcksCutoff = cutoff.UnixMilli()
 		res.AcksRemoved = m.acks.PruneHandled(cutoff.UnixMilli())
+	}
+	if cfg.AuditDays > 0 && m.audit != nil {
+		cutoff := now.AddDate(0, 0, -cfg.AuditDays)
+		res.AuditCutoff = cutoff.UnixMilli()
+		if removed, err := m.audit.Prune(cutoff.UnixMilli()); err == nil {
+			res.AuditRemoved = removed
+		}
+		// 兜底条数：时间口径是主规则，条数是"单机磁盘被写爆"的安全网。
+		if rows, err := m.audit.PruneRows(audit.MaxRows); err == nil {
+			res.AuditRowsRemoved = rows
+		}
 	}
 	if cfg.ReportsDays > 0 && m.reports != nil {
 		cutoff := now.AddDate(0, 0, -cfg.ReportsDays)

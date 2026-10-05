@@ -179,7 +179,57 @@ var schemaStatements = []string{
 		PRIMARY KEY(asset_id, key)
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_asset_labels_kv ON asset_labels(key, value)`,
+	// audit_events / alert_acks：审计事件与告警处置从 JSON 文件搬进本库（设计件批次 18，2026-10-05）。
+	//
+	// 为什么放同一个库：两者的写入频率是「人工管理操作」级（每分钟几条到几十条），而本库
+	// 已在承载「每轮上报 × 资产数」的写入；单连接下这点增量可忽略，换来一个备份文件、
+	// 一套迁移机制。**审计放进库里不等于"防篡改"**——同机同权限面，真正的防篡改要靠
+	// 外部只追加存储，见设计件 §5。
+	//
+	// 与 asset_seen / asset_ignored 同理：纯附加表，老版本不读它，**不提升 schemaVersion**。
+	// 代价是回滚后旧版本的审计与处置列表会变空（旧版本读 JSON，而 JSON 已改名 .bak-migrated）。
+	`CREATE TABLE IF NOT EXISTS audit_events(
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		time_ms    INTEGER NOT NULL,
+		user_name  TEXT NOT NULL DEFAULT '',
+		method     TEXT NOT NULL DEFAULT '',
+		path       TEXT NOT NULL DEFAULT '',
+		status     INTEGER NOT NULL DEFAULT 0,
+		remote_ip  TEXT NOT NULL DEFAULT '',
+		source_loc TEXT NOT NULL DEFAULT '',
+		succeeded  INTEGER NOT NULL DEFAULT 0,
+		category   TEXT NOT NULL DEFAULT '',
+		action     TEXT NOT NULL DEFAULT '',
+		detail     TEXT NOT NULL DEFAULT ''
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_audit_events_time ON audit_events(time_ms DESC)`,
+	`CREATE INDEX IF NOT EXISTS idx_audit_events_user ON audit_events(user_name, time_ms DESC)`,
+	// ack_key 沿用既有的 rule|host|instance|startsAt 形态，语义零变化（Map/Get 的 key 不变）。
+	// comments 存 JSON 数组而不是拆表：评论永远随处置记录整体读写，拆表只会让读取多一次 join。
+	`CREATE TABLE IF NOT EXISTS alert_acks(
+		ack_key       TEXT PRIMARY KEY,
+		rule          TEXT NOT NULL DEFAULT '',
+		host          TEXT NOT NULL DEFAULT '',
+		instance      TEXT NOT NULL DEFAULT '',
+		starts_at     INTEGER NOT NULL DEFAULT 0,
+		status        TEXT NOT NULL DEFAULT 'pending',
+		user_name     TEXT NOT NULL DEFAULT '',
+		assignee      TEXT NOT NULL DEFAULT '',
+		time_ms       INTEGER NOT NULL DEFAULT 0,
+		ack_time_ms   INTEGER NOT NULL DEFAULT 0,
+		close_time_ms INTEGER NOT NULL DEFAULT 0,
+		close_reason  TEXT NOT NULL DEFAULT '',
+		comments      TEXT NOT NULL DEFAULT '[]'
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_alert_acks_time ON alert_acks(time_ms DESC)`,
+	`CREATE INDEX IF NOT EXISTS idx_alert_acks_status ON alert_acks(status, time_ms DESC)`,
 }
+
+// DB 返回底层连接，供**同库的其它持久化**复用（审计事件与告警处置，见设计件批次 18）。
+//
+// 刻意只给连接、不给"绕过 Service 直接改台账表"的口子：台账的读写语义（采集值不覆盖人工值、
+// 变更留痕、资产范围）都在 Service 里，绕过它写 assets_* 会破坏那些不变量。
+func (s *Store) DB() *sql.DB { return s.db }
 
 // Store 是资产领域的 SQLite 持久化适配器。
 //

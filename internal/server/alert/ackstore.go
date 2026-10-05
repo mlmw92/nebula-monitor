@@ -1,8 +1,10 @@
 package alert
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -76,12 +78,18 @@ func (i AckInfo) Handled() bool {
 	return false
 }
 
-// AckStore 以 JSON 文件持久化告警处置状态，按 rule|host|instance|startsAt 去重。
+// AckStore 持久化告警处置状态，按 rule|host|instance|startsAt 去重。
 // 与 monitor_alert 时序库解耦，避免污染 firing/resolved 状态序列。
+//
+// 两种模式（设计件批次 18）：
+//   - **入库模式**（db != nil）：写台账库的 alert_acks 表，一次变更写一行；
+//     内存 map 保留为**读缓存**——告警引擎的 IsHandled 在热路径上，不该每次都查库。
+//   - **降级模式**（db == nil）：退回 JSON 文件，每次变更全量重写（原行为）。
 type AckStore struct {
 	mu   sync.RWMutex
 	acks map[string]AckInfo
 	path string
+	db   *sql.DB
 }
 
 // NewAckStore 创建确认存储并加载。
@@ -89,6 +97,148 @@ func NewAckStore(path string) *AckStore {
 	s := &AckStore{acks: map[string]AckInfo{}, path: path}
 	s.load()
 	return s
+}
+
+const upsertAckSQL = `INSERT INTO alert_acks(
+	ack_key, rule, host, instance, starts_at, status, user_name, assignee,
+	time_ms, ack_time_ms, close_time_ms, close_reason, comments
+) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(ack_key) DO UPDATE SET
+	status=excluded.status, user_name=excluded.user_name, assignee=excluded.assignee,
+	time_ms=excluded.time_ms, ack_time_ms=excluded.ack_time_ms,
+	close_time_ms=excluded.close_time_ms, close_reason=excluded.close_reason,
+	comments=excluded.comments`
+
+func ackArgs(key string, a AckInfo) ([]any, error) {
+	comments := a.Comments
+	if comments == nil {
+		comments = []Comment{}
+	}
+	data, err := json.Marshal(comments)
+	if err != nil {
+		return nil, err
+	}
+	// 状态写**生效值**：迁移前的老记录没有 status 字段（空串），而空串在语义上等于
+	// 「已认领」。统一成显式值，避免库里的空串与内存里的判定各说各话。
+	return []any{
+		key, a.Rule, a.Host, a.Instance, a.StartsAt, a.EffectiveStatus(), a.User, a.Assignee,
+		a.Time, a.AckTime, a.CloseTime, a.CloseReason, string(data),
+	}, nil
+}
+
+// readJSONAcks 读 JSON 处置文件；文件不存在返回 (nil, nil)，**内容坏掉才返回错误**
+// ——调用方据此决定"不回填也不改名"，把现场保住。
+func readJSONAcks(path string) ([]AckInfo, error) {
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("读取告警处置文件失败: %w", err)
+	}
+	var list []AckInfo
+	if err := json.Unmarshal(data, &list); err != nil {
+		return nil, fmt.Errorf("解析告警处置文件失败（已保留原文件，未回填）: %w", err)
+	}
+	return list, nil
+}
+
+// insertAcks 单事务批量写入（回填用）。
+func insertAcks(db *sql.DB, list []AckInfo) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("回填告警处置失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	stmt, err := tx.Prepare(upsertAckSQL)
+	if err != nil {
+		return fmt.Errorf("回填告警处置失败: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+	for _, a := range list {
+		args, err := ackArgs(ackKey(a.Rule, a.Host, a.Instance, a.StartsAt), a)
+		if err != nil {
+			return fmt.Errorf("回填告警处置失败: %w", err)
+		}
+		if _, err := stmt.Exec(args...); err != nil {
+			return fmt.Errorf("回填告警处置失败: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func loadAcksFromDB(db *sql.DB) (map[string]AckInfo, error) {
+	rows, err := db.Query(`SELECT ack_key, rule, host, instance, starts_at, status, user_name,
+		assignee, time_ms, ack_time_ms, close_time_ms, close_reason, comments FROM alert_acks`)
+	if err != nil {
+		return nil, fmt.Errorf("读取告警处置失败: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]AckInfo{}
+	for rows.Next() {
+		var (
+			key, status, comments string
+			a                     AckInfo
+		)
+		if err := rows.Scan(&key, &a.Rule, &a.Host, &a.Instance, &a.StartsAt, &status, &a.User,
+			&a.Assignee, &a.Time, &a.AckTime, &a.CloseTime, &a.CloseReason, &comments); err != nil {
+			return nil, fmt.Errorf("读取告警处置失败: %w", err)
+		}
+		a.Status = status
+		if comments != "" && comments != "[]" {
+			var list []Comment
+			if json.Unmarshal([]byte(comments), &list) == nil {
+				a.Comments = list
+			}
+		}
+		out[key] = a
+	}
+	return out, rows.Err()
+}
+
+// UseSQLite 把存储切到入库模式：库里为空且存在 JSON 文件时**一次性回填**（幂等判据是
+// 「表为空」而不是「文件存在」，重复启动不会重复导入），随后把原文件改名 .bak-migrated；
+// 最后以库为准重建内存读缓存（库里有数据就以库为准）。
+//
+// 回填失败不阻断启动：返回错误由调用方记日志，本存储继续按降级模式工作。
+func (s *AckStore) UseSQLite(db *sql.DB) error {
+	if db == nil {
+		return nil
+	}
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM alert_acks").Scan(&count); err != nil {
+		return fmt.Errorf("读取告警处置表失败: %w", err)
+	}
+	if count == 0 {
+		list, err := readJSONAcks(s.path)
+		if err != nil {
+			return err
+		}
+		if len(list) > 0 {
+			if err := insertAcks(db, list); err != nil {
+				return err
+			}
+		}
+		if s.path != "" {
+			if _, statErr := os.Stat(s.path); statErr == nil {
+				if err := os.Rename(s.path, s.path+".bak-migrated"); err != nil {
+					return fmt.Errorf("改名已迁移的处置文件失败: %w", err)
+				}
+			}
+		}
+	}
+	loaded, err := loadAcksFromDB(db)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.db = db
+	s.acks = loaded
+	s.mu.Unlock()
+	return nil
 }
 
 func ackKey(rule, host, instance string, startsAt int64) string {
@@ -129,8 +279,23 @@ func (s *AckStore) update(rule, host, instance string, startsAt int64, actor str
 	info.User = actor
 	info.Time = time.Now().UnixMilli()
 	s.acks[key] = info
-	s.persistLocked()
+	s.saveLocked(key, info)
 	return info
+}
+
+// saveLocked 落盘一条记录：入库模式 upsert 一行；降级模式全量重写 JSON。
+//
+// 与降级模式一致，**落盘失败不打断处置动作**：内存里已经生效，重启后以库/文件为准。
+func (s *AckStore) saveLocked(key string, info AckInfo) {
+	if s.db == nil {
+		s.persistLocked()
+		return
+	}
+	args, err := ackArgs(key, info)
+	if err != nil {
+		return
+	}
+	_, _ = s.db.Exec(upsertAckSQL, args...)
 }
 
 // Mark 认领一条告警（处理人记为操作者本人）。保留既有签名以兼容调用方。
@@ -243,9 +408,21 @@ func (s *AckStore) PruneHandled(before int64) int {
 		delete(s.acks, key)
 		removed++
 	}
-	if removed > 0 {
-		s.persistLocked()
+	if removed == 0 {
+		return 0
 	}
+	if s.db != nil {
+		// 与内存同一判据：已处置（含空状态——迁移前的老记录在语义上等于已认领）
+		// 且最后操作时间早于 before。
+		if _, err := s.db.Exec(
+			`DELETE FROM alert_acks WHERE status IN ('ack','closed','') AND time_ms < ?`, before); err != nil {
+			// 库删除失败：内存已清、库里还在，重启后会重新读回来，下次清理会再删一遍。
+			// 不回滚内存——待处理记录不受影响，而这批本来就是"该清掉的"。
+			return removed
+		}
+		return removed
+	}
+	s.persistLocked()
 	return removed
 }
 
