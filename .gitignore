@@ -24,3 +24,6 @@ Thumbs.db
 
 .claude
 .codebuddy
+
+# WorkBuddy 客户端的本地工作目录（与 .codebuddy 同类，是本地状态不是项目内容）
+web/.workbuddy/
