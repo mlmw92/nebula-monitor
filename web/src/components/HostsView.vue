@@ -1,12 +1,9 @@
 <template>
   <div class="hosts-view">
-    <PageHeader
-      title="主机列表"
-      :desc="`共 ${filteredNodes.length} 台 · 在线 ${onlineCount} · 离线 ${offlineCount} · 异常 ${warningCount}`"
-    >
+    <PageHeader :title="hostTab === 'proxy' ? '网闸代理' : '主机列表'" :desc="headerDesc">
       <template #actions>
-        <el-button :icon="Setting" size="small" plain @click="showGroupManage = true">分组管理</el-button>
-        <el-button type="warning" :icon="Upload" size="small" :disabled="selectedRows.length === 0" @click="batchUpgrade">
+        <el-button v-if="hostTab === 'hosts'" :icon="Setting" size="small" plain @click="showGroupManage = true">分组管理</el-button>
+        <el-button v-if="hostTab === 'hosts'" type="warning" :icon="Upload" size="small" :disabled="selectedRows.length === 0" @click="batchUpgrade">
           批量升级{{ selectedRows.length ? ' (' + selectedRows.length + ')' : '' }}
         </el-button>
         <el-button type="primary" :icon="Plus" size="small" @click="openAddNode">添加主机</el-button>
@@ -37,8 +34,10 @@
       </div>
     </div>
 
-    <!-- 工具栏：只保留筛选与搜索，主操作已上移到页头 -->
-    <div class="toolbar">
+    <!-- 工具栏：只保留筛选与搜索，主操作已上移到页头。
+         主机状态/分组/关键词都是主机维度的筛选口径，网闸代理页签下必须整条隐藏，
+         否则会拿主机的「全部/在线/离线」计数去描述代理节点。 -->
+    <div v-if="hostTab === 'hosts'" class="toolbar">
       <div class="toolbar-left">
         <el-radio-group v-model="statusFilter" size="small">
           <el-radio-button value="">全部 ({{ filteredNodes.length }})</el-radio-button>
@@ -83,7 +82,7 @@
       dense
     >
       <template #actions>
-        <span v-if="proxyStatus.length" class="proxy-summary">在线 {{ proxyStatus.filter(p => p.online).length }} / {{ proxyStatus.length }}</span>
+        <span v-if="proxyStatus.length" class="proxy-summary">在线 {{ proxyOnlineCount }} / {{ proxyStatus.length }}</span>
       </template>
       <el-table v-if="proxyStatus.length" :data="proxyStatus" size="small" stripe>
         <el-table-column prop="node" label="节点" min-width="180" />
@@ -637,6 +636,18 @@ const onlineCount = computed(() => filteredNodes.value.filter((n) => n.status ==
 const offlineCount = computed(() => filteredNodes.value.filter((n) => n.status !== 'online').length)
 const warningCount = computed(() => filteredNodes.value.filter((n) => nodeSeverity(n) >= 50 && n.status === 'online').length)
 
+// 代理节点口径：与主机口径分开统计，避免两个页签共用一份「在线/离线」数字
+const proxyOnlineCount = computed(() => proxyStatus.value.filter((p) => p.online).length)
+
+// 页头描述随页签切换：网闸代理页签只谈代理节点，不出现主机的台数/状态计数
+const headerDesc = computed(() => {
+  if (hostTab.value === 'proxy') {
+    if (!proxyStatus.value.length) return '暂无代理节点上报'
+    return `共 ${proxyStatus.value.length} 个代理节点 · 在线 ${proxyOnlineCount.value} · 离线 ${proxyStatus.value.length - proxyOnlineCount.value}`
+  }
+  return `共 ${filteredNodes.value.length} 台 · 在线 ${onlineCount.value} · 离线 ${offlineCount.value} · 异常 ${warningCount.value}`
+})
+
 // 列设置：可勾选展示哪些列
 const colOptions = [
   { key: 'host', label: '主机名称/IP' },
@@ -881,6 +892,10 @@ function restartTimers() {
 
 // 打印当前视图：抬头带上筛选口径，否则纸上的一组数字无法复现
 function printList() {
+  if (hostTab.value === 'proxy') {
+    printPage({ title: '网闸代理节点', meta: [headerDesc.value] })
+    return
+  }
   const meta = [
     `共 ${filteredNodes.value.length} 台`,
     `在线 ${onlineCount.value} · 离线 ${offlineCount.value} · 异常 ${warningCount.value}`,
@@ -893,7 +908,7 @@ function printList() {
   }
   if (keyword.value) cond.push(`关键词=${keyword.value}`)
   meta.push(cond.length ? `筛选：${cond.join('，')}` : '筛选：无')
-  printPage({ title: hostTab.value === 'proxy' ? '网闸代理节点' : '主机列表', meta })
+  printPage({ title: '主机列表', meta })
 }
 
 function openAddNode() {
