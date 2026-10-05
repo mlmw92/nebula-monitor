@@ -141,6 +141,15 @@ func main() {
 		"write", cfg.Guards.Ops.Write,
 		"units", cfg.Guards.Ops.Units)
 
+	// 护栏的**组合**检查：两项各自都放行时，可能合起来等于任意代码执行
+	// （允许写某个可重启服务的可执行文件所在目录 + 允许重启它；或允许写进系统会自己执行的目录）。
+	// 这条依赖此前是隐性的——配的人不会意识到自己配出了一个 RCE，界面上也没有提示。
+	// **只告警不拒绝**：两个同意都是他明确写下的，替他悄悄禁掉一个比让风险可见更难排查。
+	for _, risk := range opsagent.CheckGuardRisks(cfg.Guards.Ops, opsagent.SystemdExecutables) {
+		slog.Warn(risk.Describe(),
+			"kind", risk.Kind, "allowedDir", risk.AllowedDir, "unit", risk.Unit, "exposed", risk.Exposed)
+	}
+
 	// 代理模式（edge/hub）走独立启动路径，不进入采集主循环
 	if cfg.Mode == config.ModeEdge || cfg.Mode == config.ModeHub {
 		runProxy(cfg)

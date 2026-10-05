@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -144,13 +145,16 @@ func (g OpsFileGuards) OpsAllowedDirs() []string {
 		if d == "" || !strings.HasPrefix(d, "/") {
 			continue
 		}
-		// 根目录的判断放在**归一化之前**：`filepath.Clean("/")` 在 Windows 上会返回 `\`，
-		// 按归一化后的值判会让这一条漏过去（配置里的路径永远是 POSIX 形态，按原文判才对）。
+		// 根目录不做白名单项：那等于把它下面的所有东西都放开。
 		trimmed := strings.TrimRight(d, "/")
 		if trimmed == "" {
-			continue // 根目录不做白名单项：那等于把它下面的所有东西都放开
+			continue
 		}
-		out = append(out, filepath.Clean(trimmed))
+		// 用 `path.Clean`（POSIX）而**不是** `filepath.Clean`：这些路径按契约就是 POSIX 形态
+		// （Agent 只在 Linux 上跑、比对的是 Linux 文件路径），而 `filepath.Clean` 在 Windows 上
+		// 会把 `/usr/sbin` 变成 `\usr\sbin` —— 那会让"白名单看起来加对了、比对却永远不命中"，
+		// 也让在本机（Windows）跑的用例测不到真实行为。生产在 Linux 上两者等价，故此改动是 no-op。
+		out = append(out, path.Clean(trimmed))
 	}
 	return out
 }
