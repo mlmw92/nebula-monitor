@@ -1,5 +1,7 @@
 package auth
 
+import "sort"
+
 // Policy 负责将用户与角色展开为可快速判断的授权上下文，并提供资源范围校验。
 //
 // 设计原则：业务 handler 不解析角色内部结构，只调用本包的 Principal / 辅助函数，
@@ -15,6 +17,15 @@ func ExpandPrincipal(u User, roleLookup func(name string) (Role, bool)) *Princip
 	perms := make(map[string]struct{})
 	scopeGlobal := false
 	groupSet := make(map[string]struct{})
+	// 业务标签维度的合并与节点维度**同构**：任一角色不限制该维度 ⇒ 该维度对这个人不生效；
+	// 否则把所有（角色 + 用户自身）的选择器并起来（维度内取并集，与节点分组并集同一口径）。
+	//
+	// 注意：**维度是否生效只看角色与用户自己的 AssetMode，与节点维度是否 global 无关**。
+	// 两个维度是独立的：全局节点范围 + 受限业务范围 = 能看所有机器，但只看得了带该标签的资产。
+	// 内置角色都不设 AssetMode（= all），因此**存量账号行为逐字不变**。
+	roleUnlimited := false // 有角色声明「该维度不限」
+	roleLimited := false   // 有角色声明「限定」
+	assetSel := make(map[string]AssetScope)
 	roleNames := make([]string, 0, len(u.Roles))
 
 	for _, rn := range u.Roles {
@@ -39,6 +50,14 @@ func ExpandPrincipal(u User, roleLookup func(name string) (Role, bool)) *Princip
 				groupSet[g] = struct{}{}
 			}
 		}
+		if !rs.LimitsAssets() {
+			roleUnlimited = true
+		} else {
+			roleLimited = true
+			for _, sel := range rs.AssetSelectors() {
+				assetSel[sel.Key+"\x00"+sel.Value] = sel
+			}
+		}
 	}
 
 	// 用户自身 Scope 进一步收窄/扩大：若任一角色为 global 则用户为 global；
@@ -56,6 +75,20 @@ func ExpandPrincipal(u User, roleLookup func(name string) (Role, bool)) *Princip
 			}
 		}
 	}
+	// 用户自身的业务范围（"给这个人单独收窄"的那个字段）：
+	//   · 他要是自己配了限定 → **维度生效**，不可能被角色的"不限"静默抵消。
+	//     否则这个字段就是个摆设，而且失败方向是"权限比配置看起来更大"。
+	//   · 他没配（普通用户 scope 的 AssetMode 默认就是空）→ 不参与判断，
+	//     免得普通用户的默认值把角色强加的限制关掉（那是同一个失败方向的另一面）。
+	userLimited := u.Scope.LimitsAssets()
+	if userLimited {
+		for _, sel := range u.Scope.AssetSelectors() {
+			assetSel[sel.Key+"\x00"+sel.Value] = sel
+		}
+	}
+	// 维度是否生效：用户明确配了 → 生效；否则与节点维度同构（所有角色都限定才生效，
+	// 任一角色说"不限"就等于这个人这一维不受限）。
+	assetOn := userLimited || (roleLimited && !roleUnlimited)
 
 	scope := Scope{Mode: ScopeRestricted, Groups: nil}
 	if scopeGlobal {
@@ -64,6 +97,12 @@ func ExpandPrincipal(u User, roleLookup func(name string) (Role, bool)) *Princip
 		for g := range groupSet {
 			scope.Groups = append(scope.Groups, g)
 		}
+	}
+	if assetOn {
+		scope.AssetMode = AssetScopeLimited
+		scope.AssetLabels = sortedAssetScopes(assetSel)
+	} else {
+		scope.AssetMode = AssetScopeAll
 	}
 
 	return &Principal{
@@ -74,6 +113,51 @@ func ExpandPrincipal(u User, roleLookup func(name string) (Role, bool)) *Princip
 		Scope:        scope,
 		TokenVersion: u.TokenVersion,
 	}
+}
+
+// sortedAssetScopes 把选择器 map 摊成**有序**切片。
+//
+// 顺序必须稳定：它会进 Principal.Scope、进 /auth/me 的响应、也进测试断言——
+// 顺序抖动会让"同一个账号两次请求拿到的范围看起来不一样"，排查时白白多一层噪声。
+func sortedAssetScopes(m map[string]AssetScope) []AssetScope {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]AssetScope, 0, len(m))
+	for _, sel := range m {
+		out = append(out, sel)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Key != out[j].Key {
+			return out[i].Key < out[j].Key
+		}
+		return out[i].Value < out[j].Value
+	})
+	return out
+}
+
+// AssetScopeDecision 是业务标签维度折算出的判定结果，供资产类接口下推给存储层。
+//
+// 三态**必须显式区分**，否则"限定了却没有选择器"会被当成"不限"——那是放大权限：
+//
+//	Deny=true                   → 受限但没有任何有效选择器：无任何可见资产
+//	Deny=false, Selectors=nil   → 该维度不生效（不按标签过滤）
+//	Deny=false, Selectors 非空  → 必须按选择器过滤（维度内任一命中即可见）
+type AssetScopeDecision struct {
+	Deny      bool
+	Selectors []AssetScope
+}
+
+// ResolveAssetScope 把身份的业务范围折算成判定结果。
+//
+// p 为 nil（未启用认证/单管理员模式）时不受限——与 assetAllowedNodes / nodeInScope 对
+// "无 Principal 即全局"的既有取向一致，不能在这里变成 fail-closed（那会让未启用 RBAC 的部署
+// 突然看不到任何资产）。
+func ResolveAssetScope(p *Principal) AssetScopeDecision {
+	if p == nil || !p.Scope.LimitsAssets() {
+		return AssetScopeDecision{}
+	}
+	return AssetScopeDecision{Deny: len(p.Scope.AssetSelectors()) == 0, Selectors: p.Scope.AssetSelectors()}
 }
 
 // HighRiskPermissions 为需要二次确认 + 审计的高风险权限点。

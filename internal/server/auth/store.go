@@ -18,6 +18,12 @@ import (
 type DataFile struct {
 	Users []User `yaml:"users" json:"users"`
 	Roles []Role `yaml:"roles" json:"roles"`
+	// ScopeLabelKey 是业务范围**约定的资产标签键**（默认见 DefaultScopeLabelKey，即 biz）。
+	//
+	// 放在授权数据文件里而不是 server.yaml：它只被授权判定用到，"授权相关的东西"放一起最不容易漏改。
+	// 换键后的行为是安全的：选择器自带键名，旧授权只会匹配不到任何资产（fail-closed），
+	// 不会被静默解释成新键的含义。
+	ScopeLabelKey string `yaml:"scope_label_key,omitempty" json:"scope_label_key,omitempty"`
 }
 
 // Store 管理用户与角色数据：加载、原子保存、缓存、备份与并发保护。
@@ -40,6 +46,21 @@ func NewStore(path string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// ScopeLabelKey 返回当前约定的业务范围标签键（未配置时用默认键）。
+func (s *Store) ScopeLabelKey() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.scopeLabelKeyLocked()
+}
+
+// scopeLabelKeyLocked 是 ScopeLabelKey 的**持锁版本**。
+//
+// 必须分开：Update* 系列在写锁内工作，直接调 ScopeLabelKey() 会自我死锁
+// （sync.RWMutex 不可重入，同一个 goroutine 再取读锁会永久阻塞）。
+func (s *Store) scopeLabelKeyLocked() string {
+	return NormalizeScopeLabelKey(s.data.ScopeLabelKey)
 }
 
 func setRole(m map[string]Role, r Role) map[string]Role {
@@ -186,6 +207,10 @@ func (s *Store) CreateUser(u User, plainPassword, operator string) error {
 	if err := ValidateUser(u); err != nil {
 		return err
 	}
+	// 业务范围的选择器要用**当前约定的标签键**校验，所以放在这里（ValidateUser 不知道该键）。
+	if err := ValidateAssetScope(u.Scope.AssetMode, u.Scope.AssetLabels, s.ScopeLabelKey()); err != nil {
+		return err
+	}
 	if err := ValidatePassword(plainPassword); err != nil {
 		return err
 	}
@@ -237,6 +262,10 @@ func (s *Store) UpdateUser(username string, patch UserPatch) error {
 	if patch.Scope != nil {
 		u.Scope = *patch.Scope
 		if err := ValidateUser(u); err != nil {
+			return err
+		}
+		// 此处已持写锁，必须用持锁版本的键读取（见 scopeLabelKeyLocked 的死锁说明）。
+		if err := ValidateAssetScope(u.Scope.AssetMode, u.Scope.AssetLabels, s.scopeLabelKeyLocked()); err != nil {
 			return err
 		}
 	}
@@ -369,6 +398,9 @@ func (s *Store) CreateRole(r Role, operator string, operatorScope Scope) error {
 			return fmt.Errorf("权限点 %s 非法", p)
 		}
 	}
+	if err := ValidateAssetScope(r.AssetMode, r.AssetLabels, s.ScopeLabelKey()); err != nil {
+		return err
+	}
 	// 自定义角色范围约束：仅超级管理员可创建 global 角色；
 	// 非全局操作者创建的角色范围必须是其自身范围的子集。
 	if r.ScopeMode == ScopeGlobal && !operatorScope.IsGlobal() {
@@ -421,6 +453,17 @@ func (s *Store) UpdateRole(name string, patch RolePatch) error {
 	}
 	if patch.ScopeGroups != nil {
 		r.ScopeGroups = patch.ScopeGroups
+	}
+	if patch.AssetMode != nil {
+		r.AssetMode = *patch.AssetMode
+	}
+	if patch.AssetLabels != nil {
+		r.AssetLabels = patch.AssetLabels
+	}
+	// 无条件校验**结果**（而不是"改了哪项校验哪项"）：业务维度的模式与选择器是一对，
+	// 只改其中一个也可能组出非法组合（如把模式改成 all 却留着选择器）。
+	if err := ValidateAssetScope(r.AssetMode, r.AssetLabels, s.scopeLabelKeyLocked()); err != nil {
+		return err
 	}
 	s.data.Roles[idx] = r
 	s.roles[name] = r
@@ -522,8 +565,12 @@ type UserPatch struct {
 
 // RolePatch 为角色更新请求的字段集合。
 type RolePatch struct {
-	Description  *string
-	Permissions  []string
-	ScopeMode    *string
-	ScopeGroups  []string
+	Description *string
+	Permissions []string
+	ScopeMode   *string
+	ScopeGroups []string
+	// AssetMode / AssetLabels 是业务标签维度。nil = 本次不改（与 ScopeGroups 同一套语义）；
+	// 要把该维度关掉就显式给 AssetMode="all"（并清空选择器）。
+	AssetMode   *string
+	AssetLabels []AssetScope
 }

@@ -12,6 +12,7 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -46,12 +47,45 @@ var ErrInvalid = errors.New("参数不合法")
 
 var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
-// Scope 描述用户/角色可访问的节点分组范围。
+// Scope 描述用户/角色可访问的范围：**节点分组**与**业务标签**两个维度，取交集。
 type Scope struct {
 	// Mode 为 global 或 restricted。
 	Mode string `yaml:"mode" json:"mode"`
 	// Groups 在 restricted 模式下生效，为允许访问的分组 ID 列表。
 	Groups []string `yaml:"groups" json:"groups"`
+	// AssetMode 是业务标签维度的模式：""（= all，该维度不生效）或 limited。
+	AssetMode string `yaml:"asset_mode,omitempty" json:"asset_mode,omitempty"`
+	// AssetLabels 是 limited 模式下的标签选择器（维度**内**任一命中即可见）。
+	AssetLabels []AssetScope `yaml:"asset_labels,omitempty" json:"asset_labels,omitempty"`
+}
+
+// 业务范围（资产标签维度）的模式。
+//
+// 为什么要有显式模式，而不是"有选择器就生效、没有就不生效"：那样无法区分
+// 「该维度不生效」（不看标签，只看节点分组）与「限定了但一个选择器都没配」
+// （**什么资产都看不到**）——这两者的授权含义相反。节点分组维度用的是同一套形状
+// （restricted + 空 = 无权限，绝不放大为全部），这里逐字同构，运维只需理解一次。
+const (
+	// AssetScopeAll 表示业务维度不生效。零值即此，因此**存量配置行为不变**。
+	AssetScopeAll = "all"
+	// AssetScopeLimited 表示仅 AssetLabels 命中的资产可见（与节点维度取交集）。
+	AssetScopeLimited = "limited"
+)
+
+// DefaultScopeLabelKey 是业务范围默认使用的资产标签键。
+const DefaultScopeLabelKey = "biz"
+
+// MaxAssetScopeValueLen 是选择器值的长度上限（标签值都不长，超长多半是粘错了东西）。
+const MaxAssetScopeValueLen = 64
+
+// AssetScope 是业务范围的一个标签选择器：资产带 `Key=Value` 标签即属于该范围。
+//
+// **只认一个约定键**（DefaultScopeLabelKey 或部署方配置的那个）：任意标签键都能进授权范围的话，
+// "随手给某台机器打个标签"会意外变成授权开关。选择器**自带键名**，所以配置改了键之后，
+// 旧授权只会匹配不到任何资产（fail-closed），不会被静默解释成新键的含义。
+type AssetScope struct {
+	Key   string `yaml:"key" json:"key"`
+	Value string `yaml:"value" json:"value"`
 }
 
 // IsGlobal 是否全局范围。
@@ -71,6 +105,113 @@ func (s Scope) ContainsGroup(group string) bool {
 	return false
 }
 
+// AssetModeNormalized 返回规范化后的业务维度模式：空值按 all 处理（兼容存量配置）。
+func (s Scope) AssetModeNormalized() string {
+	if s.AssetMode == "" {
+		return AssetScopeAll
+	}
+	return s.AssetMode
+}
+
+// LimitsAssets 表示业务标签维度是否生效。
+//
+// **调用方必须用它区分两种"没有选择器"**：不生效（不看标签）与"限定了却没有选择器"
+// （无任何可见资产）。把后者当成前者就等于放大权限——务必配 `AssetSelectors()` 一起读。
+func (s Scope) LimitsAssets() bool { return s.AssetModeNormalized() == AssetScopeLimited }
+
+// AssetSelectors 返回生效的标签选择器。
+//
+// 它在 "limited 但一个都没配" 时返回空切片——**那不是"不限"**，是无权限；
+// 判断维度是否生效请用 LimitsAssets()。
+func (s Scope) AssetSelectors() []AssetScope {
+	out := make([]AssetScope, 0, len(s.AssetLabels))
+	for _, sel := range s.AssetLabels {
+		key, value := strings.TrimSpace(sel.Key), strings.TrimSpace(sel.Value)
+		if key == "" || value == "" {
+			continue // 残缺选择器由写入口拦下；这里再兜一次，绝不让它变成"通配"
+		}
+		out = append(out, AssetScope{Key: key, Value: value})
+	}
+	return out
+}
+
+// NormalizeScopeLabelKey 规范化约定的业务范围标签键（空值回落到默认键）。
+func NormalizeScopeLabelKey(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return DefaultScopeLabelKey
+	}
+	return raw
+}
+
+// ValidateAssetScope 校验业务维度的取值。
+//
+// allowedKey 是当前约定的标签键（空表示用默认值）。规则：
+//   - 模式只能是 ""（等价 all）/ all / limited；
+//   - limited 下**允许一个选择器都没有**（语义是"无可见资产"，与节点维度 restricted+空 同构）；
+//   - 非 limited 模式**不允许**带选择器——那是自相矛盾的配置（配了标签却声明该维度不生效），
+//     静默忽略它会让"我明明配了业务范围"变成一句谎话，直接拒绝更清楚；
+//   - 每个选择器的键必须等于约定键，值不得为空、不长于上限、不含换行制表符。
+func ValidateAssetScope(mode string, labels []AssetScope, allowedKey string) error {
+	switch mode {
+	case "", AssetScopeAll, AssetScopeLimited:
+	default:
+		return errors.New("业务范围模式非法（只能是 all 或 limited）")
+	}
+	if len(labels) > 0 && mode != AssetScopeLimited {
+		return errors.New("配置了业务范围标签，但模式不是 limited（要么改成 limited，要么清掉标签）")
+	}
+	want := NormalizeScopeLabelKey(allowedKey)
+	for i, sel := range labels {
+		if key := strings.TrimSpace(sel.Key); key != want {
+			return fmt.Errorf("业务范围第 %d 个选择器的标签键必须是 %q（当前只认这一个约定键）", i+1, want)
+		}
+		value := strings.TrimSpace(sel.Value)
+		if value == "" {
+			return fmt.Errorf("业务范围第 %d 个选择器的标签值不能为空", i+1)
+		}
+		if len([]rune(value)) > MaxAssetScopeValueLen {
+			return fmt.Errorf("业务范围标签值过长（上限 %d 字符）", MaxAssetScopeValueLen)
+		}
+		if strings.ContainsAny(value, "\r\n\t") {
+			return fmt.Errorf("业务范围标签值不能包含换行或制表符")
+		}
+	}
+	return nil
+}
+
+// ScopeCovers 判断 outer 是否覆盖 inner，用于「自定义角色/用户的范围不得超过操作者自身范围」。
+//
+// 返回 nil 表示覆盖。两个维度分别判：节点分组（global 覆盖一切，否则 inner 的每个分组都要在 outer 里）
+// 与业务标签（outer 不生效则覆盖一切；outer 限定则 inner 必须也限定，且选择器是 outer 的子集）。
+//
+// 为什么必须有这条：范围是**收窄**工具，如果被授权者能创建/修改出比他自己更宽的范围，
+// 那就等于他能给自己提权（节点维度此前只在创建时校验，更新路径同样要过这里）。
+func ScopeCovers(outer, inner Scope) error {
+	if !outer.IsGlobal() {
+		for _, g := range inner.Groups {
+			if !outer.ContainsGroup(g) {
+				return errors.New("资源范围不得超过操作者自身的范围（节点分组）")
+			}
+		}
+	}
+	if outer.LimitsAssets() {
+		if !inner.LimitsAssets() {
+			return errors.New("操作者自身受限的业务范围下，不能授予不受业务限制的范围")
+		}
+		allowed := make(map[string]struct{}, len(outer.AssetSelectors()))
+		for _, sel := range outer.AssetSelectors() {
+			allowed[sel.Key+"\x00"+sel.Value] = struct{}{}
+		}
+		for _, sel := range inner.AssetSelectors() {
+			if _, ok := allowed[sel.Key+"\x00"+sel.Value]; !ok {
+				return fmt.Errorf("业务范围 %s=%s 超出操作者自身的业务范围", sel.Key, sel.Value)
+			}
+		}
+	}
+	return nil
+}
+
 // Role 定义一组权限点与默认资源范围。
 type Role struct {
 	Name        string   `yaml:"name" json:"name"`
@@ -79,12 +220,20 @@ type Role struct {
 	Permissions []string `yaml:"permissions" json:"permissions"`
 	ScopeMode   string   `yaml:"scope_mode" json:"scope_mode"`
 	ScopeGroups []string `yaml:"scope_groups" json:"scope_groups"`
-	CreatedBy   string   `yaml:"created_by,omitempty" json:"created_by,omitempty"`
+	// 业务标签维度（可选）。与 Scope 的同名字段语义一致：空模式 = 不生效。
+	AssetMode   string       `yaml:"asset_mode,omitempty" json:"asset_mode,omitempty"`
+	AssetLabels []AssetScope `yaml:"asset_labels,omitempty" json:"asset_labels,omitempty"`
+	CreatedBy   string       `yaml:"created_by,omitempty" json:"created_by,omitempty"`
 }
 
 // RoleScope 返回角色的默认资源范围。
 func (r Role) RoleScope() Scope {
-	return Scope{Mode: r.ScopeMode, Groups: r.ScopeGroups}
+	return Scope{
+		Mode:        r.ScopeMode,
+		Groups:      r.ScopeGroups,
+		AssetMode:   r.AssetMode,
+		AssetLabels: r.AssetLabels,
+	}
 }
 
 // User 表示一个可登录主体。
