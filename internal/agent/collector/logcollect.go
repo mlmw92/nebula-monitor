@@ -325,14 +325,24 @@ func (c *LogCollector) collectFile(ctx context.Context, src config.LogSourceConf
 	lines := make([]model.LogLine, 0, len(merged))
 	now := model.NowMillis()
 	for _, text := range merged {
-		name, hit := matchLogPattern(patterns, text)
+		ts, content := now, text
+		if origin != nil {
+			// 容器日志：时间与内容都在 kubelet 加的 CRI 框架里（`<时间> <流> <F|P> <内容>`）。
+			// 剥掉框架后正文才是应用自己那一行；时间也用它——否则同一轮采集的行会挤在
+			// 同一个"采集时刻"上，时间范围过滤与排序都会退化（见 parseCRILogLine）。
+			if criTs, criContent, ok := parseCRILogLine(text); ok {
+				ts, content = criTs, criContent
+			}
+		}
+		// 模式匹配针对**剥掉框架后的内容**：框架是运行时的，不是应用写的日志行
+		name, hit := matchLogPattern(patterns, content)
 		if !hit && !src.All {
 			continue // 默认只上传关心的行（见 config.LogSourceConfig 的隐私默认值说明）
 		}
 		if hit {
 			res.matched[name]++
 		}
-		lines = append(lines, model.LogLine{Ts: now, Pattern: name, Text: text})
+		lines = append(lines, model.LogLine{Ts: ts, Pattern: name, Text: content})
 	}
 
 	// log_lines_total 的语义是「**成功上传**的行数」：限额丢弃与上传失败都不计入，

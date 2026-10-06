@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/nebula/monitor/internal/agent/config"
 	"github.com/nebula/monitor/internal/model"
@@ -185,6 +186,80 @@ func TestLogCollector_GlobZeroMatchKeepsUp(t *testing.T) {
 	m, ok := logMetric(ms, "podlog_log_up", nil)
 	if !ok || m.Value != 1 {
 		t.Fatalf("零匹配时 up 应为 1，got %+v", ms)
+	}
+}
+
+// TestLogCollector_StripsCRIFraming 容器日志的正文与时间都必须取自 CRI 框架：
+// 留着框架会让每一行带"时间 + 流 + 标记"噪声；用采集时刻会让同一轮的行挤在同一个毫秒上。
+func TestLogCollector_StripsCRIFraming(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "pods", "nebula-podlog_logtest_uid", "logtest", "0.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := "2026-10-06T13:40:27.537868681+08:00 stdout F ERROR tick=1\n" +
+		"2026-10-06T13:40:24.536200595+08:00 stderr F ERROR tick=2\n"
+	if err := os.WriteFile(logPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	offsetsPath := filepath.Join(dir, "offsets.json")
+	seedOffsets(t, offsetsPath, "podlog", []string{logPath})
+
+	src := config.LogSourceConfig{
+		ID: "podlog", PodLogs: true, Paths: []string{logPath},
+		Patterns: []config.LogPattern{{Name: "err", Regex: "(?i)ERROR"}},
+	}
+	var got []model.LogLine
+	c := NewLogCollector("n1", []config.LogSourceConfig{src}, offsetsPath)
+	c.SetSink(func(_ context.Context, _ string, _ *model.LogOrigin, lines []model.LogLine) (model.LogSinkResult, error) {
+		got = append(got, lines...)
+		return model.LogSinkResult{}, nil
+	})
+	c.CollectCtx(context.Background())
+
+	if len(got) != 2 {
+		t.Fatalf("应上行 2 行，实际 %d：%+v", len(got), got)
+	}
+	if got[0].Text != "ERROR tick=1" || got[1].Text != "ERROR tick=2" {
+		t.Fatalf("正文应剥掉 CRI 框架，实际 %q / %q", got[0].Text, got[1].Text)
+	}
+	for i, want := range []string{"2026-10-06T13:40:27.537868681+08:00", "2026-10-06T13:40:24.536200595+08:00"} {
+		ts, err := time.Parse(time.RFC3339Nano, want)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got[i].Ts != ts.UnixMilli() {
+			t.Fatalf("第 %d 行时间应取行内值：got %d，期望 %d", i, got[i].Ts, ts.UnixMilli())
+		}
+	}
+	if got[0].Ts == got[1].Ts {
+		t.Fatal("两行时间不同，不该退化成同一个采集时刻")
+	}
+}
+
+// 普通文件来源**不**剥框架：CRI 格式只出现在 kubelet 写的容器日志里，
+// 别处"恰好长这样"的一行不该被改写。
+func TestLogCollector_KeepsPlainFileText(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "app.log")
+	line := "2026-10-06T13:40:27.537868681+08:00 stdout F ERROR tick=1"
+	if err := os.WriteFile(logPath, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	offsetsPath := filepath.Join(dir, "offsets.json")
+	seedOffsets(t, offsetsPath, "applog", []string{logPath})
+
+	src := config.LogSourceConfig{ID: "applog", All: true, Paths: []string{logPath}}
+	var got []model.LogLine
+	c := NewLogCollector("n1", []config.LogSourceConfig{src}, offsetsPath)
+	c.SetSink(func(_ context.Context, _ string, _ *model.LogOrigin, lines []model.LogLine) (model.LogSinkResult, error) {
+		got = append(got, lines...)
+		return model.LogSinkResult{}, nil
+	})
+	c.CollectCtx(context.Background())
+
+	if len(got) != 1 || got[0].Text != line {
+		t.Fatalf("普通文件的行必须原样保留，实际 %+v", got)
 	}
 }
 

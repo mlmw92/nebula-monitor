@@ -3,6 +3,7 @@ package collector
 import (
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/nebula/monitor/internal/model"
 )
@@ -49,6 +50,54 @@ func parsePodLogPath(path string) *model.LogOrigin {
 		return nil
 	}
 	return origin
+}
+
+// parseCRILogLine 解析 kubelet 的 CRI 日志行：
+//
+//	<RFC3339Nano> <stdout|stderr> <F|P> <内容>
+//
+// 返回 (毫秒时间戳, 内容, 是否匹配该格式)。
+//
+// 为什么必须解析它：容器日志行的时间与内容都在这层**框架**里。不剥掉它，
+// 正文里每一行都带着"时间 + 流 + 标记"噪声；不取它的时间，就只能用采集时刻，
+// 于是同一轮采集的所有行挤在同一个毫秒上——时间范围过滤与排序都会退化
+// （2026-10-06 端到端实机验证时正是这样：三行 ts 完全相同）。
+//
+// 只对 podLogs 来源调用：CRI 框架只出现在 kubelet 写的容器日志里，
+// 普通文件里"恰好长这样"的一行不该被改写。
+func parseCRILogLine(line string) (int64, string, bool) {
+	// 时间戳在第一个空格之前
+	i := strings.IndexByte(line, ' ')
+	if i <= 0 {
+		return 0, "", false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, line[:i])
+	if err != nil {
+		return 0, "", false
+	}
+	rest := line[i+1:]
+	// <流> <标记> <内容>
+	j := strings.IndexByte(rest, ' ')
+	if j <= 0 {
+		return 0, "", false
+	}
+	switch rest[:j] {
+	case "stdout", "stderr":
+	default:
+		return 0, "", false
+	}
+	rest = rest[j+1:]
+	// 标记：F=完整一条，P=部分（多行写入被运行时按行拆分，最后一行才是 F）。
+	// 这里不参与合并（那是 multiline 配置的职责），但格式不对就不认这条框架。
+	if len(rest) < 2 || rest[1] != ' ' {
+		return 0, "", false
+	}
+	switch rest[0] {
+	case 'F', 'P':
+	default:
+		return 0, "", false
+	}
+	return ts.UnixMilli(), rest[2:], true
 }
 
 // isPodLogFileName 判断文件名是否为 kubelet 的容器日志名（`<数字>.log`）。
