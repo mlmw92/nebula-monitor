@@ -75,6 +75,11 @@ type LogQuery struct {
 	Nodes   []string // 节点过滤（为空表示不限）
 	Sources []string // 来源过滤（为空表示不限）
 	Limit   int      // 命中上限（达到即停止扫描并标记 truncated）
+	// Fields 是结构化字段的**精确**匹配（键值全等才命中，为空表示不限）。
+	//
+	// 与 Keyword 的分工：关键词在原文里找子串，字段在解析出的键值上做等值判断——
+	// 「status=500」用关键词会命中任何含该串的行（包括别的字段的值），用字段才是语义正确的筛法。
+	Fields map[string]string
 }
 
 // LogQueryResult 是检索结果。
@@ -99,4 +104,18 @@ type LogHit struct {
 	Source  string `json:"source"`
 	Pattern string `json:"pattern,omitempty"`
 	Text    string `json:"text"`
+	// Fields 是从原文里提取出的结构化字段（JSON 对象或 key=value 对，见 logparse）。
+	// 提不到就是 nil——**原文永远在 Text 里**，字段只是附加的检索维度，不是替代品。
+	Fields map[string]string `json:"fields,omitempty"`
+}
+
+// LogFieldNamePattern 是结构化字段名的合法形态：字母或下划线开头，允许点号（嵌套）与连字符。
+//
+// 与来源名/模式名一样，服务端与检索侧必须用同一条规则：字段名会出现在查询参数里，
+// 两边不一致就会出现「写入时接受、查询时匹配不上」这种只在现场才暴露的问题。
+var LogFieldNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,63}$`)
+
+// IsValidLogFieldName 判断字段名是否合法（见 LogFieldNamePattern）。
+func IsValidLogFieldName(s string) bool {
+	return LogFieldNamePattern.MatchString(s)
 }

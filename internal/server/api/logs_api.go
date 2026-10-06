@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/logparse"
 	"github.com/nebula/monitor/internal/server/logstore"
 )
 
@@ -120,6 +121,12 @@ func parseLogQuery(r *http.Request) (model.LogQuery, error) {
 	q.Nodes = splitCSV(qv.Get("nodes"))
 	q.Sources = splitCSV(qv.Get("sources"))
 
+	fields, err := parseLogFieldFilters(qv["field"])
+	if err != nil {
+		return q, err
+	}
+	q.Fields = fields
+
 	q.Limit = logstore.DefaultLimit
 	if v := strings.TrimSpace(qv.Get("limit")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -136,6 +143,74 @@ func parseLogQuery(r *http.Request) (model.LogQuery, error) {
 		q.Limit = n
 	}
 	return q, nil
+}
+
+// MaxLogFieldFilters 是一次查询允许携带的字段过滤条件数上限。
+// 字段过滤是**逐行**判断的，条件越多每条扫描行的代价越大；8 个足够表达常见的排障条件。
+const MaxLogFieldFilters = 8
+
+// parseLogFieldFilters 解析结构化字段过滤（`field=key:value`，可重复出现）。
+//
+// 形态与台账的标签筛选（`label=key:value`）一致：同一个平台不该有两套写法。
+// 键走 model.IsValidLogFieldName（与写入侧同一条规则）；值有长度上限——
+// 字段值在落盘时已被截断到该长度，更长的查询值永远不可能命中，必须明确报错，
+// 否则用户会得到一个"查不到但也不报错"的结果。
+func parseLogFieldFilters(raw []string) (map[string]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := map[string]string{}
+	for _, item := range raw {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(item, ":")
+		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		if !ok || key == "" || value == "" {
+			return nil, fmt.Errorf("field 需为 key:value 形态（如 field=status:500）")
+		}
+		if !model.IsValidLogFieldName(key) {
+			return nil, fmt.Errorf("字段名 %q 不合法", key)
+		}
+		if len(value) > logparse.MaxFieldValueBytes {
+			return nil, fmt.Errorf("字段值过长（上限 %d 字节；字段值在落盘时已按此上限截断）", logparse.MaxFieldValueBytes)
+		}
+		if len(out) >= MaxLogFieldFilters {
+			return nil, fmt.Errorf("字段过滤条件过多（上限 %d 个）", MaxLogFieldFilters)
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// handleLogFields 返回各来源已见过的结构化字段名（供界面做筛选候选）。
+//
+// 只列服务端真的见过、且还在基数上限内的名字：列"可能存在的字段"会让用户
+// 按一个永远查不到的名字去筛，然后怀疑功能坏了。
+func (a *API) handleLogFields(w http.ResponseWriter, r *http.Request) {
+	if a.logs == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "集中日志未启用（server.yaml 的 logDir）"})
+		return
+	}
+	sources := splitCSV(r.URL.Query().Get("sources"))
+	if len(sources) == 0 {
+		sources = a.logs.Sources()
+	}
+	out := map[string][]string{}
+	for _, src := range sources {
+		if !model.IsValidLogSourceName(src) {
+			continue
+		}
+		names := a.logs.FieldNames(src)
+		if len(names) > 0 {
+			out[src] = names
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"fields": out})
 }
 
 // splitCSV 解析逗号分隔的多值参数（去空、去重前的简单形态）。

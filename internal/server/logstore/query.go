@@ -141,6 +141,11 @@ func (s *Store) Query(q model.LogQuery, cursor Cursor) (model.LogQueryResult, er
 		if len(q.Sources) > 0 && !containsStr(q.Sources, h.Source) {
 			return false
 		}
+		// 结构化字段是**精确**等值匹配（且要求全部命中）：
+		// 「status=500」用关键词会命中任何含该串的行（包括别的字段的值），那不是语义正确的筛法。
+		if !matchFields(h.Fields, q.Fields) {
+			return false
+		}
 		switch {
 		case re != nil:
 			return re.MatchString(h.Text)
@@ -361,6 +366,21 @@ func splitRel(rel string) (date, source, node string) {
 		return rel, "", ""
 	}
 	return parts[1], parts[0], strings.TrimSuffix(parts[2], ".log")
+}
+
+// matchFields 判断命中行的字段是否包含查询要求的**全部**键值（全等）。
+// want 为空表示不按字段过滤；命中行没有字段（老分片或纯文本日志）时一律不匹配——
+// 那是"这行没有这个字段"，而不是"这个字段的值恰好为空"。
+func matchFields(have, want map[string]string) bool {
+	if len(want) == 0 {
+		return true
+	}
+	for k, v := range want {
+		if have[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func containsStr(list []string, s string) bool {

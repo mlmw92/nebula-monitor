@@ -13,11 +13,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/logparse"
 )
 
 const (
@@ -27,6 +29,19 @@ const (
 	MaxLineBytes = 8 << 10
 	// MaxLinesPerBatch 是单批行数上限（与 Agent 侧的单轮上限同量级）。
 	MaxLinesPerBatch = 20000
+	// MaxFieldNamesPerSource 是单个来源允许出现的**不同**字段名上限（卡口基数控制）。
+	//
+	// 超过之后只接受已见过的名字：新名字被忽略（原文与已有字段都不受影响）。
+	// 为什么必须有：字段名来自外部输入（日志内容），不设上限时一条被注入的日志
+	// 就能把"字段目录"撑成无界集合——界面的字段筛选与将来的字段索引都会被它拖垮。
+	MaxFieldNamesPerSource = 128
+	// fieldCatalogFile 是字段目录的持久化文件名（放在 root 下，与来源目录同级）。
+	//
+	// 为什么要落盘：字段目录是"界面能给你哪些筛选候选"的唯一来源。
+	// 只放内存的话，每次重启后候选都会变空（而旧分片里明明有字段），
+	// 同时每来源的名字上限也被重置——那等于上限只在单次进程内成立。
+	// 它是 root 下的一个普通文件，不参与分片扫描（listFiles/Sources 只认目录）。
+	fieldCatalogFile = "field_names.json"
 )
 
 // nodeFilePattern 限定节点名在文件名里的安全字符：节点名会成为路径的一段。
@@ -44,6 +59,9 @@ type Store struct {
 	// written 记录 (source|date) 已写入字节数。首次触及时从现有文件大小重建，
 	// 因此重启不会把当天的配额清零（否则「重启一次就重新拥有全天配额」）。
 	written map[string]int64
+	// fieldNames 记录每个来源已见过的结构化字段名（卡口基数控制，见 MaxFieldNamesPerSource）。
+	// 进程内状态：重启后重新积累，上限本身仍然成立。
+	fieldNames map[string]map[string]struct{}
 }
 
 // New 创建存储器。root 为空返回 nil（调用方据此关闭该能力）；maxBytesPerDay ≤ 0 用兜底值。
@@ -54,13 +72,136 @@ func New(root string, maxBytesPerDay int64) *Store {
 	if maxBytesPerDay <= 0 {
 		maxBytesPerDay = DefaultMaxBytesPerDay
 	}
-	return &Store{
+	s := &Store{
 		root:            root,
 		maxPerDay:       maxBytesPerDay,
 		scanBudgetBytes: DefaultScanBudgetBytes,
 		scanBudgetLines: DefaultScanBudgetLines,
 		written:         map[string]int64{},
+		fieldNames:      map[string]map[string]struct{}{},
 	}
+	s.loadFieldCatalog()
+	return s
+}
+
+// loadFieldCatalog 读取字段目录（不存在或损坏时按空目录继续：它只是候选列表，
+// 丢了不影响检索——下次写入会把名字重新积累起来）。
+func (s *Store) loadFieldCatalog() {
+	data, err := os.ReadFile(filepath.Join(s.root, fieldCatalogFile))
+	if err != nil {
+		return
+	}
+	var raw map[string][]string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return
+	}
+	for source, names := range raw {
+		if !model.IsValidLogSourceName(source) {
+			continue
+		}
+		set := make(map[string]struct{}, len(names))
+		for _, name := range names {
+			if !model.IsValidLogFieldName(name) || len(set) >= MaxFieldNamesPerSource {
+				continue
+			}
+			set[name] = struct{}{}
+		}
+		if len(set) > 0 {
+			s.fieldNames[source] = set
+		}
+	}
+}
+
+// saveFieldCatalog 落盘字段目录（调用方已持有 s.mu）。写失败只影响候选列表，不影响落盘主链路。
+func (s *Store) saveFieldCatalog() {
+	raw := make(map[string][]string, len(s.fieldNames))
+	for source, set := range s.fieldNames {
+		names := make([]string, 0, len(set))
+		for name := range set {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		raw[source] = names
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(s.root, 0o700); err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(s.root, fieldCatalogFile), data, 0o600)
+}
+
+// Sources 列出已有日志的来源（目录名，有序）。供界面的来源下拉与字段候选使用。
+func (s *Store) Sources() []string {
+	if s == nil {
+		return nil
+	}
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() && model.IsValidLogSourceName(e.Name()) {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// FieldNames 返回某个来源已见过的字段名（有序）。
+//
+// 给界面做字段筛选的候选值用：**只列服务端真的见过、且还在上限内的名字**，
+// 不列"可能存在的字段"——那样用户会按一个永远查不到的名字去筛。
+func (s *Store) FieldNames(source string) []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	known := s.fieldNames[source]
+	out := make([]string, 0, len(known))
+	for name := range known {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// extractFields 提取结构化字段并施加每来源的名字基数上限（调用方已持有 s.mu）。
+func (s *Store) extractFields(source, text string) map[string]string {
+	fields := logparse.Extract(text)
+	if len(fields) == 0 {
+		return nil
+	}
+	known := s.fieldNames[source]
+	if known == nil {
+		known = map[string]struct{}{}
+		s.fieldNames[source] = known
+	}
+	out := make(map[string]string, len(fields))
+	added := false
+	for name, value := range fields {
+		if _, ok := known[name]; !ok {
+			if len(known) >= MaxFieldNamesPerSource {
+				continue
+			}
+			known[name] = struct{}{}
+			added = true
+		}
+		out[name] = value
+	}
+	if added {
+		// 目录只在**出现新名字**时才落盘：日志写入是高频路径，不能每批都写一次小文件。
+		s.saveFieldCatalog()
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // budgetBytes / budgetLines 返回扫描预算（构造与 SetScanBudget 都会保证非零，这里只是防御）。
@@ -134,6 +275,9 @@ func (s *Store) Append(b model.LogBatch) (accepted, dropped int, reason string, 
 			Source:  b.Source,
 			Pattern: line.Pattern,
 			Text:    truncate(line.Text, MaxLineBytes),
+			// 结构化字段在**落盘时**提取：与原文写在同一条 JSON 里，
+			// 因此不需要另建索引，检索仍是"顺序读 + 有界扫描"（见 query.go）。
+			Fields: s.extractFields(b.Source, line.Text),
 		}
 		data, err := json.Marshal(rec)
 		if err != nil {
