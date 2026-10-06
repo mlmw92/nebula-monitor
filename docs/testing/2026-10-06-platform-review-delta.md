@@ -125,3 +125,53 @@
 ### 6.4 本轮之后仍未实现的功能（按文档 §五 优先级）
 
 P0 首批剩余：资产拓扑视图（2-03/2-11）、日志结构化解析与字段检索（9-06/9-07）、日志后端抽象（9-08）、容器↔日志↔资产联动（8-07）。P1/P2 及「明确不做」项见全景表 §三与 §四对账表，其中链路追踪、会话录制/堡垒机、在线终端、移动端/i18n 为已确认的暂缓或不做项，不应计入"未完成"。
+
+---
+
+## 七、第三轮：8-07 容器 ↔ 资产联动（2026-10-06 续二）
+
+按 §六.4 给出的顺序推进 8-07。该功能原文是「容器 → 日志/资产联动（Pod 打标回到资产与日志检索）」，其中**日志检索那一半依赖日志侧的标签注入**（`logship` 只采本机文件、`paths` 不支持通配符、没有 pod 维度标签），不在本批可闭环范围内；因此本批把**资产联动双向打通**，并把日志侧的依赖如实记录（见 §7.4）。
+
+### 7.1 新增能力
+
+| 层 | 内容 |
+|---|---|
+| Server | 新增 `GET /api/v1/assets/lookup`（权限 `assets:read`）：按 `type + key` 精确查一条资产；容器类资产允许直接给身份（`cluster`/`namespace`/`name`，工作负载再加 `kind`），**由服务端拼自然键**。范围外与不存在一律 404；身份缺一块返回 400（不能拼半截键去查，那会把"请求写错"显示成"没进台账"） |
+| Server | `asset.ParseContainerKey(typeKey, naturalKey)`：从自然键解出集群/命名空间/kind/名字（集群含 `://`，从右往左取三段）；`assetView.container` 在容器类资产上带出该身份 |
+| 前端（容器页） | Pod / 工作负载行新增「台账」按钮：按 **apiserver 地址**（台账自然键用的就是它，不是别名）查台账，命中跳资产详情，404 明确提示"尚未进入台账（清单上报约一个采集周期）" |
+| 前端（台账页） | 支持 `?id=` 直接打开资产详情抽屉；容器类资产详情新增「查看容器日志 / 查看容器工作负载」→ 容器页 |
+| 前端（容器页） | 支持 `?cluster=&namespace=&pod=`（或 `tab=`）深链：选中集群、切到对应 Tab、并按需打开该 Pod 的日志抽屉；参数只认领一次（消费后清掉 query） |
+| 前端（主机页） | 修复**死链**：`AlertsView` 的「跳主机」早已 push `/hosts?node=`，但 `HostsView` 从不读该参数——点了只是切页，没有落到那台机器上。现按精确归属落到那一台（见 §7.3） |
+
+### 7.2 设计取舍
+
+- **自然键的拼与解都放服务端**：前端只传身份。集群是 apiserver 地址（含 `://` 与可能的端口），前端 split 一次就可能把 `https:` 当成命名空间；而**解错的联动不会报错**，只会跳到另一个对象上——这类缺陷只能靠"不在前端做这件事"来根除。
+- **`lookup` 不复用列表的 keyword**：模糊搜索一旦拼错就会命中另一条资产，比"没找到"更糟（用户会点进一条不相干的记录）。
+- **404 是正常结果**：清单上报有一个采集周期，刚建的 Pod 可能还没进台账；`lookupAsset` 刻意不用通用 `http.get`（它会把 404 抛成异常，调用方只能靠文案猜）。
+
+### 7.3 顺带修复的联动缺陷（D13）
+
+`AlertsView.gotoNode` → `/hosts?node=<主机名>` 的参数此前**无人消费**：页面切过去了，筛选条件没带过去，用户看到的是全部主机。修法：`HostsView` 消费该参数并落到那一台。第一版只回填关键词，用例随即暴露不足——关键词是**模糊**匹配（含 IP 与显示名），`web-01` 会同时筛出 `web-011`。最终改为「关键词让人看见筛的是谁 + `pinnedNode` 精确归属只留那一台」，用户一改关键词即交还给模糊匹配。
+
+### 7.4 仍未做（依赖日志侧）
+
+「从 Pod 跳到集中日志检索」需要：`logship` 支持按路径通配采集容器日志目录（如 `/var/log/pods/<ns>_<pod>_<uid>/`）、从路径注入 pod 维度标签、以及结构化字段检索（9-06/9-07）。在这三项落地前，容器页的日志入口是**按需拉取**（`container.logs`），不是检索。这一依赖已写入全景表 §3.8 该行。
+
+### 7.5 本轮新增用例与执行证据
+
+| 用例 | 文件 | 断言 |
+|---|---|---|
+| `TestParseContainerKeyRoundTrip` / `Rejects` | `internal/server/asset/model_test.go` | 拼解互逆（含 `://`、端口、路径、带点的名字）；非容器类型与残缺键拒绝 |
+| `TestHandleAssetLookupByNaturalKey` | `internal/server/api/asset_lookup_api_test.go` | 命中返回资产（naturalKey/typeKey/node 正确） |
+| `TestHandleAssetLookupMissIsNotFound` | 同上 | 同命名空间不同名、同名不同命名空间、不同集群、不同类型一律 404 |
+| `TestHandleAssetLookupRespectsScope` | 同上 | 范围外 404、范围内 200 |
+| `TestHandleAssetLookupValidationAndDisabled` | 同上 | 缺参数 400、未启用资产能力 503 |
+| `TestHandleAssetLookupByContainerIdentity` | 同上 | 身份三元组命中且 `container` 身份解出；身份缺一块 400 |
+| `TestRoutes_AssetLookupPermissionAndRouting` | 同上 | 缺 `assets:read` 403；`/lookup` 未被 `/{id}` 抢先匹配 |
+| 「Pod 行上的「台账」命中后跳到资产详情，未命中给明确提示」 | `web/src/components/container/ContainerView.test.js` | 下发参数含 **apiserver 地址**；命中 push `/assets?id=`；404 不跳转并给出提示 |
+| 「带 ?cluster/namespace/pod 进入时直接定位并打开日志抽屉」 | 同上 | 清掉深链参数、选中该集群、下发 `container.logs` |
+| 「带 ?node= 进入时精确落到那一台，且参数只认领一次」 | `web/src/components/HostsView.test.js` | 前缀相同的 `web-011` 被排除（按表格行断言）、参数消费后清空 |
+
+**执行结果**：`go build ./...`、`go vet ./...` 通过；`go test -count=1 ./...` 全绿；`npm --prefix web test` 10 文件 **60 项**通过；`npm --prefix web run build` 通过。
+
+**未覆盖边界（不得视为通过）**：真实集群的台账联动闭环（需要 K8s 清单上报 + 前端点击的端到端）、浏览器端到端（真实登录 → 跳转 → 日志抽屉）。
