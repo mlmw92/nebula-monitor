@@ -27,10 +27,11 @@ usage() {
   sudo ./install.sh uninstall [选项]       # 通过统一入口调用（推荐）
 
 选项:
-  --all              卸载 server + agent + tsdb（默认行为：只卸探测到的）
+  --all              卸载 server + agent + tsdb + logs（默认行为：只卸探测到的）
   --server           仅卸载 server
   --agent            仅卸载 agent
   --tsdb             仅卸载时序库 (victoriametrics / mimir / cortex / thanos)
+  --logs             仅卸载日志后端 (victorialogs)
   --purge            额外删除数据目录 /var/lib/*（不可逆，谨慎使用）
   --keep-data        保留数据目录（默认行为，等价于不传该参数）
   --yes              跳过所有交互确认
@@ -55,6 +56,7 @@ ASSUME_YES=0
 DO_SERVER=0
 DO_AGENT=0
 DO_TSDB=0
+DO_LOGS=0
 DO_ALL=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -65,17 +67,18 @@ while [[ $# -gt 0 ]]; do
     --server)     DO_SERVER=1; shift ;;
     --agent)      DO_AGENT=1; shift ;;
     --tsdb|--vm)  DO_TSDB=1; shift ;;
+    --logs|--vl)  DO_LOGS=1; shift ;;
     -h|--help)    usage; exit 0 ;;
     *) c_err "未知参数: $1"; usage; exit 2 ;;
   esac
 done
-# --all 包含三项
+# --all 包含四项
 if (( DO_ALL )); then
-  DO_SERVER=1; DO_AGENT=1; DO_TSDB=1
+  DO_SERVER=1; DO_AGENT=1; DO_TSDB=1; DO_LOGS=1
 fi
 # 没指定任何范围 -> 进入自动探测
-if (( ! DO_SERVER && ! DO_AGENT && ! DO_TSDB )); then
-  DO_SERVER=1; DO_AGENT=1; DO_TSDB=1
+if (( ! DO_SERVER && ! DO_AGENT && ! DO_TSDB && ! DO_LOGS )); then
+  DO_SERVER=1; DO_AGENT=1; DO_TSDB=1; DO_LOGS=1
 fi
 
 # 需要 root
@@ -118,6 +121,15 @@ if (( VM_SVC || VM_BIN || VM_ETC )); then
   (( DO_TSDB )) && VM_PRESENT=1
 fi
 
+# 日志后端 (VictoriaLogs)
+VL_SVC=0; [[ -f /etc/systemd/system/victoria-logs.service ]] && VL_SVC=1
+VL_BIN=0; [[ -x /usr/local/bin/victoria-logs ]] && VL_BIN=1
+VL_DATA=0; [[ -d /var/lib/victoria-logs-data ]] && VL_DATA=1
+VL_PRESENT=0
+if (( VL_SVC || VL_BIN )); then
+  (( DO_LOGS )) && VL_PRESENT=1
+fi
+
 # TSDB (Mimir / Cortex / Thanos - Docker 模式)
 DOCKER_TSDB_PRESENT=0
 DOCKER_COMPOSE_FILE=""
@@ -129,7 +141,7 @@ fi
 
 # 检查是否真有任何东西要卸
 ANY_PRESENT=0
-if (( SERVER_PRESENT || AGENT_PRESENT || VM_PRESENT || DOCKER_TSDB_PRESENT )); then
+if (( SERVER_PRESENT || AGENT_PRESENT || VM_PRESENT || VL_PRESENT || DOCKER_TSDB_PRESENT )); then
   ANY_PRESENT=1
 fi
 
@@ -172,6 +184,14 @@ if (( VM_PRESENT )); then
   (( VM_DATA && PURGE )) && echo -e "  - ${C_RED}数据(将删):  /var/lib/victoria-metrics-data/${C_RST}"
   (( VM_DATA && !PURGE )) && echo -e "  - ${C_DIM}数据(保留):  /var/lib/victoria-metrics-data/${C_RST}"
   (( VM_OPT  && PURGE )) && echo -e "  - ${C_RED}安装目录:    /opt/victoria-metrics/${C_RST}"
+fi
+if (( VL_PRESENT )); then
+  echo -e "${C_BLU}VictoriaLogs（集中日志后端）${C_RST}"
+  (( VL_SVC )) && echo "  - 服务:    victoria-logs.service"
+  (( VL_BIN )) && echo "  - 二进制:  /usr/local/bin/victoria-logs"
+  (( VL_DATA && PURGE )) && echo -e "  - ${C_RED}数据(将删):  /var/lib/victoria-logs-data/${C_RST}"
+  (( VL_DATA && !PURGE )) && echo -e "  - ${C_DIM}数据(保留):  /var/lib/victoria-logs-data/${C_RST}"
+  echo -e "  ${C_DIM}注意：日志数据保留下来也没法再被平台读取——Server 侧需同步改回 logBackend: local${C_RST}"
 fi
 if (( DOCKER_TSDB_PRESENT )); then
   echo -e "${C_BLU}Docker TSDB (Mimir / Cortex / Thanos)${C_RST}"
@@ -262,6 +282,21 @@ if (( VM_PRESENT )); then
   fi
   systemctl daemon-reload
   c_ok "VictoriaMetrics 卸载完成"
+fi
+
+# 3b) 日志后端 - VictoriaLogs
+if (( VL_PRESENT )); then
+  echo
+  c_info "卸载 VictoriaLogs..."
+  stop_disable victoria-logs
+  safe_rm /usr/local/bin/victoria-logs
+  safe_rm /etc/systemd/system/victoria-logs.service
+  if (( PURGE )); then
+    safe_rm /var/lib/victoria-logs-data
+  fi
+  systemctl daemon-reload
+  c_ok "VictoriaLogs 卸载完成"
+  c_warn "若 Server 仍配着 logBackend: victorialogs，检索会回 502；请把它改回 local（或指向另一个后端）后重启 monitor-server"
 fi
 
 # 4) TSDB - Docker (Mimir / Cortex / Thanos)

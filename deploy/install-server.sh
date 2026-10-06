@@ -29,6 +29,10 @@ WEB_DIR="/etc/monitor-server/web"
 BIN_DIR="/usr/local/bin"
 SERVICE_DIR="/etc/systemd/system"
 ALERT_WEBHOOK=""
+LOG_BACKEND=""          # 集中日志后端：local（默认，自研分片落盘）| victorialogs（外部后端）
+LOG_ADDR=""             # 外部日志后端地址（logBackend=victorialogs 时必填）
+LOG_DIR=""              # 集中日志存储目录（local 后端用；默认 <DATA_DIR>/logs）
+LOG_EXPLICIT=0          # 是否由命令行显式指定日志后端，升级时据此决定是否就地更新配置
 ENABLE_AGENT_AUTH=""    # yes/no：是否启用 Agent 接入授权密钥（未显式指定时默认 yes）
 AGENT_SECRET=""         # 授权密钥（启用时生成或显式传入）
 AGENT_AUTH_EXPLICIT=0   # 是否由命令行显式指定（--agent-auth/--agent-secret），升级时据此决定是否更新配置
@@ -105,6 +109,9 @@ usage() {
   --packages <dir>              本地离线包目录（默认自动探测 dist/artifacts/packages 或 offline，含 node tarball）
   --node-package <name>         指定离线包内的 Node 压缩包文件名（如 node-v24.18.0-linux-x64.tar.xz）
   --alert-webhook <urls>        告警 webhook 地址（逗号分隔，可选）
+  --log-backend <type>          集中日志后端: local(默认)|victorialogs
+  --log-addr <url>              外部日志后端地址（victorialogs 时用），如 http://10.0.0.10:9428
+  --log-dir <dir>               集中日志存储目录（local 后端用；默认 $DATA_DIR/logs）
   --agent-auth                  启用 Agent 接入授权密钥
   --agent-secret <key>          指定授权密钥（与 --agent-auth 配合；缺省则自动生成）
   --yes                         非交互式；未提供二进制来源且处于源码目录时自动从源码构建
@@ -114,6 +121,13 @@ usage() {
 时序库说明：
   本脚本仅对接已有时序库（通过 --tsdb-addr 指定）。
   如需在本机安装时序库，请先运行：sudo bash deploy/install-tsdb.sh
+
+集中日志说明：
+  默认使用自研分片落盘（logBackend: local），**不需要任何额外组件**。
+  如需外部日志后端（VictoriaLogs），请先运行：sudo bash deploy/install-logs.sh
+  再带 --log-backend victorialogs --log-addr <地址> 执行本脚本。
+  切到外部后端后：日志的保留与容量由该后端负责，平台不再执行日志清理，
+  也不再叠加「单来源每日上限」（上行的限速与请求体上限仍然生效）。
 EOF
   exit 0
 }
@@ -128,6 +142,9 @@ while [[ $# -gt 0 ]]; do
     --packages)        PKG_DIR="$2"; shift 2 ;;
     --node-package)    NODE_PKG="$2"; shift 2 ;;
     --alert-webhook)   ALERT_WEBHOOK="$2"; shift 2 ;;
+    --log-backend)     LOG_BACKEND="$2"; LOG_EXPLICIT=1; shift 2 ;;
+    --log-addr)        LOG_ADDR="$2"; LOG_EXPLICIT=1; shift 2 ;;
+    --log-dir)         LOG_DIR="$2"; LOG_EXPLICIT=1; shift 2 ;;
     --agent-auth)      ENABLE_AGENT_AUTH="yes"; AGENT_AUTH_EXPLICIT=1; shift ;;
     --agent-secret)    AGENT_SECRET="$2"; ENABLE_AGENT_AUTH="yes"; AGENT_AUTH_EXPLICIT=1; shift 2 ;;
     --yes)             ASSUME_YES=1; shift ;;
@@ -342,6 +359,38 @@ step_tsdb() {
   c_ok "时序库后端: $TSDB_BACKEND @ $TSDB_ADDR${TSDB_QUERY_ADDR:+ (查询 $TSDB_QUERY_ADDR)}"
 }
 
+# 集中日志后端：默认 local（自研分片落盘），可选外部后端 VictoriaLogs。
+#
+# 不做交互提问：默认值就是"不用任何额外组件"的那个选项，多问一句只会让
+# 首次安装多一个需要判断的岔路。要外部后端的人已经知道自己在做什么（他也得先跑 install-logs.sh）。
+step_logs() {
+  if [[ -z "$LOG_BACKEND" ]]; then
+    # 只给了地址（没给后端名）：按外部后端处理——用户显然是想接 VictoriaLogs
+    if [[ -n "$LOG_ADDR" ]]; then
+      LOG_BACKEND="victorialogs"
+    else
+      LOG_BACKEND="local"
+    fi
+  fi
+  case "$LOG_BACKEND" in
+    local|victorialogs) ;;
+    *) die "--log-backend 只支持 local|victorialogs（当前: $LOG_BACKEND）。
+   后端名写错**必须现在失败**：静默降级会让它变成一次\"日志功能消失了\"的事故，
+   而日志恰好是排障时才去看的东西。" ;;
+  esac
+  if [[ "$LOG_BACKEND" == "victorialogs" ]]; then
+    if [[ -z "$LOG_ADDR" ]]; then
+      # 默认指向本机：install-logs.sh 装完就是 :9428。地址在别的机器时必须显式给。
+      LOG_ADDR="http://127.0.0.1:9428"
+      c_warn "未指定 --log-addr，默认使用 $LOG_ADDR（日志后端在别的机器请显式指定）"
+    fi
+    c_ok "集中日志后端: victorialogs @ $LOG_ADDR（保留与容量由该后端负责）"
+  else
+    [[ -z "$LOG_DIR" ]] && LOG_DIR="$DATA_DIR/logs"
+    c_ok "集中日志后端: local（目录 $LOG_DIR）"
+  fi
+}
+
 step_network() {
   if [[ -z "$LISTEN" ]]; then
     if (( ASSUME_YES )); then LISTEN=":8080"; else
@@ -420,6 +469,32 @@ patch_agent_auth_config() {
   # 文件中若无 agentAuth 块（awk 未写入 new），则追加
   if ! grep -qE '^[[:space:]]*agentAuth:' "$cfg"; then
     printf '\n%s\n' "$new_block" >> "$cfg"
+  fi
+}
+
+# 升级模式下显式指定日志后端参数时，就地更新 logDir / logBackend / logVictoriaLogs.addr。
+# 与 agentAuth 同一取向：升级默认保留原配置不覆盖，只有用户显式指定时才动这几项。
+patch_log_config() {
+  local cfg="$CONFIG_DIR/server.yaml"
+  [[ -f "$cfg" ]] || return 0
+  awk -v backend="$LOG_BACKEND" -v addr="$LOG_ADDR" -v dir="$LOG_DIR" '
+    /^[[:space:]]*logDir:[[:space:]]/ && dir != "" { print "logDir: \"" dir "\""; next }
+    /^[[:space:]]*logBackend:[[:space:]]/ { print "logBackend: " backend; next }
+    /^[[:space:]]*logVictoriaLogs:[[:space:]]*$/ {
+      print "logVictoriaLogs:"
+      print "  addr: \"" addr "\""
+      skip=1; next
+    }
+    skip && /^[[:space:]]/ { next }
+    skip { skip=0 }
+    { print }
+  ' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+  # 老配置里没有这几项时补上（升级前生成的 server.yaml 只有 tsdb 与 agentAuth）
+  if ! grep -qE '^[[:space:]]*logBackend:' "$cfg"; then
+    printf '\nlogBackend: %s\n' "$LOG_BACKEND" >> "$cfg"
+  fi
+  if [[ "$LOG_BACKEND" == "victorialogs" ]] && ! grep -qE '^[[:space:]]*logVictoriaLogs:' "$cfg"; then
+    printf 'logVictoriaLogs:\n  addr: "%s"\n' "$LOG_ADDR" >> "$cfg"
   fi
 }
 
@@ -711,6 +786,11 @@ generate_config() {
       patch_agent_auth_config
       c_ok "已更新 agentAuth: enabled=$([[ "$ENABLE_AGENT_AUTH" == "yes" ]] && echo true || echo false)"
     fi
+    # 显式 --log-backend/--log-addr/--log-dir 时，仅就地更新日志后端那几项
+    if (( LOG_EXPLICIT )); then
+      patch_log_config
+      c_ok "已更新集中日志后端: $LOG_BACKEND${LOG_ADDR:+ @ $LOG_ADDR}"
+    fi
     return
   fi
 
@@ -722,6 +802,14 @@ generate_config() {
     tsdb_block=$(printf '  backend: %s\n  addr: "%s"' "$TSDB_BACKEND" "$TSDB_ADDR")
     [[ -n "$TSDB_QUERY_ADDR" ]] && tsdb_block+=$(printf '\n  queryAddr: "%s"' "$TSDB_QUERY_ADDR")
   fi
+
+  # 日志后端配置块。键名必须与服务端结构体 tag 一致
+  # （internal/server/config/config.go 的 logDir/logBackend/logVictoriaLogs），
+  # 契约由 internal/server/config/config_test.go 的 TestLoadInstallerGeneratedLogConfig 钉住：
+  # 改这里就要同步改那里，否则症状是"运维以为切到了外部后端、服务端其实还在用本地"。
+  local log_block
+  log_block=$(printf 'logDir: "%s"\nlogBackend: %s' "$LOG_DIR" "$LOG_BACKEND")
+  [[ "$LOG_BACKEND" == "victorialogs" ]] && log_block+=$(printf '\nlogVictoriaLogs:\n  addr: "%s"' "$LOG_ADDR")
 
   local webhook_block
   if [[ -n "$ALERT_WEBHOOK" ]]; then
@@ -743,6 +831,14 @@ tsdb:
 $tsdb_block
   writeTimeout: 5
   queryTimeout: 10
+
+# 集中日志存储
+#   logBackend: local（默认，自研按 来源/日期/节点 分片落盘）
+#              | victorialogs（外部后端，由 deploy/install-logs.sh 安装）
+#   切到外部后端后：日志的保留与容量由该后端负责（它的 -retentionPeriod），
+#   平台不再执行日志清理、也不再叠加「单来源每日上限」；logDir 不再被使用。
+#   上行的限速（logUploadRateBps）与请求体上限（logMaxBodyBytes）仍然生效——它们在接收侧。
+$log_block
 
 nodeMeta: "$CONFIG_DIR/nodes.json"
 dataDir: "$DATA_DIR"
@@ -913,6 +1009,11 @@ summary() {
   echo " 监听地址      : $LISTEN"
   echo " 时序库后端    : $TSDB_BACKEND"
   echo " 时序库地址    : $TSDB_ADDR${TSDB_QUERY_ADDR:+ (查询 $TSDB_QUERY_ADDR)}"
+  if [[ "$LOG_BACKEND" == "victorialogs" ]]; then
+    echo " 集中日志后端  : victorialogs @ $LOG_ADDR（保留与容量由该后端负责）"
+  else
+    echo " 集中日志后端  : local（目录 $LOG_DIR）"
+  fi
   echo " 配置文件      : $CONFIG_DIR/server.yaml"
   echo " 二进制        : $BIN_DIR/monitor-server"
   echo "------------------------------------------------------------"
@@ -939,6 +1040,7 @@ main() {
   preflight
   step_mode
   step_tsdb
+  step_logs
   step_network
   step_alert
   step_agent_auth

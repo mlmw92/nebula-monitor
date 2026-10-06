@@ -94,30 +94,37 @@ cp -a "$WEB_DIR"/. "$STAGE_FULL/web/"
 # 3) 部署脚本（含 docker/ 子目录）
 cp -a deploy/install-server.sh  "$STAGE_FULL/deploy/"
 cp -a deploy/install-tsdb.sh    "$STAGE_FULL/deploy/"
+cp -a deploy/install-logs.sh    "$STAGE_FULL/deploy/"
 cp -a deploy/agent-install.sh   "$STAGE_FULL/deploy/"
 [[ -d deploy/docker ]] && cp -a deploy/docker "$STAGE_FULL/deploy/"
 chmod +x "$STAGE_FULL/deploy/"*.sh
 
-# 4) 可选依赖（node / vm tarball；与 install-server.sh install-tsdb.sh 兼容）
+# 4) 可选依赖（node / vm / victoria-logs tarball；与 install-server.sh / install-tsdb.sh / install-logs.sh 兼容）
 shopt -s nullglob
 any_pkg=0
-for f in "$PKG_DIR"/node-*.tar.xz "$PKG_DIR"/victoria-metrics-*.tar.gz; do
+for f in "$PKG_DIR"/node-*.tar.xz "$PKG_DIR"/victoria-metrics-*.tar.gz "$PKG_DIR"/victoria-logs-*.tar.gz; do
   cp -a "$f" "$STAGE_FULL/packages/"
   any_pkg=1
 done
 shopt -u nullglob
 if (( !any_pkg )); then
-  c_warn "未在 ${PKG_DIR}/ 找到 node / victoria-metrics tarball（full 包将不含相关可选依赖）"
+  c_warn "未在 ${PKG_DIR}/ 找到 node / victoria-metrics / victoria-logs tarball（full 包将不含相关可选依赖）"
+fi
+# VictoriaLogs 是可选组件：缺它不影响默认部署（logBackend 默认 local），但要在日志里说清楚，
+# 免得客户拿着 full 包跑到现场才发现"想接外部日志后端却没带包"。
+if ! ls "$STAGE_FULL"/packages/victoria-logs-*.tar.gz >/dev/null 2>&1; then
+  c_warn "full 包不含 victoria-logs（可选日志后端）；如需离线安装请先跑 build/fetch-packages.sh"
 fi
 
 # 5) 统一入口 install.sh（无参数时进入交互菜单；带子命令时透传）
 cat > "$STAGE_FULL/install.sh" <<'EOF'
 #!/usr/bin/env bash
 # nebula-monitor 统一安装入口
-#   无参数       进入交互菜单选择 server / agent / vm
+#   无参数       进入交互菜单选择 server / agent / vm / logs
 #   server [..]  部署/升级 Server（透传给 deploy/install-server.sh）
 #   agent  [..]  安装 Agent   （透传给 deploy/agent-install.sh）
 #   vm     [..]  独立安装时序库（透传给 deploy/install-tsdb.sh）
+#   logs   [..]  独立安装日志后端 VictoriaLogs（透传给 deploy/install-logs.sh，可选组件）
 # 透传时自动设置 --packages/--dist 指向包内目录。
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -159,6 +166,8 @@ usage() {
   agent     - 监控 Agent（向 Server 上报指标）
   vm        - 时序库（可与 Server 同机或分机；VM 默认二进制+systemd，
               Mimir/Cortex/Thanos 自动走 Docker）
+  logs      - 日志后端 VictoriaLogs（可选；只有把 Server 的 logBackend
+              设为 victorialogs 时才需要，默认的 local 自研落盘不需要任何组件）
   uninstall - 卸载组件；默认保留数据目录（仅停服务+删二进制+删配置），
               加 --purge 才会删数据（不可逆）
 USAGE
@@ -176,28 +185,30 @@ interactive_menu() {
   【1】安装 server
   【2】安装 agent
   【3】安装 VictoriaMetrics
-  【4】卸载 server
-  【5】卸载 agent
-  【6】卸载 VictoriaMetrics
-  【7】卸载全部
+  【4】安装 VictoriaLogs（可选：外部日志后端）
+  【5】卸载 server
+  【6】卸载 agent
+  【7】卸载 VictoriaMetrics
+  【8】卸载全部
 
   h) help       查看详细帮助
   q) quit       退出
 
 MENU
   while true; do
-    read -r -p "请输入选项 [1-7/h/q]: " choice || { echo; exit 1; }
+    read -r -p "请输入选项 [1-8/h/q]: " choice || { echo; exit 1; }
     case "$choice" in
       1)            run_privileged "$HERE/install.sh" server ;;
       2)            run_privileged "$HERE/install.sh" agent ;;
       3)            run_privileged "$HERE/install.sh" vm ;;
-      4)            run_privileged "$HERE/install.sh" uninstall --server ;;
-      5)            run_privileged "$HERE/install.sh" uninstall --agent ;;
-      6)            run_privileged "$HERE/install.sh" uninstall --tsdb ;;
-      7)            run_privileged "$HERE/install.sh" uninstall --all ;;
+      4)            run_privileged "$HERE/install.sh" logs ;;
+      5)            run_privileged "$HERE/install.sh" uninstall --server ;;
+      6)            run_privileged "$HERE/install.sh" uninstall --agent ;;
+      7)            run_privileged "$HERE/install.sh" uninstall --tsdb ;;
+      8)            run_privileged "$HERE/install.sh" uninstall --all ;;
       h|H|help)     usage; echo; continue ;;
       q|Q|quit|exit) echo "已退出"; exit 0 ;;
-      *)            echo "无效选项 '$choice'，请输入 1-7 或 h/q" ;;
+      *)            echo "无效选项 '$choice'，请输入 1-8 或 h/q" ;;
     esac
   done
 }
@@ -226,11 +237,16 @@ case "$cmd" in
     run_privileged "$HERE/deploy/install-tsdb.sh" \
       --packages "$HERE/packages" "$@"
     ;;
+  logs|victorialogs|vl)
+    # 日志后端（可选组件）：同样把 --packages 指向包内，让 install-logs.sh 自动探测 VL tarball
+    run_privileged "$HERE/deploy/install-logs.sh" \
+      --packages "$HERE/packages" "$@"
+    ;;
   uninstall|remove)
     run_privileged "$HERE/deploy/uninstall.sh" "$@"
     ;;
   *)
-    echo "未知子命令: $cmd（支持 server / agent / vm / uninstall）" >&2
+    echo "未知子命令: $cmd（支持 server / agent / vm / logs / uninstall）" >&2
     usage; exit 2
     ;;
 esac
@@ -281,13 +297,28 @@ sudo ./install.sh agent \\
 > 升级请使用 **upgrade 包**（仅含 bin + web，体积小）。如需复用本包的 install.sh 自动化：
 > \`sudo ./install.sh server --upgrade\` 会保留 server.yaml 重启服务。
 
+## 可选：外部日志后端（VictoriaLogs）
+
+集中日志**默认走自研分片落盘，不需要任何额外组件**。只有当客户要接外部日志后端时才需要：
+
+\`\`\`
+sudo ./install.sh logs --yes                  # 装 VictoriaLogs（二进制 + systemd，默认保留 7 天）
+# 然后让 Server 指向它（首次安装时一并给，或对已有 Server 加参数就地改配置）：
+sudo ./install.sh server --upgrade --log-backend victorialogs --log-addr http://127.0.0.1:9428
+\`\`\`
+
+> 切到外部后端后：日志的**保留与容量由 VictoriaLogs 负责**（\`--retention\`，默认 7d 与平台
+> 自研落盘的默认保留期一致），平台不再执行日志清理、也不再叠加「单来源每日上限」；
+> 上行的限速与请求体上限仍然生效。详见 \`docs/adr/0002-log-backend-abstraction.md\`。
+
 ## 目录说明
 
 | 路径 | 用途 |
 |---|---|
-| \`install.sh\` | 统一入口（server / agent 子命令） |
+| \`install.sh\` | 统一入口（server / agent / vm / logs 子命令） |
 | \`deploy/install-server.sh\` | 原始 Server 安装/升级脚本 |
 | \`deploy/install-tsdb.sh\` | 时序库本地安装脚本 |
+| \`deploy/install-logs.sh\` | 日志后端（VictoriaLogs）本地安装脚本（可选） |
 | \`deploy/agent-install.sh\` | 原始 Agent 安装脚本 |
 | \`deploy/docker/\` | Docker 部署示例 |
 | \`bin/server/linux/<arch>/server\` | Server 离线二进制 |
