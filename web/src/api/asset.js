@@ -64,6 +64,12 @@ export const getAssetSummary = (params = {}) => http.get(withQuery('/api/v1/asse
 // 它必须能看见且能恢复，否则「删掉的关系就永远回不来」。
 export const getAssetLinks = (id) => http.get('/api/v1/assets/' + encodeURIComponent(id) + '/links')
 
+// 关系图：以某资产为中心、N 跳以内的邻域（depth 由服务端夹紧到 1..3）。
+// 与 getAssetLinks 的分工：那个给直接关系（表格逐条看），这个给邻域（图上找影响面）；
+// 两者共用同一套资源范围裁剪，因此"表里看不到、图里看得到"不会发生。
+export const getAssetTopology = (id, params = {}) =>
+  http.get(withQuery('/api/v1/assets/' + encodeURIComponent(id) + '/topology', params))
+
 // ---- 关系的人工维护 ----
 // 三种动作共用一套寻址：URL 里的资产是基准，给 {toType,toKey,kind,direction}。
 // direction 用读接口返回的原值即可（out=基准 → 对端，in=对端 → 基准），前端不必自己算方向。
