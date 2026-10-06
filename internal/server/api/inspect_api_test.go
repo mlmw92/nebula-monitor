@@ -275,6 +275,19 @@ func TestRoutes_InspectScopedRunDoesNotCompareOtherGroupBaseline(t *testing.T) {
 	}
 }
 
+// 不存在的巡检记录：全局用户也应得到 404，而不是 200 + 空差异。
+// 「记录不存在」与「本次没有差异」必须是两种结果，否则前端无法区分，且与受限分支语义分叉。
+func TestRoutes_InspectUnknownRunIsNotFound(t *testing.T) {
+	a, _ := assetTestAPI(t)
+	mux := newRoutesMux(a)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, reqWith(globalPrincipal("inspect:read"), http.MethodGet,
+		"/api/v1/inspect/runs/9999/findings", ""))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("未知巡检记录应 404，实际 %d（%s）", rec.Code, rec.Body.String())
+	}
+}
+
 // 快照列表属台账读取：范围外资产按 404。
 func TestRoutes_AssetSnapshotsRespectsScope(t *testing.T) {
 	a, svc := assetTestAPI(t)

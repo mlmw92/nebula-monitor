@@ -260,6 +260,47 @@ func (r *Receiver) HandleReport(w http.ResponseWriter, req *http.Request) {
 		})
 	}
 
+	// 中间件实例存活指标 <mw>_instance_up：与 redis/k8s 同一形态，统一由 receiver 产出。
+	//
+	// 为什么必须在这里补：exporter 模式下第三方 exporter 只暴露自己的存活名
+	// （mysql_up / pg_up / nginx_up / kafka_up / mongodb_up / fastdfs_up），而平台的
+	// 「中间件离线」告警查的是 <mw>_instance_up。缺了它，这 6 类在 exporter 模式下
+	// 告警永远不会触发——采集看起来一切正常，故障却无人知晓。
+	//
+	// 与直连模式共存的方式：直连采集器自己产出同名序列，这里**仅在缺失时补**
+	// （按「指标名 + instance」判重），绝不写出同一实例的第二条序列——两条序列的
+	// label 集不同时，PromQL 取最新会来回摇摆（redis 采集器为此刻意不再自产该指标）。
+	for _, mi := range payload.MySQLInstances {
+		metrics = ensureInstanceUp(metrics, "mysql_instance_up", payload.Node, mi.Instance, mi.Up, payload.ReportAt,
+			map[string]string{"group": groupOr(mi.Group, payload.Group), "instance": mi.Instance, "name": mi.Name,
+				"role": mi.Role, "topology": mi.Topology, "version": mi.Version})
+	}
+	for _, pi := range payload.PostgresInstances {
+		metrics = ensureInstanceUp(metrics, "postgres_instance_up", payload.Node, pi.Instance, pi.Up, payload.ReportAt,
+			map[string]string{"group": groupOr(pi.Group, payload.Group), "instance": pi.Instance, "name": pi.Name,
+				"role": pi.Role, "topology": pi.Topology, "version": pi.Version, "database": pi.Database})
+	}
+	for _, ni := range payload.NginxInstances {
+		metrics = ensureInstanceUp(metrics, "nginx_instance_up", payload.Node, ni.Instance, ni.Up, payload.ReportAt,
+			map[string]string{"group": groupOr(ni.Group, payload.Group), "instance": ni.Instance, "name": ni.Name,
+				"version": ni.Version})
+	}
+	for _, ki := range payload.KafkaInstances {
+		metrics = ensureInstanceUp(metrics, "kafka_instance_up", payload.Node, ki.Instance, ki.Up, payload.ReportAt,
+			map[string]string{"group": groupOr(ki.Group, payload.Group), "instance": ki.Instance, "name": ki.Name,
+				"role": ki.Role, "version": ki.Version})
+	}
+	for _, mi := range payload.MongoDBInstances {
+		metrics = ensureInstanceUp(metrics, "mongodb_instance_up", payload.Node, mi.Instance, mi.Up, payload.ReportAt,
+			map[string]string{"group": groupOr(mi.Group, payload.Group), "instance": mi.Instance, "name": mi.Name,
+				"role": mi.Role, "topology": mi.Topology, "version": mi.Version})
+	}
+	for _, fi := range payload.FastDFSInstances {
+		metrics = ensureInstanceUp(metrics, "fastdfs_instance_up", payload.Node, fi.Instance, fi.Up, payload.ReportAt,
+			map[string]string{"group": groupOr(fi.Group, payload.Group), "instance": fi.Instance, "name": fi.Name,
+				"role": fi.Role})
+	}
+
 	// 将本次上报的中间件实例配置写入注册表：即使 Agent 离线（时序指标 stale），
 	// Web 仍可从注册表枚举到"已配置但离线"的实例，避免误判为"尚未配置 Xxx 监控"。
 	instancereg.Default.SetMySQL(payload.Node, payload.MySQLInstances)
@@ -420,4 +461,36 @@ func cloneLabels(m map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// ensureInstanceUp 在缺失时补出平台统一存活指标 <mw>_instance_up（调用处有完整说明）。
+//
+// 判重按「指标名 + instance」而不是只看指标名：一台机器上可以配多个同类型实例，
+// 只按名字判重会让第二个实例被误判成"已经有人报过了"而永久缺一条序列。
+func ensureInstanceUp(metrics []model.Metric, name, node, instance string, up bool, ts int64, labels map[string]string) []model.Metric {
+	for _, m := range metrics {
+		if m.Name != name {
+			continue
+		}
+		if m.Labels == nil || m.Labels["instance"] == "" || m.Labels["instance"] == instance {
+			return metrics
+		}
+	}
+	value := 0.0
+	if up {
+		value = 1
+	}
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels["node"] = node
+	return append(metrics, model.Metric{Node: node, Name: name, Labels: labels, Value: value, Timestamp: ts})
+}
+
+// groupOr 取实例自身分组，为空时回退节点分组（避免展示成默认的 "default"）。
+func groupOr(group, fallback string) string {
+	if group == "" {
+		return fallback
+	}
+	return group
 }

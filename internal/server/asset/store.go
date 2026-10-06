@@ -1184,6 +1184,17 @@ func (s *Store) linksOf(assetID int64) ([]Link, error) {
 	return out, rows.Err()
 }
 
+// deleteSnapshot 删除一条快照（含字段，靠外键级联）。
+//
+// 用途：条件写（设标杆）失败时回收刚建的那份快照。不回收的话它会成为该资产的
+// 「最近一次快照」，既白占存储，又会让下一次巡检拿它当 L2 比对基准。
+func (s *Store) deleteSnapshot(id int64) error {
+	if _, err := s.db.Exec(`DELETE FROM snapshots WHERE id=?`, id); err != nil {
+		return fmt.Errorf("删除巡检快照失败: %w", err)
+	}
+	return nil
+}
+
 // recordSnapshot 在同一事务里写入快照头与字段，避免出现「有头无字段」的半截数据。
 func (s *Store) recordSnapshot(assetID, takenAt int64, fields map[string]string) (int64, error) {
 	tx, err := s.db.Begin()
@@ -1364,7 +1375,25 @@ func (s *Store) inspectRunsOf(limit int) ([]InspectRun, error) {
 	return out, rows.Err()
 }
 
-// inspectRunsInNodes 先按当前资产节点过滤，再对可见成员聚合并限制记录数。
+// inspectRunExists 判断巡检记录是否存在（供「不存在」与「无差异」区分）。
+func (s *Store) inspectRunExists(runID int64) (bool, error) {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM inspect_runs WHERE id=?`, runID).Scan(&n); err != nil {
+		return false, fmt.Errorf("查询巡检记录失败: %w", err)
+	}
+	return n > 0, nil
+}
+
+// memberNodeExpr 给出「成员资产归属节点」的取值表达式。
+//
+// 优先用资产的**当前**节点（节点迁移后不再授予历史可见性），资产已被删除时回退到
+// 记录时的 node_at_run——成员行与差异项都刻意不带外键级联，就是为了让历史结论在
+// 资产消失后仍然可读；只看当前节点会让这些证据整体消失，与冗余存身份字段的意图相悖。
+func memberNodeExpr(alias string) string {
+	return `COALESCE(` + alias + `.node, m.node_at_run)`
+}
+
+// inspectRunsInNodes 先按成员资产归属过滤，再对可见成员聚合并限制记录数。
 func (s *Store) inspectRunsInNodes(limit int, nodes []string) ([]InspectRun, error) {
 	if limit <= 0 {
 		limit = defaultInspectRunLimit
@@ -1378,13 +1407,13 @@ func (s *Store) inspectRunsInNodes(limit int, nodes []string) ([]InspectRun, err
 	args = append(args, limit)
 	rows, err := s.db.Query(`SELECT r.id,r.actor,r.started_at,r.truncated,COUNT(*),SUM(m.baselined),
 		(SELECT COUNT(*) FROM inspect_findings f JOIN inspect_run_members fm ON fm.run_id=f.run_id AND fm.asset_id=f.asset_id
-		 JOIN assets fa ON fa.id=fm.asset_id WHERE f.run_id=r.id AND fa.node IN (`+placeholders(len(nodes))+`)
+		 LEFT JOIN assets fa ON fa.id=fm.asset_id WHERE f.run_id=r.id AND `+memberNodeExpr("fa")+` IN (`+placeholders(len(nodes))+`)
 		 AND (f.kind!='deviation' OR EXISTS (
 		 SELECT 1 FROM inspect_finding_baselines fb JOIN assets ba ON ba.id=fb.asset_id
 		 WHERE fb.finding_id=f.id AND ba.node IN (`+placeholders(len(nodes))+`))))
 		FROM inspect_runs r JOIN inspect_run_manifest v ON v.run_id=r.id
-		JOIN inspect_run_members m ON m.run_id=r.id JOIN assets a ON a.id=m.asset_id
-		WHERE a.node IN (`+placeholders(len(nodes))+`)
+		JOIN inspect_run_members m ON m.run_id=r.id LEFT JOIN assets a ON a.id=m.asset_id
+		WHERE `+memberNodeExpr("a")+` IN (`+placeholders(len(nodes))+`)
 		GROUP BY r.id ORDER BY r.started_at DESC,r.id DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("查询可见巡检记录失败: %w", err)
@@ -1417,7 +1446,7 @@ func (s *Store) inspectFindingsInNodes(runID int64, limit int, nodes []string) (
 	}
 	var visible int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM inspect_run_members m JOIN inspect_run_manifest v ON v.run_id=m.run_id
-		JOIN assets a ON a.id=m.asset_id WHERE m.run_id=? AND a.node IN (`+placeholders(len(nodes))+`)`, args...).Scan(&visible)
+		LEFT JOIN assets a ON a.id=m.asset_id WHERE m.run_id=? AND `+memberNodeExpr("a")+` IN (`+placeholders(len(nodes))+`)`, args...).Scan(&visible)
 	if err != nil {
 		return nil, false, fmt.Errorf("查询巡检记录范围失败: %w", err)
 	}
@@ -1431,7 +1460,7 @@ func (s *Store) inspectFindingsInNodes(runID int64, limit int, nodes []string) (
 	rows, err := s.db.Query(`SELECT f.id,f.run_id,f.asset_id,f.asset_type,f.asset_key,f.asset_name,f.node,
 		f.field,f.kind,f.level,f.expected,f.actual,f.at FROM inspect_findings f
 		JOIN inspect_run_members m ON m.run_id=f.run_id AND m.asset_id=f.asset_id
-		JOIN assets a ON a.id=m.asset_id WHERE f.run_id=? AND a.node IN (`+placeholders(len(nodes))+`)
+		LEFT JOIN assets a ON a.id=m.asset_id WHERE f.run_id=? AND `+memberNodeExpr("a")+` IN (`+placeholders(len(nodes))+`)
 		AND (f.kind!='deviation' OR EXISTS (
 			SELECT 1 FROM inspect_finding_baselines fb JOIN assets ba ON ba.id=fb.asset_id
 			WHERE fb.finding_id=f.id AND ba.node IN (`+placeholders(len(nodes))+`)))

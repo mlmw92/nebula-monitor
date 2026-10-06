@@ -458,7 +458,10 @@ func (a *API) assetAllowedNodes(p *auth.Principal) []string {
 	if a.nodeMgr == nil {
 		return []string{}
 	}
-	nodes := a.visibleNodes(a.nodeMgr.ListHostNodes(), p)
+	// 与 nodeInScope 用同一个节点集合（含 edge/hub）：两处口径必须一致，
+	// 否则会出现「列表看不到、详情能打开」。资产不会挂在代理节点上，因此
+	// 放宽到全部节点不会额外暴露任何资产，只是让两处判定不再互相矛盾。
+	nodes := a.visibleNodes(a.nodeMgr.ListNodes(), p)
 	out := make([]string, 0, len(nodes))
 	for _, n := range nodes {
 		out = append(out, n.Hostname)

@@ -3,6 +3,7 @@ package asset
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sort"
 	"strings"
@@ -711,13 +712,21 @@ func (s *Service) InspectRunsInNodes(limit int, nodes []string) ([]InspectRun, e
 }
 
 // InspectFindingsInNodes 仅返回当前仍有权读取的差异项。
+//
+// 返回的 visible 表示「这条记录是否存在且对本调用者可见」：不存在与无权限都返回 false，
+// 调用方据此统一回 404——否则全局用户对不存在的记录会拿到 200 + 空差异，
+// 而受限用户拿到 404，同一接口两套语义，前端无法区分「空结果」与「记录不存在」。
 func (s *Service) InspectFindingsInNodes(runID int64, limit int, nodes []string) ([]InspectFinding, bool, error) {
-	if nodes == nil {
-		findings, err := s.InspectFindings(runID, limit)
-		return findings, true, err
-	}
 	if runID <= 0 {
 		return nil, false, errors.New("巡检记录 ID 不能为空")
+	}
+	if nodes == nil {
+		exists, err := s.store.inspectRunExists(runID)
+		if err != nil || !exists {
+			return nil, false, err
+		}
+		findings, err := s.InspectFindings(runID, limit)
+		return findings, true, err
 	}
 	if len(nodes) == 0 {
 		return nil, false, nil
@@ -769,6 +778,11 @@ func (s *Service) SetBaselineIfCurrent(ref Ref, actor string, currentAssetID int
 		return Baseline{}, err
 	}
 	if !changed {
+		// 条件写没有生效：回收刚建的那份快照。留着它会成为该资产的「最近一次快照」，
+		// 既白占存储，又会让下一次巡检拿它当 L2 比对基准（用户什么都没改成，却多了个基准）。
+		if derr := s.store.deleteSnapshot(id); derr != nil {
+			slog.Warn("回收未被引用的巡检快照失败", "asset", a.ID, "snapshot", id, "err", derr)
+		}
 		return Baseline{}, ErrBaselineChanged
 	}
 	return b, nil

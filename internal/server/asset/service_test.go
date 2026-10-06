@@ -969,6 +969,86 @@ func TestBaselineConditionalWritesRejectMovedAsset(t *testing.T) {
 	}
 }
 
+// TestInspectVisibilityKeepsDeletedAssetEvidence 成员资产被删除后，历史巡检结论仍可读。
+//
+// inspect_run_members / inspect_findings 刻意不带外键级联（巡检记录是证据）；若可见性只看
+// 资产的**当前**节点，资产一删这些证据就对所有人消失，与该设计意图相悖。判定规则：
+// 资产还在 → 用当前节点（节点迁移不追溯授权）；资产已删 → 回退到记录时的 node_at_run。
+func TestInspectVisibilityKeepsDeletedAssetEvidence(t *testing.T) {
+	svc, store := newTestService(t)
+	for _, name := range []string{"web-01", "db-01"} {
+		if _, _, err := svc.Apply(hostObservation(name, map[string]string{"cpu": "4"})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.RunInspect(InspectScope{}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	web, found, err := svc.Get(Ref{TypeKey: TypeHost, NaturalKey: "web-01"})
+	if err != nil || !found {
+		t.Fatalf("web 资产应存在：found=%v err=%v", found, err)
+	}
+	if _, err := store.db.Exec(`DELETE FROM assets WHERE id=?`, web.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	runs, err := svc.InspectRunsInNodes(10, []string{"web-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].Assets != 1 {
+		t.Fatalf("被删资产的历史记录应仍可见且只计可见成员：%+v", runs)
+	}
+	_, visible, err := svc.InspectFindingsInNodes(runs[0].ID, 10, []string{"web-01"})
+	if err != nil || !visible {
+		t.Fatalf("被删资产所属节点的读取者应仍能看到该记录：visible=%v err=%v", visible, err)
+	}
+	if other, err := svc.InspectRunsInNodes(10, []string{"other-node"}); err != nil || len(other) != 0 {
+		t.Fatalf("范围外节点不得看到该记录：%+v %v", other, err)
+	}
+}
+
+// TestInspectFindingsUnknownRunIsNotVisible 不存在的巡检记录对全局用户也不得返回「空差异」：
+// 「记录不存在」与「本次没有差异」必须是两种结果，否则前端无法区分，两套语义也会分叉。
+func TestInspectFindingsUnknownRunIsNotVisible(t *testing.T) {
+	svc, _ := newTestService(t)
+	findings, visible, err := svc.InspectFindingsInNodes(9999, 10, nil)
+	if err != nil {
+		t.Fatalf("未知记录不应报错（与无权限同语义）：%v", err)
+	}
+	if visible || len(findings) != 0 {
+		t.Fatalf("未知记录不得判为可见：visible=%v findings=%+v", visible, findings)
+	}
+}
+
+// TestSetBaselineConditionalFailureReclaimsSnapshot 条件写失败时不得留下孤儿快照：
+// 它会成为该资产的「最近一次快照」，被下一次巡检当成 L2 比对基准。
+func TestSetBaselineConditionalFailureReclaimsSnapshot(t *testing.T) {
+	svc, store := newTestService(t)
+	if _, _, err := svc.Apply(hostObservation("web-01", map[string]string{"cpu": "4"})); err != nil {
+		t.Fatal(err)
+	}
+	web, _, err := svc.Get(Ref{TypeKey: TypeHost, NaturalKey: "web-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := func() int {
+		var n int
+		if err := store.db.QueryRow(`SELECT COUNT(*) FROM snapshots WHERE asset_id=?`, web.ID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := count()
+	// currentAssetID 传一个不可能的值：等价于标杆被并发换掉，条件写必然不命中。
+	if _, err := svc.SetBaselineIfCurrent(Ref{TypeKey: TypeHost, NaturalKey: "web-01"}, "ops1", 12345, nil); !errors.Is(err, ErrBaselineChanged) {
+		t.Fatalf("并发替换应报 ErrBaselineChanged：%v", err)
+	}
+	if after := count(); after != before {
+		t.Fatalf("失败的条件写不应留下快照：before=%d after=%d", before, after)
+	}
+}
+
 // TestBaselineConditionalWritesRejectEmptyScope 「受限但无任何可见节点」必须报范围错误，
 // 不能退化成 ErrBaselineChanged：后者会让用户反复刷新重试一个永远不会成功的操作。
 func TestBaselineConditionalWritesRejectEmptyScope(t *testing.T) {

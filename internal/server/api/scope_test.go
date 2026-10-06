@@ -319,6 +319,28 @@ func TestAssetAllowedNodesFailsClosedWithoutNodeManager(t *testing.T) {
 	}
 }
 
+// TestAssetAllowedNodesMatchesNodeScope 资产可见节点集合必须与 nodeInScope 同口径，
+// 否则会出现「列表看不到、详情能打开」。代理节点（edge/hub）也一并纳入：
+// 资产不会挂在代理节点上，放宽不会额外暴露资产，只是让两处判定不再互相矛盾。
+func TestAssetAllowedNodesMatchesNodeScope(t *testing.T) {
+	a := scopeTestAPI(t)
+	a.nodeMgr.Register(&model.ReportPayload{Node: "edge-1", Group: "g1", Mode: model.ModeEdge, IP: "10.0.0.9"})
+	p := restrictedPrincipal([]string{"assets:read"}, "g1")
+	if !a.nodeInScope(p, "edge-1") {
+		t.Fatal("夹具前提：nodeInScope 认为 edge-1 在范围内")
+	}
+	allowed := a.assetAllowedNodes(p)
+	found := false
+	for _, n := range allowed {
+		if n == "edge-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("assetAllowedNodes 应与 nodeInScope 同口径（含代理节点）：%v", allowed)
+	}
+}
+
 // TestWS_Authorize_AuthDisabled 未启用认证时 WebSocket 订阅保持放行（仅做 topic 合法性校验）。
 func TestWS_Authorize_AuthDisabled(t *testing.T) {
 	base := scopeTestAPI(t)
