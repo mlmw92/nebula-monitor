@@ -33,7 +33,11 @@ vi.mock('echarts', () => ({
   graphic: { LinearGradient: vi.fn() },
 }))
 
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  // 组件读 route.query 处理「从日志页建规则」的深链，缺这个导出会在挂载期直接抛
+  useRoute: () => ({ query: {} }),
+}))
 
 // 组件按需 import 的图标必须在这里都有同名导出，否则会在加载期直接抛
 // "No \"Xxx\" export is defined on the \"@element-plus/icons-vue\" mock"

@@ -772,45 +772,23 @@
       </template>
     </el-dialog>
 
-    <!-- 关系图：以本资产为中心的 N 跳邻域。
-         点节点=「以它为中心」重新展开——图上的"走下去"就是换中心，
-         比在抽屉与弹窗之间来回切更贴合看图的直觉。 -->
-    <el-dialog v-model="topoVisible" :title="topoTitle" width="900px" @opened="renderTopology" @closed="disposeChart">
-      <div class="topo-bar">
-        <el-radio-group v-model="topoDepth" size="small" @change="openTopology">
-          <el-radio-button :value="1">1 跳</el-radio-button>
-          <el-radio-button :value="2">2 跳</el-radio-button>
-          <el-radio-button :value="3">3 跳</el-radio-button>
-        </el-radio-group>
-        <span class="muted">点节点可以「以它为中心」重新展开</span>
-        <span class="muted topo-legend">实线 = 采集发现 · 虚线 = 人工维护 · 红圈 = 失联</span>
-      </div>
-      <el-alert
-        v-if="topoTruncated"
-        type="warning"
-        :closable="false"
-        show-icon
-        title="节点数达到上限，图只展开了部分关系"
-        description="缩小跳数，或直接以目标资产为中心查看。静默省略会让人以为关系就这么多。"
-        class="alert-gap"
-      />
-      <el-alert v-if="topoError" type="error" :closable="false" show-icon :title="topoError" class="alert-gap" />
-      <div v-show="!topoError" ref="topoChartRef" class="topo-chart"></div>
+    <!-- 关系图：以本资产为中心的 N 跳邻域（图本身由 TopologyGraph 负责，
+         与告警影响面共用同一个组件，两处的范围口径与交互才会一致）。 -->
+    <el-dialog v-model="topoVisible" :title="topoTitle" width="900px">
+      <TopologyGraph v-if="detail" :asset-id="detail.id" :height="520" />
     </el-dialog>
   </section>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import * as echarts from 'echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   listAssets,
   getAsset,
   getAssetHistory,
   getAssetLinks,
-  getAssetTopology,
   createAssetLink,
   deleteAssetLink,
   restoreAssetLink,
@@ -835,6 +813,8 @@ import EmptyState from '../common/EmptyState.vue'
 import KpiCard from '../KpiCard.vue'
 // 批量条与节点操作页共用（同一个视觉与「取消选择」位置）
 import BatchBar from '../BatchBar.vue'
+// 关系图与告警影响面共用同一个组件：两处的范围裁剪、着色与交互必须一致
+import TopologyGraph from './TopologyGraph.vue'
 
 const auth = useAuth()
 // 前端隐藏仅为体验：服务端 assets:write 是真正的边界（且属高风险权限，提交前二次确认）。
@@ -1740,124 +1720,18 @@ function gotoContainer(item) {
 
 /* ================= 关系图（拓扑） ================= */
 
+// 图本身由 TopologyGraph 组件负责（与告警影响面共用）：这里只管"打开"。
 const topoVisible = ref(false)
-const topoError = ref('')
-const topo = ref(null)
-const topoDepth = ref(2)
-const topoChartRef = ref(null)
-let topoChart = null
-
 const topoTitle = computed(() => {
-  const root = topo.value && (topo.value.nodes || []).find((n) => n.root)
-  return root ? `关系图 · ${root.name || root.naturalKey}` : '关系图'
+  const name = detail.value ? detail.value.name || detail.value.naturalKey : ''
+  return name ? `关系图 · ${name}` : '关系图'
 })
-// 截断必须说出来：静默省略会让人以为"关系就这么多"，从而漏掉真实的影响面——
-// 那正是这张图存在的意义。
-const topoTruncated = computed(() => !!(topo.value && topo.value.truncated))
 
-// 类型 → 颜色。与图例共用同一份定义，避免"图上是蓝的、图例说是绿的"。
-const TOPO_COLORS = {
-  host: '#4a9df0',
-  'middleware-instance': '#00d9a3',
-  pod: '#e6a23c',
-  workload: '#8b5cf6',
-}
-
-// openTopology 打开关系图（默认以当前详情抽屉里的资产为中心）。
+// openTopology 打开关系图（以当前详情抽屉里的资产为中心）。
 function openTopology() {
   if (!detail.value) return
   topoVisible.value = true
-  loadTopology(detail.value.id)
 }
-
-// loadTopology 取某资产的邻域并重绘。点节点也走这里（换中心）。
-async function loadTopology(id) {
-  topoError.value = ''
-  try {
-    topo.value = await getAssetTopology(id, { depth: topoDepth.value })
-  } catch (e) {
-    topo.value = null
-    topoError.value = e.message || '加载关系图失败'
-  }
-  await nextTick()
-  renderTopology()
-}
-
-// renderTopology 把邻域画成力导向图。节点大小按跳数（中心最大）、
-// 颜色按类型、红圈表示失联；边用虚线区分人工维护。
-function renderTopology() {
-  const data = topo.value
-  if (!data || !topoChartRef.value) return
-  if (!topoChart) topoChart = echarts.init(topoChartRef.value)
-  const nodes = (data.nodes || []).map((n) => ({
-    id: n.key,
-    name: n.name || n.naturalKey,
-    symbolSize: n.root ? 52 : n.depth === 1 ? 38 : 28,
-    itemStyle: {
-      color: TOPO_COLORS[n.typeKey] || '#909399',
-      // 已从台账隐藏的资产画成半透明：它仍在关系里，但已不是"要治理的对象"
-      opacity: n.ignored ? 0.45 : 1,
-      borderColor: n.status === 'online' ? 'transparent' : '#f56c6c',
-      borderWidth: n.status === 'online' ? 0 : 2,
-    },
-    // 原始节点挂在 data 上：tooltip 与点击回调都要用
-    raw: n,
-    label: { show: true, fontSize: 11 },
-  }))
-  const links = (data.edges || []).map((e) => ({
-    source: e.from,
-    target: e.to,
-    raw: e,
-    lineStyle: { type: e.source === 'manual' ? 'dashed' : 'solid', width: 1.4, color: '#9aa4b2' },
-    label: { show: true, formatter: e.kind, fontSize: 10, color: '#8a94a6' },
-  }))
-
-  topoChart.setOption(
-    {
-      tooltip: {
-        formatter: (p) => {
-          if (p.dataType === 'edge') {
-            const e = p.data.raw || {}
-            return `${e.kind}<br/>${e.from}<br/>↓<br/>${e.to}<br/>来源：${e.source === 'manual' ? '人工维护' : '采集发现'}`
-          }
-          const n = (p.data && p.data.raw) || {}
-          const where = n.depth ? `距中心 ${n.depth} 跳` : '（中心）'
-          return `${n.typeTitle || ''}：${n.name || n.naturalKey}<br/>归属节点：${n.node || '—'}<br/>状态：${statusLabel(n.status)}<br/>${where}`
-        },
-      },
-      series: [
-        {
-          type: 'graph',
-          layout: 'force',
-          roam: true,
-          draggable: true,
-          data: nodes,
-          links,
-          // 力导向参数刻意收敛：关系图节点数不多，斥力太大只会散成一团看不清
-          force: { repulsion: 320, edgeLength: 130, gravity: 0.08 },
-          emphasis: { focus: 'adjacency' },
-          edgeSymbol: ['none', 'arrow'],
-          edgeSymbolSize: 7,
-        },
-      ],
-    },
-    true
-  )
-  topoChart.off('click')
-  topoChart.on('click', (p) => {
-    const n = p && p.data && p.data.raw
-    if (!n || n.root) return
-    loadTopology(n.id)
-  })
-}
-
-function disposeChart() {
-  if (topoChart) {
-    topoChart.dispose()
-    topoChart = null
-  }
-}
-onBeforeUnmount(disposeChart)
 
 onMounted(async () => {
   await load()
@@ -2168,20 +2042,5 @@ onMounted(async () => {
 }
 .attr-editor {
   width: 100%;
-}
-/* 关系图：工具条（跳数 + 图例）与画布 */
-.topo-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-.topo-legend {
-  margin-left: auto;
-}
-.topo-chart {
-  width: 100%;
-  height: 520px;
 }
 </style>

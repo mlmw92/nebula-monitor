@@ -24,6 +24,49 @@
       />
     </SectionCard>
 
+    <!-- 周期化生成：默认关闭，打开后按间隔自动生成一份（全景表 11-4）。
+         与上方「生成报告」的分工：那个是"现在生成一份"，这里是"以后自动生成"。 -->
+    <SectionCard title="周期化生成">
+      <div class="generate-row">
+        <el-switch v-model="schedule.enabled" @change="saveSchedule" />
+        <span class="schedule-label">每</span>
+        <el-input-number
+          v-model="schedule.intervalHours"
+          :min="1"
+          :max="720"
+          size="small"
+          controls-position="right"
+          @change="saveSchedule"
+        />
+        <span class="schedule-label">小时自动生成</span>
+        <el-select v-model="schedule.type" style="width: 140px" size="small" @change="saveSchedule">
+          <el-option label="日报" value="daily" />
+          <el-option label="周报" value="weekly" />
+          <el-option label="月报" value="monthly" />
+        </el-select>
+        <el-button size="small" :loading="scheduleRunning" @click="runScheduleNow">立即生成一次</el-button>
+      </div>
+      <div class="schedule-hint">
+        <template v-if="scheduleError">{{ scheduleError }}</template>
+        <template v-else-if="schedule.lastRunAt">
+          上次运行 {{ formatTime(schedule.lastRunAt) }}
+          <span v-if="schedule.lastReportId">· 报告 {{ schedule.lastReportId }}</span>
+          <span v-if="schedule.lastError" class="schedule-fail">· 失败：{{ schedule.lastError }}</span>
+          <span v-if="schedule.nextAt && schedule.enabled">· 下次约 {{ formatTime(schedule.nextAt) }}</span>
+        </template>
+        <template v-else>尚未运行过。关闭时不影响上方的手动生成。</template>
+      </div>
+      <el-alert
+        v-if="schedule.lastError"
+        class="tip"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="上次自动生成失败"
+        :description="schedule.lastError"
+      />
+    </SectionCard>
+
     <SectionCard title="历史报告">
       <el-alert
         v-if="historyError"
@@ -115,6 +158,70 @@ async function generate() {
   } finally { generating.value = false }
 }
 
+/* ================= 周期化生成（全景表 11-4） ================= */
+
+// 调度配置与运行状态。lastRunAt/lastReportId/lastError 由服务端维护（界面上只读）。
+const schedule = ref({ enabled: false, type: 'weekly', intervalHours: 24, lastRunAt: 0, lastReportId: '', lastError: '', nextAt: 0 })
+const scheduleError = ref('')
+const scheduleRunning = ref(false)
+
+function applySchedule(data) {
+  const cfg = (data && data.config) || {}
+  const last = (data && data.last) || {}
+  schedule.value = {
+    enabled: !!cfg.enabled,
+    type: cfg.type || 'weekly',
+    intervalHours: cfg.intervalHours || 24,
+    lastRunAt: last.at || cfg.lastRunAt || 0,
+    lastReportId: last.reportId || cfg.lastReportId || '',
+    lastError: last.error || cfg.lastError || '',
+    nextAt: (data && data.nextAt) || 0,
+  }
+}
+
+async function loadSchedule() {
+  try {
+    applySchedule(await http.get('/api/v1/report/schedule'))
+    scheduleError.value = ''
+  } catch (e) {
+    // 该能力未启用（503）时如实说明，而不是让开关看起来"关着"——
+    // 那会让人以为打开就好了，实际上后端根本没有调度器。
+    scheduleError.value = e.message || '报告调度不可用'
+  }
+}
+
+async function saveSchedule() {
+  try {
+    applySchedule(
+      await http.put('/api/v1/report/schedule', {
+        enabled: schedule.value.enabled,
+        type: schedule.value.type,
+        intervalHours: schedule.value.intervalHours,
+      })
+    )
+    ElMessage.success('已保存（热生效）')
+  } catch (e) {
+    ElMessage.error(e.message || '保存失败')
+    // 回读服务端真实状态：否则界面会停留在"我改成了这样"，而后端并没有接受
+    await loadSchedule()
+  }
+}
+
+async function runScheduleNow() {
+  scheduleRunning.value = true
+  try {
+    const run = await http.post('/api/v1/report/schedule/run', {})
+    await Promise.all([loadSchedule(), loadHistory()])
+    ElMessage.success('已生成一份报告')
+    if (run && run.reportId) preview(run.reportId)
+  } catch (e) {
+    ElMessage.error(e.message || '生成失败')
+    await loadSchedule()
+  } finally {
+    scheduleRunning.value = false
+  }
+}
+
 function preview(id) {
   currentId.value = id
   previewUrl.value = `/api/v1/report/download?id=${encodeURIComponent(id)}`
@@ -152,11 +259,17 @@ function download(id) {
 function typeLabel(t) { return { daily: '日报', weekly: '周报', monthly: '月报' }[t] || t }
 function formatTime(ms) { return new Date(ms).toLocaleString('zh-CN') }
 
-onMounted(loadHistory)
+onMounted(() => {
+  loadHistory()
+  loadSchedule()
+})
 </script>
 
 <style scoped>
 .report-view { padding: 4px 0 16px; }
+.schedule-label { color: var(--text-dim); font-size: 13px; }
+.schedule-hint { margin-top: 8px; color: var(--text-dim); font-size: 12.5px; }
+.schedule-fail { color: #f56c6c; }
 .page-header { margin-bottom: 16px; }
 .page-title { font-size: 22px; font-weight: 700; margin: 0; background: linear-gradient(135deg, var(--text) 0%, var(--text-dim) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .page-desc { font-size: 13px; color: var(--text-dim); margin-top: 4px; }

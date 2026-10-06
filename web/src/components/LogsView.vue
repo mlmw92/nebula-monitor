@@ -127,11 +127,33 @@
           <template #default="{ row }">{{ fmtTime(row.ts) }}</template>
         </el-table-column>
         <el-table-column prop="node" label="节点" width="150" />
-        <el-table-column prop="source" label="来源" width="120" />
-        <el-table-column label="命中模式" width="120">
+        <el-table-column label="来源 / 资产" width="200">
+          <template #default="{ row }">
+            <span>{{ row.source }}</span>
+            <!-- 资产映射来自服务端：资产上用人工属性 logSource 声明"这条来源属于我"。
+                 点标签打开台账，点「只看」把节点 + 来源一起收窄到该资产。 -->
+            <template v-if="assetsOf(row).length">
+              <!-- 点击挂在原生 span 上而不是 el-tag 上：标签组件的 attrs 透传行为不由我们决定，
+                   而"点了没反应"是那种不会被报错暴露的失败 -->
+              <span v-for="a in assetsOf(row)" :key="a.id" class="asset-chip" @click="openAsset(a)">
+                <el-tag size="small" effect="plain">{{ a.name || a.naturalKey }}</el-tag>
+              </span>
+              <el-button v-if="assetsOf(row).length === 1" link size="small" @click="onlyAsset(row)">只看</el-button>
+            </template>
+          </template>
+        </el-table-column>
+        <el-table-column label="命中模式" width="170">
           <template #default="{ row }">
             <span v-if="row.pattern" class="tag">{{ row.pattern }}</span>
             <span v-else class="muted">—</span>
+            <!-- 由这一行直接建规则：Agent 已为每个模式产出独立指标
+                 （<来源>_log_<模式>_total），这里只是把模式名翻译成规则模板。 -->
+            <el-button
+              v-if="row.pattern && can('alerts:write')"
+              link
+              size="small"
+              @click="createRule(row)"
+            >建规则</el-button>
           </template>
         </el-table-column>
         <el-table-column label="日志" min-width="420">
@@ -201,13 +223,40 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import http from '../api/http'
+import useAuth from '../composables/useAuth'
 import PageHeader from './common/PageHeader.vue'
 import EmptyState from './common/EmptyState.vue'
 
 const route = useRoute()
+const router = useRouter()
+// 「建规则」是写操作（保存规则需 alerts:write），无权时按钮不出现
+const { can } = useAuth()
+
+// ---- 日志 → 资产联动（全景表 8-6 的联动侧）----
+// 资产上用人工属性 logSource 声明"这条采集来源属于我"，服务端据此把本页的
+// (来源, 节点) 映射成资产。前端只做展示与跳转，不猜归属。
+function assetsOf(row) {
+  return assetMap.value[row.source + '|' + row.node] || []
+}
+function openAsset(item) {
+  router.push({ path: '/assets', query: { id: String(item.id) } })
+}
+// onlyAsset 把检索范围收窄到该资产的日志：资产已声明来源，节点就是它的归属节点，
+// 因此"只看这个资产"= 节点 + 来源两个筛选一起加上（不需要额外的资产参数）。
+function onlyAsset(row) {
+  nodes.value = [row.node]
+  sources.value = [row.source]
+  search()
+}
+
+// createRule 由这一行日志建阈值规则（全景表 9-05）：跳到告警页并带上来源/模式，
+// 由那边向服务端取模板（指标名必须由服务端拼，见 logs_api.go 的说明）。
+function createRule(row) {
+  router.push({ path: '/alerts', query: { newLogRule: row.source + '|' + row.pattern, node: row.node } })
+}
 
 // 时间范围默认最近 1 小时：日志量远大于指标，默认范围必须收窄（与服务端默认一致）。
 function defaultRange() {
@@ -237,6 +286,9 @@ const fieldFilters = ref([])
 const fieldCandidates = ref([])
 
 const lines = ref([])
+// assetMap 的键是 `<source>|<node>`：资产上用人工属性 logSource 声明归属，
+// 服务端只解析本页出现过的组合（见 logs_api.go 的 logsAssetMap）。
+const assetMap = ref({})
 const cursor = ref('')
 const truncated = ref(false)
 const scanned = ref({ bytes: 0, lines: 0, files: 0 })
@@ -481,11 +533,14 @@ async function search() {
     cursor.value = data.cursor || ''
     truncated.value = !!data.truncated
     scanned.value = { bytes: data.scannedBytes || 0, lines: data.scannedLines || 0, files: data.files || 0 }
+    // 服务端给出的「来源 + 节点 → 资产」映射：本页共享，逐行查它即可。
+    assetMap.value = data.assets || {}
   } catch (e) {
     loadError.value = e.message || '查询失败'
     lines.value = []
     cursor.value = ''
     truncated.value = false
+    assetMap.value = {}
   } finally {
     loading.value = false
   }
@@ -500,6 +555,8 @@ async function loadMore() {
     lines.value = lines.value.concat(data.lines || [])
     cursor.value = data.cursor || ''
     truncated.value = !!data.truncated
+    // 翻页后的映射要**合并**而不是覆盖：否则前几页的资产标签会突然全部消失。
+    assetMap.value = { ...assetMap.value, ...(data.assets || {}) }
   } catch (e) {
     loadError.value = e.message || '加载更多失败'
   } finally {
@@ -574,6 +631,8 @@ onMounted(async () => {
 .field-hint .el-button + .el-button { margin-left: 0; }
 /* 字段贴在日志原文上方：同一行的两面，分开一列会让阅读来回跳 */
 .field-chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 2px; }
+/* 资产标签：可点（跳台账），因此要有指针与间距 */
+.asset-chip { margin-left: 4px; cursor: pointer; }
 .field-chip { background: var(--tag-bg-2, rgba(103, 194, 58, 0.14)); font-family: var(--mono); }
 .logline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; cursor: pointer; }
 .logline.open { white-space: pre-wrap; word-break: break-all; }

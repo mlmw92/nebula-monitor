@@ -15,10 +15,17 @@ vi.mock('../api/http', () => ({
 }))
 
 const routerReplace = vi.fn()
+const routerPush = vi.fn()
 let routeQuery = {}
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: routerReplace }),
+  useRouter: () => ({ push: routerPush, replace: routerReplace }),
   useRoute: () => ({ query: routeQuery }),
+}))
+
+// 权限按用例设置：日志→资产、由日志建规则都受权限门控（UI 反映权限）。
+let permissions = []
+vi.mock('../composables/useAuth', () => ({
+  default: () => ({ can: (perm) => permissions.includes(perm) }),
 }))
 
 if (!globalThis.ResizeObserver) {
@@ -48,14 +55,24 @@ beforeEach(() => {
   vi.clearAllMocks()
   wrappers = []
   routeQuery = {}
+  permissions = []
   http.get.mockImplementation(async (path) => {
     if (String(path).includes('/api/v1/logs/fields')) {
       return { fields: { applog: ['level', 'status'] } }
     }
     if (String(path).includes('/api/v1/logs?')) {
       return {
-        lines: [{ ts: Date.now(), node: 'web-01', source: 'applog', text: '{"level":"error"}', fields: { level: 'error', status: '500' } }],
+        lines: [
+          {
+            ts: Date.now(), node: 'web-01', source: 'applog', pattern: 'err',
+            text: '{"level":"error"}', fields: { level: 'error', status: '500' },
+          },
+        ],
         truncated: false,
+        // 服务端给出的「来源 + 节点 → 资产」映射（资产上用人工属性 logSource 声明归属）
+        assets: {
+          'applog|web-01': [{ id: 7, typeKey: 'host', typeTitle: '主机', naturalKey: 'web-01', name: 'web-01', node: 'web-01' }],
+        },
       }
     }
     if (String(path).includes('/api/v1/nodes')) {
@@ -137,5 +154,53 @@ describe('LogsView 结构化字段检索', () => {
     expect(last).toContain('field=status%3A500')
     // 字段贴在日志原文上方
     expect(w.findAll('.field-chip').length).toBe(2)
+  })
+})
+
+describe('LogsView 日志 → 资产联动', () => {
+  it('把日志行标到资产上，并可「只看该资产」', async () => {
+    const w = mountView()
+    await flushPromises()
+
+    const chip = w.find('.asset-chip')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('web-01')
+
+    // 「只看」= 节点 + 来源一起收窄（资产已声明来源，节点就是它的归属节点）
+    const only = w.findAll('button').find((b) => b.text().includes('只看'))
+    expect(only).toBeTruthy()
+    await only.trigger('click')
+    await flushPromises()
+
+    const last = logsQueries().at(-1)
+    expect(last).toContain('nodes=web-01')
+    expect(last).toContain('sources=applog')
+  })
+
+  it('点资产标签跳到台账详情', async () => {
+    const w = mountView()
+    await flushPromises()
+    await w.find('.asset-chip').trigger('click')
+    expect(routerPush).toHaveBeenCalledWith({ path: '/assets', query: { id: '7' } })
+  })
+
+  it('「建规则」按权限显示，并把来源/模式/节点带给告警页', async () => {
+    permissions = []
+    let w = mountView()
+    await flushPromises()
+    expect(w.findAll('button').some((b) => b.text().includes('建规则'))).toBe(false)
+    w.unmount()
+
+    permissions = ['alerts:write']
+    w = mountView()
+    await flushPromises()
+    const btn = w.findAll('button').find((b) => b.text().includes('建规则'))
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+    // 指标名由服务端拼（拼错的症状是"规则配好了却没有数据"），前端只传来源与模式
+    expect(routerPush).toHaveBeenCalledWith({
+      path: '/alerts',
+      query: { newLogRule: 'applog|err', node: 'web-01' },
+    })
   })
 })

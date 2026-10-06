@@ -488,6 +488,49 @@
         <div class="ev-chart-title" v-if="detail.metric">触发指标近 1 小时趋势</div>
         <div class="ev-chart" ref="chartRef" v-if="detail.metric"></div>
 
+        <!-- 资产与影响面：这条告警落在哪条资产上、它刚改过什么、会影响谁 -->
+        <div class="ev-chart-title">资产与影响面</div>
+        <div v-if="impactLoading" class="muted">正在关联台账…</div>
+        <template v-else-if="impact">
+          <div v-if="impact.error" class="muted">{{ impact.error }}</div>
+          <template v-else>
+            <div v-if="(impact.matched || []).length" class="impact-assets">
+              <el-tag
+                v-for="item in impact.matched"
+                :key="item.id"
+                class="impact-asset"
+                effect="plain"
+                @click="openAsset(item)"
+              >
+                {{ item.name || item.naturalKey }}
+                <span class="muted">（{{ item.typeTitle || item.typeKey }}）</span>
+              </el-tag>
+            </div>
+            <div v-else class="muted impact-note">{{ impact.note }}</div>
+
+            <template v-if="(impact.changes || []).length">
+              <div class="impact-sub">近期变更（{{ impact.changes.length }} 条）</div>
+              <div class="impact-changes">
+                <div v-for="(rec, i) in impact.changes" :key="i" class="impact-change">
+                  <span class="impact-change-at">{{ fmt(rec.at) }}</span>
+                  <span class="mono">{{ rec.naturalKey }}</span>
+                  <span class="impact-change-field">{{ rec.field }}</span>
+                  <span class="mono">{{ changeText(rec) }}</span>
+                  <span class="muted">{{ rec.actor || rec.source }}</span>
+                </div>
+              </div>
+            </template>
+            <div v-else-if="(impact.matched || []).length" class="muted impact-note">
+              命中资产的近 30 天没有字段变更记录（只有真变化才记录）。
+            </div>
+
+            <template v-if="impactRootId">
+              <div class="impact-sub">波及范围（点节点可以「以它为中心」重新展开）</div>
+              <TopologyGraph :asset-id="impactRootId" :height="320" />
+            </template>
+          </template>
+        </template>
+
         <div class="ev-chart-title">处置记录</div>
         <div class="collab-timeline">
           <div v-for="(c, i) in ackInfo(detail)?.comments || []" :key="i" class="collab-item">
@@ -551,7 +594,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Plus, Bell, Printer } from '@element-plus/icons-vue'
 import PageHeader from './common/PageHeader.vue'
 import SectionCard from './common/SectionCard.vue'
@@ -560,11 +603,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import http, { getToken } from '../api/http'
 import RuleModal from './RuleModal.vue'
+import TopologyGraph from './asset/TopologyGraph.vue'
 import useAuth from '../composables/useAuth'
 import { printPage } from '../utils/print'
 
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 const router = useRouter()
+const route = useRoute()
 // 「测试事件」会真实写事件并触发通知，可见性复用 notify:write（服务端独立审计拒绝）。
 const { can } = useAuth()
 const rules = ref([])
@@ -1094,6 +1139,51 @@ function openDetail(row) {
   detail.value = row
   drawer.value = true
   nextTick(() => loadTrend(row))
+  loadImpact(row)
+}
+
+// ---- 资产与影响面（全景表 1-05）----
+//
+// 告警事件只带指标标签（node / instance），台账资产是另一套身份。这里把两者对上，
+// 并给出排障真正需要的三件事：命中资产、该资产近期变更、波及范围。
+// **不放进列表**：列表是高频轮询的，逐条去台账解析会把列表变成 N 次查询。
+const impact = ref(null)
+const impactLoading = ref(false)
+
+async function loadImpact(row) {
+  impact.value = null
+  const params = new URLSearchParams()
+  if (row.node) params.set('node', row.node)
+  if (row.instance) params.set('instance', row.instance)
+  if (!params.toString()) return
+  impactLoading.value = true
+  try {
+    impact.value = await http.get('/api/v1/alerts/impact?' + params.toString())
+  } catch (e) {
+    // 影响面是补充信息：拿不到不该让告警详情看起来像出错了，只在区块内提示。
+    impact.value = { error: e.message || '加载资产影响面失败' }
+  } finally {
+    impactLoading.value = false
+  }
+}
+
+// impactRootId 是波及范围图的中心资产 id（服务端已把中心标出来）。
+const impactRootId = computed(() => {
+  const nodes = (impact.value && impact.value.topology && impact.value.topology.nodes) || []
+  const root = nodes.find((n) => n.root)
+  return root ? root.id : null
+})
+
+// openAsset 跳到台账并直接打开该资产的详情（台账页支持 ?id= 深链）。
+function openAsset(item) {
+  router.push({ path: '/assets', query: { id: String(item.id) } })
+}
+
+// changeText 把一条字段级变更渲染成「旧值 → 新值」：只给字段名看不出改成了什么。
+function changeText(rec) {
+  const old = rec.old === '' || rec.old == null ? '（空）' : rec.old
+  const next = rec.new === '' || rec.new == null ? '（空）' : rec.new
+  return old + ' → ' + next
 }
 function gotoNode(row) {
   router.push({ path: '/hosts', query: { node: row.node } })
@@ -1331,10 +1421,33 @@ async function delInhibit(idx) {
   } catch (e) { /* 取消 */ }
 }
 
+// applyLogRulePrefill 处理「从日志检索页建规则」的深链（全景表 9-05）。
+//
+// 模板由服务端生成（`/api/v1/logs/rule-template`），这里不自己拼指标名：
+// 拼错的症状是"规则配好了却永远没有数据"，而没有任何一处会报错。
+async function applyLogRulePrefill() {
+  const raw = String(route.query.newLogRule || '')
+  const [source, pattern] = raw.split('|')
+  if (!source || !pattern) return
+  try {
+    const params = new URLSearchParams({ source, pattern })
+    if (route.query.node) params.set('node', String(route.query.node))
+    editing.value = await http.get('/api/v1/logs/rule-template?' + params.toString())
+    // 用掉即清：否则刷新页面会再次弹出同一个表单
+    const rest = { ...route.query }
+    delete rest.newLogRule
+    delete rest.node
+    router.replace({ path: '/alerts', query: rest })
+  } catch (e) {
+    ElMessage.error(e.message || '生成规则模板失败')
+  }
+}
+
 // 每 30s 自动刷新告警列表，确保实时性
 onMounted(() => {
   load()
   loadMaintenance()
+  applyLogRulePrefill()
   timer = setInterval(load, 30000)
   // 换肤后重绘趋势图（ECharts 颜色来自 CSS 变量）
   window.addEventListener('nebula:theme-changed', onThemeChanged)
@@ -1619,5 +1732,43 @@ onUnmounted(() => {
 .tpl-desc {
   font-size: 12px;
   color: var(--el-text-color-secondary, #909399);
+}
+/* 资产与影响面 */
+.impact-assets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.impact-asset {
+  cursor: pointer;
+}
+.impact-note {
+  margin: 4px 0 8px;
+  font-size: 12.5px;
+}
+.impact-sub {
+  margin: 10px 0 6px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary, #909399);
+}
+.impact-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+.impact-change {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  font-size: 12px;
+}
+.impact-change-at {
+  color: var(--el-text-color-secondary, #909399);
+}
+.impact-change-field {
+  font-weight: 500;
 }
 </style>

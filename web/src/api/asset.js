@@ -70,6 +70,10 @@ export const getAssetLinks = (id) => http.get('/api/v1/assets/' + encodeURICompo
 export const getAssetTopology = (id, params = {}) =>
   http.get(withQuery('/api/v1/assets/' + encodeURIComponent(id) + '/topology', params))
 
+// 告警影响面：把告警的指标标签（node / instance）对到台账资产，并给出该资产的近期变更与波及范围。
+// 参数用标签而不是告警 ID：告警恢复后就从活跃列表消失了，而排障往往发生在之后。
+export const getAlertImpact = (params = {}) => http.get(withQuery('/api/v1/alerts/impact', params))
+
 // ---- 关系的人工维护 ----
 // 三种动作共用一套寻址：URL 里的资产是基准，给 {toType,toKey,kind,direction}。
 // direction 用读接口返回的原值即可（out=基准 → 对端，in=对端 → 基准），前端不必自己算方向。
