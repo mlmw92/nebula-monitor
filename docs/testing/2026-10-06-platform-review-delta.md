@@ -234,3 +234,53 @@ P0 首批剩余：资产拓扑视图（2-03/2-11）、日志结构化解析与�
 **执行结果**：`go build ./...`、`go vet ./...` 通过；`go test -count=1 ./...` 全绿；`npm --prefix web test` **11 文件 64 项**通过；`npm --prefix web run build` 通过。
 
 **未覆盖边界（不得视为通过）**：真实 Agent 上行的日志（含多行合并后的堆栈行、超长行、非 UTF-8 内容）在字段解析下的表现、大分片（百万行级）下字段过滤的扫描耗时、浏览器端到端。
+
+---
+
+## 九、第五轮：资产关系图 / 拓扑视图（2026-10-06 续四）
+
+P0 首批的最后一项（全景表 §3.2「资产关系与拓扑」的拓扑视图 + §3.2「配置项模型页 / 关系视图页」的关系视图）。关系数据（`runs_on` / `member_of` / `depends_on` / `exposes`、来源标记、人工抑制）此前都已就绪，缺的是**可视化与导航**。
+
+### 9.1 落地内容
+
+| 层 | 内容 |
+|---|---|
+| 存储 | `Store.topologyAround(rootID, depth, maxNodes)`：**逐层 BFS** 展开邻域，返回节点（含跳数）、边与是否被上限截断；`assetsByIDs` 复用既有的 `assetSelectColumns` + `scanAssets`（列清单只有一处，不会与列表漂移） |
+| 服务 | `Service.Topology(ref, depth, maxNodes, allowedNodes)`：**资源范围在这里裁剪**——范围外的节点与其相关边都不进结果集，中心不在范围内返回 `ErrOutOfScope`（与标杆条件写同一语义）；跳数 1..3、节点数 ≤500 一律夹紧 |
+| 接口 | `GET /api/v1/assets/{id}/topology?depth=&limit=`（权限 `assets:read`，与 `/links` 同权限同口径）。节点带 `key`（`typeKey\|naturalKey`，与关联表格的寻址一致）、类型标题、状态、责任人、是否已隐藏；边带 `kind` 与 `source`（区分采集发现 / 人工维护） |
+| 前端 | 详情抽屉「关联关系」页签新增「关系图」：ECharts 力导向图，节点按类型着色、大小按跳数（中心最大）、失联标红圈、已隐藏半透明；人工维护的边画虚线；**点节点即以它为中心重新展开**；跳数 1/2/3 可切；截断时显式告警 |
+
+### 9.2 设计取舍
+
+- **逐层 BFS + 硬上限，而不是递归 SQL**：一台跑了几十个实例的主机在两跳内就能连到全库；上限若在展开完成之后才生效，代价已经付过了。上限按**层**立即生效，被挡在门外的端点其边也一并丢弃（图里不该出现指向不存在节点的边）。
+- **范围裁剪放服务层而不是 API 层"取回再过滤"**：范围外的节点一旦进入结果集，任何一处忘记过滤都会变成越权；让它们根本不出现才是唯一稳妥的做法。**只留一半的边也不行**——边本身携带对端的节点名与自然键。
+- **节点身份用 `typeKey|naturalKey` 而不是自增 id**：台账界面一直以它寻址（关联关系的对端就是它），图与表用同一套标识才不会各说各话。
+- **点节点=换中心**，而不是"打开另一个抽屉"：图上的"走下去"就是换中心，比在抽屉与弹窗之间来回切更贴合看图直觉。
+- **截断必须显式告警**：静默省略会让人以为"关系就这么多"，从而漏掉真实影响面——那正是这张图存在的意义。
+
+### 9.3 本轮新增用例与执行证据
+
+| 用例 | 文件 | 断言 |
+|---|---|---|
+| `TestTopologyExpandsByDepth` | `internal/server/asset/topology_test.go` | 1 跳/2 跳的节点与边集合、中心标记与真实跳数；`depth=99` 夹紧到上限而不是报错 |
+| `TestTopologyIsolatedAsset` | 同上 | 无关系资产：只有中心节点、零条边，不是错误 |
+| `TestTopologyHandlesCycles` | 同上 | 互为依赖的环不死循环、不重复计节点 |
+| `TestTopologyTruncatesAtNodeLimit` | 同上 | 达到上限即标截断、节点数不超限、**边不指向图里不存在的节点** |
+| `TestTopologyRespectsScope` | 同上 | 范围外邻居与跨范围边都不出现；范围外/空可见集合的中心报 `ErrOutOfScope` |
+| `TestTopologyHidesUnattributedNodesFromRestrictedUsers` | 同上 | 归属节点为空的资产对受限用户不可见、对全局可见 |
+| `TestTopologyOrderIsStable` | 同上 | 两次查询节点与边顺序一致（前端图不会每次打开都重新洗牌） |
+| `TestRoutes_AssetTopologyPayload` | `internal/server/api/asset_topology_api_test.go` | 载荷结构（root/nodes/edges）、节点类型标题与状态、边两端寻址与来源 |
+| `TestRoutes_AssetTopologyClampsParams` | 同上 | `depth=99` 夹紧为 3（200 而不是 400） |
+| `TestRoutes_AssetTopologyRespectsScope` | 同上 | 受限用户图里无范围外节点/跨范围边；范围外中心 404 |
+| `TestRoutes_AssetTopologyPermissionAndMissing` | 同上 | 缺 `assets:read` 403；未知 id 404；未注入资产能力 503 |
+| AssetListView 五条用例 | `web/src/components/asset/AssetListView.test.js` | 请求跳数正确；节点/边映射（中心更大、失联红圈、人工边虚线）；截断提示；点节点换中心（点中心不重查）；切跳数重查；失败给出错误而不是空图 |
+
+**执行结果**：`go build ./...`、`go vet ./...` 通过；`go test -count=1 ./...` 全绿；`npm --prefix web test` **12 文件 69 项**通过；`npm --prefix web run build` 通过。
+
+### 9.4 仍未做
+
+- **配置项模型页**（`asset_types.schema` 的字段 Schema 编辑）：目前 `schema` 只存不解释。
+- **全库关系视图**：当前以单个资产为中心（N 跳邻域），没有"整张图"的入口——那需要先解决布局与聚合（全库规模下力导向图不可读）。
+- `depends_on` / `exposes` 仍**只有人工来源**：这是刻意的"关系宁少而准"，不是缺失。
+
+**未覆盖边界（不得视为通过）**：真实集群规模下的图渲染性能（数百节点力导向）、浏览器端到端（真实点击 → 换中心 → 视觉确认）、大屏/暗色主题下的配色可读性。
