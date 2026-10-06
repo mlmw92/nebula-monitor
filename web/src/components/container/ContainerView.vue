@@ -115,10 +115,11 @@
               >
                 <template #default="{ row }">{{ row.cells[i] }}</template>
               </el-table-column>
-              <el-table-column v-if="canDescribe || canLogs" label="操作" :width="canLogs ? 130 : 90" fixed="right">
+              <el-table-column v-if="canDescribe || canLogs || canLedger" label="操作" :width="canLogs ? 160 : 120" fixed="right">
                 <template #default="{ row }">
                   <el-button v-if="canDescribe" link size="small" @click.stop="describeRow(row)">详情</el-button>
                   <el-button v-if="canLogs" link size="small" @click.stop="openLogs(row)">日志</el-button>
+                  <el-button v-if="canLedger" link size="small" :loading="ledgerBusy" @click.stop="openLedger(row)">台账</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -215,10 +216,12 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Refresh, Grid, Monitor, Bell } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import http from '../../api/http'
 import { createOpsTask, getOpsTask, cancelOpsTasks, listOpsTasks } from '../../api/ops'
+import { lookupAsset } from '../../api/asset'
 import PageHeader from '../common/PageHeader.vue'
 import SectionCard from '../common/SectionCard.vue'
 import EmptyState from '../common/EmptyState.vue'
@@ -253,6 +256,8 @@ const DETAIL_SPEC = {
 const POLL_INTERVAL = 3000
 const POLL_TIMEOUT = 60000
 
+const route = useRoute()
+const router = useRouter()
 const clusters = ref([])
 const loading = ref(false)
 const clusterKey = ref('')
@@ -272,6 +277,13 @@ const canQuery = computed(() => !!currentCluster.value && currentCluster.value.u
 const canDescribe = computed(() => !!DETAIL_SPEC[activeTab.value])
 // 日志只对 Pod 有意义：工作负载/事件列表里的对象不是容器实例。
 const canLogs = computed(() => activeTab.value === 'pods')
+// 台账入口：只有 Pod 与工作负载会落台账资产（事件不是对象；Job 刻意不建资产）。
+const canLedger = computed(() => activeTab.value === 'pods' || activeTab.value === 'workloads')
+
+// 工作负载列表的「类型」列 → 台账资产的自然键片段。
+// Job 不在其中：台账不给 Job 建资产（它的 Pod 的 member_of 因此为空，那是如实的"没有归属"）。
+const WORKLOAD_LEDGER_KINDS = { Deployment: 'deployment', StatefulSet: 'statefulset', DaemonSet: 'daemonset' }
+const ledgerBusy = ref(false)
 
 // 详情抽屉也走同一套缓存：重复点同一行同样是一次 15 秒的下发，没理由重来一遍。
 const detailKey = ref({ cluster: '', kind: '', namespace: '', name: '' })
@@ -645,14 +657,100 @@ function refreshDetail() {
 function openLogs(row) {
   const spec = DETAIL_SPEC.pods
   const cells = row.cells || []
-  const ns = cells[spec.nsCol]
-  const pod = cells[spec.nameCol]
-  if (!ns || !pod) return
-  logsTarget.value = { namespace: ns, pod }
+  openLogsFor(cells[spec.nsCol], cells[spec.nameCol])
+}
+
+// openLogsFor 是 openLogs 的本体：反向联动（从台账点进来）只有身份、没有表格行，
+// 因此身份必须能独立传入——否则那条路径只能伪造一行假数据。
+function openLogsFor(namespace, pod) {
+  if (!namespace || !pod) return
+  logsTarget.value = { namespace, pod }
   logsContainer.value = ''
   logsTitle.value = '日志 · ' + pod
   logsVisible.value = true
   fetchLogs(false)
+}
+
+/* ===== 跨页联动 ===== */
+
+// openLedger 跳到台账里这条 Pod / 工作负载的资产详情。
+//
+// 自然键由服务端按身份拼（前端不拼）：集群取 **apiserver 地址**而不是别名——
+// 台账的 Pod/工作负载资产就是按地址建的（见 collector.k8s.go 的 clusterOf）。
+async function openLedger(row) {
+  const spec = DETAIL_SPEC[activeTab.value]
+  const cluster = currentCluster.value
+  if (!spec || !cluster) return
+  const cells = row.cells || []
+  const params = {
+    type: activeTab.value === 'pods' ? 'pod' : 'workload',
+    cluster: cluster.instance,
+    namespace: cells[spec.nsCol],
+    name: cells[spec.nameCol],
+  }
+  if (activeTab.value === 'workloads') {
+    const kind = WORKLOAD_LEDGER_KINDS[cells[0]]
+    if (!kind) {
+      ElMessage.info('该对象类型不进台账：只有 Deployment / StatefulSet / DaemonSet 会建资产')
+      return
+    }
+    params.kind = kind
+  }
+  ledgerBusy.value = true
+  try {
+    const res = await lookupAsset(params)
+    // 404 在这里是**正常结果**：清单上报有一个采集周期的延迟，刚建的 Pod 可能还没进台账
+    if (res.status === 404) {
+      ElMessage.info('该对象尚未进入台账（清单上报约一个采集周期，稍后再看）')
+      return
+    }
+    if (!res.ok) {
+      ElMessage.error((res.body && res.body.error) || '查询台账失败')
+      return
+    }
+    const item = res.body && res.body.asset
+    if (!item) {
+      ElMessage.error('台账返回内容不完整')
+      return
+    }
+    if (item.ignored) {
+      ElMessage.warning('该资产已被从台账隐藏，可在「资产台账 → 含已忽略」中恢复')
+    }
+    router.push({ path: '/assets', query: { id: item.id } })
+  } catch (e) {
+    ElMessage.error(e.message || '查询台账失败')
+  } finally {
+    ledgerBusy.value = false
+  }
+}
+
+// applyDeepLink 处理从台账反向点进来的地址（?cluster=&namespace=&pod=）：
+// 选中集群 → 切到 Pod Tab → 打开该 Pod 的日志抽屉。
+//
+// 只认领一次（消费后把 query 里的定位参数清掉）：否则用户在这个页面上手动切集群，
+// 又被 query 拽回去，看起来就像"选了没用"。
+async function applyDeepLink() {
+  const q = route.query
+  const pod = String(q.pod || '').trim()
+  const tab = String(q.tab || '').trim()
+  const clusterRef = String(q.cluster || '').trim()
+  const ns = String(q.namespace || '').trim()
+  if (!pod && !tab && !clusterRef) return
+  router.replace({ path: '/container', query: {} })
+
+  const hit = clusters.value.find((c) => c.instance === clusterRef || c.name === clusterRef)
+  if (!hit) {
+    ElMessage.warning('未找到该对象所属的集群：可能该节点未上报，或集群凭据已变更')
+    return
+  }
+  clusterKey.value = keyOf(hit)
+  if (ns) namespace.value = ns
+  if (tab && TABS.some((t) => t.key === tab)) activeTab.value = tab
+  if (pod) activeTab.value = 'pods'
+  await nextTick()
+  // 列表：只在没有缓存结果时才下发（与 autoRun 同一规矩）；日志抽屉另走一次按需拉取
+  autoRun(activeTab.value)
+  if (pod) openLogsFor(ns, pod)
 }
 
 // fetchLogs 拉取当前 Pod 的最近日志；force=true 表示用户明确要求重新拉取。
@@ -720,6 +818,8 @@ onMounted(async () => {
     now.value = Date.now()
   }, 30_000)
   await loadClusters()
+  // 从台账反向点进来时优先按地址定位（applyDeepLink 内部会自己触发列表与日志的拉取）
+  await applyDeepLink()
   // 只在"这个（集群 + Tab）还没有结果"时查一次（不要让人对着空白面板猜）；
   // 有上次的结果就直接显示结果与刷新时间——**进页面不等于刷新**。
   await autoRun(activeTab.value)

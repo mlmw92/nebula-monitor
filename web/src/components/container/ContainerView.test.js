@@ -11,6 +11,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import http from '../../api/http'
 import { createOpsTask, getOpsTask, listOpsTasks, cancelOpsTasks } from '../../api/ops'
+import { lookupAsset } from '../../api/asset'
 import ContainerView from './ContainerView.vue'
 import { resetContainerQueryCache } from './queryCache'
 
@@ -22,6 +23,17 @@ vi.mock('../../api/ops', () => ({
   getOpsTask: vi.fn(),
   cancelOpsTasks: vi.fn(),
   listOpsTasks: vi.fn(),
+}))
+vi.mock('../../api/asset', () => ({
+  lookupAsset: vi.fn(),
+}))
+// 跨页联动要用到路由：push 用于跳台账，replace 用于"只认领一次"地清掉深链参数。
+const routerPush = vi.fn()
+const routerReplace = vi.fn()
+let routeQuery = {}
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerPush, replace: routerReplace }),
+  useRoute: () => ({ query: routeQuery }),
 }))
 
 // jsdom 未实现 ResizeObserver，Element Plus 的表格会用到它。
@@ -62,6 +74,7 @@ beforeEach(() => {
   resetContainerQueryCache()
   seq = 0
   wrappers = []
+  routeQuery = {}
   http.get.mockImplementation(async (path) => {
     if (String(path).includes('/container/k8s/clusters')) return { clusters: [CLUSTER_A, CLUSTER_B] }
     return {}
@@ -270,6 +283,62 @@ describe('ContainerView 容器与工作负载页', () => {
     expect(document.body.textContent).toContain('line-1')
     expect(document.body.textContent).toContain('line-2')
     expect(document.body.textContent).toContain('最近 200 行')
+  })
+
+  // 跨页联动：容器页的 Pod/工作负载行 → 台账资产详情。
+  // 集群必须传 **apiserver 地址**（台账的自然键就是按它建的），传别名会查不到。
+  it('Pod 行上的「台账」命中后跳到资产详情，未命中给明确提示', async () => {
+    lookupAsset.mockResolvedValue({ ok: true, status: 200, body: { asset: { id: 42 } } })
+    // Pod 列表的列序是「命名空间, 名称」（见 DETAIL_SPEC.pods）
+    getOpsTask.mockImplementation(async (id) => ({
+      task: {
+        id,
+        state: 'succeeded',
+        json: JSON.stringify({
+          columns: ['命名空间', '名称'], rows: [['default', 'web-1']], total: 1, truncated: false,
+        }),
+      },
+    }))
+
+    const w = mountView()
+    await settle(w)
+    await w.findAll('.el-tabs__item')[1].trigger('click') // Pod
+    await settle(w)
+
+    const btn = w.findAll('button').find((b) => b.text() === '台账')
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+    await settle(w)
+
+    expect(lookupAsset).toHaveBeenCalledTimes(1)
+    expect(lookupAsset.mock.calls[0][0]).toMatchObject({
+      type: 'pod', cluster: CLUSTER_A.instance, namespace: 'default', name: 'web-1',
+    })
+    expect(routerPush).toHaveBeenCalledWith({ path: '/assets', query: { id: 42 } })
+
+    // 未命中（404 是正常结果：清单上报有一个采集周期）→ 不跳转，只说清楚
+    lookupAsset.mockResolvedValue({ ok: false, status: 404, body: { error: '资产不存在' } })
+    routerPush.mockClear()
+    await btn.trigger('click')
+    await settle(w)
+    expect(routerPush).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('尚未进入台账')
+  })
+
+  // 反向联动：从台账的容器资产点进来（?cluster=&namespace=&pod=），
+  // 必须选中该集群、切到 Pod Tab、并打开那个 Pod 的日志抽屉；参数只认领一次。
+  it('带 ?cluster/namespace/pod 进入时直接定位并打开日志抽屉', async () => {
+    routeQuery = { cluster: CLUSTER_A.instance, namespace: 'default', pod: 'web-1' }
+    const w = mountView()
+    await settle(w)
+
+    expect(routerReplace).toHaveBeenCalledWith({ path: '/container', query: {} })
+    // 选中了集群（否则 currentCluster 为空，下面一切都不会发生）
+    expect(w.findComponent({ name: 'ElSelect' }).props('modelValue')).toBe(keyOf(CLUSTER_A))
+    // 列表与日志是两次独立下发，顺序不保证：按动作找，而不是取最后一次
+    const logsCall = createOpsTask.mock.calls.map((c) => c[0]).find((c) => c.kind === 'container.logs')
+    expect(logsCall).toBeTruthy()
+    expect(logsCall.params).toMatchObject({ namespace: 'default', name: 'web-1' })
   })
 
   it('点「查询」= 手动刷新：会重新下发并更新时间', async () => {

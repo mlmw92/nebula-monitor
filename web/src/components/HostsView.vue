@@ -56,6 +56,8 @@
           size="small"
           clearable
           style="width: 200px"
+          @input="pinnedNode = ''"
+          @clear="pinnedNode = ''"
         >
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
@@ -490,7 +492,7 @@ openssl x509 -req -in edge.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 36
 
 <script setup>
 import { ref, computed, reactive, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Plus, Search, Setting, ArrowDown, Refresh, Edit, Operation, Upload, Monitor, Connection, Printer } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api/http'
@@ -502,6 +504,7 @@ import EmptyState from './common/EmptyState.vue'
 import StatusPill from './common/StatusPill.vue'
 import { printPage } from '../utils/print'
 
+const route = useRoute()
 const router = useRouter()
 const nodes = ref([])
 const latestAgentVersion = ref('')
@@ -512,6 +515,10 @@ const groups = ref([])
 const statusFilter = ref('')
 const groupFilter = ref('')
 const keyword = ref('')
+// pinnedNode 是「深链带来的那一台」的精确归属：关键词是**模糊**匹配（含 IP 与显示名），
+// 节点一多，web-01 会同时筛出 web-011，而用户点的是某一台具体机器。
+// 用户一改关键词就交还给模糊匹配（见模板上的 @input / @clear）。
+const pinnedNode = ref('')
 const currentPage = ref(1)
 const pageSize = ref(20)
 
@@ -731,6 +738,8 @@ const filteredNodes = computed(() => {
   else if (statusFilter.value === 'offline') arr = arr.filter((n) => n.status !== 'online')
   else if (statusFilter.value === 'warning') arr = arr.filter((n) => nodeSeverity(n) >= 50)
   if (groupFilter.value) arr = arr.filter((n) => (n.group || 'default') === groupFilter.value)
+  // 深链的精确归属：只留那一台（关键词的模糊匹配留着，是为了让用户看见"筛的是谁"）
+  if (pinnedNode.value) arr = arr.filter((n) => n.hostname === pinnedNode.value)
   if (keyword.value) {
     const k = keyword.value.toLowerCase()
     arr = arr.filter(
@@ -1096,8 +1105,31 @@ function onVis() {
   }
 }
 
-onMounted(() => {
-  load()
+// applyDeepLink 处理 ?node=<主机名>：告警详情等处的「跳主机」入口就是这么跳过来的。
+//
+// 必须先精确匹配落到那一台再回填关键词：关键词是**模糊**匹配（含 IP 与显示名），
+// 节点一多，`web-01` 会同时筛出 `web-01` 与 `web-011`——用户点的是"这台机器"。
+function applyDeepLink() {
+  const want = String(route.query.node || '').trim()
+  if (!want) return
+  router.replace({ path: '/hosts', query: {} })
+  hostTab.value = 'hosts'
+  const hit = nodes.value.find(
+    (n) => n.hostname === want || n.displayName === want || n.ip === want
+  )
+  if (!hit) {
+    ElMessage.warning('未找到该主机：可能已离线并从节点列表移除，或不在你的资源范围内')
+    keyword.value = want
+    return
+  }
+  // 关键词负责让用户看见"筛的是谁"，精确归属负责真正只留这一台
+  keyword.value = hit.hostname
+  pinnedNode.value = hit.hostname
+}
+
+onMounted(async () => {
+  await load()
+  applyDeepLink()
   loadVersion()
   restartTimers()
   document.addEventListener('visibilitychange', onVis)

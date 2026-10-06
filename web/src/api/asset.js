@@ -22,6 +22,27 @@ export const listAssets = (params = {}) => http.get(withQuery('/api/v1/assets', 
 // 资产详情（属性含采集值与人工值两个来源，values 为生效值）
 export const getAsset = (id) => http.get('/api/v1/assets/' + encodeURIComponent(id))
 
+// 按「类型 + 身份」精确查一条资产，供跨页联动使用（容器页的 Pod/工作负载 → 台账资产）。
+//
+// 参数两种形态：`{ type, key }`（已知自然键）或 `{ type, cluster, namespace, name[, kind] }`
+// （容器类资产给身份，由服务端拼键——前端不拼，拼错只会命中另一条资产）。
+//
+// 刻意**不用 http.get**：404 在这里是**正常结果**（"这个对象还没进台账"，
+// 清单上报有一个采集周期），而通用封装会把它抛成异常，调用方只能靠文案猜。
+export async function lookupAsset(params = {}) {
+  const token = getToken()
+  const res = await fetch(withQuery('/api/v1/assets/lookup', params), {
+    headers: token ? { Authorization: 'Bearer ' + token } : {},
+  })
+  let body = {}
+  try {
+    body = await res.json()
+  } catch (e) {
+    /* 非 JSON 响应体：交给调用方按状态码兜底 */
+  }
+  return { ok: res.ok, status: res.status, body }
+}
+
 // 字段级变更历史；limit 为 0 时用服务端默认上限。
 export const getAssetHistory = (id, limit = 0) =>
   http.get('/api/v1/assets/' + encodeURIComponent(id) + '/history' + (limit ? '?limit=' + limit : ''))

@@ -403,6 +403,18 @@
                 <el-button type="danger" plain @click="dropBaseline">清除期望值</el-button>
               </template>
             </div>
+
+            <!-- 容器类资产（Pod / 工作负载）到容器页看日志与事件：只读跳转，
+                 因此不受写权限门控——只读账号同样需要这条排障路径 -->
+            <div v-if="detail.container" class="drawer-actions">
+              <el-button
+                :title="detail.typeKey === 'pod' ? '到容器页查看该 Pod 的日志与事件' : '到容器页查看该集群/命名空间的工作负载'"
+                @click="gotoContainer(detail)"
+              >
+                {{ detail.typeKey === 'pod' ? '查看容器日志' : '查看容器工作负载' }}
+              </el-button>
+              <span class="muted">集群 {{ detail.container.cluster }} · {{ detail.container.namespace }}</span>
+            </div>
           </el-tab-pane>
 
           <el-tab-pane :label="`变更历史 ${history.length}`" name="history">
@@ -761,6 +773,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   listAssets,
@@ -843,6 +856,8 @@ const LINK_KINDS = [
 ]
 const linkAddVisible = ref(false)
 const linkBusy = ref(false)
+const route = useRoute()
+const router = useRouter()
 const linkForm = reactive({ direction: 'out', kind: 'runs_on', peer: '' })
 const peerOptions = ref([])
 const peerLoading = ref(false)
@@ -1657,7 +1672,45 @@ async function afterWrite(id) {
   await load()
 }
 
-onMounted(load)
+/* ===== 跨页联动（容器页 ⇄ 台账）===== */
+
+// openFromQuery 处理 ?id=<资产 ID>：容器页的「台账」按钮就是这么跳过来的。
+//
+// 只认领一次（消费后清掉 query）：否则用户关掉抽屉再刷新页面，抽屉会自己又弹出来。
+async function openFromQuery() {
+  const id = String(route.query.id || '').trim()
+  if (!id) return
+  router.replace({ path: '/assets', query: {} })
+  try {
+    const item = await getAsset(id)
+    if (item && item.id) openDetail(item)
+  } catch (e) {
+    // 范围外与已删除在这里是同一句话：不给范围探测留信息（与服务端的 404 口径一致）
+    ElMessage.warning('未找到该资产：可能已被删除，或不在你的资源范围内')
+  }
+}
+
+// gotoContainer 跳到容器页看这个 Pod / 工作负载。
+//
+// 身份取自服务端解出的 container 字段（不是前端 split 自然键）：集群是 apiserver 地址
+// （含 `://`），自己解析一次就可能解错，而解错的联动不报错、只会跳到别的对象上。
+function gotoContainer(item) {
+  const c = item && item.container
+  if (!c) return
+  const query = { cluster: c.cluster, namespace: c.namespace }
+  if (item.typeKey === 'pod') {
+    query.pod = c.name
+  } else {
+    // 工作负载没有单一日志可看：只定位到集群 + 命名空间，并切到工作负载 Tab
+    query.tab = 'workloads'
+  }
+  router.push({ path: '/container', query })
+}
+
+onMounted(async () => {
+  await load()
+  await openFromQuery()
+})
 </script>
 
 <style scoped>
