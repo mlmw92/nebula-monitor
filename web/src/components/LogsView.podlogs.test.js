@@ -16,9 +16,12 @@ vi.mock('../api/http', () => ({
 }))
 
 const routerPush = vi.fn()
+// 深链用例要能逐例给 route.query，所以不能写死空对象。
+// vi.mock 的工厂会提升到文件顶部，引用外层变量必须走 vi.hoisted，否则读到的是 TDZ 里的绑定。
+const routeState = vi.hoisted(() => ({ query: {} }))
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: routerPush, replace: vi.fn() }),
-  useRoute: () => ({ query: {} }),
+  useRoute: () => ({ query: routeState.query }),
 }))
 vi.mock('../composables/useAuth', () => ({
   default: () => ({ can: () => false }),
@@ -47,6 +50,7 @@ function logsQueries() {
 beforeEach(() => {
   vi.clearAllMocks()
   wrappers = []
+  routeState.query = {}
   http.get.mockImplementation(async (path) => {
     if (String(path).includes('/api/v1/logs/fields')) return { fields: {} }
     if (String(path).includes('/api/v1/logs?')) {
@@ -142,5 +146,44 @@ describe('LogsView 容器日志（Pod 日志）', () => {
     const chips = w.findAll('.asset-chip')
     expect(chips.length).toBe(2) // 一行一个（pod 行 → Pod 资产，applog 行 → 主机资产）
     expect(chips.some((c) => c.text().includes('web-01'))).toBe(true)
+  })
+
+  // 深链 `?pods=<命名空间>|<Pod>`：容器页（与 Pod 资产）跳进来时带的就是这个。
+  // 认领失败的症状不是报错，而是"条件没了却照样出结果"——用户会以为这就是该 Pod 的全部日志。
+  it('深链里的 pods 条件被认领：显示为可删除的容器条件并拼进查询', async () => {
+    routeState.query = { pods: 'nebula-demo|web-1' }
+    const w = mountView()
+    await flushPromises()
+
+    const chip = w.findAll('.field-tag').find((t) => t.text().includes('nebula-demo/web-1'))
+    expect(chip).toBeTruthy()
+    expect(logsQueries().at(-1)).toContain('pods=nebula-demo%7Cweb-1')
+  })
+
+  // 形态校验与服务端 parseLogPodFilters 同一条规则：不合法的项丢掉，
+  // 而不是让它去撞服务端的 400——那会把**整个查询**打成失败，用户看到的是一片报错。
+  it('深链里形态不合法的容器条件被丢掉，不让它把整个查询打成失败', async () => {
+    routeState.query = { pods: ['nebula-demo|web-1', 'Bad Name|x', 'nopipe', '|empty', 'ns|'] }
+    const w = mountView()
+    await flushPromises()
+
+    const last = logsQueries().at(-1)
+    expect(last).toContain('pods=nebula-demo%7Cweb-1')
+    for (const bad of ['Bad', 'nopipe', 'empty']) {
+      expect(last).not.toContain(bad)
+    }
+    // 生效中的条件只有那一条合法的
+    const podChips = w.findAll('.field-tag').filter((t) => t.text().includes('容器'))
+    expect(podChips.length).toBe(1)
+  })
+
+  // 服务端 MaxLogPodFilters 是 8：多了会被 400 掉，所以超出部分先截断，保住其余条件照常生效。
+  it('深链带的容器条件超过服务端上限（8）时截断', async () => {
+    routeState.query = { pods: Array.from({ length: 10 }, (_, i) => `ns|pod-${i}`) }
+    const w = mountView()
+    await flushPromises()
+
+    const q = logsQueries().at(-1)
+    expect((q.match(/pods=/g) || []).length).toBe(8)
   })
 })

@@ -35,6 +35,12 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: routerPush, replace: routerReplace }),
   useRoute: () => ({ query: routeQuery }),
 }))
+// 集中日志入口按 `logs:read` 门控（与 container:read 是两个权限点），
+// 所以权限表要能逐例改：无权时按钮必须**不出现**，而不是点了撞 403。
+const authState = vi.hoisted(() => ({ perms: ['logs:read'] }))
+vi.mock('../../composables/useAuth', () => ({
+  default: () => ({ can: (p) => authState.perms.includes(p) }),
+}))
 
 // jsdom 未实现 ResizeObserver，Element Plus 的表格会用到它。
 if (!globalThis.ResizeObserver) {
@@ -75,6 +81,7 @@ beforeEach(() => {
   seq = 0
   wrappers = []
   routeQuery = {}
+  authState.perms = ['logs:read']
   http.get.mockImplementation(async (path) => {
     if (String(path).includes('/container/k8s/clusters')) return { clusters: [CLUSTER_A, CLUSTER_B] }
     return {}
@@ -354,5 +361,68 @@ describe('ContainerView 容器与工作负载页', () => {
     expect(calls()).toBe(2)
     expect(w.text()).toContain('row-for-t2')
     expect(w.text()).toContain('上次刷新')
+  })
+
+  // 集中日志入口：Pod 行上的「检索日志」跳 /logs?pods=<命名空间>|<Pod>。
+  //
+  // 它和「日志」是**两条数据源不同的路径**（那条是按需拉取，这条是集中日志），
+  // 所以两件事都要钉住：① 参数形态与服务端 `pods=` 完全相同（前端不拼自然键、不猜节点）；
+  // ② 没有 logs:read 时整个入口不出现——点了只会撞 403 的按钮不该摆在那里。
+  function podsPayload() {
+    return async (id) => ({
+      task: {
+        id,
+        state: 'succeeded',
+        json: JSON.stringify({
+          columns: ['命名空间', '名称'], rows: [['nebula-demo', 'web-1']], total: 1, truncated: false,
+        }),
+      },
+    })
+  }
+
+  it('Pod 行「检索日志」跳到集中日志并按容器身份收窄', async () => {
+    getOpsTask.mockImplementation(podsPayload())
+
+    const w = mountView()
+    await settle(w)
+    await w.findAll('.el-tabs__item')[1].trigger('click') // Pod
+    await settle(w)
+
+    const btn = w.findAll('button').find((b) => b.text().includes('检索日志'))
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+
+    // 只带 pods：节点在这里无从得知（猜错就是一个空结果），时间窗用检索页自己的默认
+    expect(routerPush).toHaveBeenCalledWith({ path: '/logs', query: { pods: 'nebula-demo|web-1' } })
+  })
+
+  it('日志抽屉里也能直接跳集中日志（从台账反向进来时正看着这一屏）', async () => {
+    getOpsTask.mockImplementation(podsPayload())
+    routeQuery = { cluster: CLUSTER_A.instance, namespace: 'nebula-demo', pod: 'web-1' }
+
+    const w = mountView()
+    await settle(w)
+
+    const btn = [...document.body.querySelectorAll('button')].find((b) => b.textContent.includes('在集中日志中检索'))
+    expect(btn).toBeTruthy()
+    btn.click()
+    await settle(w)
+
+    expect(routerPush).toHaveBeenCalledWith({ path: '/logs', query: { pods: 'nebula-demo|web-1' } })
+  })
+
+  it('没有 logs:read 时不出现集中日志入口（按需拉取仍可用）', async () => {
+    authState.perms = []
+    getOpsTask.mockImplementation(podsPayload())
+
+    const w = mountView()
+    await settle(w)
+    await w.findAll('.el-tabs__item')[1].trigger('click') // Pod
+    await settle(w)
+
+    expect(w.text()).toContain('web-1') // Pod 列表照常
+    expect(w.findAll('button').some((b) => b.text().includes('检索日志'))).toBe(false)
+    // 「日志」（按需拉取，只要 container:read）不受影响
+    expect(w.findAll('button').some((b) => b.text() === '日志')).toBe(true)
   })
 })

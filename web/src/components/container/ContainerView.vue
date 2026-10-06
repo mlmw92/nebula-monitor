@@ -115,10 +115,14 @@
               >
                 <template #default="{ row }">{{ row.cells[i] }}</template>
               </el-table-column>
-              <el-table-column v-if="canDescribe || canLogs || canLedger" label="操作" :width="canLogs ? 160 : 120" fixed="right">
+              <el-table-column v-if="canDescribe || canLogs || canLedger" label="操作" :width="actionColWidth" fixed="right">
                 <template #default="{ row }">
                   <el-button v-if="canDescribe" link size="small" @click.stop="describeRow(row)">详情</el-button>
                   <el-button v-if="canLogs" link size="small" @click.stop="openLogs(row)">日志</el-button>
+                  <!-- 「日志」是按需拉取（不依赖任何采集配置，但行数/时间窗有上限）；
+                       「检索日志」是集中日志（受该节点 podLogs 采集影响，可翻页、带字段与资产联动）。
+                       两个入口的数据源不同，所以并排摆着而不是二选一。 -->
+                  <el-button v-if="canLogs && canSearchLogs" link size="small" @click.stop="searchLogs(row)">检索日志</el-button>
                   <el-button v-if="canLedger" link size="small" :loading="ledgerBusy" @click.stop="openLedger(row)">台账</el-button>
                 </template>
               </el-table-column>
@@ -196,6 +200,13 @@
             class="logs-container"
           />
           <el-button size="small" :loading="logsBusy" @click="fetchLogs(true)">重新拉取</el-button>
+          <!-- 这里是"想看得更多"的自然落点：按需拉取封顶 200 行 / 24 小时，
+               超出就得走集中日志（另一次查询，不是同一次拉取的加长版）。 -->
+          <el-button
+            v-if="canSearchLogs && logsTarget"
+            size="small"
+            @click="searchLogsFor(logsTarget.namespace, logsTarget.pod)"
+          >在集中日志中检索</el-button>
         </div>
       </div>
       <div v-if="logsBusy && !logs" class="drawer-loading">正在拉取（等待 Agent 上报）…</div>
@@ -207,7 +218,7 @@
         <EmptyState
           v-else
           title="这段时间窗内没有日志"
-          :hints="['容器可能还没启动，或该时间段确实没有输出', '可换一个容器名，或直接上机器查看完整日志']"
+          :hints="logsEmptyHints"
         />
       </template>
     </el-drawer>
@@ -222,6 +233,7 @@ import { ElMessage } from 'element-plus'
 import http from '../../api/http'
 import { createOpsTask, getOpsTask, cancelOpsTasks, listOpsTasks } from '../../api/ops'
 import { lookupAsset } from '../../api/asset'
+import useAuth from '../../composables/useAuth'
 import PageHeader from '../common/PageHeader.vue'
 import SectionCard from '../common/SectionCard.vue'
 import EmptyState from '../common/EmptyState.vue'
@@ -258,6 +270,7 @@ const POLL_TIMEOUT = 60000
 
 const route = useRoute()
 const router = useRouter()
+const { can } = useAuth()
 const clusters = ref([])
 const loading = ref(false)
 const clusterKey = ref('')
@@ -279,6 +292,20 @@ const canDescribe = computed(() => !!DETAIL_SPEC[activeTab.value])
 const canLogs = computed(() => activeTab.value === 'pods')
 // 台账入口：只有 Pod 与工作负载会落台账资产（事件不是对象；Job 刻意不建资产）。
 const canLedger = computed(() => activeTab.value === 'pods' || activeTab.value === 'workloads')
+// 「检索日志」跳的是集中日志页，路由权限 `logs:read`——与 `container:read` 是两个权限点
+// （日志内容可能含敏感数据，见 router/index.js）。无权时按钮不出现：点了只会撞 403 的入口
+// 不该摆在那里。这与台账入口同一取向（能否跳过去由目标页的权限决定）。
+const canSearchLogs = computed(() => can('logs:read'))
+// 操作列宽度按实际按钮数给：写死宽度会把「检索日志」挤成省略号。
+const actionColWidth = computed(() => (canLogs.value ? (canSearchLogs.value ? 240 : 160) : 120))
+// Pod 日志抽屉的空态提示按权限给：没有 logs:read 的用户不该被指去一个他进不去的页面。
+const logsEmptyHints = computed(() => {
+  const hints = ['容器可能还没启动，或该时间段确实没有输出', '可换一个容器名，或直接上机器查看完整日志']
+  if (canSearchLogs.value) {
+    hints.push('要看更早/更多的行：用「在集中日志中检索」（需该节点已开 podLogs 采集）')
+  }
+  return hints
+})
 
 // 工作负载列表的「类型」列 → 台账资产的自然键片段。
 // Job 不在其中：台账不给 Job 建资产（它的 Pod 的 member_of 因此为空，那是如实的"没有归属"）。
@@ -672,6 +699,28 @@ function openLogsFor(namespace, pod) {
 }
 
 /* ===== 跨页联动 ===== */
+
+// searchLogsFor 跳到集中日志检索，按容器身份收窄（`pods=<命名空间>|<Pod>`）。
+//
+// 与「日志」是两条**数据源不同**的路径：那条是**按需拉取**（Agent 现拉现回，不依赖任何采集配置，
+// 但行数与时间窗封顶），这条是**集中日志**（靠该节点开了 `logSources[].podLogs` 采到的东西，
+// 因此**可能是空的**——"配了却没数据"的原因由检索页的空态提示说清，不能让人以为日志丢了）。
+//
+// 两个刻意的"不带"：
+//   · 节点：这里只知道 Pod 名，不知道它此刻落在哪台机器上；容器条件本身已经足够精确，
+//     猜一个节点猜错就是一个空结果（扫描范围由服务端按授权收窄）。
+//   · 时间窗：用检索页自己的默认（最近 1 小时），与那一页的口径一致；要看更早的范围在那里改。
+function searchLogsFor(namespace, pod) {
+  if (!namespace || !pod) return
+  router.push({ path: '/logs', query: { pods: namespace + '|' + pod } })
+}
+
+// searchLogs 从表格行取身份——与「日志」同一个来源（DETAIL_SPEC.pods 的列下标）。
+function searchLogs(row) {
+  const spec = DETAIL_SPEC.pods
+  const cells = row.cells || []
+  searchLogsFor(cells[spec.nsCol], cells[spec.nameCol])
+}
 
 // openLedger 跳到台账里这条 Pod / 工作负载的资产详情。
 //

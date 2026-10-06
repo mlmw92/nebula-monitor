@@ -366,6 +366,26 @@ const podAssetMap = ref({})
 // pods 是生效中的容器过滤（值为 `<namespace>|<pod>`，与服务端参数同形）。
 // 用字符串而不是对象：它要直接进 URLSearchParams，也要能原样显示与删除。
 const pods = ref([])
+
+// 容器身份各段的合法形态：与服务端 `model.LogOriginPartPattern` + `MaxLogOriginPartLen`
+// 是**同一条规则**（k8s 的 DNS-1123 子域，小写字母数字与 `-`/`.`、首尾必须是字母数字）。
+//
+// 深链里的容器条件先在这挡一道：形态不对的项丢掉，而不是让它去撞服务端的 400——
+// 那会让**整个查询**失败（用户看到一片报错），而问题只是 URL 里多了个字符。
+// 与上面字段过滤的取向一致（同样在客户端先挡）。
+const ORIGIN_PART_RE = /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/
+const MAX_ORIGIN_PART_LEN = 253
+// 服务端的 MaxLogPodFilters 是 8：多了会被 400 掉，这里先截断，保住其余条件照常生效。
+const MAX_POD_FILTERS = 8
+
+// podFilterValid 判断一个 `<命名空间>|<Pod>` 是否合法（与服务端 parseLogPodFilters 同规则）。
+function podFilterValid(key) {
+  const i = key.indexOf('|')
+  if (i <= 0) return false
+  return [key.slice(0, i), key.slice(i + 1)].every(
+    (p) => p.length > 0 && p.length <= MAX_ORIGIN_PART_LEN && ORIGIN_PART_RE.test(p),
+  )
+}
 const cursor = ref('')
 const truncated = ref(false)
 const scanned = ref({ bytes: 0, lines: 0, files: 0 })
@@ -678,8 +698,13 @@ async function loadMeta() {
   }
 }
 
-// 深链：/logs?node=<节点>&from=<ms>&to=<ms>&q=<关键词>（如从告警详情「查看日志」跳来）。
+// 深链：/logs?node=<节点>&from=<ms>&to=<ms>&q=<关键词>&field=&pods=
 // 只覆盖显式传入的项，其余保持默认，避免「跳过来却看不到东西」。
+//
+// `pods=<命名空间>|<Pod>` 是**容器页（与 Pod 资产）跳进来的入口**：容器页只知道
+// 命名空间与 Pod 名，日志的归属由 Agent 从 kubelet 路径解析、服务端校验后落库，
+// 因此这里只搬条件、不猜归属。不带节点是刻意的：多节点时前端不知道这个 Pod 此刻
+// 落在哪台机器，猜错就是一个空结果（条件本身已经足够精确，扫描范围由服务端按授权收窄）。
 function applyDeepLink() {
   const q = route.query
   if (q.node) nodes.value = String(q.node).split(',').map((s) => s.trim()).filter(Boolean)
@@ -698,6 +723,13 @@ function applyDeepLink() {
   fieldFilters.value = fields
     .map((f) => String(f).trim())
     .filter((f) => FIELD_FILTER_RE.test(f))
+  // 容器过滤同理（与 field 同一形态）。认领后它会以可删除的 chip 出现在工具条上——
+  // 生效中的条件必须看得见，否则"日志怎么少了"会变成下一个问题。
+  const podList = q.pods === undefined ? [] : Array.isArray(q.pods) ? q.pods : [q.pods]
+  pods.value = podList
+    .map((p) => String(p).trim())
+    .filter(podFilterValid)
+    .slice(0, MAX_POD_FILTERS)
 }
 
 // 来源变了就重新取一次字段候选：不同来源的字段集合本来就不一样
