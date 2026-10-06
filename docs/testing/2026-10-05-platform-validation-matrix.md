@@ -145,7 +145,7 @@
 
 | 项 | 证据与边界 |
 |---|---|
-| exporter 模式下 6 类缺少 `<mw>_instance_up` 序列 | mysql/postgres/nginx/kafka/mongo/fastdfs 的 exporter 路径不产出平台统一存活指标（`redis`/`k8s` 由 receiver 合成，`rabbitmq`/`rocketmq` 采集器自合成）。因此本批修正的 `Instance.Up` 只经资产台账与实例注册表可见，「中间件离线」告警（查 TSDB 的 `<mw>_instance_up`）对这 6 类仍不触发。属既有结构性问题，新增序列会影响 TSDB 口径，需单独决策后再实施。 |
+| ~~exporter 模式下 6 类缺少 `<mw>_instance_up` 序列~~ **已于 2026-10-06 修复** | 原状：mysql/postgres/nginx/kafka/mongo/fastdfs 的 exporter 路径不产出平台统一存活指标（`redis`/`k8s` 由 receiver 合成，`rabbitmq`/`rocketmq` 采集器自合成），因此「中间件离线」告警（查 TSDB 的 `<mw>_instance_up`）对这 6 类不触发。**修法**：在 receiver 侧按实例元信息补出这 6 类序列（与 redis/k8s 同一形态），并按「指标名 + instance」判重——直连模式采集器已自产同名序列时不重复写，避免同一实例出现两条 label 集不同的序列。**验证**：`internal/server/receiver/instance_up_test.go` 三条用例（exporter 模式补出且离线写 0、直连模式不重复、同机多实例逐个补）。**未实机验证**：真实 exporter 部署下的告警触发闭环。 |
 | `zookeeper` 测试随机失败（既有偶发，Windows 特有，非本批引入） | `internal/agent/collector/zookeeper_test.go` 的 `fakeZooKeeper`：Windows 整包 6 次有 2 次失败。`-run 'TestZooKeeper' -count=40`（**不运行**本批任何新用例）同样失败，证明与本批改动无关。诊断（临时插桩）显示服务端每次都能读满 6 字节命令并完整写出 payload 且无错误，客户端却收到 RST 或 5s 超时；尝试「读满一行」「CloseWrite+排空」「写后延迟关闭」三种关闭方式均未消除偶发，已全部回退，夹具保持原样。**2026-10-06 在 dev-server 上 `-count=200` 全过**，确认是 Windows 回环在快速连接/关闭下的行为，不影响 Linux/CI。 |
 | 第二批全量回归 | `go test ./...`；`go vet ./...`；`go build ./...`；`GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build ./...`；`npm --prefix web test`；`npm --prefix web run build` | vet、双平台构建、前端 10 文件 55 项测试与生产构建均通过。`go test ./...` 在本机**不能稳定全绿**：除上表已记录的 zookeeper 偶发外其余包全部通过（重复运行可复现同一偶发，非本批引入）。因拨测包新增对 `golang.org/x/net` 的直接导入，`go mod tidy` 仅把该依赖从 indirect 移到直接 require（`go.sum` 未变）。既有 Element Plus `small` 弃用和大 chunk 告警仍在。 |
 

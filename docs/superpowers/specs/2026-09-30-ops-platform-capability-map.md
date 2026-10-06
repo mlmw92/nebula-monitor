@@ -53,16 +53,18 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 | 5 | 发布部署 | 4 | 1 | 0 | 3 | P2 |
 | 6 | 工单流程 | 4 | 1 | 0 | 3 | P2 |
 | 7 | 堡垒机 / PAM | 7 | 3 | 0 | 4 | P2 |
-| 8 | 容器 / K8s | 8 | 3 | 1 | 4 | **P0** |
+| 8 | 容器 / K8s | 8 | 4 | 1 | 3 | **P0** |
 | 9 | 日志 | 8 | 4 | 1 | 3 | P0 |
 | 10 | 链路追踪 | 3 | 0 | 0 | 3 | P3 |
 | 11 | 巡检合规 | 6 | 4 | 2 | 0 | P1 |
 | 12 | 报表大屏 | 8 | 6 | 0 | 2 | P2 |
 | 13 | 权限审计 | 8 | 5 | 1 | 2 | P0 |
 | 14 | 开放集成 | 7 | 4 | 0 | 3 | P2 |
-| | **合计** | **96** | **52** | **8** | **36** | |
+| | **合计** | **96** | **53** | **8** | **35** | |
 
 > 2026-10-05 对账：上表按 §三的逐项状态重新统计。旧总览 93/51/7/35 未随详细条目与状态更新；本次仅纠正计数，不将「有代码入口」等同于「通过测试」。逐项验证计划及实测结果见 `../../testing/2026-10-05-platform-validation-matrix.md`。
+>
+> 2026-10-06 增量：§3.8「容器/Pod 日志拉取」由**未实现**转为**已实现**（`container.logs` 只读动作 + 前端日志抽屉），故合计为 53/8/35。本轮缺陷修复与新增用例见 `../../testing/2026-10-06-platform-review-delta.md`。
 
 **一句话结论**：采集、告警、存储、权限、审计、离线交付已有基础；短板集中在资产拓扑可视化、日志结构化与索引、告警到资产/处置的关联闭环。下行操作已有参数化动作与逐机护栏；不提供任意脚本或在线终端作为默认扩展方向。
 
@@ -181,7 +183,7 @@ S（≤3 人日）/ M（1-2 周）/ L（≥1 月）。跨模块或需新增持�
 | Docker 容器指标采集 | 已实现 | `internal/agent/collector/docker.go`（Docker Engine API） | — | — | — | — |
 | 工作负载列表 / 详情 / YAML 只读视图 | 部分实现 | **列表与详情已落地**：集群清单 `GET /api/v1/container/k8s/clusters`（`internal/server/api/container_api.go`，权限点 `container:read`，按资源范围过滤）；工作负载 / Pod / 事件走统一下行通道的只读动作 `container.workloads` / `container.pods` / `container.describe` / `container.events`（`internal/server/ops/catalog.go` 目录 + `internal/agent/collector/k8s_query.go` 执行）；前端「观测监控 → 容器与工作负载」(`web/src/components/container/ContainerView.vue`)。**未做的部分**：不提供**原始 YAML** —— `container.describe` 是**白名单投影**（Pod 环境变量只给变量名、ConfigMap 只给键名、`secrets` 不在可选资源类型里），这是有意为之，不是缺失 | **P0** | L | 下行通道（ADR-0003，已完成） | D3 |
 | 事件（Event）查看 | 已实现 | `container.events` 只读动作：`internal/agent/collector/k8s_query.go:QueryEvents`（服务端 `fieldSelector` 过滤 + 按时间倒序 + 200 条上限 + 截断显式回传）；前端同上页「事件」Tab | **P0** | S | 同上 | D3 |
-| 容器/Pod 日志拉取 | 未实现 | Agent 侧 `logship` 只能采**本机文件**（`paths` 不支持通配符），不能拉 Pod 日志；K8s 采集器只拉指标不拉日志。**2026-09-30 补充（用户要求列为待办，后面再考虑）**：在平台实现本项（方案 C：用 `k8sInstances` 凭据调 apiserver `/api/v1/namespaces/{ns}/pods/{pod}/log?sinceTime=` 拉取）之前，短期有两条绕过路径——**A** 集群侧采集器按 `POST /api/v1/logs` 契约直接投递（`receiver/logs.go:HandleLogs`：`X-Agent-Secret` + `{node,group,source,lines[{ts,pattern,text}]}`，4 MiB/请求、1 MiB/s/节点、每来源每日 1 GiB；注意**节点未声明来源清单时放行任意来源、已声明则清单外 403**，故需用一个不与 Agent 撞名的专用节点名，且外部来源不会出现在页面「来源」下拉里）；**B** 把 Pod 日志转写成节点固定文件再由 Agent 采（能力最全：有模式计数指标可告警）。方案 A 若要做到"来源可声明可筛选"，需补一个小的"外部日志来源声明"能力 | **P0** | M | 同上 | D3 |
+| 容器/Pod 日志拉取 | 已实现 | **按需拉取已落地（2026-10-06）**：`container.logs` 只读动作（`internal/server/ops/catalog.go` 目录 + `internal/agent/ops/container.go` 护栏与参数复校 + `internal/agent/collector/k8s_query.go:QueryLogs` 调 apiserver `/api/v1/namespaces/{ns}/pods/{pod}/log`），前端在「容器与工作负载 → Pod」行上提供「日志」抽屉。**边界**：命名空间与 Pod 名必填；行数默认 200、最多 500，时间窗最多 24 小时；单次正文预算 96 KiB（超出即截断并显式标注）；单行超过 500 字符截断并统计；**不提供全量下载**（要看全量应上机器或走日志后端）。**仍未做**：把 Pod 日志接入集中日志链路（`logship` 仍只采本机文件），即"容器 → 日志检索"的联动见下一行 | **P0** | M | 同上 | D3 |
 | exec 终端（默认关闭、按权限开放） | 未实现 | 需三道门控 + 审计；凭据永不上行 | P2 | L | 只读管理面先落地 | D3 |
 | 容器 → 日志/资产联动（Pod 打标回到资产与日志检索） | 未实现 | — | P1 | M | 资产台账 + 日志标签注入 | D2/D3 |
 | 镜像/配置安全扫描 | 未实现 | 可选参考 `aquasecurity/trivy`（Apache-2.0） | P3 | M | — | — |
