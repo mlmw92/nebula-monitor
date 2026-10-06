@@ -85,6 +85,22 @@
         </span>
       </div>
 
+      <!-- 容器过滤：按 Pod 收窄。生效中的过滤条件必须**看得见、删得掉**——
+           否则"日志怎么少了"会变成下一个问题（同理见上面的字段过滤）。 -->
+      <div v-if="pods.length" class="field-row">
+        <el-tag
+          v-for="p in pods"
+          :key="p"
+          closable
+          size="small"
+          type="warning"
+          class="field-tag"
+          @close="removePodFilter(p)"
+        >
+          容器 {{ podFilterLabel(p) }}
+        </el-tag>
+      </div>
+
       <el-alert
         v-if="loadError"
         type="error"
@@ -127,12 +143,26 @@
           <template #default="{ row }">{{ fmtTime(row.ts) }}</template>
         </el-table-column>
         <el-table-column prop="node" label="节点" width="150" />
-        <el-table-column label="来源 / 资产" width="200">
+        <el-table-column label="来源 / 资产" width="220">
           <template #default="{ row }">
             <span>{{ row.source }}</span>
+            <!-- 容器日志（行上带容器身份，Pod 日志）：身份来自 Agent 从文件路径解析的结果、
+                 服务端已校验，资产是**那个 Pod** —— 与"某台机器上的某类来源"是两套归属，
+                 不能混用，因此这类行只展示 Pod 那一套。 -->
+            <template v-if="podOrigin(row)">
+              <div class="pod-line">
+                {{ podOrigin(row).namespace }}/{{ podOrigin(row).pod }}
+                <span v-if="podOrigin(row).container" class="muted">· {{ podOrigin(row).container }}</span>
+              </div>
+              <span v-for="a in podAssetsOf(row)" :key="a.id" class="asset-chip" @click="openAsset(a)">
+                <el-tag size="small" effect="plain" type="warning">{{ a.name || a.naturalKey }}</el-tag>
+              </span>
+              <!-- 「只看」按容器身份收窄：即使台账里没有这个 Pod 也能用（过滤用的是日志自带的身份） -->
+              <el-button link size="small" @click="onlyPod(row)">只看</el-button>
+            </template>
             <!-- 资产映射来自服务端：资产上用人工属性 logSource 声明"这条来源属于我"。
                  点标签打开台账，点「只看」把节点 + 来源一起收窄到该资产。 -->
-            <template v-if="assetsOf(row).length">
+            <template v-else-if="assetsOf(row).length">
               <!-- 点击挂在原生 span 上而不是 el-tag 上：标签组件的 attrs 透传行为不由我们决定，
                    而"点了没反应"是那种不会被报错暴露的失败 -->
               <span v-for="a in assetsOf(row)" :key="a.id" class="asset-chip" @click="openAsset(a)">
@@ -252,6 +282,40 @@ function onlyAsset(row) {
   search()
 }
 
+// ---- 容器日志（Pod 日志）----
+// 身份来自 Agent 从 kubelet 的容器日志路径解析出的 namespace/pod/container，
+// 服务端校验后才落库；前端只展示与跳转，不猜归属。
+// podOrigin 返回行的容器身份（普通文件日志返回 null）。
+function podOrigin(row) {
+  return row && row.origin && row.origin.pod ? row.origin : null
+}
+function podKey(o) {
+  return o.namespace + '|' + o.pod
+}
+function podAssetsOf(row) {
+  const o = podOrigin(row)
+  return o ? podAssetMap.value[podKey(o)] || [] : []
+}
+// onlyPod 按容器身份收窄检索：与「只看资产」同一取向，先把节点 + 来源收窄到这一行，
+// 再叠上容器条件——节点参与扫描收窄（本地后端按节点分文件），容器条件才是"只看这个 Pod"。
+// 它不依赖台账（过滤用的是日志自带的身份），因此台账里没有这个 Pod 时按钮依然有意义。
+function onlyPod(row) {
+  const o = podOrigin(row)
+  if (!o) return
+  nodes.value = [row.node]
+  sources.value = [row.source]
+  const key = podKey(o)
+  if (!pods.value.includes(key)) pods.value = pods.value.concat(key)
+  search()
+}
+function removePodFilter(key) {
+  pods.value = pods.value.filter((x) => x !== key)
+}
+function podFilterLabel(key) {
+  const [ns, pod] = key.split('|')
+  return ns + '/' + pod
+}
+
 // createRule 由这一行日志建阈值规则（全景表 9-05）：跳到告警页并带上来源/模式，
 // 由那边向服务端取模板（指标名必须由服务端拼，见 logs_api.go 的说明）。
 function createRule(row) {
@@ -289,6 +353,12 @@ const lines = ref([])
 // assetMap 的键是 `<source>|<node>`：资产上用人工属性 logSource 声明归属，
 // 服务端只解析本页出现过的组合（见 logs_api.go 的 logsAssetMap）。
 const assetMap = ref({})
+// podAssetMap 的键是 `<namespace>|<pod>`：容器日志要标的是那个 Pod，
+// 与"某台机器上的某类来源"是两套归属，服务端也分两张表给（见 logsPodAssetMap）。
+const podAssetMap = ref({})
+// pods 是生效中的容器过滤（值为 `<namespace>|<pod>`，与服务端参数同形）。
+// 用字符串而不是对象：它要直接进 URLSearchParams，也要能原样显示与删除。
+const pods = ref([])
 const cursor = ref('')
 const truncated = ref(false)
 const scanned = ref({ bytes: 0, lines: 0, files: 0 })
@@ -518,6 +588,8 @@ function buildQuery(withCursor) {
   if (nodes.value.length) p.set('nodes', nodes.value.join(','))
   if (sources.value.length) p.set('sources', sources.value.join(','))
   for (const f of fieldFilters.value) p.append('field', f)
+  // 容器过滤可重复出现（服务端最多 8 个），与 field 同一形态
+  for (const pod of pods.value) p.append('pods', pod)
   p.set('limit', '200')
   if (withCursor && cursor.value) p.set('cursor', cursor.value)
   return p.toString()
@@ -535,12 +607,15 @@ async function search() {
     scanned.value = { bytes: data.scannedBytes || 0, lines: data.scannedLines || 0, files: data.files || 0 }
     // 服务端给出的「来源 + 节点 → 资产」映射：本页共享，逐行查它即可。
     assetMap.value = data.assets || {}
+    // 容器身份 → Pod 资产（键 `<namespace>|<pod>`）：与上面的主机映射分开两张表
+    podAssetMap.value = data.podAssets || {}
   } catch (e) {
     loadError.value = e.message || '查询失败'
     lines.value = []
     cursor.value = ''
     truncated.value = false
     assetMap.value = {}
+    podAssetMap.value = {}
   } finally {
     loading.value = false
   }
@@ -557,6 +632,7 @@ async function loadMore() {
     truncated.value = !!data.truncated
     // 翻页后的映射要**合并**而不是覆盖：否则前几页的资产标签会突然全部消失。
     assetMap.value = { ...assetMap.value, ...(data.assets || {}) }
+    podAssetMap.value = { ...podAssetMap.value, ...(data.podAssets || {}) }
   } catch (e) {
     loadError.value = e.message || '加载更多失败'
   } finally {
@@ -633,6 +709,9 @@ onMounted(async () => {
 .field-chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 2px; }
 /* 资产标签：可点（跳台账），因此要有指针与间距 */
 .asset-chip { margin-left: 4px; cursor: pointer; }
+/* 容器身份：一行小字而不是标签——它是"这行日志的出处"，本身不是可点的实体
+   （可点的是它下面的 Pod 资产标签） */
+.pod-line { font-size: 12px; margin-top: 2px; }
 .field-chip { background: var(--tag-bg-2, rgba(103, 194, 58, 0.14)); font-family: var(--mono); }
 .logline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; cursor: pointer; }
 .logline.open { white-space: pre-wrap; word-break: break-all; }
