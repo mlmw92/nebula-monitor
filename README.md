@@ -380,7 +380,7 @@ securityStoreFile: /var/lib/monitor-server/security_store.json
 - **容器 / Kubernetes 只读管理面（P0）**：工作负载、Pod、事件、单对象详情与日志拉取。凭据只存 Agent 本地，操作经上报响应以**异步任务**语义下发（单次往返至少一个上报周期）。
 - **容器 exec 终端（P2）**：默认关闭，需本机护栏 + 能力协商 + 独立高风险权限点 + 审计。
 - **日志结构化解析与字段检索（P0/P1）**：把下方「日志分析增强（P1）」中的**结构化解析纳入首批**，字段检索与全文索引随后。
-- **日志后端可替换（P2）**：抽出日志存储接口并随第二个适配器落地（候选 VictoriaLogs）。
+- **日志后端可替换（P2 · 接口与第二适配器已落地）**：日志存储已抽成接口 `logstore.LogStore`，默认仍走自研分片落盘，可选 VictoriaLogs（`logBackend: victorialogs` + `logVictoriaLogs.addr`）。外部后端的容量与保留由它自己负责（如 VictoriaLogs 的 `-retentionPeriod`），平台不再叠加每日上限、也不执行日志清理；**首次启用前请按 `docs/testing/2026-10-06-platform-review-delta.md` §10.4 的联调清单核对**（适配器尚未在真实实例上验证）。
 - **链路追踪（P3 · 明确推迟）**：需应用侧探针/SDK 侵入，与内网离线 + 轻量定位冲突；未来可选 eBPF 零侵入方案或 OTel 网关（理由与前置条件见上述设计件）。
 
 

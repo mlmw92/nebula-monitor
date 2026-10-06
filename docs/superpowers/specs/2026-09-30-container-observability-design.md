@@ -220,3 +220,20 @@ ADR-0003 那条通路上的第一批只读能力：集群清单 + 工作负载 +
 
 **验证**：`go test ./...` 全绿；`npm --prefix web run build` 与 `npm --prefix web test`（38 例）通过。新增用例：动作目录与参数注入（`internal/server/ops/catalog_test.go`）、集群清单的权限 / 资源范围 / 凭据字段边界（`internal/server/api/container_api_test.go`）、护栏三态与「参数不合法时一次都不调用查询实现」（`internal/agent/ops/container_test.go`）。
 **尚未在 dev-server 做实机端到端验证**（需一台配了 `k8sInstances` 的节点）。
+
+### 批次 2（2026-10-06）：`LogStore` 后端抽象与 VictoriaLogs 适配器（§4.3，ADR-0002）
+
+ADR-0002 的"接口与第二适配器同时落地"：本批把日志存储抽成接口，并给出第一个外部后端实现。**默认后端不变**（自研分片落盘），外部后端是可选能力。
+
+| 层 | 改动 |
+|---|---|
+| 接口 | `internal/server/logstore/backend.go`：`LogStore`（`Append` / `Query` / `Backend` / `Sources` / `FieldNames`）+ 后端标识 + 工厂 `NewBackend` + 游标跨后端校验 |
+| 适配器 | `internal/server/logstore/victorialogs.go`：写入 `/insert/jsonline`（NDJSON + `_stream_fields=node,source`）、检索 `/select/logsql/query`（LogsQL 翻译 + JSON Lines 解析）、元数据 `field_names` / `stream_field_values` |
+| 配置 | `logBackend: local|victorialogs`、`logVictoriaLogs.{addr,queryTimeout,writeTimeout}`；**后端名写错即启动失败**（静默降级会把配置笔误变成"日志功能消失了"） |
+| 装配 | `cmd/server`：工厂选后端，receiver 与 api 共用同一个后端实例；retention 只对自研落盘生效，外部接管时显式声明 |
+| 错误分类 | `logstore.ErrBackendUnavailable`：接口层回 **502**（"日志后端挂了"）而不是 400（"查询写错了"）；Agent 上行同理 |
+| 前端 | 保留策略页在外部后端下显示"由外部后端负责"而不是"0 个文件" |
+
+**关键取舍**：接口签名按**实际调用面**修正（`Append(model.LogBatch)` 而非初稿的 `Write([]model.LogEntry)`，见 ADR-0002 落地记录）；游标加后端标识（跨后端重放会静默跳行）；检索语义逐条对齐（子串→正则过滤器、精确等值→`field:="v"`、闭区间→`end+1ms`、字段读取时从正文重新提取）；不实现"能力对齐"的假象——外部后端没有逐文件扫描诊断，就如实返回 0 并由界面区分。
+
+**验证**：契约用例同一套断言跑两个适配器（`backend_contract_test.go`，第二个跑在按文档实现文档化子集的假后端上）+ 方言/参数级单测（`victorialogs_test.go`）。**未在真实 VictoriaLogs 实例上联调**，清单见 `../../testing/2026-10-06-platform-review-delta.md` §十。

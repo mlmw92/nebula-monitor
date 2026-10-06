@@ -284,3 +284,72 @@ P0 首批的最后一项（全景表 §3.2「资产关系与拓扑」的拓扑�
 - `depends_on` / `exposes` 仍**只有人工来源**：这是刻意的"关系宁少而准"，不是缺失。
 
 **未覆盖边界（不得视为通过）**：真实集群规模下的图渲染性能（数百节点力导向）、浏览器端到端（真实点击 → 换中心 → 视觉确认）、大屏/暗色主题下的配色可读性。
+
+---
+
+## 十、第六轮：日志后端抽象与 VictoriaLogs 适配器（2026-10-06 续五）
+
+P0 首批的最后一项（全景表 §3.9「外部日志后端」）。ADR-0002 的口径是**接口与第二适配器同时落地**（只有一个适配器时抽接口是"假想接缝"），因此本批同时交付接口、适配器、配置与契约用例。
+
+### 10.1 落地内容
+
+| 层 | 内容 |
+|---|---|
+| 接口 | `logstore.LogStore`：`Append(model.LogBatch)` / `Query(model.LogQuery, Cursor)` / `Backend()` / `Sources()` / `FieldNames()`。签名按**实际调用面**落地，修正 ADR 初稿（初稿写 `Write([]model.LogEntry)`，但上行用的是 `Append` + `LogBatch`，且限额丢弃是正常结果不是错误） |
+| 游标 | `Cursor` 增加 `Backend`：跨后端重放**必须被拒**（偏移语义不同，硬用会静默跳行）。零值游标（从头开始）任何后端都接受；有偏移但无标识的历史游标只对本地后端有效 |
+| 适配器 | `logstore.VictoriaLogs`：写入 `/insert/jsonline`（NDJSON，`_stream_fields=node,source`，时间用 RFC3339 避免单位歧义）、检索 `/select/logsql/query`（LogsQL 翻译 + JSON Lines 解析 + 客户端归一排序）、元数据 `field_names` / `stream_field_values` |
+| 配置 | `logBackend: local\|victorialogs` + `logVictoriaLogs.{addr,queryTimeout,writeTimeout}`；**后端名写错即启动失败**（静默降级会把配置笔误变成"日志功能消失了"，而日志恰好是排障时才去看的东西） |
+| 装配 | `cmd/server`：工厂选后端；receiver 与 api 共用同一实例（不会"写到 A、读 B"）；retention 只对自研落盘生效，外部接管时**显式声明** |
+| 错误分类 | `logstore.ErrBackendUnavailable` → 接口回 **502**、Agent 上行回 502。运维看到 400 会去改查询条件，而真实情况是"日志后端连不上"——错误码指错方向比不给错误码更费时间 |
+| 前端 | 保留策略页：外部后端下显示"由该后端负责（如 VictoriaLogs 的 -retentionPeriod）"，保留天数标注"不生效" |
+
+### 10.2 关键设计取舍
+
+- **方言按一手文档写，不靠记忆**：2026-10-06 取官方 Querying / LogsQL / Data Ingestion 三页核对（`/select/logsql/query` 的参数与 JSON Lines 响应、`_time` 语义、`limit`+`offset` 分页、`/insert/jsonline` 的 `_stream_fields`/`_time_field`/`_msg_field`）。
+- **检索语义逐条对齐本地后端**（这是抽象的全部意义）：
+  - 关键词是**子串** → 正则过滤器 `~"QuoteMeta(kw)"`（不用 `*x*`：含空格/引号/通配符时拼接极易出错）；两层转义（先转正则元字符、再转 LogsQL 字面量）。
+  - 字段是**精确等值** → `field:="v"`。**绝不用 `field:v`**——那是按词匹配（`status:500` 会命中 `status:5000` 那种"看起来对、其实是别的行"的结果）。
+  - 字段名含连字符/点号时**必须加引号**：`-` 在 LogsQL 里是取反运算符，`status-code:="500"` 会被解析成 `status` 且非 `code:="500"`——语法合法、结果全错。
+  - 时间闭区间 → `end = To+1ms`：后端 `end` 是**开区间**，少补 1ms 会静默丢掉"到某一毫秒为止"的那一行。
+  - 字段**读取时从正文重新提取**（而不是采信后端返回的顶层字段）：后端里的字段可能来自别的写入工具，重新提取才能保证两个后端的 `Fields` 完全一致。
+  - 保留字段（`_time`/`_msg`/`node`/`source`/`pattern`）**不可被正文覆盖**：否则一条日志就能伪造自己的来源与节点。
+- **如实暴露能力差异**（不制造"能力对齐"的假象）：外部后端没有逐文件扫描，三项扫描诊断就返回 0（界面只在"没命中"时展示诊断，因此不会显示成"扫了 0 个文件"的假象）；单来源每日上限不适用（容量归后端），但上行的限速与请求体上限仍然生效（在 receiver 侧）。
+- **元数据接口失败不拖垮检索**：候选列表拿不到就返回空列表（界面退化成手动输入字段名），而不是让整个检索页报错。
+
+### 10.3 本轮新增用例与执行证据
+
+| 用例 | 文件 | 断言 |
+|---|---|---|
+| `TestBackendContract_*`（10 组） | `internal/server/logstore/backend_contract_test.go` | **同一套断言跑两个适配器**：全量检索与时间倒序、字段提取一致、关键词子串（且不匹配模式名）、正则优先于关键词、字段精确等值（`500 timeout` 不得被 `500` 命中）、节点/来源/叠加过滤、**闭区间时间**（`From==To==某行` 必须返回）、分页不重不漏且截断显式、游标跨后端被拒、目录候选口径、写入校验一致、后端标识唯一 |
+| `TestBuildLogsQL`（13 组） | `internal/server/logstore/victorialogs_test.go` | 空条件→`*`；子串→正则；正则优先；元字符/引号/反斜杠/控制字符的**两层转义**；`field:=`（不是 `field:`）；含连字符与点号的字段名加引号；多条件显式 AND + 括号；字段顺序稳定 |
+| `TestVictoriaLogs_AppendRequestShape` | 同上 | `_stream_fields=node,source`、时间/消息字段绑定、时间用 RFC3339、结构化字段平铺、**正文不得覆盖保留字段** |
+| `TestVictoriaLogs_QueryRequestShape` | 同上 | `limit=Limit+1`（多取一行判断截断）、首页无 `offset`、续读同时带 `limit`+`offset`、`end = To+1ms`、`start = From` |
+| `TestParseVLTime`（11 组） | 同上 | RFC3339（秒/纳秒/带时区偏移）、Unix 秒/毫秒/微秒/纳秒（按量级判断）、字符串数字、空值/非法值/类型不符 |
+| `TestParseVLLines` | 同上 | 坏行与无时间戳的行跳过（不整页失败）、字段从正文重新提取、时间戳精确解析 |
+| `TestVictoriaLogs_ErrorClassification` / `TestVictoriaLogs_BackendUnavailableIsClassified` | 同上 / 契约文件 | 5xx 与网络失败归类为 `ErrBackendUnavailable`，且**不得报告"已接受行"**（否则丢日志在指标上完全看不见） |
+| `TestNewVictoriaLogs_ValidatesAddr` / `TestNewBackend` | 同上 | 地址校验（空/缺 scheme/末尾斜杠）、未知后端名报错、本地未配置目录返回**真正的 nil 接口**（不能是"非 nil 接口"，否则 503 判断失效） |
+| `TestVictoriaLogs_CatalogsDegradeGracefully` | 同上 | 元数据接口失败时返回空候选而不是让检索不可用 |
+| `TestRoutes_LogsQueryBackendUnavailable` | `internal/server/api/logs_backend_test.go` | 后端不可用 502、查询问题 400、正常 200 |
+| `TestManager_ExternalLogBackendIsReported` | `internal/server/retention/retention_test.go` | 状态报告 `logsBackend`；清理结果说明"由外部后端负责"且不报删除量；注入本地存储后回到 local 口径 |
+| RetentionSubView 三条 | `web/src/components/settings/RetentionSubView.test.js` | 本地口径展示文件/分片；外部后端说明由后端负责且保留天数不生效；后端标识缺失（旧服务端）时按本地口径、不误报外部后端 |
+
+**执行结果**：`go build ./...`、`go vet ./...` 通过；`go test -count=1 ./...` 全绿；`npm --prefix web test` **13 文件 72 项**通过；`npm --prefix web run build` 通过。
+
+### 10.4 首次启用外部后端前的联调清单（**未做，不得视为通过**）
+
+以下每项都**没有**在真实 VictoriaLogs 实例上验证过——适配器跑在按文档实现文档化子集的假后端上（`victorialogs_fake_test.go`），它只能证明"翻译符合文档语法"，不能证明"真后端接受"：
+
+1. **写入**：`curl` 一条真实上行后，用 `GET /select/logsql/query?query=*` 确认字段（`_time`/`_msg`/`node`/`source`/`pattern` 与解析出的业务字段）都落了进去，且 `_stream_fields=node,source` 生效（观察压缩率与 `vl_streams` 计数）。
+2. **时间**：确认 `start`/`end` 的 RFC3339 解析与本平台的毫秒闭区间一致（造一条恰好落在 `To` 上的日志，确认能查到）。
+3. **分页**：确认 `limit`+`offset` 在真实数据下不重不漏（本平台的续读依赖"同一时间窗内偏移稳定"）。
+4. **方言**：确认 `~"..."`、`field:="..."`、`field:in(...)`、`"含连字符的字段名":="..."` 四种形态都被真实解析器接受（假后端只实现了这四种）。
+5. **元数据**：确认 `stream_field_values?field=source` 与 `field_names` 的响应结构与文档一致（假后端按 `{"values":[{"value":...}]}` 实现）。
+6. **容量**：确认后端的 `-retentionPeriod` 与业务约定一致，并确认平台侧 `logsDays` 已不再被期待生效（界面会提示"不生效"）。
+7. **部署**：若客户要引入，需把 VictoriaLogs 二进制纳入 `build/fetch-packages.sh`（离线依赖缓存）与 `deploy/install-tsdb.sh` 的部署脚本模式（ADR-0002 的既定要求）。
+8. **故障演练**：停掉后端，确认检索接口回 502、Agent 上行回 502 且 `log_dropped_total` 计数可见（而不是静默丢日志）。
+
+### 10.5 仍未做
+
+- **全文倒排索引**（9-07 的另一半）：字段过滤仍是**有界扫描**；引入外部后端是"换存储"，不是"建索引"。
+- **日志↔资产标签注入**（9-05 的联动侧）：检索侧仍不能按资产维度筛选。
+- `build/fetch-packages.sh` / `deploy/install-tsdb.sh` 的脚本改动（属于"客户要引入时"的部署工作，不在本批）。
