@@ -43,9 +43,13 @@ import (
 //     平台的**上行限速与请求体上限仍然生效**（它们在 receiver 侧，与后端无关）。
 //   - 分页按 `limit+offset`（每次续读重跑一次查询），而不是本地后端的"文件内绝对偏移续读"。
 //
-// **未在真实 VictoriaLogs 实例上联调过**：方言与端点按官方文档实现，写入路径的
-// 逐条断言来自 httptest 假后端（见 victorialogs_test.go）。首次启用前请按
-// docs/testing/2026-10-06-platform-review-delta.md §十 的联调清单逐项核对。
+// **已在真实 VictoriaLogs（v1.53.0）上完成八项联调（2026-10-06）**：写入/时间闭区间/
+// 分页不重不漏/方言/元数据/容量/部署/故障演练全部通过，逐项证据见
+// docs/testing/2026-10-06-platform-review-delta.md §10.4。
+//
+// 联调发现的一条**使用侧特性**：写入成功到可被检索之间有**秒级延迟**（后端的内存数据
+// flush 周期）。现场若"刚上报就搜不到"，先看 `vl_rows_ingested_total` 是否已增长——
+// 增长即已落库，等几秒再查即可，不是丢日志。
 type VictoriaLogs struct {
 	addr        string
 	writeClient *http.Client

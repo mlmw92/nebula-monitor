@@ -335,23 +335,34 @@ P0 首批的最后一项（全景表 §3.9「外部日志后端」）。ADR-0002
 
 **执行结果**：`go build ./...`、`go vet ./...` 通过；`go test -count=1 ./...` 全绿；`npm --prefix web test` **13 文件 72 项**通过；`npm --prefix web run build` 通过。
 
-### 10.4 首次启用外部后端前的联调清单（**未做，不得视为通过**）
+### 10.4 外部后端联调清单（**2026-10-06 已在真实实例上完成**）
 
-以下每项都**没有**在真实 VictoriaLogs 实例上验证过——适配器跑在按文档实现文档化子集的假后端上（`victorialogs_fake_test.go`），它只能证明"翻译符合文档语法"，不能证明"真后端接受"：
+联调环境：dev-server（124.223.77.206），VictoriaLogs **v1.53.0**（linux-amd64，官方发布包），
+用新增的 `deploy/install-logs.sh` 离线安装为 `victoria-logs.service`（`-storageDataPath=/var/lib/victoria-logs-data`、`-httpListenAddr=:9428`、`-retentionPeriod=7d`）；Server 1.30.34 把 `logBackend` 切为 `victorialogs` 后重启。**联调结束已恢复 `local` 并停用 VL**（安装保留，`systemctl enable victoria-logs` 可再启用）。
 
-1. **写入**：`curl` 一条真实上行后，用 `GET /select/logsql/query?query=*` 确认字段（`_time`/`_msg`/`node`/`source`/`pattern` 与解析出的业务字段）都落了进去，且 `_stream_fields=node,source` 生效（观察压缩率与 `vl_streams` 计数）。
-2. **时间**：确认 `start`/`end` 的 RFC3339 解析与本平台的毫秒闭区间一致（造一条恰好落在 `To` 上的日志，确认能查到）。
-3. **分页**：确认 `limit`+`offset` 在真实数据下不重不漏（本平台的续读依赖"同一时间窗内偏移稳定"）。
-4. **方言**：确认 `~"..."`、`field:="..."`、`field:in(...)`、`"含连字符的字段名":="..."` 四种形态都被真实解析器接受（假后端只实现了这四种）。
-5. **元数据**：确认 `stream_field_values?field=source` 与 `field_names` 的响应结构与文档一致（假后端按 `{"values":[{"value":...}]}` 实现）。
-6. **容量**：确认后端的 `-retentionPeriod` 与业务约定一致，并确认平台侧 `logsDays` 已不再被期待生效（界面会提示"不生效"）。
-7. **部署**：若客户要引入，需把 VictoriaLogs 二进制纳入 `build/fetch-packages.sh`（离线依赖缓存）与 `deploy/install-tsdb.sh` 的部署脚本模式（ADR-0002 的既定要求）。
-8. **故障演练**：停掉后端，确认检索接口回 502、Agent 上行回 502 且 `log_dropped_total` 计数可见（而不是静默丢日志）。
+| # | 项 | 结果与判据 |
+|---|---|---|
+| 1 | 写入 | **通过**。VL 自报 `vl_rows_ingested_total{type="jsonline"}=13`、`vl_bytes_ingested_total=3646`、`vl_rows_dropped_total{reason="too_many_fields"}=0`；样本行含 `_time`/`_msg`/`_stream` 且 `_stream={node="VM-0-10-ubuntu",source="nginx_access"}`（`_stream_fields=node,source` 生效）；JSON 文本行解析出的 `level`/`status`/`path` 均作为字段落下 |
+| 2 | 时间 | **通过**。取一条真实日志的毫秒时间戳 T：`to=T` 时命中（闭区间含端点）、`to=T-1ms` 时不命中——`end=To+1ms` 的换算被双向证实 |
+| 3 | 分页 | **通过**。`limit=1` 首页给游标（解出 `{"b":"victorialogs","k":1}`，带后端标识）；第 2 页与第 1 页不重复、时间倒序；两页合并**逐条等于**直接 `limit=2` 的结果（不重不漏） |
+| 4 | 方言 | **通过**。关键词（子串）、正则（裸模式 `status.{0,4}500`、`(?i)LEVEL`）、`sources`、`field=source:nginx_access`、`nodes` 五种形态均被真实解析器接受并返回正确命中数；`regex` 传带斜杠的 `/x/` 不匹配属**预期**（界面约定是裸模式，占位提示"正则，如 disk\|oom"） |
+| 5 | 元数据 | **通过**。`POST /select/logsql/stream_field_values` 与 `/field_names` 实测返回 `{"values":[{"value":...,"hits":N}]}`；平台 `/api/v1/logs/fields` 在字段写入后列出 `{"nginx_access":["level","path","status"]}` 且**不泄露** `node/source/pattern` 等流字段；`field=status:500` 恰好命中 1 条并带 `fields`，`field=status:404` 命中 0 条 |
+| 6 | 容量 | **通过**。`systemctl show` 证实 `-retentionPeriod=7d`（与平台自研落盘默认 7d 一致）；平台 `/system/retention` 自报 `logsBackend="victorialogs"`；执行一次清理后 `logDirsRemoved=0 / logFilesRemoved=0`，且 `/var/lib/monitor-server/logs` **逐字节未变**（外部后端的数据平台不碰） |
+| 7 | 部署 | **通过**。`build/fetch-packages.sh` 已纳入 VL（三架构，可选组件失败不阻断发布）；`deploy/install-logs.sh` 在实机完成"离线包扫描 → 解压装二进制 → 写 systemd → 存活 `/health` 与查询 `/select/logsql/query` 双健康检查"；`deploy/uninstall.sh --logs`、`build/release.sh` 的 full 包与 `install.sh logs` 子命令配套齐 |
+| 8 | 故障演练 | **通过**。停 VL 后检索回 **502**（`日志后端不可用: ... dial tcp 127.0.0.1:9428: connect: connection refused`）而非 400；Agent 上行同样回 502（Agent 会重试并计入丢弃指标）；**重启 VL 后无需重启 Server 即恢复 200**（适配器每次请求新建客户端） |
+
+**联调中的发现（已处理或已记录）**：
+
+1. **写入到可检索有秒级延迟**：上行成功后立刻查询可能查不到，数秒后才可见（VL 的内存数据 flush 周期）。**不是缺陷**，但必须在文档里写清——现场看到"刚上报的日志搜不到"极易判成"日志丢了"。判定方法：用 `vl_rows_ingested_total` 确认已落库，再等几秒重查。
+2. **接收端的 `source not declared by node` 守卫在联调中被触发**：构造测试上行时用了节点未声明的来源，被如实拒绝（400）。这是既有守卫的正确行为，记录以免下次误判成"写入缺陷"——验证字段链路时要用节点**已声明**的来源。
+3. **`ProbeTSDBRetention` 对真实 VictoriaMetrics 必然失败（已修）**：VM 的 `/flags` 是**纯文本**（`-flag="value"` 逐行、`text/plain`、只列显式设置过的参数），而实现按 JSON 解析，于是保留策略页的 TSDB 一段一直显示"解析 /flags 失败: invalid character 'h' in numeric literal"。原单元测试用的是自造的 JSON 响应，恰好把不一致盖住了。已改为解析纯文本并补 `parseTSDBFlagLine` 边界用例，测试数据改用**真实格式**。该机 VM 未显式设保留期，修复后的预期展示是"时序库未显式暴露保留参数，当前保留期由其后端默认值决定"（需随下一次 Server 升级生效）。
+
+**未覆盖边界（不得视为通过）**：VL 多副本/集群版与多租户（`AccountID/ProjectID`）路径、大流量下的写入吞吐与背压、字段基数爆炸场景、`v1.53.0` 以外的版本、浏览器端到端（真实点击检索/翻页/字段筛选的视觉确认）。
 
 ### 10.5 仍未做
 
 - **全文倒排索引**（9-07 的另一半）：字段过滤仍是**有界扫描**；引入外部后端是"换存储"，不是"建索引"。
-- `build/fetch-packages.sh` / `deploy/install-tsdb.sh` 的脚本改动（属于"客户要引入时"的部署工作，不在本批）。
+- ~~`build/fetch-packages.sh` / `deploy/install-tsdb.sh` 的脚本改动~~ → **已于 2026-10-06 落地**：`build/fetch-packages.sh` 纳入 VL（三架构，可选组件失败不阻断发布）、新增 `deploy/install-logs.sh`（独立脚本，不塞进 `install-tsdb.sh`——那个脚本的 `--backend` 语义是"指标时序库四选一"，VL 是并存的日志存储）、`deploy/install-server.sh` 新增 `--log-backend/--log-addr/--log-dir` 并写入 `server.yaml`、`deploy/uninstall.sh --logs`、`build/release.sh` 的 full 包与 `install.sh logs` 子命令。
 
 ---
 
@@ -428,4 +439,4 @@ P0 首批落地后，按全景表 §五「建议的 P1 候选」推进。本批�
 - **Pod 日志进入集中日志检索**（§3.8 的另一半）：需要 Agent 侧协议扩展——`logSources[].paths` 支持通配符 + 按来源**选择性**上报路径（Server 据此解析 pod 身份并解析到资产）。这意味着全部 Agent 需重分发，属独立立项；本批只做了 Server 侧绑定（不需要 Agent 配合的那一半）。
 - **通知消息里带资产与影响面**（§3.1 的延伸）：通知模板目前只有事件字段与 labels；要在通知里写"影响 N 个资产"，需要先定义资产信息的模板占位符与截断口径。
 - **日志字段倒排索引**、**批量命令/脚本执行**：见 §11.5。
-- 上一批的联调清单（§10.4）仍未执行（外部日志后端未在真实实例上验证）。
+- ~~上一批的联调清单（§10.4）仍未执行~~ → **已于 2026-10-06 在真实 VictoriaLogs v1.53.0 上执行完毕**（八项全过，见 §10.4）。
