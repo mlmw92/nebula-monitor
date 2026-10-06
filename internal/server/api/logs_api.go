@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -19,7 +20,10 @@ import (
 // 而不是「查完再过滤结果」——后者既浪费扫描预算，也会通过「明明有 N 条却只显示 M 条」泄露别人的日志量。
 
 // SetLogStore 注入集中日志存储（未注入时检索接口返回 503，与管理端「该能力未启用」一致）。
-func (a *API) SetLogStore(s *logstore.Store) { a.logs = s }
+//
+// 参数是接口：调用方传 nil **具体类型**（例如未配置目录的 *Store）会得到"非 nil 接口"，
+// 上面的 503 判断随即失效——注入前必须显式判空（见 cmd/server 的写法）。
+func (a *API) SetLogStore(s logstore.LogStore) { a.logs = s }
 
 // handleLogsQuery 处理集中日志检索。
 func (a *API) handleLogsQuery(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +76,12 @@ func (a *API) handleLogsQuery(w http.ResponseWriter, r *http.Request) {
 
 	res, err := a.logs.Query(q, cursor)
 	if err != nil {
+		// 外部后端不可用要回 502：运维看到 400 会去改查询条件，
+		// 而真实情况是"日志后端连不上"——错误码指错方向比不给错误码更费时间。
+		if errors.Is(err, logstore.ErrBackendUnavailable) {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

@@ -113,8 +113,9 @@ type Receiver struct {
 	defense *security.DefenseStore // 受控 fail2ban 入侵防御任务存储（可空）
 	ops     *ops.Service           // 统一下行操作通道（可空；用 SetOps 注入）
 
-	// 集中日志（C2）：logs 为 nil 表示该能力关闭（接口回 503，与不配置 logSources 的 Agent 恰好对称）
-	logs       *logstore.Store
+	// 集中日志（C2）：logs 为 nil 表示该能力关闭（接口回 503，与不配置 logSources 的 Agent 恰好对称）。
+	// 用接口而不是具体类型：日志后端可替换（默认自研落盘，可选 VictoriaLogs，ADR-0002）。
+	logs       logstore.LogStore
 	logMaxBody int64
 	logLimiter *logRateLimiter
 

@@ -210,9 +210,29 @@ func main() {
 	if logDir == "" {
 		logDir = filepath.Join(cfg.DataDir, "logs")
 	}
-	// 同一个实例既供上行写入、也供检索读取：读写两侧共用一份存储，布局不会各写各的
-	logStore := logstore.New(logDir, cfg.LogMaxBytesPerDay)
-	recv.SetLogStore(logStore, cfg.LogMaxBodyBytes, cfg.LogUploadRateBps)
+	// 日志后端可替换（ADR-0002）：默认自研分片落盘，可选外部后端 VictoriaLogs。
+	// 后端名写错**必须让启动失败**：静默降级成"日志不可用"会把一个配置笔误
+	// 变成一次"日志功能消失了"的事故（而日志恰好是排障时才去看的东西）。
+	logBackend, err := logstore.NewBackend(cfg.LogBackend, logstore.BackendOptions{
+		Dir:            logDir,
+		MaxBytesPerDay: cfg.LogMaxBytesPerDay,
+		VictoriaLogs: logstore.VictoriaLogsOptions{
+			Addr:         cfg.LogVictoriaLogs.Addr,
+			QueryTimeout: time.Duration(cfg.LogVictoriaLogs.QueryTimeout) * time.Second,
+			WriteTimeout: time.Duration(cfg.LogVictoriaLogs.WriteTimeout) * time.Second,
+		},
+	})
+	if err != nil {
+		slog.Error("初始化集中日志后端失败", "backend", cfg.LogBackend, "err", err)
+		os.Exit(1)
+	}
+	// 同一个实例既供上行写入、也供检索读取：读写两侧共用同一个后端实例，
+	// 不会出现"写到一个后端、读另一个后端"这种只在查不到日志时才暴露的问题。
+	// logBackend 是接口：nil 表示未启用（上面已把"具体类型的 nil"挡在工厂里）。
+	recv.SetLogStore(logBackend, cfg.LogMaxBodyBytes, cfg.LogUploadRateBps)
+	if logBackend != nil {
+		slog.Info("集中日志已启用", "backend", logBackend.Backend(), "dir", logDir)
+	}
 
 	// 资产台账（内嵌 SQLite 单文件）：库路径留空时取 <DataDir>/assets.db。
 	// 打开失败**不阻断启动**——台账是次要能力，缺它时监控主链路仍应可用。
@@ -342,8 +362,14 @@ func main() {
 		slog.Error("初始化数据保留策略失败", "err", err)
 		os.Exit(1)
 	}
-	// 集中日志也纳入保留清理（C2，默认 7 天）：按「来源/日期/节点」的日期分片整天删除
-	retentionMgr.SetLogStore(logStore)
+	// 集中日志的保留清理只对**自研落盘**生效：按「来源/日期/节点」的日期分片整天删除。
+	// 外部后端的保留期由它自己管（VictoriaLogs 的 -retentionPeriod），平台既不该也不能
+	// 去删它的数据；但必须显式声明，否则界面会把"日志 0 文件"说成"日志未接入"。
+	if local, ok := logBackend.(*logstore.Store); ok {
+		retentionMgr.SetLogStore(local)
+	} else if logBackend != nil {
+		retentionMgr.SetLogStoreExternal(logBackend.Backend())
+	}
 	rest := api.New(store, nodeMgr, rules, alertStore, hub, cfg.AgentAuth, cfg.AgentBinDir, cfg.WebDir, cfg.Auth, upgrader, notifyMgr, engine, maintenance, dialtestStore, reportGen, screenMgr, ackStore, inhibitStore, groupingStore, ngxWin, uiMgr, *cfgPath, securityStore, defenseStore, auditStore, authStore)
 	rest.SetDashboardManager(dashMgr)
 	// 下行操作通道：与 receiver 共用同一个 service 实例（见上面 opsSvc 的说明）
@@ -352,8 +378,8 @@ func main() {
 	rest.SetPipelineStore(pipelineStore)
 	rest.SetSelfMon(mon)
 	rest.SetRetention(retentionMgr)
-	// 集中日志检索（C2）：与上行共用同一个存储实例（同一份目录，读写两侧布局必然一致）
-	rest.SetLogStore(logStore)
+	// 集中日志检索（C2）：与上行共用同一个后端实例（读写两侧必然是同一个后端）
+	rest.SetLogStore(logBackend)
 	rest.SetMiddlewareRegistry(mwRegistry)
 	// 资产台账接口：仅在库可用时注入（传 nil 具体值进接口会得到「非 nil 接口」，必须显式判断）
 	if assetSvc != nil {

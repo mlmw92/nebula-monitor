@@ -42,18 +42,28 @@ const (
 	DefaultScanBudgetLines = 200000
 )
 
-// Cursor 是翻页游标：定位到「某个文件 + 文件内绝对字节偏移」，该偏移之后的部分均已扫描过。
+// Cursor 是翻页游标。**字段分属不同后端**，因此必须按 Backend 区分：
+// 把一个后端的游标喂给另一个后端，轻则空页、重则静默跳行——而"少了几行日志"
+// 这种症状在现场极难归因。Backend 因此是必填项，由 checkCursor 在 Query 入口校验。
 //
-// 用绝对偏移而不是「距末尾的字节数」：日志文件是追加写的，用距末尾的距离做游标，
+// 空 Backend 视为**本地后端**：接口引入前只有自研落盘一种实现，历史游标必须继续可用。
+//
+// 本地后端用「文件 + 文件内绝对字节偏移」（该偏移之后的部分均已扫描过）：
+// 用绝对偏移而不是「距末尾的字节数」——日志文件是追加写的，用距末尾的距离做游标，
 // 一旦文件在两次翻页之间长大，续读就会跳过还没看过的老行（静默丢数据）。
 type Cursor struct {
-	File   string `json:"f"` // 相对 root 的文件路径
-	Offset int64  `json:"o"` // 文件内绝对字节偏移（从文件头算）
+	Backend string `json:"b,omitempty"` // 后端标识（BackendLocal / BackendVictoriaLogs）
+	File    string `json:"f,omitempty"` // 本地后端：相对 root 的文件路径
+	Offset  int64  `json:"o,omitempty"` // 本地后端：文件内绝对字节偏移（从文件头算）
+	// Skip 是外部后端的续读位置：跳过「最新的 N 条」（VictoriaLogs 的 limit+offset 分页）。
+	// 与本地后端的偏移语义不同，因此两者不能互相翻译——这也是 Backend 必填的原因。
+	Skip int `json:"k,omitempty"`
 }
 
 // EncodeCursor 把游标编码成不透明字符串（前端只回传，不解析）。
+// 没有任何续读位置时返回空串：空游标对前端意味着「没有下一页」。
 func EncodeCursor(c Cursor) string {
-	if c.File == "" {
+	if c.File == "" && c.Skip == 0 {
 		return ""
 	}
 	data, err := json.Marshal(c)
@@ -93,6 +103,11 @@ func (s *Store) SetScanBudget(bytes, lines int64) {
 func (s *Store) Query(q model.LogQuery, cursor Cursor) (model.LogQueryResult, error) {
 	if s == nil {
 		return model.LogQueryResult{}, fmt.Errorf("集中日志存储未启用")
+	}
+	// 游标必须属于本后端：另一个后端的游标在这里没有任何意义，
+	// 硬当成偏移用会静默跳行（见 Cursor 的说明）。
+	if err := checkCursor(cursor, BackendLocal); err != nil {
+		return model.LogQueryResult{}, err
 	}
 	limit := q.Limit
 	if limit <= 0 {
@@ -185,7 +200,7 @@ func (s *Store) Query(q model.LogQuery, cursor Cursor) (model.LogQueryResult, er
 			// 因此本行不会被重复返回，也不会被跳过。
 			if len(res.Lines) >= limit {
 				// 已够一页
-				next = Cursor{File: rel, Offset: lineStart}
+				next = Cursor{Backend: BackendLocal, File: rel, Offset: lineStart}
 				res.Truncated = true
 				stop = true
 				return false
@@ -193,7 +208,7 @@ func (s *Store) Query(q model.LogQuery, cursor Cursor) (model.LogQueryResult, er
 			if res.ScannedBytes >= budgetBytes || res.ScannedLines >= budgetLines {
 				// 预算用尽：按行判断（而不是每个文件读完才判断），
 				// 否则一个超大文件会被整份扫完——「有界」就名不副实了。
-				next = Cursor{File: rel, Offset: lineStart}
+				next = Cursor{Backend: BackendLocal, File: rel, Offset: lineStart}
 				res.Truncated = true
 				stop = true
 				return false

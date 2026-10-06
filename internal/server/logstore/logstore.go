@@ -173,7 +173,7 @@ func (s *Store) FieldNames(source string) []string {
 
 // extractFields 提取结构化字段并施加每来源的名字基数上限（调用方已持有 s.mu）。
 func (s *Store) extractFields(source, text string) map[string]string {
-	fields := logparse.Extract(text)
+	fields := parseFields(text)
 	if len(fields) == 0 {
 		return nil
 	}
@@ -221,6 +221,17 @@ func (s *Store) budgetLines() int64 {
 
 // Root 返回存储根目录（检索侧按同样布局定位文件）。
 func (s *Store) Root() string { return s.root }
+
+// Backend 返回后端标识。实现 logstore.LogStore。
+//
+// 值接收者：nil 接收者也要能回答（它会被放进接口变量后调用）。
+func (s *Store) Backend() string { return BackendLocal }
+
+// parseFields 从原文里提取结构化字段（两个后端共用同一条解析规则）。
+//
+// 必须共用：换后端不得改变"哪些字段能筛"，否则用户会看到同一份日志在
+// 两个后端下筛出不同结果——这种不一致没有报错，只会被当成"偶发"。
+func parseFields(text string) map[string]string { return logparse.Extract(text) }
 
 // Append 写入一批日志，返回接受与丢弃的行数（以及丢弃原因，供 Agent 记进指标）。
 //

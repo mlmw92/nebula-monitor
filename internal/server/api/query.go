@@ -117,7 +117,9 @@ type API struct {
 	selfmon        *selfmon.Monitor       // 自监控收集器（可空；不注入时探针仍可用，只是没有进程指标）
 	retention      *retention.Manager     // 数据保留策略（可空；不注入时接口返回默认策略）
 	mwRegistry     *mwreg.Registry        // 中间件类型注册表（可空；未注入时退化为内置类型）
-	logs           *logstore.Store        // 集中日志存储（C2；可空，未注入时检索接口返回 503）
+	// 集中日志存储（C2；可空，未注入时检索接口返回 503）。
+	// 用接口而不是具体类型：日志后端可替换（默认自研落盘，可选 VictoriaLogs，ADR-0002）。
+	logs           logstore.LogStore
 	assets         AssetProvider          // 资产台账（可空；未注入时资产接口返回 503）
 	startedAt      time.Time              // 进程启动时间，供 /healthz、/readyz 报告运行时长
 }

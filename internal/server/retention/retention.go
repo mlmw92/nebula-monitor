@@ -147,6 +147,10 @@ type Status struct {
 	Security    BuiltinLimit       `json:"security"`
 	TSDB        TSDBRetention      `json:"tsdb"`
 	LastCleanup *CleanupResult     `json:"lastCleanup,omitempty"`
+	// LogsBackend 是集中日志的后端标识（local / victorialogs）。
+	// 切到外部后端后 Logs 恒为零——那里的占用与保留由后端自己管。
+	// 必须显式回传：否则"日志 0 文件 0 字节"看起来像日志功能坏了。
+	LogsBackend string `json:"logsBackend,omitempty"`
 }
 
 // Manager 持有保留策略并执行清理。所有字段在构造后只读，故仅需保护配置与上次结果。
@@ -165,6 +169,10 @@ type Manager struct {
 	// 它是本包最后纳入的一类数据，而构造参数已经很长——再加一个会迫使所有调用点（含测试）跟着改，
 	// 收益却只有「少一行注入」。可选能力一律走 Set* 注入（与模板存储、日志存储的写法一致）。
 	logs *logstore.Store
+
+	// logsExternal 是"日志由外部后端接管"时的后端名（非空且 logs 为 nil 时生效）。
+	// 保留期归外部后端，但清理结果与状态必须把这件事说出来（见 SetLogStoreExternal）。
+	logsExternal string
 
 	lastMu sync.Mutex
 	last   *CleanupResult
@@ -206,6 +214,25 @@ func (m *Manager) SetLogStore(s *logstore.Store) {
 	}
 }
 
+// SetLogStoreExternal 声明集中日志由**外部后端**接管（此时不注入本地存储）。
+//
+// 外部后端自管保留期（VictoriaLogs 的 -retentionPeriod）：平台既不该也不能去删它的数据。
+// 但要**说出来**——否则界面会把"日志 0 文件"显示成"日志未接入"，
+// 把一次有意的架构选择说成配置缺失。
+func (m *Manager) SetLogStoreExternal(backend string) {
+	if m != nil {
+		m.logsExternal = backend
+	}
+}
+
+// logsBackend 返回日志后端标识：注入了本地存储就是 local，被外部接管就是后端名。
+func (m *Manager) logsBackend() string {
+	if m.logs != nil {
+		return m.logs.Backend()
+	}
+	return m.logsExternal
+}
+
 // Config 返回当前策略。
 func (m *Manager) Config() Config {
 	if m == nil {
@@ -238,6 +265,7 @@ func (m *Manager) Status() Status {
 		return Status{Config: DefaultConfig()}
 	}
 	out := Status{Config: m.Config()}
+	out.LogsBackend = m.logsBackend()
 	if m.acks != nil {
 		out.Acks = m.acks.Stats()
 	}
@@ -281,8 +309,12 @@ func (m *Manager) cleanup(cfg Config) CleanupResult {
 		(cfg.LogsDays > 0 && m.logs != nil) ||
 		(cfg.AuditDays > 0 && m.audit != nil)
 	switch {
-	case m.acks == nil && m.reports == nil && m.logs == nil && m.audit == nil:
+	case m.acks == nil && m.reports == nil && m.logs == nil && m.audit == nil && m.logsExternal == "":
 		res.Skipped = "未接入可清理的数据源"
+	case !actionable && m.logsExternal != "":
+		// 日志由外部后端接管时，"没做什么"是**有意的**：保留期归那个后端。
+		// 若只说"未接入数据源"，会把一次架构选择说成配置缺失。
+		res.Skipped = "集中日志由外部后端（" + m.logsExternal + "）负责保留与容量，平台不执行日志清理"
 	case !actionable:
 		res.Skipped = "保留天数均为 0 或对应数据源未接入（无可清理内容）"
 	}

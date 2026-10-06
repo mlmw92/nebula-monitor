@@ -44,10 +44,26 @@ type Config struct {
 	RetentionFile     string          `yaml:"retentionFile"`     // 数据保留策略配置文件（Web 端可改，保存即热生效）
 	SecurityStoreFile string          `yaml:"securityStoreFile"` // 安全事件/基线持久化文件
 	AssetStoreFile    string          `yaml:"assetStoreFile"`    // 资产台账库（内嵌 SQLite 单文件）；留空取 <DataDir>/assets.db
-	LogDir            string          `yaml:"logDir"`            // 集中日志存储目录（按 来源/日期/节点 分片）；留空取 <DataDir>/logs
-	LogMaxBytesPerDay int64           `yaml:"logMaxBytesPerDay"` // 单来源每日写入上限（字节），超出丢弃并计数
-	LogUploadRateBps  int64           `yaml:"logUploadRateBps"`  // 单节点日志上行速率上限（字节/秒）
-	LogMaxBodyBytes   int64           `yaml:"logMaxBodyBytes"`   // 单次日志上行请求体上限（字节）
+	LogDir            string             `yaml:"logDir"`            // 集中日志存储目录（按 来源/日期/节点 分片）；留空取 <DataDir>/logs
+	LogMaxBytesPerDay int64              `yaml:"logMaxBytesPerDay"` // 单来源每日写入上限（字节），超出丢弃并计数
+	LogUploadRateBps  int64              `yaml:"logUploadRateBps"`  // 单节点日志上行速率上限（字节/秒）
+	LogMaxBodyBytes   int64              `yaml:"logMaxBodyBytes"`   // 单次日志上行请求体上限（字节）
+	LogBackend        string             `yaml:"logBackend"`        // 日志后端：local（默认，自研分片落盘）| victorialogs（外部后端）
+	LogVictoriaLogs   VictoriaLogsConfig `yaml:"logVictoriaLogs"`   // 外部日志后端连接配置（logBackend=victorialogs 时生效）
+}
+
+// VictoriaLogsConfig 是外部日志后端（VictoriaLogs）的连接配置。
+//
+// 默认**不启用**：只有显式把 logBackend 设为 victorialogs 时才会用到它——
+// 引入外部后端是可选能力，离线包的默认真空不因此改变（ADR-0002）。
+//
+// 注意：切到外部后端后，日志的**保留与容量治理由该后端负责**（VictoriaLogs 的
+// `-retentionPeriod`），平台不再叠加"单来源每日上限"，也不再执行按天清理。
+// 上行的限速与请求体上限仍然生效（它们在 receiver 侧，与后端无关）。
+type VictoriaLogsConfig struct {
+	Addr         string `yaml:"addr"`         // 基址，如 http://127.0.0.1:9428
+	QueryTimeout int    `yaml:"queryTimeout"` // 查询超时（秒），默认 30
+	WriteTimeout int    `yaml:"writeTimeout"` // 写入超时（秒），默认 10
 }
 
 // ScreenConfig 数据大屏模块显隐配置（全局单份，与 notify 一致）。
@@ -351,6 +367,8 @@ func Default() *Config {
 		LogMaxBytesPerDay: 1 << 30, // 1 GiB/来源/天
 		LogUploadRateBps:  1 << 20, // 1 MiB/s/节点
 		LogMaxBodyBytes:   4 << 20, // 4 MiB/请求
+		// 日志后端默认自研落盘：外部后端是可选能力，默认值必须保持"离线单机可用"。
+		LogBackend: "local",
 		GeoIPFile:         "/var/lib/monitor-server/geoip/ip2region_v4.xdb",
 		MiddlewareViewFile: "/etc/monitor-server/middleware_view.yaml",
 		Auth:              AuthConfig{Enabled: false, Username: "admin", Password: "admin", Secret: "", UsersFile: "/var/lib/monitor-server/users.yaml", MigrateSingleAdmin: true},

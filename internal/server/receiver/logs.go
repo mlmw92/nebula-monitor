@@ -26,7 +26,10 @@ const logDefaultMaxBody = 4 << 20
 const logDefaultRateBps = 1 << 20
 
 // SetLogStore 注入集中日志存储器（未注入 = 该能力关闭，接口返回 503）。
-func (r *Receiver) SetLogStore(store *logstore.Store, maxBodyBytes, rateBps int64) {
+//
+// 参数是接口：传 nil **具体类型**（例如未配置目录的 *Store）会得到"非 nil 接口"，
+// 上面的 503 判断随即失效——注入前必须显式判空（见 cmd/server 的写法）。
+func (r *Receiver) SetLogStore(store logstore.LogStore, maxBodyBytes, rateBps int64) {
 	if maxBodyBytes <= 0 {
 		maxBodyBytes = logDefaultMaxBody
 	}
@@ -89,6 +92,12 @@ func (r *Receiver) HandleLogs(w http.ResponseWriter, req *http.Request) {
 
 	accepted, dropped, reason, err := r.logs.Append(batch)
 	if err != nil {
+		// 外部后端不可用要回 502（Agent 会重试并记指标），而不是 400——
+		// 400 会让现场去查 Agent 的配置，而真实原因是"日志后端连不上"。
+		if errors.Is(err, logstore.ErrBackendUnavailable) {
+			http.Error(w, "store unavailable: "+err.Error(), http.StatusBadGateway)
+			return
+		}
 		http.Error(w, "store failed: "+err.Error(), http.StatusBadRequest)
 		return
 	}

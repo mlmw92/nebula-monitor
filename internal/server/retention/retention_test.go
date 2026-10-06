@@ -357,6 +357,39 @@ func TestManager_RunStopsOnCancel(t *testing.T) {
 }
 
 // TestManager_NilSafe 空接收者不应 panic（接口未注入保留策略时仍可访问）。
+// 外部日志后端接管时，"日志没有可清理内容"必须说清是**架构选择**而不是配置缺失：
+// 否则界面会显示"日志未接入"，把一次有意的部署说成故障。
+func TestManager_ExternalLogBackendIsReported(t *testing.T) {
+	dir := t.TempDir()
+	m, err := New(filepath.Join(dir, "retention.yaml"), DefaultConfig(), nil, nil, nil, nil, "")
+	if err != nil {
+		t.Fatalf("创建管理器失败: %v", err)
+	}
+	m.SetLogStoreExternal("victorialogs")
+
+	if st := m.Status(); st.LogsBackend != "victorialogs" {
+		t.Fatalf("状态应报告日志后端标识：%+v", st)
+	}
+	res := m.CleanupNow()
+	if !strings.Contains(res.Skipped, "victorialogs") || !strings.Contains(res.Skipped, "外部后端") {
+		t.Fatalf("清理结果应说明日志由外部后端负责：%+v", res)
+	}
+	// 日志类不参与清理：不得报告删除量（报 0 也容易被读成"清理过了"）
+	if res.LogFilesRemoved != 0 || res.LogDirsRemoved != 0 {
+		t.Fatalf("外部后端不应参与本地清理：%+v", res)
+	}
+
+	// 注入本地存储后回到 local 口径
+	store := logstore.New(t.TempDir(), 0)
+	m.SetLogStore(store)
+	if st := m.Status(); st.LogsBackend != logstore.BackendLocal {
+		t.Fatalf("注入本地存储后应报告 local：%+v", st)
+	}
+	if res := m.CleanupNow(); strings.Contains(res.Skipped, "victorialogs") {
+		t.Fatalf("本地存储不应再报外部后端：%+v", res)
+	}
+}
+
 func TestManager_NilSafe(t *testing.T) {
 	var m *Manager
 	if cfg := m.Config(); cfg.AcksDays != DefaultAcksDays {
