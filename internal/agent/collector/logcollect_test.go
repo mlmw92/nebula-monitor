@@ -66,7 +66,7 @@ func (f *logFixture) source(t *testing.T, mut func(*config.LogSourceConfig)) con
 // collector 新建采集器（offsetPath 传空字符串可模拟「未落盘」）。
 func (f *logFixture) collector(src config.LogSourceConfig, offsetsPath string) *LogCollector {
 	c := NewLogCollector("n1", []config.LogSourceConfig{src}, offsetsPath)
-	c.SetSink(func(_ context.Context, _ string, lines []model.LogLine) (model.LogSinkResult, error) {
+	c.SetSink(func(_ context.Context, _ string, _ *model.LogOrigin, lines []model.LogLine) (model.LogSinkResult, error) {
 		f.lines = append(f.lines, lines...)
 		return model.LogSinkResult{}, nil
 	})
@@ -285,7 +285,7 @@ func TestLogCollector_MissingPathMarksDown(t *testing.T) {
 func TestLogCollector_NoSourcesIsNoop(t *testing.T) {
 	c := NewLogCollector("n1", nil, "")
 	called := false
-	c.SetSink(func(context.Context, string, []model.LogLine) (model.LogSinkResult, error) {
+	c.SetSink(func(context.Context, string, *model.LogOrigin, []model.LogLine) (model.LogSinkResult, error) {
 		called = true
 		return model.LogSinkResult{}, nil
 	})
@@ -303,7 +303,7 @@ func TestLogCollector_SinkDropCountsAsReason(t *testing.T) {
 	f := newLogFixture(t, "error: 1\nerror: 2\nerror: 3\n")
 	src := f.source(t, nil)
 	c := NewLogCollector("n1", []config.LogSourceConfig{src}, f.offsetsPath)
-	c.SetSink(func(context.Context, string, []model.LogLine) (model.LogSinkResult, error) {
+	c.SetSink(func(context.Context, string, *model.LogOrigin, []model.LogLine) (model.LogSinkResult, error) {
 		return model.LogSinkResult{Dropped: 1, Reason: "rate"}, nil
 	})
 	ms := c.CollectCtx(context.Background())

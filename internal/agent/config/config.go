@@ -202,6 +202,16 @@ type LogSourceConfig struct {
 	Patterns []LogPattern `yaml:"patterns"`
 	// All 为 true 时忽略 Patterns、上传全部行（显式开启，默认 false）。
 	All bool `yaml:"all"`
+	// PodLogs 声明"这些 paths 是 Pod 的容器日志文件"（kubelet 的 /var/log/pods/ 布局）。
+	//
+	// 开启后 Agent 会从**文件路径**解析出容器身份（namespace/pod/container）随批次上报，
+	// 中心据此把日志行标到 Pod 资产上。**只上报解析出的身份，不上报路径**——
+	// 路径会暴露被监控机的目录结构，而检索与联动只需要"属于哪个 Pod"。
+	//
+	// 为什么必须显式声明而不是"能解析就解析"：解析出来的身份会决定这条日志被标到哪个资产上，
+	// 悄悄猜错就是"在别人的资产下看到自己的日志"。开启时启动期即校验 paths 落在
+	// /var/log/pods/ 下，把"配错了却没有任何提示"堵在配置期。
+	PodLogs bool `yaml:"podLogs"`
 	// Multiline 描述「一条日志跨多行」的合并方式（堆栈/异常）。
 	Multiline LogMultiline `yaml:"multiline"`
 	// MaxLinesPerRound / MaxBytesPerRound 是单轮单文件的读取上限（超限丢弃并计数）。
@@ -236,6 +246,9 @@ const (
 	// DefaultLogMultilineMaxLines / MaxLogMultilineLines 是单条日志合并行数上限。
 	DefaultLogMultilineMaxLines = 50
 	MaxLogMultilineLines        = 500
+	// PodLogDir 是 kubelet 写容器日志的固定目录（PodLogs 来源的路径必须落在它下面）。
+	// 布局：<PodLogDir><namespace>_<pod>_<uid>/<container>/<重启序号>.log
+	PodLogDir = "/var/log/pods/"
 )
 
 // 上报磁盘缓冲的默认值。
@@ -491,6 +504,12 @@ func normalizeAndValidateLogSources(cfg *Config) error {
 		for j, p := range s.Paths {
 			if !isSafeAbsPath(p) {
 				return fmt.Errorf("logSources[%d]（%s）：paths[%d] %q 必须是绝对路径且不含 ..", i, s.ID, j, p)
+			}
+			// podLogs 来源的路径必须是 kubelet 的容器日志目录：身份是从路径格式解析出来的，
+			// 路径不在那里就必然解析不出身份——而那正是这个开关的全部意义。
+			if s.PodLogs && !strings.HasPrefix(filepath.ToSlash(p), PodLogDir) {
+				return fmt.Errorf("logSources[%d]（%s）：podLogs: true 时 paths[%d] %q 必须位于 %s 下（如 %s*/*/*.log）",
+					i, s.ID, j, p, PodLogDir, PodLogDir)
 			}
 		}
 		if !s.All && len(s.Patterns) == 0 {

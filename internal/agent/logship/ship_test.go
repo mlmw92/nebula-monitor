@@ -31,7 +31,8 @@ func TestShipper_SendsBatchWithSecret(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, err := New(srv.URL, "s3cret", "n1", "default").Sink()(context.Background(), "applog", lines(2))
+	origin := &model.LogOrigin{Namespace: "nebula-demo", Pod: "web-1", Container: "app"}
+	res, err := New(srv.URL, "s3cret", "n1", "default").Sink()(context.Background(), "podlog", origin, lines(2))
 	if err != nil {
 		t.Fatalf("不应报错：%v", err)
 	}
@@ -41,8 +42,12 @@ func TestShipper_SendsBatchWithSecret(t *testing.T) {
 	if secret != "s3cret" || ctype != "application/json" {
 		t.Fatalf("请求头不符：secret=%q content-type=%q", secret, ctype)
 	}
-	if got.Node != "n1" || got.Source != "applog" || len(got.Lines) != 2 {
+	if got.Node != "n1" || got.Source != "podlog" || len(got.Lines) != 2 {
 		t.Fatalf("请求体不符：%+v", got)
+	}
+	// 容器身份必须随批次上行：中心靠它把日志行标到 Pod 资产上，丢了就只剩"来自某台机器"。
+	if got.Origin == nil || got.Origin.Namespace != "nebula-demo" || got.Origin.Pod != "web-1" || got.Origin.Container != "app" {
+		t.Fatalf("容器身份应随批次上行，got %+v", got.Origin)
 	}
 	if res.Dropped != 0 {
 		t.Fatalf("全部接收时不应有丢弃：%+v", res)
@@ -57,7 +62,7 @@ func TestShipper_RateLimitedIsNormalResult(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, err := New(srv.URL, "", "n1", "").Sink()(context.Background(), "applog", lines(2))
+	res, err := New(srv.URL, "", "n1", "").Sink()(context.Background(), "applog", nil, lines(2))
 	if err != nil {
 		t.Fatalf("限速不算上传失败：%v", err)
 	}
@@ -73,11 +78,11 @@ func TestShipper_ServerErrorIsError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := New(srv.URL, "", "n1", "").Sink()(context.Background(), "applog", lines(1)); err == nil {
+	if _, err := New(srv.URL, "", "n1", "").Sink()(context.Background(), "applog", nil, lines(1)); err == nil {
 		t.Fatal("5xx 应作为错误返回")
 	}
 	// 连不上的地址也应是错误
-	if _, err := New("http://127.0.0.1:1", "", "n1", "").Sink()(context.Background(), "applog", lines(1)); err == nil {
+	if _, err := New("http://127.0.0.1:1", "", "n1", "").Sink()(context.Background(), "applog", nil, lines(1)); err == nil {
 		t.Fatal("连接失败应作为错误返回")
 	}
 }
@@ -90,7 +95,7 @@ func TestShipper_PropagatesServerDropReason(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, err := New(srv.URL, "", "n1", "").Sink()(context.Background(), "applog", lines(3))
+	res, err := New(srv.URL, "", "n1", "").Sink()(context.Background(), "applog", nil, lines(3))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +112,7 @@ func TestShipper_UnparseableResponseCountsAsAccepted(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, err := New(srv.URL, "", "n1", "").Sink()(context.Background(), "applog", lines(2))
+	res, err := New(srv.URL, "", "n1", "").Sink()(context.Background(), "applog", nil, lines(2))
 	if err != nil || res.Dropped != 0 {
 		t.Fatalf("应视为全部接收，got %+v err=%v", res, err)
 	}

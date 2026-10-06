@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -35,10 +37,7 @@ type LogCollector struct {
 	// Sink 接收本轮读到的行（由子批次 B 接上「上传到 Server」；为 nil 时只做计数）。
 	// 上传失败不清空偏移：本轮的行会随偏移推进而过去，因此上传实现内部必须自行决定
 	// 「失败即丢弃并计数」还是「重试」——见 design 文档 §4.3（当前实现选前者）。
-	//
-	// 返回值区分两类「没上传成功」：限额丢弃（Dropped > 0，正常结果、计入 reason 标签）
-	// 与真正失败（error，计入 reason=unreachable）。
-	sink func(ctx context.Context, source string, lines []model.LogLine) (model.LogSinkResult, error)
+	sink model.LogSink
 }
 
 // NewLogCollector 创建日志采集器并加载已落盘的偏移。
@@ -54,7 +53,7 @@ func NewLogCollector(node string, sources []config.LogSourceConfig, offsetsPath 
 }
 
 // SetSink 设置日志行接收方（上传实现）。
-func (c *LogCollector) SetSink(f func(ctx context.Context, source string, lines []model.LogLine) (model.LogSinkResult, error)) {
+func (c *LogCollector) SetSink(f model.LogSink) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sink = f
@@ -87,11 +86,17 @@ func (c *LogCollector) CollectCtx(ctx context.Context) []model.Metric {
 		}
 		patterns := compileLogPatterns(src)
 		res := collectResult{matched: map[string]int64{}, dropped: map[string]int64{}, ok: true}
-		for _, path := range src.Paths {
+		paths, capped := expandSourcePaths(src)
+		if capped > 0 {
+			// 截断必须可见：否则"配了却只有一部分 Pod 的日志"会被当成"其它 Pod 没日志"。
+			slog.Warn("日志来源匹配到的文件数超过单轮上限，本轮只采集前若干文件",
+				"source", src.ID, "limit", maxLogFilesPerSource, "skipped", capped)
+		}
+		for _, path := range paths {
 			if ctx.Err() != nil {
 				break
 			}
-			r := c.collectFile(ctx, src, path, patterns)
+			r := c.collectFile(ctx, src, path, c.originOf(src, path), patterns)
 			if !r.ok {
 				res.ok = false
 			}
@@ -103,9 +108,95 @@ func (c *LogCollector) CollectCtx(ctx context.Context) []model.Metric {
 				res.dropped[k] += v
 			}
 		}
+		// pod 来源的偏移要跟着文件生命周期清理（见 pruneOffsets 的说明）
+		if src.PodLogs {
+			c.pruneOffsets(src.ID)
+		}
 		out = append(out, c.buildLogMetrics(src, res, now)...)
 	}
 	return out
+}
+
+// maxLogFilesPerSource 是单个来源单轮参与采集的文件数上限。
+//
+// 通配符（Pod 日志）在一个节点上很容易匹配到几百个文件；没有上限时一轮采集会把
+// 整个节点的日志都读一遍：轮次被拖长、上报批次变大，而"更全"的收益并不存在。
+const maxLogFilesPerSource = 200
+
+// expandSourcePaths 把来源的 paths 展开为实际要读的文件列表，并返回因上限被跳过的文件数。
+//
+// **通配符零匹配不算失败**：Pod 是短命的，一个来源此刻没匹配到文件（没有 Pod、都在重启）
+// 是正常状态。若把它记成 up=0，"日志采集不可用"会在每次缩容时误报，最后没人再看这个信号；
+// 而配置写错由启动期校验兜住（podLogs 来源的路径必须落在 k8s 的容器日志目录下）。
+func expandSourcePaths(src config.LogSourceConfig) (paths []string, skipped int) {
+	for _, p := range src.Paths {
+		for _, m := range expandLogPaths(p) {
+			if len(paths) >= maxLogFilesPerSource {
+				skipped++
+				continue
+			}
+			paths = append(paths, m)
+		}
+	}
+	return paths, skipped
+}
+
+// expandLogPaths 展开一个路径模式：**不含通配符时原样返回**（既有配置零行为变化）。
+func expandLogPaths(pattern string) []string {
+	if !strings.ContainsAny(pattern, "*?[") {
+		return []string{pattern}
+	}
+	matched, err := filepath.Glob(pattern)
+	if err != nil {
+		// 非法模式（如未闭合的 `[`）：本轮跳过并告警，而不是让整轮采集失败
+		slog.Warn("日志路径通配符非法，本轮跳过", "pattern", pattern, "err", err)
+		return nil
+	}
+	// Glob 已返回有序结果，这里显式再排一次：**顺序稳定**是偏移可复现的前提，
+	// 顺序抖动会让"同一轮里先读哪个文件"变化，进而让偏移推进看起来时快时慢。
+	sort.Strings(matched)
+	return matched
+}
+
+// originOf 解析某个文件对应的容器身份（未开启 podLogs 的来源恒为 nil）。
+//
+// 解析不出身份时**仍然采集这些行**（只是不带身份）：丢日志比少一个标签严重得多；
+// 而"配了 podLogs 却没有身份"由这里的告警指出来（每个来源每轮最多一条，与
+// "日志文件打开失败"的告警频率一致）。
+func (c *LogCollector) originOf(src config.LogSourceConfig, path string) *model.LogOrigin {
+	if !src.PodLogs {
+		return nil
+	}
+	origin := parsePodLogPath(path)
+	if origin == nil {
+		slog.Warn("podLogs 来源的文件路径不符合容器日志格式，这些行将不带容器身份",
+			"source", src.ID, "path", path,
+			"expected", config.PodLogDir+"<namespace>_<pod>_<uid>/<container>/<序号>.log")
+	}
+	return origin
+}
+
+// pruneOffsets 删除「该来源下文件已不存在」的偏移记录（只对 podLogs 来源调用）。
+//
+// 为什么只对 podLogs：容器日志路径里带 Pod UID，文件被 kubelet 回收后**永不再出现**，
+// 留着这些偏移只会让偏移文件无界增长（而它每轮都要整体重写一次）。普通文件路径则可能
+// 被轮转后重建，删掉偏移会让它被当成新文件"从末尾开始"，静默跳过开头的内容——那是丢日志。
+func (c *LogCollector) pruneOffsets(sourceID string) {
+	prefix := sourceID + "|"
+	removed := 0
+	for key := range c.offsets {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if _, err := os.Stat(key[len(prefix):]); err != nil && os.IsNotExist(err) {
+			delete(c.offsets, key)
+			removed++
+		}
+	}
+	if removed > 0 {
+		slog.Info("清理已消失的容器日志文件偏移", "source", sourceID, "removed", removed, "remaining", len(c.offsets))
+		c.saveOffsets()
+	}
 }
 
 // buildLogMetrics 产出日志相关的指标。
@@ -154,7 +245,7 @@ func (c *LogCollector) buildLogMetrics(src config.LogSourceConfig, res collectRe
 
 // collectFile 读取单个文件的一轮增量。
 func (c *LogCollector) collectFile(ctx context.Context, src config.LogSourceConfig, path string,
-	patterns []compiledLogPattern) collectResult {
+	origin *model.LogOrigin, patterns []compiledLogPattern) collectResult {
 
 	res := collectResult{matched: map[string]int64{}, dropped: map[string]int64{}}
 	key := src.ID + "|" + path
@@ -247,7 +338,7 @@ func (c *LogCollector) collectFile(ctx context.Context, src config.LogSourceConf
 	// log_lines_total 的语义是「**成功上传**的行数」：限额丢弃与上传失败都不计入，
 	// 它们分别由 log_dropped_total{reason=...} 体现——两个数字相加才是本轮读到的行数。
 	if c.sink != nil && len(lines) > 0 {
-		out, err := c.sink(ctx, src.ID, lines)
+		out, err := c.sink(ctx, src.ID, origin, lines)
 		switch {
 		case err != nil:
 			// 上传失败：本轮丢弃并计数（日志是尽力而为的数据；积压会变成永不收敛的问题）

@@ -1,6 +1,10 @@
 package model
 
-import "regexp"
+import (
+	"context"
+	"regexp"
+	"strings"
+)
 
 // C2 集中日志的共享数据类型（Agent 采集侧与 Server 存储/检索侧共用）。
 //
@@ -20,12 +24,47 @@ type LogLine struct {
 }
 
 // LogBatch 是一次上行请求携带的日志批次。
+//
+// **一批 = 一个文件**（采集器逐文件读、逐文件上行），因此"这批日志来自哪个容器"
+// 只需要在批次上写一次，不必逐行重复。
 type LogBatch struct {
 	Node   string    `json:"node"`            // 节点名（写入存储文件名，供检索按节点过滤）
 	Group  string    `json:"group,omitempty"` // 节点分组（便于按范围检索）
 	Source string    `json:"source"`          // 来源 id（对应 agent.yaml 里的 logSources[].id）
 	Lines  []LogLine `json:"lines"`           // 本批日志行
+	// Origin 是容器身份（仅 logSources[].podLogs 开启的来源才有）。
+	//
+	// **只上报解析出的身份，不上报路径**：路径本身携带被监控机的目录结构，
+	// 而"这条日志属于哪个 Pod"才是检索与联动需要的（见文件头隐私说明）。
+	Origin *LogOrigin `json:"origin,omitempty"`
 }
+
+// LogOrigin 是一条日志所属的容器身份。
+//
+// 三个字段都必须来自**可信来源**（采集侧从 kubelet 的固定路径格式解析），
+// 服务端会做字符集与长度校验后才落库：这些值会进入存储、界面与资产联动，
+// 一条日志的正文绝不允许决定自己"属于哪个 Pod"（否则可以伪造归属，
+// 把自己的日志标到别人的资产上）。
+type LogOrigin struct {
+	Namespace string `json:"namespace,omitempty"`
+	Pod       string `json:"pod,omitempty"`
+	Container string `json:"container,omitempty"`
+}
+
+// Empty 判断身份是否为空（三个字段都空即视为没有身份）。
+func (o *LogOrigin) Empty() bool {
+	return o == nil || (o.Namespace == "" && o.Pod == "" && o.Container == "")
+}
+
+// LogSink 接收某个文件本轮读到的行（采集器**逐文件**调用它：一批 = 一个文件）。
+//
+// 放在 model 而不是采集器包里：它是「采集 → 上行」两侧共同的契约，
+// 上行实现（logship）不该为了拿一个函数类型去依赖采集器。
+//
+// origin 为 nil 表示普通文件日志；非 nil 时表示这些行来自该容器。
+// 返回值区分两类「没上传成功」：限额丢弃（Dropped > 0，正常结果、计入 reason 标签）
+// 与真正失败（error，计入 reason=unreachable）。
+type LogSink func(ctx context.Context, source string, origin *LogOrigin, lines []LogLine) (LogSinkResult, error)
 
 // LogAppendResult 是一次落盘的结果（Server 回给 Agent，Agent 据此把丢弃记进指标）。
 type LogAppendResult struct {
@@ -116,6 +155,53 @@ type LogHit struct {
 	// Fields 是从原文里提取出的结构化字段（JSON 对象或 key=value 对，见 logparse）。
 	// 提不到就是 nil——**原文永远在 Text 里**，字段只是附加的检索维度，不是替代品。
 	Fields map[string]string `json:"fields,omitempty"`
+	// Origin 是这条日志所属的容器身份（普通文件日志为空）。
+	// 落库时随行一起写：检索时要按它把行标到 Pod 资产上，事后无法从别处补。
+	Origin *LogOrigin `json:"origin,omitempty"`
+}
+
+// LogOriginPartPattern 是容器身份各段的合法形态：k8s 的 DNS-1123 标签/子域
+// （小写字母数字与 `-`、`.`，首尾必须是字母数字）。长度上限见 MaxLogOriginPartLen。
+//
+// 与来源名/字段名同一取向：**服务端与采集侧必须用同一条规则**，且这条规则要足够严——
+// 这些值会进入存储、界面与资产联动，宽松的字符集等于把注入面直接开到台账上。
+var LogOriginPartPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
+
+// MaxLogOriginPartLen 是身份各段的长度上限（k8s 的 DNS 子域上限 253）。
+const MaxLogOriginPartLen = 253
+
+// NormalizeLogOrigin 校验并规范化容器身份。
+//
+// 返回 (nil, true) 表示"没有身份"——这是**正常情况**（普通文件日志不该被拒绝）。
+// 返回 (nil, false) 表示身份非法：调用方应当**拒绝这批日志**，而不是"丢掉身份继续收"。
+// 为什么宁可拒绝：身份决定这条日志被标到哪个 Pod 资产上，一个不可信的身份比没有身份
+// 更危险（伪造归属会让运维在别人的资产下看到自己的日志）；而合法的 Agent 永远不会发出非法身份。
+//
+// 大小写先折叠为小写：k8s 名字本就是小写，个别运行时/镜像上报大写时按同一口径归一是
+// 无害的，但**校验必须发生在归一之后**，否则等于放宽了字符集。
+func NormalizeLogOrigin(o *LogOrigin) (*LogOrigin, bool) {
+	if o == nil {
+		return nil, true
+	}
+	out := LogOrigin{
+		Namespace: strings.ToLower(strings.TrimSpace(o.Namespace)),
+		Pod:       strings.ToLower(strings.TrimSpace(o.Pod)),
+		Container: strings.ToLower(strings.TrimSpace(o.Container)),
+	}
+	if out.Namespace == "" && out.Pod == "" && out.Container == "" {
+		return nil, true
+	}
+	for _, part := range []string{out.Namespace, out.Pod, out.Container} {
+		if part == "" {
+			// 只给一半身份（例如有 Pod 没 namespace）：无法唯一定位，视为非法。
+			// 定位不到资产是可接受的降级，**定位错**不是。
+			return nil, false
+		}
+		if len(part) > MaxLogOriginPartLen || !LogOriginPartPattern.MatchString(part) {
+			return nil, false
+		}
+	}
+	return &out, true
 }
 
 // LogFieldNamePattern 是结构化字段名的合法形态：字母或下划线开头，允许点号（嵌套）与连字符。

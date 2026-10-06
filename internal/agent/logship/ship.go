@@ -42,9 +42,9 @@ func New(serverURL, secret, node, group string) *Shipper {
 }
 
 // Sink 返回可直接交给日志采集器的接收函数。
-func (s *Shipper) Sink() func(ctx context.Context, source string, lines []model.LogLine) (model.LogSinkResult, error) {
-	return func(ctx context.Context, source string, lines []model.LogLine) (model.LogSinkResult, error) {
-		return s.send(ctx, source, lines)
+func (s *Shipper) Sink() model.LogSink {
+	return func(ctx context.Context, source string, origin *model.LogOrigin, lines []model.LogLine) (model.LogSinkResult, error) {
+		return s.send(ctx, source, origin, lines)
 	}
 }
 
@@ -55,8 +55,9 @@ func (s *Shipper) Sink() func(ctx context.Context, source string, lines []model.
 //     若当成失败处理，日志里会持续刷「上传失败」，把真正的问题淹掉；
 //   - 其它非 2xx / 网络错误 → error（记为 reason=unreachable）；
 //   - 2xx → 采用服务端回报的 accepted/dropped（每日上限导致的丢弃也是正常结果）。
-func (s *Shipper) send(ctx context.Context, source string, lines []model.LogLine) (model.LogSinkResult, error) {
-	body, err := json.Marshal(model.LogBatch{Node: s.node, Group: s.group, Source: source, Lines: lines})
+func (s *Shipper) send(ctx context.Context, source string, origin *model.LogOrigin, lines []model.LogLine) (model.LogSinkResult, error) {
+	// 容器身份（origin）只在 podLogs 来源上非空；批次级携带，见 model.LogBatch 的说明。
+	body, err := json.Marshal(model.LogBatch{Node: s.node, Group: s.group, Source: source, Lines: lines, Origin: origin})
 	if err != nil {
 		return model.LogSinkResult{}, err
 	}

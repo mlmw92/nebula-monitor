@@ -144,7 +144,7 @@ func New(node, group string, labels map[string]string, cfg config.CollectorToggl
 func (c *Collector) NodeName() string { return c.node }
 
 // SetLogSink 设置日志上行接收方（未配置日志来源时是空操作）。
-func (c *Collector) SetLogSink(f func(ctx context.Context, source string, lines []model.LogLine) (model.LogSinkResult, error)) {
+func (c *Collector) SetLogSink(f model.LogSink) {
 	if c.logs != nil {
 		c.logs.SetSink(f)
 	}

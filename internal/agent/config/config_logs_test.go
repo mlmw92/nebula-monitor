@@ -83,6 +83,14 @@ func TestLogSources_Rejects(t *testing.T) {
 			return s
 		}(), "startPattern"},
 		{"单轮行数越界", func() LogSourceConfig { s := validLogSource(); s.MaxLinesPerRound = MaxLogLinesPerRound + 1; return s }(), "maxLinesPerRound"},
+		// podLogs 的路径必须落在 kubelet 的容器日志目录下：身份是从路径格式解析出来的，
+		// 路径不在那里就必然解析不出身份——而那正是这个开关的全部意义
+		{"podLogs 路径不在容器日志目录", func() LogSourceConfig {
+			s := validLogSource()
+			s.PodLogs = true
+			s.Paths = []string{"/var/log/myapp/app.log"}
+			return s
+		}(), PodLogDir},
 		{"单轮字节越界", func() LogSourceConfig { s := validLogSource(); s.MaxBytesPerRound = MaxLogBytesPerRound + 1; return s }(), "maxBytesPerRound"},
 	}
 	for _, tc := range cases {
@@ -127,6 +135,11 @@ logSources:
     multiline: { startPattern: "^\\d{4}-", maxLines: 20 }
     maxLinesPerRound: 500
     maxBytesPerRound: 1048576
+  - id: podlog
+    podLogs: true
+    paths: ["/var/log/pods/*/*/*.log"]
+    patterns:
+      - { name: err, regex: "(?i)error" }
 `
 	var cfg Config
 	if err := yaml.Unmarshal([]byte(doc), &cfg); err != nil {
@@ -134,6 +147,11 @@ logSources:
 	}
 	if err := normalizeAndValidateLogSources(&cfg); err != nil {
 		t.Fatalf("应通过校验：%v", err)
+	}
+	// podLogs 的 tag 必须真的能解析出来：写错（如 podlogs / pod_logs）会静默变成 false，
+	// 症状是"配了容器日志却全都没有身份"，而没有任何一处会报错
+	if len(cfg.LogSources) != 2 || !cfg.LogSources[1].PodLogs {
+		t.Fatalf("podLogs 键未解析出来：%+v", cfg.LogSources)
 	}
 	s := cfg.LogSources[0]
 	if s.ID != "applog" || len(s.Paths) != 1 || len(s.Patterns) != 1 || s.Patterns[0].Name != "err" {
