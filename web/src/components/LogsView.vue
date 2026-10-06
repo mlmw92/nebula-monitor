@@ -134,6 +134,7 @@
             title="没有命中的日志"
             :hints="[
               '确认 Agent 的 logSources.patterns 已配置并包含目标文件路径',
+              '容器日志：来源要开 podLogs 且路径要能匹配到实际文件（如 /var/log/pods/*/*/*.log）',
               '扩大时间范围——日志默认只查最近一段时间',
               '关键词模式下是子串匹配，正则模式需切换到「正则」',
             ]"
@@ -238,7 +239,13 @@
       <ul class="ex-notes">
         <li><code>id</code>：小写字母开头，只含小写字母 / 数字 / 下划线（它同时是存储分片名与指标前缀）</li>
         <li><code>patterns[].name</code>：字母或下划线开头（会拼进指标名 <code>&lt;id&gt;_log_&lt;name&gt;_total</code>）</li>
-        <li><code>paths</code>：必须是绝对路径，<b>不支持通配符</b>，也不能含 <code>..</code></li>
+        <li><code>paths</code>：必须是绝对路径，不能含 <code>..</code>；<b>支持通配符</b>（如 <code>/var/log/pods/*/*/*.log</code>）</li>
+        <li>
+          <code>podLogs: true</code>：声明这些路径是 <b>Pod 的容器日志</b>，Agent 会从路径解析出
+          命名空间/Pod/容器随日志上报（<b>只上报身份，不上报路径</b>），检索页据此标到 Pod 资产；
+          此时路径必须落在 <code>/var/log/pods/</code> 下
+        </li>
+        <li>通配符没匹配到文件<b>不算采集故障</b>（Pod 是短命的）；单轮最多采 200 个文件，超出会告警</li>
         <li>不给 <code>patterns</code> 就必须显式写 <code>all: true</code>，否则 Agent 拒绝启动（刻意的隐私默认值）</li>
         <li>首次见到文件<strong>从末尾开始读，不回溯历史</strong>；想看历史日志请到机器上看</li>
         <li>单轮超上限会「跳过该文件剩余部分并计数」（<code>&lt;id&gt;_log_dropped_total</code>），不会延后补读</li>
@@ -385,6 +392,19 @@ logSources:
     patterns:
       - { name: http_5xx, regex: '" 5[0-9][0-9] ' }
       - { name: http_4xx, regex: '" 4[0-9][0-9] ' }
+`.trim(),
+  },
+  {
+    key: 'podlog',
+    label: 'Pod 容器日志（kubelet 的 /var/log/pods）',
+    hint: '必须开 podLogs 才会解析出容器身份并关联到 Pod 资产；路径要落在 /var/log/pods/ 下。',
+    yaml: String.raw`
+logSources:
+  - id: podlog
+    podLogs: true
+    paths: ["/var/log/pods/*/*/*.log"]
+    patterns:
+      - { name: err, regex: '(?i)\b(ERROR|Exception|Caused by)\b' }
 `.trim(),
   },
   {
