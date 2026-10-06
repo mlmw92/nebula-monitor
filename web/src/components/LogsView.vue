@@ -53,9 +53,36 @@
         >
           <el-option v-for="s in sourceNames" :key="s" :label="s" :value="s" />
         </el-select>
+        <el-input
+          v-model="fieldInput"
+          size="small"
+          clearable
+          style="width: 210px"
+          placeholder="字段过滤，如 status:500，回车添加"
+          @keyup.enter="addFieldFilter"
+        />
         <el-button type="primary" size="small" :loading="loading" @click="search">查询</el-button>
         <!-- 日志来源配在 Agent 侧，页面上看不到任何字段；"没数据"时最缺的就是可复制的模板 -->
         <el-button size="small" @click="exampleVisible = true">配置示例</el-button>
+      </div>
+
+      <!-- 字段过滤：服务端在**解析出的键值**上做等值匹配，比关键词精确（关键词会命中别的字段的值）。
+           候选只列服务端真的见过的字段名，避免用户按一个永远查不到的名字去筛。 -->
+      <div v-if="fieldFilters.length || fieldCandidates.length" class="field-row">
+        <el-tag
+          v-for="f in fieldFilters"
+          :key="f"
+          closable
+          size="small"
+          class="field-tag"
+          @close="removeFieldFilter(f)"
+        >
+          {{ f }}
+        </el-tag>
+        <span v-if="fieldCandidates.length" class="muted field-hint">
+          已知字段：
+          <el-button v-for="n in fieldCandidates" :key="n" link size="small" @click="pickField(n)">{{ n }}</el-button>
+        </span>
       </div>
 
       <el-alert
@@ -109,6 +136,10 @@
         </el-table-column>
         <el-table-column label="日志" min-width="420">
           <template #default="{ row }">
+            <!-- 结构化字段贴在原文上方：两者是同一行的两面，分开一列会让阅读来回跳 -->
+            <div v-if="fieldPairs(row).length" class="field-chips">
+              <span v-for="p in fieldPairs(row)" :key="p" class="tag field-chip">{{ p }}</span>
+            </div>
             <!-- 默认单行省略，点击展开（多行堆栈合并后的日志需要看全） -->
             <div
               class="logline"
@@ -169,7 +200,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import http from '../api/http'
@@ -198,6 +229,12 @@ const nodes = ref([])
 const sources = ref([])
 const nodeNames = ref([])
 const sourceNames = ref([])
+
+// 字段过滤：`key:value` 形态（与服务端参数一致，可重复出现）。
+// 同一个键不允许两个值——它永远不会同时命中，留着只会让人以为"条件生效了但没结果"。
+const fieldInput = ref('')
+const fieldFilters = ref([])
+const fieldCandidates = ref([])
 
 const lines = ref([])
 const cursor = ref('')
@@ -362,6 +399,62 @@ function toggle(row) {
   expanded.value = next
 }
 
+// ---------- 结构化字段 ----------
+
+const FIELD_FILTER_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}:.+$/
+
+// addFieldFilter 把输入框里的 `key:value` 变成一个过滤条件（回车触发）。
+// 形态在客户端先挡一道：服务端会 400，但让用户先看到"该写成什么样"比看一个报错更好。
+function addFieldFilter() {
+  const v = fieldInput.value.trim()
+  if (!v) return
+  if (!FIELD_FILTER_RE.test(v)) {
+    ElMessage.warning('字段过滤需为 key:value 形态，例如 status:500')
+    return
+  }
+  const key = v.slice(0, v.indexOf(':'))
+  if (fieldFilters.value.some((f) => f.slice(0, f.indexOf(':')) === key)) {
+    ElMessage.warning('同一个字段只能给一个值：' + key)
+    return
+  }
+  fieldFilters.value.push(v)
+  fieldInput.value = ''
+}
+
+function removeFieldFilter(f) {
+  fieldFilters.value = fieldFilters.value.filter((x) => x !== f)
+}
+
+// pickField 点候选字段名时先把 `名字:` 填进输入框，用户只需补值。
+function pickField(name) {
+  fieldInput.value = name + ':'
+}
+
+// fieldPairs 把一条日志的字段摊成 `k=v`（按键排序，保证同一行每次渲染顺序一致）。
+function fieldPairs(row) {
+  const f = row && row.fields
+  if (!f) return []
+  return Object.keys(f).sort().map((k) => k + '=' + f[k])
+}
+
+// loadFieldCandidates 拉取"服务端真的见过的字段名"作为候选。
+//
+// 只列见过的名字：列"可能存在的字段"会让用户按一个永远查不到的名字去筛，
+// 然后怀疑功能坏了。接口要 logs:read，拿不到就静默留空（不打扰查询主链路）。
+async function loadFieldCandidates() {
+  try {
+    const params = sources.value.length ? '?sources=' + encodeURIComponent(sources.value.join(',')) : ''
+    const data = await http.get('/api/v1/logs/fields' + params)
+    const all = new Set()
+    for (const names of Object.values((data && data.fields) || {})) {
+      for (const n of names) all.add(n)
+    }
+    fieldCandidates.value = Array.from(all).sort().slice(0, 24)
+  } catch (e) {
+    fieldCandidates.value = []
+  }
+}
+
 function buildQuery(withCursor) {
   const p = new URLSearchParams()
   if (range.value && range.value[0] && range.value[1]) {
@@ -372,6 +465,7 @@ function buildQuery(withCursor) {
   if (kw) p.set(mode.value === 're' ? 'regex' : 'q', kw)
   if (nodes.value.length) p.set('nodes', nodes.value.join(','))
   if (sources.value.length) p.set('sources', sources.value.join(','))
+  for (const f of fieldFilters.value) p.append('field', f)
   p.set('limit', '200')
   if (withCursor && cursor.value) p.set('cursor', cursor.value)
   return p.toString()
@@ -446,11 +540,21 @@ function applyDeepLink() {
     keyword.value = String(q.q)
     mode.value = 'kw'
   }
+  // 字段过滤可重复出现：单个时是字符串，多个时是数组，两种都要吃下
+  const fields = q.field === undefined ? [] : Array.isArray(q.field) ? q.field : [q.field]
+  fieldFilters.value = fields
+    .map((f) => String(f).trim())
+    .filter((f) => FIELD_FILTER_RE.test(f))
 }
+
+// 来源变了就重新取一次字段候选：不同来源的字段集合本来就不一样
+// （applog 有 level/status，nginx_access 可能是 status/upstream）。
+watch(sources, () => loadFieldCandidates())
 
 onMounted(async () => {
   applyDeepLink()
   await loadMeta()
+  await loadFieldCandidates()
   await search()
 })
 </script>
@@ -464,6 +568,13 @@ onMounted(async () => {
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .alert-gap { margin-bottom: 10px; }
 .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; background: var(--tag-bg, rgba(64, 158, 255, 0.12)); font-size: 12px; }
+/* 字段过滤行：已生效的条件（可删）+ 候选字段名（点击填入输入框） */
+.field-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.field-hint { display: inline-flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.field-hint .el-button + .el-button { margin-left: 0; }
+/* 字段贴在日志原文上方：同一行的两面，分开一列会让阅读来回跳 */
+.field-chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 2px; }
+.field-chip { background: var(--tag-bg-2, rgba(103, 194, 58, 0.14)); font-family: var(--mono); }
 .logline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; cursor: pointer; }
 .logline.open { white-space: pre-wrap; word-break: break-all; }
 .foot { margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
