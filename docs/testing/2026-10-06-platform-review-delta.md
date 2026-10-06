@@ -175,3 +175,62 @@ P0 首批剩余：资产拓扑视图（2-03/2-11）、日志结构化解析与�
 **执行结果**：`go build ./...`、`go vet ./...` 通过；`go test -count=1 ./...` 全绿；`npm --prefix web test` 10 文件 **60 项**通过；`npm --prefix web run build` 通过。
 
 **未覆盖边界（不得视为通过）**：真实集群的台账联动闭环（需要 K8s 清单上报 + 前端点击的端到端）、浏览器端到端（真实登录 → 跳转 → 日志抽屉）。
+
+---
+
+## 八、第四轮：9-06 日志结构化解析与字段检索（2026-10-06 续三）
+
+按 §七 的顺序推进 9-06。这是三项里改动面最大的一项，落地时把范围钉在两件事上：**字段解析**与**按字段检索**；不碰"索引"与"日志建规则"（见 §8.4）。
+
+### 8.1 关键决策：解析放在 Server 侧
+
+`logship` 已经在每一行上带了命中模式名，而 Agent 是**离线分发**的：把提字段做在 Agent，就必须重分发全部 Agent 才能让已部署的机器受益；做在 Server 侧则**现有 Agent 无需升级**即可用上字段检索。代价是 Server 的每行解析开销——用"每行字段数上限 + 名字字符集 + 值长度"把它压到常数级。
+
+### 8.2 落地内容
+
+| 层 | 内容 |
+|---|---|
+| 解析器 | 新包 `internal/server/logparse`：JSON 对象取顶层标量、一层嵌套用点号连接（`http.status`），数组与 null 跳过；无结构行退到 `key=value` 扫描（引号/单引号/无引号三种值写法）；**坏 JSON 不丢原文**（退回 key=value，再不行就没有字段） |
+| 解析器边界 | 名字走 `model.IsValidLogFieldName`（与来源名/模式名同一套"服务端与检索侧必须一致"的规则）；单行 ≤16 字段、值 ≤256 字节（按 UTF-8 边界截断）；**凭据类键名不进字段表**（`password`/`token`/`authorization`… 含嵌套的最后一段） |
+| 落盘 | 字段与原文写在**同一条 JSON** 里（`model.LogHit.fields`）：不需要另建索引，检索仍是"顺序读 + 有界扫描"；老分片没有该字段 → nil，向后兼容 |
+| 基数控制 | 每来源字段名上限 128（`MaxFieldNamesPerSource`）：超限后**只接受已见过的名字**，新名字被忽略而原文与已有字段照常落盘；目录落盘到 `<root>/field_names.json`（否则重启后候选变空、上限也被重置） |
+| 检索 | `model.LogQuery.Fields`：扫描时逐行**精确等值**匹配，多条件为「与」；命中行带回 `fields` |
+| 接口 | `GET /api/v1/logs?field=key:value`（可重复，形态与台账的 `label=key:value` 一致）；`GET /api/v1/logs/fields?sources=` 返回各来源**真的见过**的字段名（候选） |
+| 前端 | 检索页新增字段过滤输入（回车成条件、可删、同字段只允许一个值）、候选字段名一键填入、结果里把字段作为 chips 贴在原文上方；深链支持 `?field=`（可重复） |
+
+### 8.3 设计取舍
+
+- **字段与原文同存而不是另建索引**：现有检索的全部保证（分片挑选、反向逐行、字节/行数预算、游标绝对偏移）原样适用；另建索引会同时引入"索引与分片不一致"这一类新缺陷，而 9-07 的百万行级性能要求需要独立立项（含索引一致性与删除语义），不该顺手带出来。
+- **字段过滤是精确等值而不是模糊**：关键词已经覆盖模糊场景，字段的价值恰恰在"不误命中别的字段的值"。
+- **`field=key:value` 而不是多个参数名**：与台账 `label=key:value` 同一形态，同一平台不该有两套写法。
+- **候选字段只列"见过的名字"**：列"可能存在的字段"会让用户按一个永远查不到的名字去筛，然后怀疑功能坏了。
+
+### 8.4 仍未做（本轮明确不做）
+
+- **全文/字段倒排索引**与百万行级性能保证（9-07）：需要独立立项，含索引一致性、删除与压缩语义。
+- **由日志内容直接建告警规则**（9-05）：现状是"日志指标 + 阈值规则"，从检索页一键建规则需要规则表单与日志字段的双向绑定。
+- **把 Pod 日志接入集中检索**（8-07 的另一半）：仍需 `logship` 支持路径通配与 pod 维度标签注入。
+
+### 8.5 本轮新增用例与执行证据
+
+| 用例 | 文件 | 断言 |
+|---|---|---|
+| `TestExtractJSONObject` | `internal/server/logparse/parse_test.go` | 顶层标量 + 一层嵌套（点号）；长整数不退化成科学计数法；数组/null 跳过 |
+| `TestExtractFallsBackOnBrokenJSON` | 同上 | 残缺 JSON 不丢原文：退回 key=value，扫不到则返回 nil |
+| `TestExtractKeyValue` / `TestExtractKeyValueStopsAtWhitespace` | 同上 | 三种引号写法；无引号值到空白为止（避免吞掉后续字段） |
+| `TestExtractSkipsSensitiveKeys` | 同上 | `password` / 嵌套 `access_token` / `passwd` 不进字段表，普通字段保留 |
+| `TestExtractBounds` | 同上 | 非法字段名丢弃、值按 UTF-8 边界截断并留标记、每行字段数封顶 |
+| `TestExtractNoStructure` | 同上 | 空行与纯文本不产出字段 |
+| `TestAppendExtractsFieldsToDisk` | `internal/server/logstore/fields_test.go` | 字段与原文同落盘；无结构行无字段 |
+| `TestQueryFiltersByField` | 同上 | 精确等值、多条件为与、不存在字段返回空（不退化成不过滤） |
+| `TestFieldCatalogPersistsAndCapsCardinality` | 同上 | 名字封顶 128、重启后目录与上限都在、超限新名字被忽略而原文保留 |
+| `TestFieldCatalogFileIsNotTreatedAsSource` | 同上 | 目录文件不被当成来源目录 |
+| `TestLogsQueryByFieldFilter` | `internal/server/api/logs_fields_api_test.go` | 单条件/多条件命中与空结果；命中行带回字段 |
+| `TestLogsQueryByFieldRespectsScope` | 同上 | 字段过滤不能绕过资源范围 |
+| `TestLogsQueryFieldFilterValidation` | 同上 | 缺冒号/缺键/缺值/名字非法/值超长/条件过多一律 400 |
+| `TestLogsFieldsEndpoint` | 同上 | 候选只含见过的名字；缺 `logs:read` 403 |
+| LogsView 四条用例 | `web/src/components/LogsView.test.js` | 条件拼进查询、形态不对本地拒绝、同字段只允许一个值、候选点击填入、深链 `field` 生效且结果展示字段 |
+
+**执行结果**：`go build ./...`、`go vet ./...` 通过；`go test -count=1 ./...` 全绿；`npm --prefix web test` **11 文件 64 项**通过；`npm --prefix web run build` 通过。
+
+**未覆盖边界（不得视为通过）**：真实 Agent 上行的日志（含多行合并后的堆栈行、超长行、非 UTF-8 内容）在字段解析下的表现、大分片（百万行级）下字段过滤的扫描耗时、浏览器端到端。
