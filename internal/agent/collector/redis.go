@@ -332,16 +332,17 @@ func (c *RedisCollector) collectExporter(ctx context.Context, cfg model.RedisIns
 	client := &http.Client{Timeout: 5 * time.Second}
 	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
-		slog.Warn("Redis exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
+		slog.Warn("Redis exporter 拉取失败", "target", safeExporterTarget(cfg.ExporterURL), "err", safeExporterError(err))
 		return nil, model.RedisInstance{
 			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 			Role: "unknown", Topology: cfg.Topology, Group: cfg.Name, Up: false,
 		}
 	}
 	metrics := parsePrometheusText(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), now)
+	up := exporterHealth(string(body), len(metrics) > 0, "redis_up", "redis_instance_up")
 	ri := model.RedisInstance{
 		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
-		Role: "master", Topology: cfg.Topology, Group: cfg.Name, Up: true,
+		Role: "master", Topology: cfg.Topology, Group: cfg.Name, Up: up,
 	}
 	// 从指标中提取 version 标签
 	for _, m := range metrics {

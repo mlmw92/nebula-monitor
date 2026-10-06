@@ -163,12 +163,13 @@ func (c *NginxCollector) collectExporter(ctx context.Context, cfg model.NginxIns
 	defer client.CloseIdleConnections()
 	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
-		slog.Warn("Nginx exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
+		slog.Warn("Nginx exporter 拉取失败", "target", safeExporterTarget(cfg.ExporterURL), "err", safeExporterError(err))
 		return nil, c.downInstance(cfg)
 	}
 	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), "nginx_", now)
+	up := exporterHealth(string(body), len(metrics) > 0, "nginx_up", "nginx_instance_up")
 	ni := model.NginxInstance{
-		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node, Group: cfg.Name, Up: true,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node, Group: cfg.Name, Up: up,
 	}
 	for _, m := range metrics {
 		if m.Name == "nginx_instance_up" && m.Labels != nil {
@@ -189,11 +190,11 @@ func (c *NginxCollector) collectExporter(ctx context.Context, cfg model.NginxIns
 //	Reading: 0 Writing: 3 Waiting: 12
 var (
 	// reActive 匹配 stub_status 中的 "Active connections" 数值。
-	reActive  = regexp.MustCompile(`Active connections:\s*(\d+)`)
+	reActive = regexp.MustCompile(`Active connections:\s*(\d+)`)
 	// reNumbers 匹配 "accepts handled requests" 三个累计计数。
 	reNumbers = regexp.MustCompile(`\s+(\d+)\s+(\d+)\s+(\d+)`)
 	// reRWWait 匹配 Reading/Writing/Waiting 三个并发连接计数。
-	reRWWait  = regexp.MustCompile(`Reading:\s*(\d+)\s+Writing:\s*(\d+)\s+Waiting:\s*(\d+)`)
+	reRWWait = regexp.MustCompile(`Reading:\s*(\d+)\s+Writing:\s*(\d+)\s+Waiting:\s*(\d+)`)
 )
 
 func parseNginxStubStatus(text string) map[string]float64 {

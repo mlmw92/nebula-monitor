@@ -4,8 +4,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/nebula/monitor/internal/server/asset"
 	"github.com/nebula/monitor/internal/server/auth"
 )
 
@@ -115,6 +117,34 @@ func TestRoutes_AlertCollab_StateAffectsPendingView(t *testing.T) {
 	}
 }
 
+// TestRoutes_AlertCollab_ReAckClearsCloseInfo 关闭后再次认领：回写记录不得残留关闭原因/关闭时间。
+//
+// 处置接口对状态迁移没有守卫（pending/ack/closed 都接受同一组动作），所以这条路径是可达的；
+// 状态残留会直接出现在前端的时间线里。
+func TestRoutes_AlertCollab_ReAckClearsCloseInfo(t *testing.T) {
+	a := alertTestAPI(t)
+	mux := newRoutesMux(a)
+	p := globalPrincipal("alerts:read", "alerts:write")
+
+	collabAck(t, mux, p, "/api/v1/alerts/close", collabBody("web-01", 1000, `"reason":"误报"`))
+	ack := collabAck(t, mux, p, "/api/v1/alerts/ack", collabBody("web-01", 1000, ""))
+	if ack["status"] != "ack" {
+		t.Fatalf("再次认领后应为已认领：%v", ack)
+	}
+	// closeReason/closeTime 带 omitempty：清空后应完全不出现
+	if v, ok := ack["closeReason"]; ok {
+		t.Fatalf("再次认领不应残留关闭原因：%v", v)
+	}
+	if v, ok := ack["closeTime"]; ok {
+		t.Fatalf("再次认领不应残留关闭时间：%v", v)
+	}
+	// 持久化层同样不得残留（重启后不能复活）
+	info, ok := a.acks.Get("CPU 使用率过高", "web-01", "cpu_usage", 1000)
+	if !ok || info.CloseReason != "" || info.CloseTime != 0 {
+		t.Fatalf("落库记录仍带关闭信息：%+v", info)
+	}
+}
+
 // TestRoutes_AlertCollab_ScopeDenied 资源范围外节点的处置被拒绝并记入审计。
 func TestRoutes_AlertCollab_ScopeDenied(t *testing.T) {
 	a := alertTestAPI(t)
@@ -160,6 +190,58 @@ func TestRoutes_AlertCollab_Validation(t *testing.T) {
 				t.Fatalf("应 400，got %d（body=%s）", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestRoutes_AlertCollab_ActionWithCommentUsesSingleWrite(t *testing.T) {
+	a := alertTestAPI(t)
+	store, err := asset.Open(t.TempDir() + "/assets.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := a.acks.UseSQLite(store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB().Exec(`CREATE TRIGGER reject_second_ack_write BEFORE UPDATE ON alert_acks BEGIN SELECT RAISE(FAIL, 'second write'); END`); err != nil {
+		t.Fatal(err)
+	}
+	mux := newRoutesMux(a)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, reqWith(globalPrincipal("alerts:write"), http.MethodPost, "/api/v1/alerts/ack",
+		collabBody("web-01", 1000, `"comment":"single transaction"`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("action with comment must use one write, got %d: %s", rec.Code, rec.Body.String())
+	}
+	info, ok := a.acks.Get("CPU 使用率过高", "web-01", "cpu_usage", 1000)
+	if !ok || info.Status != "ack" || len(info.Comments) != 1 {
+		t.Fatalf("atomic action missing state/comment: %+v", info)
+	}
+}
+
+func TestRoutes_AlertCollab_PersistenceFailureReturns500(t *testing.T) {
+	a := alertTestAPI(t)
+	store, err := asset.Open(t.TempDir() + "/assets.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.acks.UseSQLite(store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	mux := newRoutesMux(a)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, reqWith(globalPrincipal("alerts:write"), http.MethodPost, "/api/v1/alerts/ack", collabBody("web-01", 1000, "")))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("persistence failure should be 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "database is closed") || strings.Contains(rec.Body.String(), "sql:") {
+		t.Fatalf("internal persistence error leaked: %s", rec.Body.String())
+	}
+	if _, ok := a.acks.Get("CPU 使用率过高", "web-01", "cpu_usage", 1000); ok {
+		t.Fatal("failed action must not update cache")
 	}
 }
 

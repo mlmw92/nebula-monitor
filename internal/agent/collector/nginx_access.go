@@ -25,7 +25,7 @@ const (
 	nginxAccessMaxBytes = 8 << 20
 
 	// 支持的日志格式名称
-	nginxLogFormatCombined      = "combined"
+	nginxLogFormatCombined = "combined"
 	// nginxLogFormatCombinedTimed 带时间戳的 combined 变体格式名。
 	nginxLogFormatCombinedTimed = "combined_timed"
 )

@@ -101,14 +101,14 @@ func (c *ElasticsearchCollector) collectOne(ctx context.Context, cfg model.Elast
 	ei.Up = true
 
 	labels := map[string]string{
-		"node":        c.node,
-		"instance":    ei.Instance,
-		"name":        cfg.Name,
-		"group":       cfg.Name,
-		"role":        "coordinator",
-		"version":     ei.Version,
-		"cluster":     ei.ClusterName,
-		"es_status":   ei.Status,
+		"node":      c.node,
+		"instance":  ei.Instance,
+		"name":      cfg.Name,
+		"group":     cfg.Name,
+		"role":      "coordinator",
+		"version":   ei.Version,
+		"cluster":   ei.ClusterName,
+		"es_status": ei.Status,
 	}
 	mk := func(name string, val float64) model.Metric {
 		return model.Metric{Node: c.node, Name: name, Labels: labels, Value: val, Timestamp: now}

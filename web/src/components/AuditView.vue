@@ -126,9 +126,9 @@
 </template>
 
 <script setup>
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import http from '../api/http'
+import http, { getToken, setToken } from '../api/http'
 import PageHeader from './common/PageHeader.vue'
 import EmptyState from './common/EmptyState.vue'
 import { printPage } from '../utils/print'
@@ -137,6 +137,7 @@ const loading = ref(false)
 const exporting = ref(false)
 const loadError = ref('')
 const events = ref([])
+let latestRequest = 0
 // total 是**同条件总数**（服务端算，与列表共用一处 WHERE）；page 从 1 开始。
 const total = ref(0)
 const page = ref(1)
@@ -225,18 +226,21 @@ function printList() {
 }
 
 async function loadEvents() {
+  const request = ++latestRequest
   loading.value = true
   try {
     const data = await http.get(`/api/v1/audit/events?${queryString()}`)
+    if (request !== latestRequest) return
     events.value = data.events || []
     total.value = Number(data.total) || 0
     loadError.value = ''
   } catch (error) {
+    if (request !== latestRequest) return
     events.value = []
     total.value = 0
     loadError.value = error.message || '网络异常，请稍后重试'
   } finally {
-    loading.value = false
+    if (request === latestRequest) loading.value = false
   }
 }
 
@@ -255,7 +259,16 @@ async function exportCSV() {
   exporting.value = true
   try {
     // 导出走独立路由（需 audit:export 权限点），查看与导出在服务端权限点不同
-    const response = await fetch(`/api/v1/audit/export?${queryString({ includeOffset: false })}`, { credentials: 'include' })
+    const token = getToken()
+    const response = await fetch(`/api/v1/audit/export?${queryString({ includeOffset: false })}`, {
+      credentials: 'include',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    if (response.status === 401) {
+      setToken('')
+      window.dispatchEvent(new CustomEvent('auth-expired'))
+      throw new Error('未登录或登录已过期')
+    }
     if (!response.ok) throw new Error('导出失败')
     const blob = await response.blob()
     const url = URL.createObjectURL(blob)
@@ -273,6 +286,7 @@ async function exportCSV() {
 }
 
 onMounted(loadEvents)
+onUnmounted(() => { latestRequest++ })
 </script>
 
 <style scoped>

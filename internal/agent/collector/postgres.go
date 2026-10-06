@@ -175,13 +175,14 @@ func (c *PostgresCollector) collectExporter(ctx context.Context, cfg model.Postg
 	client := &http.Client{Timeout: 5 * time.Second}
 	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
-		slog.Warn("PostgreSQL exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
+		slog.Warn("PostgreSQL exporter 拉取失败", "target", safeExporterTarget(cfg.ExporterURL), "err", safeExporterError(err))
 		return nil, c.downInstance(cfg, "unknown")
 	}
 	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), "postgres_", now)
+	up := exporterHealth(string(body), len(metrics) > 0, "pg_up", "postgres_up", "postgres_instance_up")
 	pi := model.PostgresInstance{
 		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
-		Role: "master", Topology: cfg.Topology, Group: cfg.Name, Database: cfg.Database, Up: true,
+		Role: "master", Topology: cfg.Topology, Group: cfg.Name, Database: cfg.Database, Up: up,
 	}
 	for _, m := range metrics {
 		if m.Name == "postgres_instance_up" && m.Labels != nil {

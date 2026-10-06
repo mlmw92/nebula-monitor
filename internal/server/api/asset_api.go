@@ -38,8 +38,14 @@ type AssetProvider interface {
 	// 差异巡检（inspect）：读结论 + 维护标杆，都不改动资产本身。
 	RunInspect(sc asset.InspectScope, actor string) (asset.InspectRun, error)
 	InspectRuns(limit int) ([]asset.InspectRun, error)
+	InspectRunsInNodes(limit int, nodes []string) ([]asset.InspectRun, error)
 	InspectFindings(runID int64, limit int) ([]asset.InspectFinding, error)
+	InspectFindingsInNodes(runID int64, limit int, nodes []string) ([]asset.InspectFinding, bool, error)
 	Baselines() ([]asset.Baseline, error)
+	BaselinesInNodes(nodes []string) ([]asset.Baseline, error)
+	BaselineForType(typeKey string) (asset.Baseline, bool, error)
+	SetBaselineIfCurrent(ref asset.Ref, actor string, currentAssetID int64, nodes []string) (asset.Baseline, error)
+	ClearBaselineIfCurrent(typeKey string, currentAssetID int64, nodes []string) error
 	SetBaseline(ref asset.Ref, actor string) (asset.Baseline, error)
 	ClearBaseline(typeKey string) error
 	// Links 返回资产的直接关联（出边与入边）。
@@ -443,8 +449,14 @@ func (a *API) assetLinksPayload(item asset.Asset, p *auth.Principal) (map[string
 //
 // 与 nodeInScope 的边界一致：未注册节点（nodeGroup 为空）对受限用户不可归属，因此不在此集合内。
 func (a *API) assetAllowedNodes(p *auth.Principal) []string {
-	if p == nil || p.Scope.IsGlobal() || a.nodeMgr == nil {
+	if p == nil || p.Scope.IsGlobal() {
 		return nil
+	}
+	// 受限身份但节点管理器缺失：无法判定任何资产的归属。此处必须 fail-closed
+	// （与 nodeInScope 的 nodeGroup 缺省为空、受限即不可见的取向一致）：
+	// 返回 nil 会被下游解释成「全局、不过滤」，把范围校验变成越权旁路。
+	if a.nodeMgr == nil {
+		return []string{}
 	}
 	nodes := a.visibleNodes(a.nodeMgr.ListHostNodes(), p)
 	out := make([]string, 0, len(nodes))

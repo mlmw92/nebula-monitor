@@ -6,8 +6,10 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/nebula/monitor/internal/server/alert"
 )
@@ -29,7 +31,7 @@ type alertActionRequest struct {
 func (a *API) decodeAlertAction(w http.ResponseWriter, r *http.Request) (alertActionRequest, string, bool) {
 	var body alertActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体解析失败: " + err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体不是合法 JSON"})
 		return body, "", false
 	}
 	if body.Rule == "" || body.Host == "" || body.StartsAt <= 0 {
@@ -52,23 +54,28 @@ func (a *API) decodeAlertAction(w http.ResponseWriter, r *http.Request) (alertAc
 	return body, user, true
 }
 
+func writeAlertActionError(w http.ResponseWriter, err error) {
+	if errors.Is(err, alert.ErrEmptyComment) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "保存告警处置失败"})
+}
+
 // respondAlertAction 回写处置结果（含最新记录，前端无需再拉一次列表）。
 func respondAlertAction(w http.ResponseWriter, info alert.AckInfo) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "ack": info})
 }
 
 // finishAlertAction 处理「可选附带评论」并回写结果。
-func (a *API) finishAlertAction(w http.ResponseWriter, body alertActionRequest, user string, info alert.AckInfo) {
-	if strings.TrimSpace(body.Comment) == "" {
-		respondAlertAction(w, info)
-		return
-	}
-	updated, err := a.acks.Comment(body.Rule, body.Host, body.Instance, body.StartsAt, user, body.Comment)
+func (a *API) finishAlertAction(w http.ResponseWriter, body alertActionRequest, user string,
+	fn func(*alert.AckInfo)) {
+	info, err := a.acks.Apply(body.Rule, body.Host, body.Instance, body.StartsAt, user, fn, body.Comment)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeAlertActionError(w, err)
 		return
 	}
-	respondAlertAction(w, updated)
+	respondAlertAction(w, info)
 }
 
 // handleAlertAck 认领一条告警；可同时指派处理人并追加一条评论。
@@ -78,13 +85,21 @@ func (a *API) handleAlertAck(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var info alert.AckInfo
-	if strings.TrimSpace(body.Assignee) != "" {
-		info = a.acks.Assign(body.Rule, body.Host, body.Instance, body.StartsAt, user, body.Assignee)
-	} else {
-		info = a.acks.Mark(body.Rule, body.Host, body.Instance, body.StartsAt, user)
-	}
-	a.finishAlertAction(w, body, user, info)
+	a.finishAlertAction(w, body, user, func(info *alert.AckInfo) {
+		info.Status = alert.StatusAck
+		if strings.TrimSpace(body.Assignee) != "" {
+			info.Assignee = strings.TrimSpace(body.Assignee)
+		} else {
+			info.Assignee = user
+		}
+		if info.AckTime == 0 {
+			info.AckTime = time.Now().UnixMilli()
+		}
+		// 认领把记录从「已关闭」拉回处理中：必须清掉上一条的关闭原因/时间，
+		// 否则界面会显示「已认领」却带着旧关闭原因与关闭时间的自相矛盾记录。
+		info.CloseReason = ""
+		info.CloseTime = 0
+	})
 }
 
 // handleAlertClose 关闭告警：处置完成或判定为误报，可记录原因。
@@ -94,8 +109,11 @@ func (a *API) handleAlertClose(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	info := a.acks.Close(body.Rule, body.Host, body.Instance, body.StartsAt, user, body.Reason)
-	a.finishAlertAction(w, body, user, info)
+	a.finishAlertAction(w, body, user, func(info *alert.AckInfo) {
+		info.Status = alert.StatusClosed
+		info.CloseReason = strings.TrimSpace(body.Reason)
+		info.CloseTime = time.Now().UnixMilli()
+	})
 }
 
 // handleAlertReopen 重新打开告警：回到待处理，重新出现在待处理列表与统计中。
@@ -105,8 +123,12 @@ func (a *API) handleAlertReopen(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	info := a.acks.Reopen(body.Rule, body.Host, body.Instance, body.StartsAt, user)
-	a.finishAlertAction(w, body, user, info)
+	a.finishAlertAction(w, body, user, func(info *alert.AckInfo) {
+		info.Status = alert.StatusPending
+		info.Assignee = ""
+		info.CloseReason = ""
+		info.CloseTime = 0
+	})
 }
 
 // handleAlertComment 追加一条协作评论（不改变处置状态）。
@@ -118,7 +140,7 @@ func (a *API) handleAlertComment(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := a.acks.Comment(body.Rule, body.Host, body.Instance, body.StartsAt, user, body.Comment)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeAlertActionError(w, err)
 		return
 	}
 	respondAlertAction(w, info)

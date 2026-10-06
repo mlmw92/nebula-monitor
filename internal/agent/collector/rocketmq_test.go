@@ -85,8 +85,8 @@ func TestRocketMQCollectorExporterKeepsNativeInstanceUp(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("rocketmq_instance_up 应恰好 1 条，实际 %d：%+v", count, metrics)
 	}
-	if len(instances) != 1 || !instances[0].Up || instances[0].Version != "5.3.1" {
-		t.Fatalf("拉取成功应视为在线并带版本：%+v", instances)
+	if len(instances) != 1 || instances[0].Up || instances[0].Version != "5.3.1" {
+		t.Fatalf("显式 up=0 应判离线并保留版本：%+v", instances)
 	}
 }
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/nebula/monitor/internal/server/asset"
+	"github.com/nebula/monitor/internal/server/auth"
 )
 
 // 触发巡检需要 inspect:run：它与 assets:write 分开，因为巡检只给结论、不改配置。
@@ -118,6 +120,158 @@ func TestRoutes_InspectRunsAndFindingsRead(t *testing.T) {
 		"/api/v1/inspect/runs/not-a-number/findings", ""))
 	if bad.Code != http.StatusBadRequest {
 		t.Fatalf("非法巡检记录 ID 应 400，实际 %d", bad.Code)
+	}
+}
+
+func TestRoutes_InspectReadRespectsScope(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	mux := newRoutesMux(a)
+	if _, err := svc.RunInspect(asset.InspectScope{}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	seedAsset(t, svc, asset.TypeHost, "web-01", "web-01", "web-01", map[string]string{"cpuCores": "8"})
+	seedAsset(t, svc, asset.TypeHost, "db-01", "db-01", "db-01", map[string]string{"cpuCores": "16"})
+	run, err := svc.RunInspect(asset.InspectScope{}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal := restrictedPrincipal([]string{"inspect:read"}, "g1")
+	get := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, reqWith(principal, http.MethodGet, path, ""))
+		return rec
+	}
+	runs := get("/api/v1/inspect/runs?limit=1")
+	if runs.Code != http.StatusOK {
+		t.Fatalf("runs status = %d: %s", runs.Code, runs.Body.String())
+	}
+	var listing struct {
+		Runs []inspectRunView `json:"runs"`
+	}
+	if err := json.Unmarshal(runs.Body.Bytes(), &listing); err != nil {
+		t.Fatal(err)
+	}
+	if len(listing.Runs) != 1 || listing.Runs[0].Assets != 2 || listing.Runs[0].Findings != 1 {
+		t.Fatalf("g1 should only see two assets and one finding: %+v", listing.Runs)
+	}
+	findings := get("/api/v1/inspect/runs/" + strconv.FormatInt(run.ID, 10) + "/findings")
+	if findings.Code != http.StatusOK {
+		t.Fatalf("findings status = %d: %s", findings.Code, findings.Body.String())
+	}
+	var result struct {
+		Findings []inspectFindingView `json:"findings"`
+	}
+	if err := json.Unmarshal(findings.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 1 || result.Findings[0].Node != "web-01" {
+		t.Fatalf("g1 leaked findings: %+v", result.Findings)
+	}
+}
+
+func TestRoutes_InspectOldRunAndEmptyScopeAreHidden(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	mux := newRoutesMux(a)
+	if _, err := svc.RunInspect(asset.InspectScope{}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	seedAsset(t, svc, asset.TypeHost, "db-01", "db-01", "db-01", map[string]string{"cpuCores": "16"})
+	run, err := svc.RunInspect(asset.InspectScope{Filter: asset.ListFilter{Node: "db-01"}}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/inspect/runs/" + strconv.FormatInt(run.ID, 10) + "/findings"
+	for _, p := range []*auth.Principal{
+		restrictedPrincipal([]string{"inspect:read"}, "g1"),
+		restrictedPrincipal([]string{"inspect:read"}),
+	} {
+		for _, target := range []string{"/api/v1/inspect/runs", path} {
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, reqWith(p, http.MethodGet, target, ""))
+			if target == path && rec.Code != http.StatusNotFound {
+				t.Fatalf("scope-out finding status = %d: %s", rec.Code, rec.Body.String())
+			}
+			if target != path && strings.Contains(rec.Body.String(), "node:db-01") {
+				t.Fatalf("scope-out run leaked: %s", rec.Body.String())
+			}
+		}
+	}
+}
+
+func TestRoutes_InspectBaselineWriteCannotReplaceOtherGroup(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	mux := newRoutesMux(a)
+	db, found, err := svc.Get(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "db-01"})
+	if err != nil || !found {
+		t.Fatalf("db asset: %v %v", found, err)
+	}
+	web, found, err := svc.Get(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"})
+	if err != nil || !found {
+		t.Fatalf("web asset: %v %v", found, err)
+	}
+	if _, err := svc.SetBaseline(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "db-01"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{http.MethodPost, http.MethodDelete} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, reqWith(restrictedPrincipal([]string{"assets:write"}, "g1"), method,
+			"/api/v1/assets/"+strconv.FormatInt(web.ID, 10)+"/baseline", ""))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s should not replace g2 baseline, got %d: %s", method, rec.Code, rec.Body.String())
+		}
+	}
+	items, err := svc.Baselines()
+	if err != nil || len(items) != 1 || items[0].AssetID != db.ID {
+		t.Fatalf("g2 baseline changed: %+v %v", items, err)
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, reqWith(restrictedPrincipal([]string{"inspect:read"}, "g1"), http.MethodGet, "/api/v1/inspect/baselines", ""))
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "db-01") {
+		t.Fatalf("g2 baseline leaked: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRoutes_InspectDoesNotExposeOtherGroupBaselineValue(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	mux := newRoutesMux(a)
+	if _, err := svc.SetBaseline(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "db-01"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	seedAsset(t, svc, asset.TypeHost, "db-01", "db-01", "db-01", map[string]string{"cpuCores": "secret-g2"})
+	if _, err := svc.SetBaseline(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "db-01"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	run, err := svc.RunInspect(asset.InspectScope{}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, reqWith(restrictedPrincipal([]string{"inspect:read"}, "g1"), http.MethodGet,
+		"/api/v1/inspect/runs/"+strconv.FormatInt(run.ID, 10)+"/findings", ""))
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "secret-g2") {
+		t.Fatalf("other group baseline disclosed: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRoutes_InspectScopedRunDoesNotCompareOtherGroupBaseline(t *testing.T) {
+	a, svc := assetTestAPI(t)
+	mux := newRoutesMux(a)
+	seedAsset(t, svc, asset.TypeHost, "db-01", "db-01", "db-01", map[string]string{"cpuCores": "secret-g2"})
+	if _, err := svc.SetBaseline(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "db-01"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, reqWith(restrictedPrincipal([]string{"inspect:run"}, "g1"), http.MethodPost, "/api/v1/inspect/runs", ""))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("run status %d: %s", rec.Code, rec.Body.String())
+	}
+	var run inspectRunView
+	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.Findings != 0 {
+		t.Fatalf("out-of-scope baseline influenced run: %+v", run)
 	}
 }
 

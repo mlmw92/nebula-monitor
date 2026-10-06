@@ -378,7 +378,16 @@ type InspectRun struct {
 	Assets    int
 	Findings  int
 	// Truncated 表示资产数超过单次巡检上限，本次只覆盖了前 N 个（绝不静默截断）。
-	Truncated bool
+	Truncated    bool
+	PartialScope bool
+}
+
+// InspectRunMember 保存执行时归属；读取权限始终按当前资产与节点分组判断。
+type InspectRunMember struct {
+	AssetID   int64
+	Node      string
+	Baselined bool
+	Findings  int
 }
 
 // InspectFinding 是一条差异项。
@@ -386,19 +395,20 @@ type InspectRun struct {
 // 冗余存资产的身份字段（type/key/name/node）而不是只存 asset_id：
 // 巡检记录是**证据**，资产后来被删除也不该让历史结论变得无法解读。
 type InspectFinding struct {
-	ID        int64
-	RunID     int64
-	AssetID   int64
-	AssetType string
-	AssetKey  string
-	AssetName string
-	Node      string
-	Field     string
-	Kind      FindingKind
-	Level     FindingLevel
-	Expected  string
-	Actual    string
-	At        int64
+	ID              int64
+	RunID           int64
+	AssetID         int64
+	AssetType       string
+	AssetKey        string
+	AssetName       string
+	Node            string
+	Field           string
+	Kind            FindingKind
+	Level           FindingLevel
+	Expected        string
+	Actual          string
+	BaselineAssetID int64
+	At              int64
 }
 
 // Baseline 是「标杆资产」：以它的某次快照作为该资产类型的期望值（L3 合规比对）。

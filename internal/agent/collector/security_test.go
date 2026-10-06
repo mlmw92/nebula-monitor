@@ -68,7 +68,6 @@ func TestSSHBruteforceNoOffendersEmitsNothing(t *testing.T) {
 	}
 }
 
-
 func TestTrimSSHFailures(t *testing.T) {
 	got := trimSSHFailures([]int64{100, 200, 300}, 200)
 	if len(got) != 2 || got[0] != 200 || got[1] != 300 {

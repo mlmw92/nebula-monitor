@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -55,6 +56,56 @@ func TestHandleAuditEventsReturnsFilteredEvents(t *testing.T) {
 	}
 	if len(body.Events) != 1 || body.Events[0].Action == "" {
 		t.Fatalf("unexpected events: %#v", body.Events)
+	}
+}
+
+func TestHandleAuditExportIgnoresPageOffsetAndLimit(t *testing.T) {
+	store := audit.New("")
+	for i := 0; i < 3; i++ {
+		if err := store.Record(audit.Event{User: "admin", Method: http.MethodPost, Path: "/api/v1/assets", Category: "management"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := &API{audit: store}
+	// 列表停留在末页且每页只看一条：导出仍应覆盖当前筛选的全部记录。
+	rec := httptest.NewRecorder()
+	a.handleAuditExport(rec, httptest.NewRequest(http.MethodGet, "/api/v1/audit/export?limit=1&offset=2&category=management", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	rows, err := csv.NewReader(strings.NewReader(rec.Body.String())).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 4 { // 表头 + 三条记录
+		t.Fatalf("exported %d CSV rows, want 4", len(rows))
+	}
+}
+
+func TestRoutes_AuditExportRequiresIndependentPermission(t *testing.T) {
+	a, _ := permitTestAPI(t)
+	mux := newRoutesMux(a)
+	if err := a.audit.Record(audit.Event{User: "admin", Path: "/api/v1/rules"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, path string
+		perms      []string
+		want       int
+	}{
+		{"读审计不等于导出", "/api/v1/audit/export", []string{"audit:read"}, http.StatusForbidden},
+		{"导出权限可下载", "/api/v1/audit/export", []string{"audit:export"}, http.StatusOK},
+		{"旧格式入口仍需双重授权", "/api/v1/audit/events?format=csv", []string{"audit:read"}, http.StatusForbidden},
+		{"仅导出不能经旧入口绕开读权限", "/api/v1/audit/events?format=csv", []string{"audit:export"}, http.StatusForbidden},
+		{"双重授权允许旧入口", "/api/v1/audit/events?format=csv", []string{"audit:read", "audit:export"}, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, withPrincipal(httptest.NewRequest(http.MethodGet, tc.path, nil), tc.perms...))
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tc.want, rec.Body.String())
+			}
+		})
 	}
 }
 

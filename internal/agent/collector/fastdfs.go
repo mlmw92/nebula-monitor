@@ -76,12 +76,12 @@ func (c *FastDFSCollector) collectExporter(ctx context.Context, cfg model.FastDF
 	inst := fastDFSInstanceMeta(c, cfg)
 	body, err := fetchMetricsText(ctx, nil, cfg.ExporterURL)
 	if err != nil {
-		slog.Warn("FastDFS exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
+		slog.Warn("FastDFS exporter 拉取失败", "target", safeExporterTarget(cfg.ExporterURL), "err", safeExporterError(err))
 		inst.Up = false
 		return nil, inst
 	}
 	metrics := parsePrometheusTextWithPrefix(body, c.node, inst.Instance, "fastdfs_", now)
-	inst.Up = true
+	inst.Up = exporterHealth(body, len(metrics) > 0, "fastdfs_up")
 	for _, m := range metrics {
 		switch m.Name {
 		case "fastdfs_up":

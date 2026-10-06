@@ -261,7 +261,7 @@ func (s *AckStore) load() {
 
 // update 以「读-改-写」方式应用一次处置变更；记录不存在时初始化为待处理。
 // actor 会被记录为「最近一次操作人」，供协作时间线与审计追溯。
-func (s *AckStore) update(rule, host, instance string, startsAt int64, actor string, fn func(*AckInfo)) AckInfo {
+func (s *AckStore) update(rule, host, instance string, startsAt int64, actor string, fn func(*AckInfo)) (AckInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := ackKey(rule, host, instance, startsAt)
@@ -278,40 +278,64 @@ func (s *AckStore) update(rule, host, instance string, startsAt int64, actor str
 	fn(&info)
 	info.User = actor
 	info.Time = time.Now().UnixMilli()
+	if err := s.saveLocked(key, info); err != nil {
+		return AckInfo{}, err
+	}
 	s.acks[key] = info
-	s.saveLocked(key, info)
-	return info
+	return info, nil
 }
 
 // saveLocked 落盘一条记录：入库模式 upsert 一行；降级模式全量重写 JSON。
-//
-// 与降级模式一致，**落盘失败不打断处置动作**：内存里已经生效，重启后以库/文件为准。
-func (s *AckStore) saveLocked(key string, info AckInfo) {
+func (s *AckStore) saveLocked(key string, info AckInfo) error {
 	if s.db == nil {
-		s.persistLocked()
-		return
+		return s.persistWithLocked(key, info)
 	}
 	args, err := ackArgs(key, info)
 	if err != nil {
-		return
+		return err
 	}
-	_, _ = s.db.Exec(upsertAckSQL, args...)
+	if _, err := s.db.Exec(upsertAckSQL, args...); err != nil {
+		return fmt.Errorf("保存告警处置失败: %w", err)
+	}
+	return nil
 }
 
-// Mark 认领一条告警（处理人记为操作者本人）。保留既有签名以兼容调用方。
-func (s *AckStore) Mark(rule, host, instance string, startsAt int64, user string) AckInfo {
+// Apply 在一次持久化写入中完成状态变更与可选评论。
+func (s *AckStore) Apply(rule, host, instance string, startsAt int64, actor string,
+	fn func(*AckInfo), comment string) (AckInfo, error) {
+	comment = strings.TrimSpace(comment)
+	return s.update(rule, host, instance, startsAt, actor, func(i *AckInfo) {
+		fn(i)
+		if comment == "" {
+			return
+		}
+		if runes := []rune(comment); len(runes) > maxCommentLength {
+			comment = string(runes[:maxCommentLength])
+		}
+		i.Comments = append(i.Comments, Comment{User: actor, Text: comment, Time: time.Now().UnixMilli()})
+		if len(i.Comments) > maxAckComments {
+			i.Comments = i.Comments[len(i.Comments)-maxAckComments:]
+		}
+	})
+}
+
+// Mark 认领一条告警（处理人记为操作者本人）。
+func (s *AckStore) Mark(rule, host, instance string, startsAt int64, user string) (AckInfo, error) {
 	return s.update(rule, host, instance, startsAt, user, func(i *AckInfo) {
 		i.Status = StatusAck
 		i.Assignee = user
 		if i.AckTime == 0 {
 			i.AckTime = time.Now().UnixMilli()
 		}
+		// 认领把记录从「已关闭」拉回处理中：清掉上一条的关闭信息，避免状态残留。
+		i.CloseReason = ""
+		i.CloseTime = 0
 	})
 }
 
 // Assign 把告警指派给指定处理人（同时置为已认领）。
 // assignee 为空时表示指派给当前操作者本人。
-func (s *AckStore) Assign(rule, host, instance string, startsAt int64, user, assignee string) AckInfo {
+func (s *AckStore) Assign(rule, host, instance string, startsAt int64, user, assignee string) (AckInfo, error) {
 	if strings.TrimSpace(assignee) == "" {
 		assignee = user
 	}
@@ -321,11 +345,13 @@ func (s *AckStore) Assign(rule, host, instance string, startsAt int64, user, ass
 		if i.AckTime == 0 {
 			i.AckTime = time.Now().UnixMilli()
 		}
+		i.CloseReason = ""
+		i.CloseTime = 0
 	})
 }
 
 // Close 关闭告警并记录原因。
-func (s *AckStore) Close(rule, host, instance string, startsAt int64, user, reason string) AckInfo {
+func (s *AckStore) Close(rule, host, instance string, startsAt int64, user, reason string) (AckInfo, error) {
 	return s.update(rule, host, instance, startsAt, user, func(i *AckInfo) {
 		i.Status = StatusClosed
 		i.CloseReason = strings.TrimSpace(reason)
@@ -335,7 +361,7 @@ func (s *AckStore) Close(rule, host, instance string, startsAt int64, user, reas
 
 // Reopen 重新打开告警：回到待处理并清空处理人与关闭信息。
 // 评论历史与认领时间保留，便于回看处置过程。
-func (s *AckStore) Reopen(rule, host, instance string, startsAt int64, user string) AckInfo {
+func (s *AckStore) Reopen(rule, host, instance string, startsAt int64, user string) (AckInfo, error) {
 	return s.update(rule, host, instance, startsAt, user, func(i *AckInfo) {
 		i.Status = StatusPending
 		i.Assignee = ""
@@ -354,14 +380,14 @@ func (s *AckStore) Comment(rule, host, instance string, startsAt int64, user, te
 		text = string(runes[:maxCommentLength])
 	}
 	now := time.Now().UnixMilli()
-	info := s.update(rule, host, instance, startsAt, user, func(i *AckInfo) {
+	info, err := s.update(rule, host, instance, startsAt, user, func(i *AckInfo) {
 		i.Comments = append(i.Comments, Comment{User: user, Text: text, Time: now})
 		// 只保留最新的若干条，避免单条告警的协作记录无界增长
 		if len(i.Comments) > maxAckComments {
 			i.Comments = i.Comments[len(i.Comments)-maxAckComments:]
 		}
 	})
-	return info, nil
+	return info, err
 }
 
 // AckStats 是处置记录的统计快照（保留策略与自监控使用）。
@@ -394,36 +420,44 @@ func (s *AckStore) Stats() AckStats {
 //
 // 待处理（pending）记录一律保留：它们仍然需要人处理，不能因为时间久远被静默清掉，
 // 否则「重新打开后回到待处理」的告警会在清理后再次消失。
-func (s *AckStore) PruneHandled(before int64) int {
+func (s *AckStore) PruneHandled(before int64) (int, error) {
 	if s == nil || before <= 0 {
-		return 0
+		return 0, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	removed := 0
+	keys := make([]string, 0)
 	for key, info := range s.acks {
-		if !info.Handled() || info.Time >= before {
-			continue
+		if info.Handled() && info.Time < before {
+			keys = append(keys, key)
 		}
-		delete(s.acks, key)
-		removed++
 	}
-	if removed == 0 {
-		return 0
+	if len(keys) == 0 {
+		return 0, nil
 	}
 	if s.db != nil {
-		// 与内存同一判据：已处置（含空状态——迁移前的老记录在语义上等于已认领）
-		// 且最后操作时间早于 before。
-		if _, err := s.db.Exec(
-			`DELETE FROM alert_acks WHERE status IN ('ack','closed','') AND time_ms < ?`, before); err != nil {
-			// 库删除失败：内存已清、库里还在，重启后会重新读回来，下次清理会再删一遍。
-			// 不回滚内存——待处理记录不受影响，而这批本来就是"该清掉的"。
-			return removed
+		if _, err := s.db.Exec(`DELETE FROM alert_acks WHERE status IN ('ack','closed','') AND time_ms < ?`, before); err != nil {
+			return 0, fmt.Errorf("清理告警处置失败: %w", err)
 		}
-		return removed
+	} else if s.path != "" {
+		remaining := make([]AckInfo, 0, len(s.acks)-len(keys))
+		remove := make(map[string]struct{}, len(keys))
+		for _, key := range keys {
+			remove[key] = struct{}{}
+		}
+		for key, info := range s.acks {
+			if _, ok := remove[key]; !ok {
+				remaining = append(remaining, info)
+			}
+		}
+		if err := writeAcks(s.path, remaining); err != nil {
+			return 0, err
+		}
 	}
-	s.persistLocked()
-	return removed
+	for _, key := range keys {
+		delete(s.acks, key)
+	}
+	return len(keys), nil
 }
 
 // Get 返回单条告警的处置记录。
@@ -460,19 +494,41 @@ func (s *AckStore) Map() map[string]AckInfo {
 	return out
 }
 
+func (s *AckStore) persistWithLocked(key string, info AckInfo) error {
+	if s.path == "" {
+		return nil
+	}
+	list := make([]AckInfo, 0, len(s.acks)+1)
+	for k, v := range s.acks {
+		if k != key {
+			list = append(list, v)
+		}
+	}
+	list = append(list, info)
+	return writeAcks(s.path, list)
+}
+
 func (s *AckStore) persistLocked() {
+	if s.path == "" {
+		return
+	}
 	list := make([]AckInfo, 0, len(s.acks))
 	for _, v := range s.acks {
 		list = append(list, v)
 	}
+	_ = writeAcks(s.path, list)
+}
+
+func writeAcks(path string, list []AckInfo) error {
 	data, err := json.MarshalIndent(list, "", "  ")
 	if err != nil {
-		return
+		return fmt.Errorf("编码告警处置失败: %w", err)
 	}
-	if err := os.MkdirAll(dirOf(s.path), 0o755); err != nil {
-		return
+	if err := os.MkdirAll(dirOf(path), 0o755); err != nil {
+		return fmt.Errorf("创建告警处置目录失败: %w", err)
 	}
-	if err := config.AtomicWrite(s.path, data); err != nil {
-		return
+	if err := config.AtomicWrite(path, data); err != nil {
+		return fmt.Errorf("保存告警处置失败: %w", err)
 	}
+	return nil
 }

@@ -590,7 +590,7 @@ func (c *K8sCollector) collectExporter(ctx context.Context, cfg model.K8sInstanc
 	client := &http.Client{Timeout: 10 * time.Second}
 	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
-		slog.Warn("K8s 抓取 kube-state-metrics 失败", "name", cfg.Name, "url", cfg.ExporterURL, "err", err)
+		slog.Warn("K8s 抓取 kube-state-metrics 失败", "name", cfg.Name, "target", safeExporterTarget(cfg.ExporterURL), "err", safeExporterError(err))
 		return []model.Metric{c.mk("k8s_cluster_up", 0, cfg, conn, nil, now)}, false, ""
 	}
 	text := string(body)
@@ -604,8 +604,15 @@ func (c *K8sCollector) collectExporter(ctx context.Context, cfg model.K8sInstanc
 	podsFailed := sumKSMValue(text, "kube_pod_status_phase", `phase="Failed"`)
 	depsTotal := countKSMSeries(text, "kube_deployment_created")
 
+	// 至少要有一条 kube_* 样本，才说明 kube-state-metrics 真的在提供集群数据。
+	// 刻意不绑定具体指标名：KSM 常被 --metric-allowlist 收窄，健康集群可能只暴露少量族。
+	hasKSMData := hasKSMSample(text)
+	upValue := 0.0
+	if hasKSMData {
+		upValue = 1
+	}
 	out := []model.Metric{
-		c.mk("k8s_cluster_up", 1, cfg, conn, nil, now),
+		c.mk("k8s_cluster_up", upValue, cfg, conn, nil, now),
 		c.mk("k8s_nodes_total", nodesTotal, cfg, conn, nil, now),
 		c.mk("k8s_nodes_ready", nodesReady, cfg, conn, nil, now),
 		c.mk("k8s_pods_total", podsTotal, cfg, conn, nil, now),
@@ -614,7 +621,24 @@ func (c *K8sCollector) collectExporter(ctx context.Context, cfg model.K8sInstanc
 		c.mk("k8s_pods_failed", podsFailed, cfg, conn, nil, now),
 		c.mk("k8s_deployments_total", depsTotal, cfg, conn, nil, now),
 	}
-	return out, true, ""
+	return out, hasKSMData, ""
+}
+
+// hasKSMSample 判断正文里是否有至少一条 kube_* 指标样本。
+//
+// 跳过注释行：只有 `# HELP` / `# TYPE` 的响应等于没有数据，不能据此判集群在线。
+func hasKSMSample(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, _, _, ok := parsePromLine(line)
+		if ok && strings.HasPrefix(name, "kube_") {
+			return true
+		}
+	}
+	return false
 }
 
 // countKSMSeries 统计包含指定指标名的样本行数。

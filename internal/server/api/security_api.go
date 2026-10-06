@@ -114,13 +114,16 @@ func (a *API) auditEvents(r *http.Request) []audit.Event {
 // auditExportCSV 以 CSV 形式写出审计事件（/audit/export 与 /audit/events?format=csv 共用）。
 //
 // 导出上限取 audit.MaxEvents（2000）：与入库前的内存上限同档，避免一次导出把库读爆。
-// 要导出更多就按时间范围分批——这也是分页参数存在的原因。
+// 列表的 limit/offset 不影响导出；要导出更多就按时间范围分批。
 func (a *API) auditExportCSV(w http.ResponseWriter, r *http.Request) {
 	if a.audit == nil {
 		writeAuditCSV(w, nil)
 		return
 	}
-	events, _, err := a.auditQuery(auditFilter(r, audit.MaxEvents))
+	filter := auditFilter(r, audit.MaxEvents)
+	filter.Limit = audit.MaxEvents
+	filter.Offset = 0
+	events, _, err := a.auditQuery(filter)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询审计事件失败"})
 		return

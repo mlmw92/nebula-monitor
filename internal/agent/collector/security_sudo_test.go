@@ -14,7 +14,7 @@ import (
 //
 // 此前这里复用 sshOff：collectSSH 在本函数之前执行、已把偏移推到文件末尾，
 // 于是 sudo 永远从末尾开始读——表现为「sudo 审计一条都收不到」，而且不报任何错
-//（既没有错误日志，也没有 up/失败指标），属于最难发现的那类缺陷。
+// （既没有错误日志，也没有 up/失败指标），属于最难发现的那类缺陷。
 func TestSecurityCollector_SudoUsesOwnOffset(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.log")
 	body := "Sep 26 10:00:00 host sshd[1]: Accepted password for alice from 10.0.0.9 port 22 ssh2\n" +

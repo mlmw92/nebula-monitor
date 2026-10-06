@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -353,6 +354,22 @@ func NewWebhookNotifier(cfg config.WebhookConfig) *WebhookNotifier {
 // Channel 返回渠道名。
 func (n *WebhookNotifier) Channel() string { return "webhook" }
 
+func redactURLError(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return urlErr.Err
+	}
+	return err
+}
+
+func notifierTarget(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return "<invalid>"
+	}
+	return u.Scheme + "://" + u.Host
+}
+
 // Notify 向配置的 Webhook URL 发送告警 JSON。
 func (n *WebhookNotifier) Notify(e model.AlertEvent) error {
 	if !n.cfg.Enabled || len(n.cfg.URLs) == 0 {
@@ -367,16 +384,17 @@ func (n *WebhookNotifier) Notify(e model.AlertEvent) error {
 	for _, u := range n.cfg.URLs {
 		resp, err := client.Post(u, "application/json", bytes.NewReader(payload))
 		if err != nil {
-			slog.Error("Webhook 通知失败", "url", u, "err", err)
+			publicErr := fmt.Errorf("Webhook 请求失败: %v", redactURLError(err))
+			slog.Error("Webhook 通知失败", "target", notifierTarget(u), "err", publicErr)
 			if firstErr == nil {
-				firstErr = err
+				firstErr = publicErr
 			}
 			continue
 		}
 		if resp.StatusCode >= 300 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			err = fmt.Errorf("Webhook 返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-			slog.Error("Webhook 通知失败", "url", u, "err", err)
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			err = fmt.Errorf("Webhook 返回 %d", resp.StatusCode)
+			slog.Error("Webhook 通知失败", "target", notifierTarget(u), "status", resp.StatusCode)
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -404,16 +422,17 @@ func (n *WebhookNotifier) NotifyGroup(events []model.AlertEvent) error {
 	for _, u := range n.cfg.URLs {
 		resp, err := client.Post(u, "application/json", bytes.NewReader(payload))
 		if err != nil {
-			slog.Error("Webhook 汇总通知失败", "url", u, "err", err)
+			publicErr := fmt.Errorf("Webhook 汇总请求失败: %v", redactURLError(err))
+			slog.Error("Webhook 汇总通知失败", "target", notifierTarget(u), "err", publicErr)
 			if firstErr == nil {
-				firstErr = err
+				firstErr = publicErr
 			}
 			continue
 		}
 		if resp.StatusCode >= 300 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			err = fmt.Errorf("Webhook 汇总返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-			slog.Error("Webhook 汇总通知失败", "url", u, "err", err)
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			err = fmt.Errorf("Webhook 汇总返回 %d", resp.StatusCode)
+			slog.Error("Webhook 汇总通知失败", "target", notifierTarget(u), "status", resp.StatusCode)
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -563,13 +582,14 @@ func postJSON(rawURL string, body interface{}) error {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Post(rawURL, "application/json", bytes.NewReader(data))
 	if err != nil {
-		slog.Error("通知渠道请求失败", "err", err)
-		return err
+		publicErr := fmt.Errorf("通知渠道请求失败: %v", redactURLError(err))
+		slog.Error("通知渠道请求失败", "target", notifierTarget(rawURL), "err", publicErr)
+		return publicErr
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
-		slog.Error("通知渠道返回非成功状态", "status", resp.StatusCode, "body", string(b))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		slog.Error("通知渠道返回非成功状态", "target", notifierTarget(rawURL), "status", resp.StatusCode)
 		return fmt.Errorf("通知渠道返回 %d", resp.StatusCode)
 	}
 	var biz struct {
@@ -583,10 +603,10 @@ func postJSON(rawURL string, body interface{}) error {
 		return nil
 	}
 	if biz.Errcode != 0 {
-		return fmt.Errorf("通知渠道业务错误 errcode=%d errmsg=%s", biz.Errcode, biz.Errmsg)
+		return fmt.Errorf("通知渠道业务错误 errcode=%d", biz.Errcode)
 	}
 	if biz.Code != 0 {
-		return fmt.Errorf("通知渠道业务错误 code=%d msg=%s", biz.Code, biz.Msg)
+		return fmt.Errorf("通知渠道业务错误 code=%d", biz.Code)
 	}
 	return nil
 }

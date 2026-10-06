@@ -48,14 +48,21 @@
       </div>
     </div>
 
-    <!-- 上次清理结果 -->
-    <el-alert v-if="lastResult" type="success" :closable="false" show-icon class="err">
+    <!-- 上次清理结果：有失败分项时不得显示为成功 -->
+    <el-alert
+      v-if="lastResult"
+      :type="lastResult.errors?.length ? 'warning' : 'success'"
+      :closable="false"
+      show-icon
+      class="err"
+    >
       <template #title>
         上次清理：{{ fmt(lastResult.at) }} · 告警记录 {{ lastResult.acksRemoved }} 条 · 报告文件
         {{ lastResult.reportFilesRemoved }} 个（历史 {{ lastResult.reportHistoryRemoved }} 条）· 日志
         {{ lastResult.logFilesRemoved ?? 0 }} 个文件（分片 {{ lastResult.logDirsRemoved ?? 0 }}）· 释放
         {{ fileSize(lastResult.freedBytes) }}
         <span v-if="lastResult.skipped" class="field-hint inline">（{{ lastResult.skipped }}）</span>
+        <span v-if="lastResult.errors?.length" class="field-hint inline">（失败：{{ lastResult.errors.join('；') }}）</span>
       </template>
     </el-alert>
 
@@ -174,7 +181,9 @@ async function cleanup() {
   try {
     const res = await http.cleanupRetention()
     lastResult.value = res
-    if (res.skipped) {
+    if (res.errors?.length) {
+      ElMessage.warning('清理未全部完成：' + res.errors.join('；'))
+    } else if (res.skipped) {
       ElMessage.warning('未执行清理：' + res.skipped)
     } else {
       ElMessage.success(`已清理：告警记录 ${res.acksRemoved} 条、报告 ${res.reportFilesRemoved} 个（释放 ${fileSize(res.freedBytes)}）`)

@@ -132,6 +132,9 @@ type CleanupResult struct {
 	LogsCutoff           int64  `json:"logsCutoff,omitempty"`
 	FreedBytes           int64  `json:"freedBytes"`
 	Skipped              string `json:"skipped,omitempty"` // 未执行清理的原因（如未接入对应存储）
+	// Errors 是本次清理中失败的分项。清理失败**必须显式上报**：
+	// 静默吞掉错误会让人看到一次「清理完成、删除 0 条」，而数据其实在无界增长。
+	Errors []string `json:"errors,omitempty"`
 }
 
 // Status 是数据保留现状（供 Web 端展示）。
@@ -286,16 +289,28 @@ func (m *Manager) cleanup(cfg Config) CleanupResult {
 	if cfg.AcksDays > 0 && m.acks != nil {
 		cutoff := now.AddDate(0, 0, -cfg.AcksDays)
 		res.AcksCutoff = cutoff.UnixMilli()
-		res.AcksRemoved = m.acks.PruneHandled(cutoff.UnixMilli())
+		if removed, err := m.acks.PruneHandled(cutoff.UnixMilli()); err != nil {
+			// 清理失败不能假装成功：本次一条都没删，且必须让调用方与日志都看得见。
+			res.Errors = append(res.Errors, "告警处置清理失败: "+err.Error())
+			slog.Warn("告警处置清理失败", "err", err)
+		} else {
+			res.AcksRemoved = removed
+		}
 	}
 	if cfg.AuditDays > 0 && m.audit != nil {
 		cutoff := now.AddDate(0, 0, -cfg.AuditDays)
 		res.AuditCutoff = cutoff.UnixMilli()
-		if removed, err := m.audit.Prune(cutoff.UnixMilli()); err == nil {
+		if removed, err := m.audit.Prune(cutoff.UnixMilli()); err != nil {
+			res.Errors = append(res.Errors, "审计事件清理失败: "+err.Error())
+			slog.Warn("审计事件清理失败", "err", err)
+		} else {
 			res.AuditRemoved = removed
 		}
 		// 兜底条数：时间口径是主规则，条数是"单机磁盘被写爆"的安全网。
-		if rows, err := m.audit.PruneRows(audit.MaxRows); err == nil {
+		if rows, err := m.audit.PruneRows(audit.MaxRows); err != nil {
+			res.Errors = append(res.Errors, "审计条数裁剪失败: "+err.Error())
+			slog.Warn("审计条数裁剪失败", "err", err)
+		} else {
 			res.AuditRowsRemoved = rows
 		}
 	}

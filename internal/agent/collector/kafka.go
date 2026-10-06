@@ -209,12 +209,13 @@ func (c *KafkaCollector) collectExporter(ctx context.Context, cfg model.KafkaIns
 	client := &http.Client{Timeout: 5 * time.Second}
 	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
-		slog.Warn("Kafka exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
+		slog.Warn("Kafka exporter 拉取失败", "target", safeExporterTarget(cfg.ExporterURL), "err", safeExporterError(err))
 		return nil, c.downInstance(cfg)
 	}
 	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeRemoteAddr(cfg.Addr, ""), "kafka_", now)
+	up := exporterHealth(string(body), len(metrics) > 0, "kafka_up", "kafka_instance_up")
 	ki := model.KafkaInstance{
-		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node, Group: cfg.Name, Role: "broker", Version: cfg.Version, Up: true,
+		Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node, Group: cfg.Name, Role: "broker", Version: cfg.Version, Up: up,
 	}
 	for _, m := range metrics {
 		if m.Name == "kafka_instance_up" && m.Labels != nil {

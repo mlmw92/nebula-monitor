@@ -178,7 +178,7 @@ func (c *RocketMQCollector) collectExporter(ctx context.Context, cfg model.Rocke
 	client := &http.Client{Timeout: 5 * time.Second}
 	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
-		slog.Warn("RocketMQ exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
+		slog.Warn("RocketMQ exporter 拉取失败", "target", safeExporterTarget(cfg.ExporterURL), "err", safeExporterError(err))
 		return nil, model.RocketMQInstance{
 			Instance: normalizeRemoteAddr(cfg.Addr, ""), Name: cfg.Name, Node: c.node,
 			Group: cfg.Name, Role: "nameserver", Up: false,
@@ -205,9 +205,10 @@ func (c *RocketMQCollector) collectExporter(ctx context.Context, cfg model.Rocke
 			},
 		})
 	}
+	up := exporterHealth(string(body), len(metrics) > 0, "rocketmq_up", "rocketmq_instance_up")
 	ri := model.RocketMQInstance{
 		Instance: instance, Name: cfg.Name, Node: c.node,
-		Group: cfg.Name, Role: "nameserver", Up: len(metrics) > 0,
+		Group: cfg.Name, Role: "nameserver", Up: up,
 	}
 	for _, m := range metrics {
 		if m.Name == "rocketmq_instance_up" && m.Labels != nil {

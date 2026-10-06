@@ -299,6 +299,26 @@ func TestWS_Authorize(t *testing.T) {
 	}
 }
 
+// TestAssetAllowedNodesFailsClosedWithoutNodeManager 受限身份遇到「节点管理器缺失」时必须
+// fail-closed：返回 nil 会被下游（asset.ListFilter.Nodes / InspectRunsInNodes 等）解释成
+// 「全局、不过滤」，把资源范围校验变成越权旁路。与 nodeInScope 的取向保持一致。
+func TestAssetAllowedNodesFailsClosedWithoutNodeManager(t *testing.T) {
+	a := &API{} // 故意不注入 nodeMgr
+	got := a.assetAllowedNodes(restrictedPrincipal([]string{"assets:read"}, "g1"))
+	if got == nil {
+		t.Fatal("受限身份在缺少节点管理器时不得返回 nil（nil 表示不过滤）")
+	}
+	if len(got) != 0 {
+		t.Fatalf("受限身份在缺少节点管理器时应得到空集合，实际 %v", got)
+	}
+	if a.assetAllowedNodes(globalPrincipal("assets:read")) != nil {
+		t.Fatal("全局范围不应做节点限制")
+	}
+	if a.assetAllowedNodes(nil) != nil {
+		t.Fatal("未启用认证时不应做节点限制")
+	}
+}
+
 // TestWS_Authorize_AuthDisabled 未启用认证时 WebSocket 订阅保持放行（仅做 topic 合法性校验）。
 func TestWS_Authorize_AuthDisabled(t *testing.T) {
 	base := scopeTestAPI(t)

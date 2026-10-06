@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/csv"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +20,7 @@ import (
 //   - step:   步长毫秒（可选，默认根据跨度自动选择）
 //   - labels: 附加筛选标签，逗号分隔 key=value 对（可选）
 //
-// 多序列时输出长表：timestamp,node,labels,value（Excel 友好）；
+// 多序列时输出长表：timestamp,labels,value（Excel 友好）；
 // 单序列简化为：timestamp,value。
 func (a *API) handleMetricsExport(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -87,39 +89,43 @@ func (a *API) handleMetricsExport(w http.ResponseWriter, r *http.Request) {
 
 // writeMetricsCSV 按序列数量选择单序列/多序列表头并写出 CSV 响应。
 func writeMetricsCSV(w http.ResponseWriter, metric string, start, end int64, series []model.Series) {
-	var sb strings.Builder
-	if len(series) <= 1 {
-		sb.WriteString("timestamp,value\n")
-	} else {
-		sb.WriteString("timestamp,labels,value\n")
-	}
-	for _, s := range series {
-		for _, p := range s.Points {
-			t := time.UnixMilli(p.Timestamp).Format("2006-01-02 15:04:05")
-			if len(series) <= 1 {
-				sb.WriteString(fmt.Sprintf("%s,%.6g\n", t, p.Value))
-			} else {
-				sb.WriteString(fmt.Sprintf("%s,%s,%.6g\n", t, labelStr(s.Labels), p.Value))
-			}
-		}
-	}
-
 	fname := fmt.Sprintf("metric_%s_%d_%d.csv", metric, start, end)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename="+fname)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("\xEF\xBB\xBF")) // BOM 便于 Excel 识别 UTF-8
-	_, _ = w.Write([]byte(sb.String()))
+	writer := csv.NewWriter(w)
+	multi := len(series) > 1
+	if multi {
+		_ = writer.Write([]string{"timestamp", "labels", "value"})
+	} else {
+		_ = writer.Write([]string{"timestamp", "value"})
+	}
+	for _, s := range series {
+		for _, p := range s.Points {
+			row := []string{time.UnixMilli(p.Timestamp).Format("2006-01-02 15:04:05")}
+			if multi {
+				row = append(row, labelStr(s.Labels))
+			}
+			row = append(row, strconv.FormatFloat(p.Value, 'g', 6, 64))
+			_ = writer.Write(row)
+		}
+	}
+	writer.Flush()
 }
 
 // labelStr 将标签集序列化为可读字符串（排除内部 __name__）。
 func labelStr(m map[string]string) string {
-	var parts []string
-	for k, v := range m {
-		if k == "__name__" {
-			continue
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		if k != "__name__" {
+			keys = append(keys, k)
 		}
-		parts = append(parts, k+"="+v)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+m[k])
 	}
 	return strings.Join(parts, " ")
 }

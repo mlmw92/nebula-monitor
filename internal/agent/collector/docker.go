@@ -70,7 +70,7 @@ func (c *DockerCollector) collectDaemon(ctx context.Context, cfg model.DockerIns
 	}
 
 	labels := map[string]string{
-		"node": c.node,
+		"node":  c.node,
 		"group": cfg.Name,
 	}
 	mk := func(name string, val float64, extra map[string]string) model.Metric {
@@ -112,7 +112,7 @@ func (c *DockerCollector) collectDaemon(ctx context.Context, cfg model.DockerIns
 			containerName = strings.TrimPrefix(ctr.Names[0], "/")
 		}
 		containerLabels := map[string]string{
-			"instance": ctr.ID[:12],
+			"instance":       ctr.ID[:12],
 			"container_name": containerName,
 			"image":          ctr.Image,
 			"status":         status,
@@ -208,9 +208,9 @@ type dockerStats struct {
 		SystemCPUUsage uint64 `json:"system_cpu_usage"`
 	} `json:"precpu_stats"`
 	MemoryStats struct {
-		Usage  uint64 `json:"usage"`
-		Limit  uint64 `json:"limit"`
-		Stats  map[string]uint64 `json:"stats"`
+		Usage uint64            `json:"usage"`
+		Limit uint64            `json:"limit"`
+		Stats map[string]uint64 `json:"stats"`
 	} `json:"memory_stats"`
 	Networks map[string]struct {
 		RxBytes uint64 `json:"rx_bytes"`

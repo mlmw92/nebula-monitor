@@ -10,7 +10,10 @@ import (
 // TestAckStore_MarkThenHandled 认领：状态为 ack、处理人为本人、计入「已处理」。
 func TestAckStore_MarkThenHandled(t *testing.T) {
 	s := NewAckStore(filepath.Join(t.TempDir(), "acks.json"))
-	info := s.Mark("r1", "web-01", "cpu_usage", 1000, "ops1")
+	info, err := s.Mark("r1", "web-01", "cpu_usage", 1000, "ops1")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if info.Status != StatusAck || info.Assignee != "ops1" || info.User != "ops1" {
 		t.Fatalf("认领结果不符：%+v", info)
@@ -27,6 +30,20 @@ func TestAckStore_MarkThenHandled(t *testing.T) {
 	got, ok := s.Get("r1", "web-01", "cpu_usage", 1000)
 	if !ok || got.Status != StatusAck {
 		t.Fatalf("Get 应返回认领记录：%+v ok=%v", got, ok)
+	}
+}
+
+func TestAckStoreJSONWriteFailureDoesNotCacheSuccess(t *testing.T) {
+	blocked := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := NewAckStore(filepath.Join(blocked, "acks.json"))
+	if _, err := s.Mark("r1", "web-01", "cpu", 1, "ops"); err == nil {
+		t.Fatal("JSON write failure must be returned")
+	}
+	if _, ok := s.Get("r1", "web-01", "cpu", 1); ok {
+		t.Fatal("failed JSON write must not update cache")
 	}
 }
 
@@ -55,12 +72,18 @@ func TestAckStore_LegacyRecordTreatedAsAck(t *testing.T) {
 // TestAckStore_CloseAndReopen 关闭与重新打开：状态流转、关闭信息清理、认领时间与评论保留。
 func TestAckStore_CloseAndReopen(t *testing.T) {
 	s := NewAckStore(filepath.Join(t.TempDir(), "acks.json"))
-	acked := s.Mark("r1", "web-01", "cpu_usage", 1000, "ops1")
+	acked, err := s.Mark("r1", "web-01", "cpu_usage", 1000, "ops1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Comment("r1", "web-01", "cpu_usage", 1000, "ops1", "正在扩容"); err != nil {
 		t.Fatalf("评论失败: %v", err)
 	}
 
-	closed := s.Close("r1", "web-01", "cpu_usage", 1000, "ops2", " 误报，已调整阈值 ")
+	closed, err := s.Close("r1", "web-01", "cpu_usage", 1000, "ops2", " 误报，已调整阈值 ")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if closed.Status != StatusClosed || closed.CloseReason != "误报，已调整阈值" {
 		t.Fatalf("关闭结果不符：%+v", closed)
 	}
@@ -71,7 +94,10 @@ func TestAckStore_CloseAndReopen(t *testing.T) {
 		t.Fatal("已关闭应视为已处理")
 	}
 
-	reopened := s.Reopen("r1", "web-01", "cpu_usage", 1000, "ops1")
+	reopened, err := s.Reopen("r1", "web-01", "cpu_usage", 1000, "ops1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if reopened.Status != StatusPending {
 		t.Fatalf("重新打开后应为待处理，got %q", reopened.Status)
 	}
@@ -93,14 +119,20 @@ func TestAckStore_CloseAndReopen(t *testing.T) {
 func TestAckStore_Assign(t *testing.T) {
 	s := NewAckStore(filepath.Join(t.TempDir(), "acks.json"))
 
-	info := s.Assign("r1", "web-01", "cpu_usage", 1000, "ops1", "ops2")
+	info, err := s.Assign("r1", "web-01", "cpu_usage", 1000, "ops1", "ops2")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if info.Status != StatusAck || info.Assignee != "ops2" || info.User != "ops1" {
 		t.Fatalf("指派结果不符：%+v", info)
 	}
 	firstAck := info.AckTime
 
 	// 再次指派不覆盖首次认领时间
-	info = s.Assign("r1", "web-01", "cpu_usage", 1000, "ops2", "   ")
+	info, err = s.Assign("r1", "web-01", "cpu_usage", 1000, "ops2", "   ")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if info.Assignee != "ops2" {
 		t.Fatalf("空指派应回落到操作者本人，got %q", info.Assignee)
 	}
@@ -129,7 +161,9 @@ func TestAckStore_Comment(t *testing.T) {
 	}
 
 	// 已关闭的告警评论不得改变状态
-	s.Close("r2", "web-01", "cpu_usage", 2000, "ops1", "误报")
+	if _, err := s.Close("r2", "web-01", "cpu_usage", 2000, "ops1", "误报"); err != nil {
+		t.Fatal(err)
+	}
 	info, _ = s.Comment("r2", "web-01", "cpu_usage", 2000, "ops2", "补充说明")
 	if info.Status != StatusClosed {
 		t.Fatalf("评论不应改变处置状态，got %q", info.Status)
@@ -164,8 +198,12 @@ func TestAckStore_Comment(t *testing.T) {
 func TestAckStore_PersistAndReload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "acks.json")
 	s := NewAckStore(path)
-	s.Mark("r1", "web-01", "cpu_usage", 1000, "ops1")
-	s.Close("r2", "db-01", "disk_used_percent", 2000, "ops2", "已扩容")
+	if _, err := s.Mark("r1", "web-01", "cpu_usage", 1000, "ops1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Close("r2", "db-01", "disk_used_percent", 2000, "ops2", "已扩容"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Comment("r2", "db-01", "disk_used_percent", 2000, "ops2", "扩容完成"); err != nil {
 		t.Fatalf("评论失败: %v", err)
 	}
@@ -186,6 +224,33 @@ func TestAckStore_PersistAndReload(t *testing.T) {
 	}
 	if len(reloaded.Map()) != 2 {
 		t.Fatalf("应加载 2 条记录，got %d", len(reloaded.Map()))
+	}
+}
+
+// TestAckStore_ReAckClearsStaleCloseInfo 对已关闭的记录再次认领时必须清空关闭信息。
+//
+// 否则记录会同时是「已认领」又带着上一条关闭原因/关闭时间，界面上自相矛盾；
+// 重新打开（Reopen）本来就会清空，两条路径不能有两种口径。
+func TestAckStore_ReAckClearsStaleCloseInfo(t *testing.T) {
+	s := NewAckStore(filepath.Join(t.TempDir(), "acks.json"))
+	if _, err := s.Mark("r1", "web-01", "cpu_usage", 1000, "ops1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Close("r1", "web-01", "cpu_usage", 1000, "ops1", "误报"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.Mark("r1", "web-01", "cpu_usage", 1000, "ops2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Status != StatusAck {
+		t.Fatalf("再次认领后状态应为 ack：%+v", again)
+	}
+	if again.CloseReason != "" || again.CloseTime != 0 {
+		t.Fatalf("再次认领应清空关闭原因与关闭时间：%+v", again)
+	}
+	if again.AckTime == 0 {
+		t.Fatalf("认领时间应保留：%+v", again)
 	}
 }
 

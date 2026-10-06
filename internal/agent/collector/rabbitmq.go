@@ -95,11 +95,13 @@ func (c *RabbitMQCollector) collectOne(ctx context.Context, cfg model.RabbitMQIn
 	values := map[string]float64{}
 	isGlobal := map[string]bool{}
 	version := ""
+	hasRabbitMetrics := false
 	for _, line := range stringsSplitLines(string(body)) {
 		name, labels, value, ok := parsePromLine(line)
 		if !ok || !stringsHasPrefix(name, "rabbitmq_") {
 			continue
 		}
+		hasRabbitMetrics = true
 		if name == "rabbitmq_build_info" {
 			if v := labels["version"]; v != "" && version == "" {
 				version = v
@@ -140,10 +142,14 @@ func (c *RabbitMQCollector) collectOne(ctx context.Context, cfg model.RabbitMQIn
 	ri.Publishers = get("rabbitmq_publishers")
 	ri.MemoryBytes = get("rabbitmq_process_memory_bytes")
 	ri.FdUsed = get("rabbitmq_fd_used")
-	ri.Up = true
+	ri.Up = exporterHealth(string(body), hasRabbitMetrics, "rabbitmq_up", "rabbitmq_instance_up")
 
+	upValue := 0.0
+	if ri.Up {
+		upValue = 1
+	}
 	out := []model.Metric{
-		mk("rabbitmq_instance_up", 1),
+		mk("rabbitmq_instance_up", upValue),
 		mk("rabbitmq_connections", ri.Connections),
 		mk("rabbitmq_queues", ri.Queues),
 		mk("rabbitmq_queue_messages", ri.Messages),

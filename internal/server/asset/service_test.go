@@ -1,6 +1,7 @@
 package asset
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -854,6 +855,136 @@ func TestInspectRunsAndFindingsAreQueryable(t *testing.T) {
 	// 非法记录 ID 必须报错，而不是静默返回空差异
 	if _, err := svc.InspectFindings(0, 0); err == nil {
 		t.Fatal("空记录 ID 应报错")
+	}
+}
+
+func TestInspectScopedHistorySurvivesReopenAndUsesCurrentAssetNode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "assets.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(store)
+	for _, name := range []string{"web-01", "db-01"} {
+		if _, _, err := svc.Apply(hostObservation(name, map[string]string{"cpu": "4"})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := svc.RunInspect(InspectScope{}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"web-01", "db-01"} {
+		if _, _, err := svc.Apply(hostObservation(name, map[string]string{"cpu": "8"})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second, err := svc.RunInspect(InspectScope{}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc = NewService(store)
+	runs, err := svc.InspectRunsInNodes(10, []string{"web-01"})
+	if err != nil || len(runs) != 2 || runs[0].ID != second.ID || runs[0].Assets != 1 || runs[0].Findings != 1 ||
+		runs[1].ID != first.ID || runs[1].Baselined != 1 {
+		t.Fatalf("reopened scoped runs: %+v, %v", runs, err)
+	}
+	item, found, err := svc.Get(Ref{TypeKey: TypeHost, NaturalKey: "web-01"})
+	if err != nil || !found {
+		t.Fatalf("asset: %v %v", found, err)
+	}
+	if _, err := store.db.Exec(`UPDATE assets SET node='db-01' WHERE id=?`, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	runs, err = svc.InspectRunsInNodes(10, []string{"web-01"})
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("moved asset remained visible: %+v %v", runs, err)
+	}
+	runs, err = svc.InspectRunsInNodes(10, []string{"db-01"})
+	if err != nil || len(runs) != 2 || runs[0].Assets != 2 || runs[0].Findings != 2 {
+		t.Fatalf("new scope did not include moved asset: %+v %v", runs, err)
+	}
+}
+
+func TestInspectLegacyRunAndZeroAssetManifestDiffer(t *testing.T) {
+	svc, store := newTestService(t)
+	if _, err := store.db.Exec(`INSERT INTO inspect_runs(scope,actor,started_at,assets,baselined,findings,truncated) VALUES('node:web-01','old',1,1,0,1,0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO inspect_findings(run_id,asset_id,asset_type,asset_key,asset_name,node,field,kind,level,expected,actual,at)
+		VALUES(1,1,'host','web-01','web-01','web-01','cpu','changed','warning','4','8',1)`); err != nil {
+		t.Fatal(err)
+	}
+	zero, err := svc.RunInspect(InspectScope{Filter: ListFilter{Nodes: []string{}}}, "admin")
+	if err != nil || zero.Assets != 0 {
+		t.Fatalf("zero run: %+v %v", zero, err)
+	}
+	visible, err := svc.InspectRunsInNodes(10, []string{"web-01"})
+	if err != nil || len(visible) != 0 {
+		t.Fatalf("old/zero run leaked: %+v %v", visible, err)
+	}
+	if _, ok, err := svc.InspectFindingsInNodes(1, 10, []string{"web-01"}); err != nil || ok {
+		t.Fatalf("old finding visible: %v %v", ok, err)
+	}
+	all, err := svc.InspectRuns(10)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("global legacy history: %+v %v", all, err)
+	}
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM inspect_run_manifest WHERE run_id=?`, zero.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("new zero run missing manifest: %d %v", count, err)
+	}
+}
+
+func TestBaselineConditionalWritesRejectMovedAsset(t *testing.T) {
+	svc, store := newTestService(t)
+	for _, name := range []string{"web-01", "db-01"} {
+		if _, _, err := svc.Apply(hostObservation(name, map[string]string{"cpu": "4"})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	web, _, err := svc.Get(Ref{TypeKey: TypeHost, NaturalKey: "web-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`UPDATE assets SET node='db-01' WHERE id=?`, web.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SetBaselineIfCurrent(Ref{TypeKey: TypeHost, NaturalKey: "web-01"}, "ops1", 0, []string{"web-01"}); !errors.Is(err, ErrBaselineChanged) {
+		t.Fatalf("moved candidate accepted: %v", err)
+	}
+	if _, err := svc.SetBaseline(Ref{TypeKey: TypeHost, NaturalKey: "web-01"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ClearBaselineIfCurrent(TypeHost, web.ID, []string{"web-01"}); !errors.Is(err, ErrBaselineChanged) {
+		t.Fatalf("moved baseline deleted: %v", err)
+	}
+}
+
+// TestBaselineConditionalWritesRejectEmptyScope 「受限但无任何可见节点」必须报范围错误，
+// 不能退化成 ErrBaselineChanged：后者会让用户反复刷新重试一个永远不会成功的操作。
+func TestBaselineConditionalWritesRejectEmptyScope(t *testing.T) {
+	svc, _ := newTestService(t)
+	if _, _, err := svc.Apply(hostObservation("web-01", map[string]string{"cpu": "4"})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SetBaselineIfCurrent(Ref{TypeKey: TypeHost, NaturalKey: "web-01"}, "ops1", 0, []string{}); !errors.Is(err, ErrOutOfScope) {
+		t.Fatalf("empty scope should be reported as out of scope: %v", err)
+	}
+	if err := svc.ClearBaselineIfCurrent(TypeHost, 1, []string{}); !errors.Is(err, ErrOutOfScope) {
+		t.Fatalf("empty scope clear should be out of scope: %v", err)
+	}
+	// 全局（nil）与有可见节点两种情形不受影响
+	if _, err := svc.SetBaselineIfCurrent(Ref{TypeKey: TypeHost, NaturalKey: "web-01"}, "ops1", 0, nil); err != nil {
+		t.Fatalf("global scope should succeed: %v", err)
 	}
 }
 

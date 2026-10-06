@@ -38,9 +38,10 @@ type inspectRunView struct {
 	StartedAt int64  `json:"startedAt"`
 	Assets    int    `json:"assets"`
 	// Baselined 是本次「首次建立基线、无法比对」的资产数：界面据此解释"为什么第一次没有差异"。
-	Baselined int  `json:"baselined"`
-	Findings  int  `json:"findings"`
-	Truncated bool `json:"truncated"`
+	Baselined    int  `json:"baselined"`
+	Findings     int  `json:"findings"`
+	Truncated    bool `json:"truncated"`
+	PartialScope bool `json:"partialScope,omitempty"`
 }
 
 type inspectFindingView struct {
@@ -71,6 +72,7 @@ func toInspectRunView(r asset.InspectRun) inspectRunView {
 	return inspectRunView{
 		ID: r.ID, Scope: r.Scope, Actor: r.Actor, StartedAt: r.StartedAt,
 		Assets: r.Assets, Baselined: r.Baselined, Findings: r.Findings, Truncated: r.Truncated,
+		PartialScope: r.PartialScope,
 	}
 }
 
@@ -131,7 +133,7 @@ func (a *API) handleInspectRuns(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "资产台账未启用"})
 		return
 	}
-	runs, err := a.assets.InspectRuns(assetIntParam(r.URL.Query().Get("limit"), 0))
+	runs, err := a.assets.InspectRunsInNodes(assetIntParam(r.URL.Query().Get("limit"), 0), a.assetAllowedNodes(Principal(r)))
 	if err != nil {
 		slog.Error("查询巡检记录失败", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询巡检记录失败"})
@@ -156,10 +158,14 @@ func (a *API) handleInspectFindings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	findings, err := a.assets.InspectFindings(runID, assetIntParam(r.URL.Query().Get("limit"), 0))
+	findings, visible, err := a.assets.InspectFindingsInNodes(runID, assetIntParam(r.URL.Query().Get("limit"), 0), a.assetAllowedNodes(Principal(r)))
 	if err != nil {
 		slog.Error("查询差异项失败", "run", runID, "err", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询差异项失败"})
+		return
+	}
+	if !visible {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "巡检记录不存在"})
 		return
 	}
 	out := make([]inspectFindingView, 0, len(findings))
@@ -175,7 +181,7 @@ func (a *API) handleInspectBaselines(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "资产台账未启用"})
 		return
 	}
-	items, err := a.assets.Baselines()
+	items, err := a.assets.BaselinesInNodes(a.assetAllowedNodes(Principal(r)))
 	if err != nil {
 		slog.Error("查询巡检标杆失败", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询巡检标杆失败"})
@@ -196,7 +202,33 @@ func (a *API) handleAssetBaselineSet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	b, err := a.assets.SetBaseline(asset.Ref{TypeKey: item.TypeKey, NaturalKey: item.NaturalKey}, assetActor(r))
+	current, hasBaseline, err := a.assets.BaselineForType(item.TypeKey)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询巡检标杆失败"})
+		return
+	}
+	currentID := int64(0)
+	if hasBaseline {
+		owner, found, err := a.assets.GetByID(current.AssetID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询标杆资产失败"})
+			return
+		}
+		if !found || !a.nodeInScope(Principal(r), owner.Node) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "资产不存在"})
+			return
+		}
+		currentID = current.AssetID
+	}
+	b, err := a.assets.SetBaselineIfCurrent(asset.Ref{TypeKey: item.TypeKey, NaturalKey: item.NaturalKey}, assetActor(r), currentID, a.assetAllowedNodes(Principal(r)))
+	if errors.Is(err, asset.ErrOutOfScope) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "资产不存在"})
+		return
+	}
+	if errors.Is(err, asset.ErrBaselineChanged) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "标杆已变更，请刷新后重试"})
+		return
+	}
 	if err != nil {
 		slog.Error("设置巡检标杆失败", "asset", item.NaturalKey, "err", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -213,10 +245,34 @@ func (a *API) handleAssetBaselineDelete(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if err := a.assets.ClearBaseline(item.TypeKey); err != nil {
-		slog.Error("清除巡检标杆失败", "type", item.TypeKey, "err", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	current, hasBaseline, err := a.assets.BaselineForType(item.TypeKey)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询巡检标杆失败"})
 		return
+	}
+	if hasBaseline {
+		owner, found, err := a.assets.GetByID(current.AssetID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询标杆资产失败"})
+			return
+		}
+		if !found || !a.nodeInScope(Principal(r), owner.Node) || current.AssetID != item.ID {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "资产不存在"})
+			return
+		}
+		err = a.assets.ClearBaselineIfCurrent(item.TypeKey, current.AssetID, a.assetAllowedNodes(Principal(r)))
+		switch {
+		case errors.Is(err, asset.ErrOutOfScope):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "资产不存在"})
+			return
+		case errors.Is(err, asset.ErrBaselineChanged):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "标杆已变更，请刷新后重试"})
+			return
+		case err != nil:
+			slog.Error("清除巡检标杆失败", "type", item.TypeKey, "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "清除巡检标杆失败"})
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"typeKey": item.TypeKey, "cleared": true})
 }

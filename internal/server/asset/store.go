@@ -130,6 +130,18 @@ var schemaStatements = []string{
 		truncated   INTEGER NOT NULL DEFAULT 0
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_inspect_runs_at ON inspect_runs(started_at DESC)`,
+	`CREATE TABLE IF NOT EXISTS inspect_run_manifest(
+		run_id INTEGER PRIMARY KEY REFERENCES inspect_runs(id) ON DELETE CASCADE
+	)`,
+	`CREATE TABLE IF NOT EXISTS inspect_run_members(
+		run_id INTEGER NOT NULL REFERENCES inspect_runs(id) ON DELETE CASCADE,
+		asset_id INTEGER NOT NULL,
+		node_at_run TEXT NOT NULL DEFAULT '',
+		baselined INTEGER NOT NULL DEFAULT 0,
+		findings INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(run_id,asset_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_inspect_members_asset ON inspect_run_members(asset_id,run_id)`,
 	`CREATE TABLE IF NOT EXISTS inspect_findings(
 		id         INTEGER PRIMARY KEY AUTOINCREMENT,
 		run_id     INTEGER NOT NULL REFERENCES inspect_runs(id) ON DELETE CASCADE,
@@ -146,6 +158,10 @@ var schemaStatements = []string{
 		at         INTEGER NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_inspect_findings_run ON inspect_findings(run_id, level, kind)`,
+	`CREATE TABLE IF NOT EXISTS inspect_finding_baselines(
+		finding_id INTEGER PRIMARY KEY REFERENCES inspect_findings(id) ON DELETE CASCADE,
+		asset_id INTEGER NOT NULL
+	)`,
 	// inspect_baselines 按**资产类型**存标杆：期望值是「同类资产该长什么样」，
 	// 而不是某台机器自己的历史值（后者由快照前后比对覆盖，见 L2）。
 	`CREATE TABLE IF NOT EXISTS inspect_baselines(
@@ -1261,7 +1277,7 @@ func (s *Store) latestSnapshot(assetID int64) (Snapshot, bool, error) {
 //
 // 为什么必须原子：记录与差异项是同一份证据的两半，「有记录、没差异」会被读成
 // 「本次全部合规」——那比直接报错更糟。findings 为空时不写任何差异项行。
-func (s *Store) recordInspectRun(r InspectRun, findings []InspectFinding) (int64, error) {
+func (s *Store) recordInspectRun(r InspectRun, members []InspectRunMember, findings []InspectFinding) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("写入巡检记录失败: %w", err)
@@ -1282,15 +1298,38 @@ func (s *Store) recordInspectRun(r InspectRun, findings []InspectFinding) (int64
 	if err != nil {
 		return 0, fmt.Errorf("读取巡检记录主键失败: %w", err)
 	}
+	if _, err := tx.Exec(`INSERT INTO inspect_run_manifest(run_id) VALUES(?)`, runID); err != nil {
+		return 0, fmt.Errorf("写入巡检资产清单标记失败: %w", err)
+	}
+	for _, m := range members {
+		baselined := 0
+		if m.Baselined {
+			baselined = 1
+		}
+		if _, err := tx.Exec(`INSERT INTO inspect_run_members(run_id,asset_id,node_at_run,baselined,findings) VALUES(?,?,?,?,?)`,
+			runID, m.AssetID, m.Node, baselined, m.Findings); err != nil {
+			return 0, fmt.Errorf("写入巡检资产清单失败: %w", err)
+		}
+	}
 	for i := range findings {
 		f := &findings[i]
-		if _, err := tx.Exec(
+		result, err := tx.Exec(
 			`INSERT INTO inspect_findings(run_id,asset_id,asset_type,asset_key,asset_name,node,field,kind,level,expected,actual,at)
 			 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
 			runID, f.AssetID, f.AssetType, f.AssetKey, f.AssetName, f.Node,
 			f.Field, string(f.Kind), string(f.Level), f.Expected, f.Actual, f.At,
-		); err != nil {
+		)
+		if err != nil {
 			return 0, fmt.Errorf("写入差异项失败: %w", err)
+		}
+		if f.BaselineAssetID != 0 {
+			findingID, err := result.LastInsertId()
+			if err != nil {
+				return 0, fmt.Errorf("读取差异项主键失败: %w", err)
+			}
+			if _, err := tx.Exec(`INSERT INTO inspect_finding_baselines(finding_id,asset_id) VALUES(?,?)`, findingID, f.BaselineAssetID); err != nil {
+				return 0, fmt.Errorf("写入差异项标杆来源失败: %w", err)
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -1321,6 +1360,120 @@ func (s *Store) inspectRunsOf(limit int) ([]InspectRun, error) {
 		}
 		r.Truncated = truncated != 0
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// inspectRunsInNodes 先按当前资产节点过滤，再对可见成员聚合并限制记录数。
+func (s *Store) inspectRunsInNodes(limit int, nodes []string) ([]InspectRun, error) {
+	if limit <= 0 {
+		limit = defaultInspectRunLimit
+	}
+	args := make([]any, 0, len(nodes)*3+1)
+	for i := 0; i < 3; i++ {
+		for _, n := range nodes {
+			args = append(args, n)
+		}
+	}
+	args = append(args, limit)
+	rows, err := s.db.Query(`SELECT r.id,r.actor,r.started_at,r.truncated,COUNT(*),SUM(m.baselined),
+		(SELECT COUNT(*) FROM inspect_findings f JOIN inspect_run_members fm ON fm.run_id=f.run_id AND fm.asset_id=f.asset_id
+		 JOIN assets fa ON fa.id=fm.asset_id WHERE f.run_id=r.id AND fa.node IN (`+placeholders(len(nodes))+`)
+		 AND (f.kind!='deviation' OR EXISTS (
+		 SELECT 1 FROM inspect_finding_baselines fb JOIN assets ba ON ba.id=fb.asset_id
+		 WHERE fb.finding_id=f.id AND ba.node IN (`+placeholders(len(nodes))+`))))
+		FROM inspect_runs r JOIN inspect_run_manifest v ON v.run_id=r.id
+		JOIN inspect_run_members m ON m.run_id=r.id JOIN assets a ON a.id=m.asset_id
+		WHERE a.node IN (`+placeholders(len(nodes))+`)
+		GROUP BY r.id ORDER BY r.started_at DESC,r.id DESC LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("查询可见巡检记录失败: %w", err)
+	}
+	defer rows.Close()
+	out := []InspectRun{}
+	for rows.Next() {
+		var r InspectRun
+		var truncated int
+		if err := rows.Scan(&r.ID, &r.Actor, &r.StartedAt, &truncated, &r.Assets, &r.Baselined, &r.Findings); err != nil {
+			return nil, fmt.Errorf("读取可见巡检记录失败: %w", err)
+		}
+		r.Truncated = truncated != 0
+		r.PartialScope = true
+		r.Scope = "scope:mine"
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// inspectFindingsInNodes 对无可见成员或旧格式运行统一返回不可见。
+func (s *Store) inspectFindingsInNodes(runID int64, limit int, nodes []string) ([]InspectFinding, bool, error) {
+	if limit <= 0 {
+		limit = defaultInspectFindingLimit
+	}
+	args := make([]any, 0, len(nodes)+1)
+	args = append(args, runID)
+	for _, n := range nodes {
+		args = append(args, n)
+	}
+	var visible int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM inspect_run_members m JOIN inspect_run_manifest v ON v.run_id=m.run_id
+		JOIN assets a ON a.id=m.asset_id WHERE m.run_id=? AND a.node IN (`+placeholders(len(nodes))+`)`, args...).Scan(&visible)
+	if err != nil {
+		return nil, false, fmt.Errorf("查询巡检记录范围失败: %w", err)
+	}
+	if visible == 0 {
+		return nil, false, nil
+	}
+	for _, n := range nodes {
+		args = append(args, n)
+	}
+	args = append(args, limit)
+	rows, err := s.db.Query(`SELECT f.id,f.run_id,f.asset_id,f.asset_type,f.asset_key,f.asset_name,f.node,
+		f.field,f.kind,f.level,f.expected,f.actual,f.at FROM inspect_findings f
+		JOIN inspect_run_members m ON m.run_id=f.run_id AND m.asset_id=f.asset_id
+		JOIN assets a ON a.id=m.asset_id WHERE f.run_id=? AND a.node IN (`+placeholders(len(nodes))+`)
+		AND (f.kind!='deviation' OR EXISTS (
+			SELECT 1 FROM inspect_finding_baselines fb JOIN assets ba ON ba.id=fb.asset_id
+			WHERE fb.finding_id=f.id AND ba.node IN (`+placeholders(len(nodes))+`)))
+		ORDER BY CASE f.level WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+		f.asset_type,f.asset_key,f.field LIMIT ?`, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("查询可见差异项失败: %w", err)
+	}
+	defer rows.Close()
+	out := []InspectFinding{}
+	for rows.Next() {
+		var f InspectFinding
+		var kind, level string
+		if err := rows.Scan(&f.ID, &f.RunID, &f.AssetID, &f.AssetType, &f.AssetKey, &f.AssetName,
+			&f.Node, &f.Field, &kind, &level, &f.Expected, &f.Actual, &f.At); err != nil {
+			return nil, false, fmt.Errorf("读取可见差异项失败: %w", err)
+		}
+		f.Kind, f.Level = FindingKind(kind), FindingLevel(level)
+		out = append(out, f)
+	}
+	return out, true, rows.Err()
+}
+
+func (s *Store) baselinesInNodes(nodes []string) ([]Baseline, error) {
+	args := make([]any, 0, len(nodes))
+	for _, n := range nodes {
+		args = append(args, n)
+	}
+	rows, err := s.db.Query(`SELECT b.type_key,b.asset_id,b.asset_key,b.snapshot_id,b.set_by,b.set_at
+		FROM inspect_baselines b JOIN assets a ON a.id=b.asset_id
+		WHERE a.node IN (`+placeholders(len(nodes))+`) ORDER BY b.type_key`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("查询可见巡检标杆失败: %w", err)
+	}
+	defer rows.Close()
+	out := []Baseline{}
+	for rows.Next() {
+		var b Baseline
+		if err := rows.Scan(&b.TypeKey, &b.AssetID, &b.AssetKey, &b.SnapshotID, &b.SetBy, &b.SetAt); err != nil {
+			return nil, fmt.Errorf("读取可见巡检标杆失败: %w", err)
+		}
+		out = append(out, b)
 	}
 	return out, rows.Err()
 }
@@ -1366,6 +1519,75 @@ func (s *Store) setBaseline(b Baseline) error {
 		return fmt.Errorf("设置巡检标杆失败: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) setBaselineIfCurrent(b Baseline, currentAssetID int64, nodes []string) (bool, error) {
+	allowed := ""
+	args := []any{b.TypeKey, b.AssetID, b.AssetKey, b.SnapshotID, b.SetBy, b.SetAt}
+	if nodes != nil {
+		if len(nodes) == 0 {
+			return false, nil
+		}
+		allowed = ` AND node IN (` + placeholders(len(nodes)) + `)`
+		for _, n := range nodes {
+			args = append(args, n)
+		}
+	}
+	var res sql.Result
+	var err error
+	if currentAssetID == 0 {
+		args = []any{b.TypeKey, b.AssetID, b.AssetKey, b.SnapshotID, b.SetBy, b.SetAt, b.AssetID}
+		if nodes != nil {
+			for _, n := range nodes {
+				args = append(args, n)
+			}
+		}
+		query := `INSERT INTO inspect_baselines(type_key,asset_id,asset_key,snapshot_id,set_by,set_at)
+			SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM assets WHERE id=?` + allowed + `)
+			ON CONFLICT(type_key) DO NOTHING`
+		res, err = s.db.Exec(query, args...)
+	} else {
+		args = []any{b.AssetID, b.AssetKey, b.SnapshotID, b.SetBy, b.SetAt, b.TypeKey, currentAssetID, b.AssetID}
+		if nodes != nil {
+			for _, n := range nodes {
+				args = append(args, n)
+			}
+		}
+		query := `UPDATE inspect_baselines SET asset_id=?,asset_key=?,snapshot_id=?,set_by=?,set_at=?
+			WHERE type_key=? AND asset_id=? AND EXISTS (SELECT 1 FROM assets WHERE id=?` + allowed + `)`
+		if nodes != nil {
+			query += ` AND EXISTS (SELECT 1 FROM assets WHERE id=inspect_baselines.asset_id` + allowed + `)`
+			for _, n := range nodes {
+				args = append(args, n)
+			}
+		}
+		res, err = s.db.Exec(query, args...)
+	}
+	if err != nil {
+		return false, fmt.Errorf("设置巡检标杆失败: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+func (s *Store) clearBaselineIfCurrent(typeKey string, currentAssetID int64, nodes []string) (bool, error) {
+	args := []any{typeKey, currentAssetID}
+	query := `DELETE FROM inspect_baselines WHERE type_key=? AND asset_id=?`
+	if nodes != nil {
+		if len(nodes) == 0 {
+			return false, nil
+		}
+		query += ` AND EXISTS (SELECT 1 FROM assets WHERE id=inspect_baselines.asset_id AND node IN (` + placeholders(len(nodes)) + `))`
+		for _, n := range nodes {
+			args = append(args, n)
+		}
+	}
+	res, err := s.db.Exec(query, args...)
+	if err != nil {
+		return false, fmt.Errorf("清除巡检标杆失败: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // clearBaseline 清除某资产类型的标杆；本来没有也视为成功（幂等）。

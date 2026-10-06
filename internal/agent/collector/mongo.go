@@ -73,12 +73,12 @@ func (c *MongoDBCollector) collectExporter(ctx context.Context, cfg model.MongoD
 	inst := mongoInstanceMeta(c, cfg)
 	body, err := fetchMetricsText(ctx, nil, cfg.ExporterURL)
 	if err != nil {
-		slog.Warn("MongoDB exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
+		slog.Warn("MongoDB exporter 拉取失败", "target", safeExporterTarget(cfg.ExporterURL), "err", safeExporterError(err))
 		inst.Up = false
 		return nil, inst
 	}
 	metrics := parsePrometheusTextWithPrefix(body, c.node, inst.Instance, "mongodb_", now)
-	inst.Up = true
+	inst.Up = exporterHealth(body, len(metrics) > 0, "mongodb_up")
 	for _, m := range metrics {
 		switch m.Name {
 		case "mongodb_up":

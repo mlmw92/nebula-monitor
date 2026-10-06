@@ -62,7 +62,7 @@ func TestRealNginxLog(t *testing.T) {
 
 	fmt.Printf("\n=== Nginx access.log 诊断 ===\n")
 	fmt.Printf("文件: %s\n格式: %s\n实例: %s\n", *realLogPath, *realLogFormat, *realLogAddr)
-		fmt.Printf("总行数: %d  匹配: %d  未匹配: %d  匹配率: %.1f%%\n",
+	fmt.Printf("总行数: %d  匹配: %d  未匹配: %d  匹配率: %.1f%%\n",
 		total, matched, total-matched, pct(matched, total))
 	fmt.Printf("聚合: totalRequests=%v totalBytes=%v avgLatency=%v\n",
 		totalRequests, totalBytes, round2(div(latencySum, latencyN)))

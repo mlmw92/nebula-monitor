@@ -271,7 +271,7 @@ func (c *MySQLCollector) collectExporter(ctx context.Context, cfg model.MySQLIns
 	client := &http.Client{Timeout: 5 * time.Second}
 	body, err := fetchMetrics(ctx, client, cfg.ExporterURL)
 	if err != nil {
-		slog.Warn("MySQL exporter 拉取失败", "url", cfg.ExporterURL, "err", err)
+		slog.Warn("MySQL exporter 拉取失败", "target", safeExporterTarget(cfg.ExporterURL), "err", safeExporterError(err))
 		return nil, c.downInstance(cfg, "unknown")
 	}
 	metrics := parsePrometheusTextWithPrefix(string(body), c.node, normalizeInstanceAddr(cfg.Addr), "mysql_", now)
@@ -280,9 +280,10 @@ func (c *MySQLCollector) collectExporter(ctx context.Context, cfg model.MySQLIns
 	if labelName == "" {
 		labelName = inst
 	}
+	up := exporterHealth(string(body), len(metrics) > 0, "mysql_up", "mysql_instance_up")
 	mi := model.MySQLInstance{
 		Instance: inst, Name: labelName, Node: c.node,
-		Role: "master", Topology: cfg.Topology, Group: labelName, Up: true,
+		Role: "master", Topology: cfg.Topology, Group: labelName, Up: up,
 	}
 	for _, m := range metrics {
 		if m.Name == "mysql_instance_up" && m.Labels != nil {

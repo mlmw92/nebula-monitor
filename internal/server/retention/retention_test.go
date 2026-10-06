@@ -111,6 +111,47 @@ func TestManager_CleanupOnlyHandledAndOld(t *testing.T) {
 	}
 }
 
+// TestManager_CleanupFailureIsReported 清理落盘失败必须显式上报。
+//
+// 静默吞掉错误会让人看到一次「清理完成、删除 0 条」，而处置记录其实在无界增长；
+// 同时失败时绝不能先删内存——否则重启后又会被库/文件读回来（或反之丢记录）。
+func TestManager_CleanupFailureIsReported(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "acks")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	acksPath := filepath.Join(sub, "alert_acks.json")
+	old := time.Now().AddDate(0, 0, -200).UnixMilli()
+	writeAcks(t, acksPath, []alert.AckInfo{
+		{Rule: "r1", Host: "web-01", Instance: "cpu", StartsAt: 1, Status: alert.StatusAck, Time: old},
+	})
+	acks := alert.NewAckStore(acksPath)
+
+	// 让落盘必然失败：把存放处置记录的目录换成同名文件（MkdirAll 会失败）。
+	if err := os.RemoveAll(sub); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sub, []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := New(filepath.Join(dir, "retention.yaml"), DefaultConfig(), acks, nil, nil, nil, "")
+	if err != nil {
+		t.Fatalf("创建管理器失败: %v", err)
+	}
+	res := m.CleanupNow()
+	if len(res.Errors) == 0 {
+		t.Fatalf("落盘失败必须上报错误，而不是显示清理成功：%+v", res)
+	}
+	if res.AcksRemoved != 0 {
+		t.Fatalf("失败时不得报告删除条数：%+v", res)
+	}
+	if _, ok := acks.Get("r1", "web-01", "cpu", 1); !ok {
+		t.Fatal("落盘失败时不得删除内存记录（重启后会复活）")
+	}
+}
+
 func TestManager_ReportPrune(t *testing.T) {
 	dir := t.TempDir()
 	oldFile := filepath.Join(dir, "daily-20260101-000000.html")
@@ -194,7 +235,9 @@ func TestManager_ConfigInitAndPersist(t *testing.T) {
 func TestManager_StatusAndSkipped(t *testing.T) {
 	dir := t.TempDir()
 	acks := alert.NewAckStore(filepath.Join(dir, "acks.json"))
-	acks.Mark("r1", "web-01", "cpu", 1, "ops")
+	if _, err := acks.Mark("r1", "web-01", "cpu", 1, "ops"); err != nil {
+		t.Fatal(err)
+	}
 	auditStore := audit.New("")
 	_ = auditStore.Record(audit.Event{Method: "POST", Path: "/api/v1/x", User: "ops"})
 	secStore := security.New(filepath.Join(dir, "security_store.json"))

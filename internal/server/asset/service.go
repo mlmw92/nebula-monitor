@@ -3,6 +3,7 @@ package asset
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -597,8 +598,11 @@ func (s *Service) RunInspect(sc InspectScope, actor string) (InspectRun, error) 
 
 	run := InspectRun{Scope: inspectScopeLabel(sc.Filter), Actor: actor, StartedAt: at, Truncated: truncated}
 	findings := make([]InspectFinding, 0, 16)
+	members := make([]InspectRunMember, 0, len(assets))
 	for _, a := range assets {
 		run.Assets++
+		beforeAsset := len(findings)
+		baselined := false
 		cur := focusFields(a, sc.Fields)
 
 		prev, hasPrev, err := s.store.latestSnapshot(a.ID)
@@ -628,6 +632,7 @@ func (s *Service) RunInspect(sc InspectScope, actor string) (InspectRun, error) 
 			baselineAdvanced = len(findings) > before
 		} else {
 			run.Baselined++
+			baselined = true
 		}
 
 		// L3：与该资产类型的标杆比对（标杆资产不与自己比）。
@@ -635,7 +640,15 @@ func (s *Service) RunInspect(sc InspectScope, actor string) (InspectRun, error) 
 		if err != nil {
 			return InspectRun{}, err
 		}
-		if hasBaseline && bl.AssetID != a.ID {
+		baselineAllowed := hasBaseline && bl.AssetID != a.ID
+		if baselineAllowed && sc.Filter.Nodes != nil {
+			owner, found, err := s.store.assetByID(bl.AssetID)
+			if err != nil {
+				return InspectRun{}, err
+			}
+			baselineAllowed = found && slices.Contains(sc.Filter.Nodes, owner.Node)
+		}
+		if baselineAllowed {
 			expected, err := s.store.snapshotFieldsOf(bl.SnapshotID)
 			if err != nil {
 				return InspectRun{}, err
@@ -643,7 +656,9 @@ func (s *Service) RunInspect(sc InspectScope, actor string) (InspectRun, error) 
 			for k, want := range expected {
 				got, ok := cur[k]
 				if ok && !sameValue(want, got) {
-					findings = append(findings, newFinding(a, at, k, FindingDeviation, FindingWarning, want, got))
+					finding := newFinding(a, at, k, FindingDeviation, FindingWarning, want, got)
+					finding.BaselineAssetID = bl.AssetID
+					findings = append(findings, finding)
 				}
 			}
 		}
@@ -656,10 +671,13 @@ func (s *Service) RunInspect(sc InspectScope, actor string) (InspectRun, error) 
 				return InspectRun{}, err
 			}
 		}
+		members = append(members, InspectRunMember{
+			AssetID: a.ID, Node: a.Node, Baselined: baselined, Findings: len(findings) - beforeAsset,
+		})
 	}
 
 	run.Findings = len(findings)
-	runID, err := s.store.recordInspectRun(run, findings)
+	runID, err := s.store.recordInspectRun(run, members, findings)
 	if err != nil {
 		return InspectRun{}, err
 	}
@@ -680,6 +698,96 @@ func (s *Service) InspectFindings(runID int64, limit int) ([]InspectFinding, err
 
 // Baselines 列出各资产类型当前的期望值来源（标杆资产）。
 func (s *Service) Baselines() ([]Baseline, error) { return s.store.baselinesOf() }
+
+// InspectRunsInNodes 按当前节点归属读取可见的巡检结果。
+func (s *Service) InspectRunsInNodes(limit int, nodes []string) ([]InspectRun, error) {
+	if nodes == nil {
+		return s.InspectRuns(limit)
+	}
+	if len(nodes) == 0 {
+		return []InspectRun{}, nil
+	}
+	return s.store.inspectRunsInNodes(limit, nodes)
+}
+
+// InspectFindingsInNodes 仅返回当前仍有权读取的差异项。
+func (s *Service) InspectFindingsInNodes(runID int64, limit int, nodes []string) ([]InspectFinding, bool, error) {
+	if nodes == nil {
+		findings, err := s.InspectFindings(runID, limit)
+		return findings, true, err
+	}
+	if runID <= 0 {
+		return nil, false, errors.New("巡检记录 ID 不能为空")
+	}
+	if len(nodes) == 0 {
+		return nil, false, nil
+	}
+	return s.store.inspectFindingsInNodes(runID, limit, nodes)
+}
+
+// BaselinesInNodes 限定标杆资产当前可见的节点。
+func (s *Service) BaselinesInNodes(nodes []string) ([]Baseline, error) {
+	if nodes == nil {
+		return s.Baselines()
+	}
+	if len(nodes) == 0 {
+		return []Baseline{}, nil
+	}
+	return s.store.baselinesInNodes(nodes)
+}
+
+// BaselineForType 查询当前类型标杆，供操作前的资源范围检查。
+func (s *Service) BaselineForType(typeKey string) (Baseline, bool, error) {
+	return s.store.baselineOf(typeKey)
+}
+
+var ErrBaselineChanged = errors.New("标杆已变更")
+
+// ErrOutOfScope 表示目标资产不在当前资源范围内。与 ErrBaselineChanged 区分开：
+// 前者是「看不到」（应当 404），后者是「并发被换掉」（应当 409 让用户刷新重试）。
+var ErrOutOfScope = errors.New("资产不在当前资源范围内")
+
+// SetBaselineIfCurrent 仅当标杆未被并发替换时更新；0 表示尚未设置。
+func (s *Service) SetBaselineIfCurrent(ref Ref, actor string, currentAssetID int64, nodes []string) (Baseline, error) {
+	// 受限身份但一个可见节点都没有：条件写必然不命中。提前返回明确的范围错误，
+	// 不能让它退化成 ErrBaselineChanged——那会让用户反复刷新重试一个永远不会成功的操作。
+	if nodes != nil && len(nodes) == 0 {
+		return Baseline{}, ErrOutOfScope
+	}
+	a, err := s.resolve(ref)
+	if err != nil {
+		return Baseline{}, err
+	}
+	id, err := s.store.recordSnapshot(a.ID, s.now(), focusFields(a, nil))
+	if err != nil {
+		return Baseline{}, err
+	}
+	b := Baseline{TypeKey: a.TypeKey, AssetID: a.ID, AssetKey: a.NaturalKey,
+		SnapshotID: id, SetBy: actor, SetAt: s.now()}
+	changed, err := s.store.setBaselineIfCurrent(b, currentAssetID, nodes)
+	if err != nil {
+		return Baseline{}, err
+	}
+	if !changed {
+		return Baseline{}, ErrBaselineChanged
+	}
+	return b, nil
+}
+
+// ClearBaselineIfCurrent 避免标杆被并发替换后误删另一台资产的标杆。
+func (s *Service) ClearBaselineIfCurrent(typeKey string, currentAssetID int64, nodes []string) error {
+	if nodes != nil && len(nodes) == 0 {
+		return ErrOutOfScope
+	}
+	changed, err := s.store.clearBaselineIfCurrent(typeKey, currentAssetID, nodes)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return ErrBaselineChanged
+	}
+	return nil
+}
 
 // SetBaseline 把某资产的**当前**配置设为该资产类型的期望值（标杆）。
 //

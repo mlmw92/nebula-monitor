@@ -43,7 +43,7 @@
       >
         <template #empty>
           <EmptyState
-            title="还没有巡检记录"
+            title="当前范围内还没有可见的巡检记录"
             :hints="[
               '先选定上方的类型 / 归属节点范围，再点「执行巡检」',
               '首次巡检只会建立基线，不产出差异；第二次起才会比对',
@@ -55,7 +55,8 @@
           <template #default="{ row }">{{ fmtTime(row.startedAt) }}</template>
         </el-table-column>
         <el-table-column label="范围" width="200">
-          <template #default="{ row }"><span class="mono">{{ row.scope }}</span></template>
+          <template #default="{ row }">            <span v-if="row.partialScope" class="muted">当前可见范围（局部结果）</span>
+            <span v-else class="mono">{{ row.scope }}</span></template>
         </el-table-column>
         <el-table-column label="覆盖资产" width="100" prop="assets" />
         <el-table-column label="首次建基线" width="120">
@@ -75,11 +76,13 @@
         <el-table-column label="备注">
           <template #default="{ row }">
             <!-- 截断必须显式提示：静默少检一部分会让人以为"其余资产都合规" -->
-            <span v-if="row.truncated" class="warn-text">资产数超过单次巡检上限，本次只覆盖了前 {{ row.assets }} 个</span>
+            <span v-if="row.truncated && row.partialScope" class="warn-text">原巡检达到资产上限；此处仅显示当前可见的 {{ row.assets }} 个资产，不能据此判断其他资产</span>
+            <span v-else-if="row.truncated" class="warn-text">资产数超过单次巡检上限，本次只覆盖了前 {{ row.assets }} 个</span>
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
       </el-table>
+      <p v-if="runs.some(row => row.partialScope)" class="muted note">覆盖资产、首次建基线和差异项均按当前可见资产重算；这不是原巡检的全量结论。</p>
       <p v-if="runs.length" class="muted note">点击一行查看该次巡检的差异项。</p>
     </SectionCard>
 
@@ -88,6 +91,7 @@
       <template #actions>
         <div class="panel-title" style="margin: 0">
           差异项（{{ findings.length }}）
+          <span v-if="selectedRun.partialScope" class="muted">· 仅显示当前可见资产的局部差异</span>
           <span class="muted">· 记录 #{{ selectedRun.id }} · {{ fmtTime(selectedRun.startedAt) }}</span>
         </div>
       </template>
@@ -103,8 +107,8 @@
       <el-table :data="findings" v-loading="findingLoading" style="width: 100%">
         <template #empty>
           <EmptyState
-            title="本次没有差异"
-            :hints="['所选范围内所有资产的配置与上一次快照一致，也没有偏离标杆']"
+            :title="selectedRun.partialScope ? '当前可见资产没有差异' : '本次没有差异'"
+            :hints="selectedRun.partialScope ? ['这里只代表当前可见资产，不能推断其他资产的巡检结果'] : ['所选范围内所有资产的配置与上一次快照一致，也没有偏离标杆']"
           />
         </template>
         <el-table-column label="级别" width="90">
@@ -150,11 +154,8 @@
       <el-table :data="baselines" style="width: 100%">
         <template #empty>
           <EmptyState
-            title="还没有设置任何期望值"
-            :hints="[
-              '在资产台账详情里把一台标准机设为该类型的期望值',
-              '未设置标杆时，巡检只做快照前后比对，不做合规偏差判断',
-            ]"
+            title="当前可见范围内没有标杆资产"
+            :hints="['可在资产台账详情里将可见资产设为该类型的标杆', '范围外标杆不会用于当前权限范围内的巡检']"
           />
         </template>
         <el-table-column label="资产类型" width="160">
@@ -226,8 +227,10 @@ function printList() {
   const meta = []
   if (selectedRun.value) {
     meta.push(`巡检记录 #${selectedRun.value.id} · ${fmtTime(selectedRun.value.startedAt)}`)
+    if (selectedRun.value.partialScope) meta.push('仅按当前可见资产统计的局部结果')
     meta.push(`差异项 ${findings.value.length} 条`)
   } else {
+    if (runs.value.some(row => row.partialScope)) meta.push('巡检记录按当前可见资产统计（局部结果）')
     meta.push(`巡检记录 ${runs.value.length} 条`)
     if (filter.value.type) meta.push(`类型=${filter.value.type}`)
     if (filter.value.keyword) meta.push(`关键词=${filter.value.keyword}`)

@@ -2,12 +2,19 @@ package dialtest
 
 import (
 	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
 // TaskType 拨测类型。
@@ -62,11 +69,14 @@ type Result struct {
 }
 
 // Dialer 执行拨测。
-type Dialer struct{}
+type Dialer struct {
+	icmpProbe func(host string, timeout time.Duration) (time.Duration, error)
+	tlsRoots  *x509.CertPool
+}
 
 // NewDialer 创建拨测器。
 func NewDialer() *Dialer {
-	return &Dialer{}
+	return &Dialer{icmpProbe: probeICMP}
 }
 
 // Run 执行单个拨测任务。
@@ -92,8 +102,46 @@ func (d *Dialer) dialHTTP(task Task) Result {
 	client := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
-			// 默认执行系统 CA 和主机名校验，避免拨测结果被中间人伪造。
-			TLSClientConfig: &tls.Config{},
+			// 自定义完整校验只为允许读取已过期证书；签发链、主机名和未来生效仍必须通过。
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true, VerifyConnection: func(state tls.ConnectionState) error {
+				if len(state.PeerCertificates) == 0 {
+					return errors.New("对端未提供证书")
+				}
+				verify := func(at time.Time) ([][]*x509.Certificate, error) {
+					opts := x509.VerifyOptions{DNSName: state.ServerName, Roots: d.tlsRoots, Intermediates: x509.NewCertPool(), CurrentTime: at}
+					for _, cert := range state.PeerCertificates[1:] {
+						opts.Intermediates.AddCert(cert)
+					}
+					return state.PeerCertificates[0].Verify(opts)
+				}
+				now := time.Now()
+				_, err := verify(now)
+				if err == nil {
+					return nil
+				}
+				leaf := state.PeerCertificates[0]
+				var invalid x509.CertificateInvalidError
+				if !errors.As(err, &invalid) || invalid.Reason != x509.Expired || now.Before(leaf.NotBefore) || !now.After(leaf.NotAfter) {
+					return err
+				}
+				chains, historicalErr := verify(leaf.NotBefore.Add(leaf.NotAfter.Sub(leaf.NotBefore) / 2))
+				if historicalErr != nil {
+					return err
+				}
+				for _, chain := range chains {
+					valid := true
+					for _, cert := range chain[1:] {
+						if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
+							valid = false
+							break
+						}
+					}
+					if valid {
+						return nil
+					}
+				}
+				return err
+			}},
 		},
 	}
 	scheme := string(task.Type)
@@ -123,12 +171,18 @@ func (d *Dialer) dialHTTP(task Task) Result {
 			result.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
 		}
 	}
-	// HTTPS 证书到期检测
 	if task.Type == TaskTypeHTTPS && resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
 		cert := resp.TLS.PeerCertificates[0]
 		days := cert.NotAfter.Sub(time.Now()).Hours() / 24
 		result.CertExpiry = round2(days)
+		if days < 0 && result.CertExpiry == 0 {
+			result.CertExpiry = -0.01
+		}
 		result.CertNotAfter = cert.NotAfter.UnixMilli()
+		if days < 0 {
+			result.Up = false
+			result.Error = "SSL 证书已过期"
+		}
 	}
 	return result
 }
@@ -149,28 +203,78 @@ func (d *Dialer) dialTCP(task Task) Result {
 	return Result{TaskID: task.ID, Up: true, Latency: round2(latency)}
 }
 
-// dialICMP 执行 ICMP 拨测（简化实现，使用 TCP echo 替代）。
-// 注意：ICMP 需要 CAP_NET_RAW 权限，这里降级为 TCP connect 检测端口 7（echo）或直接 ping。
+// dialICMP 执行真实 ICMP Echo 探测；权限不足时返回明确失败，不退化为 TCP 端口探测。
 func (d *Dialer) dialICMP(task Task) Result {
 	timeout := time.Duration(task.Timeout) * time.Second
 	if timeout == 0 {
 		timeout = 5 * time.Second
 	}
-	// 简化：使用 TCP 连接目标主机的 echo 端口（7），失败则认为不可达
-	start := time.Now()
-	conn, err := net.DialTimeout("tcp", task.Target+":7", timeout)
-	latency := float64(time.Since(start).Microseconds()) / 1000.0
-	if err != nil {
-		// echo 端口未开放不代表主机不可达，尝试连接 80 端口
-		conn2, err2 := net.DialTimeout("tcp", task.Target+":80", timeout)
-		if err2 != nil {
-			return Result{TaskID: task.ID, Up: false, Latency: round2(latency), Error: err2.Error()}
-		}
-		conn2.Close()
-		return Result{TaskID: task.ID, Up: true, Latency: round2(latency)}
+	probe := d.icmpProbe
+	if probe == nil {
+		probe = probeICMP
 	}
-	conn.Close()
-	return Result{TaskID: task.ID, Up: true, Latency: round2(latency)}
+	latency, err := probe(task.Target, timeout)
+	if err != nil {
+		return Result{TaskID: task.ID, Up: false, Latency: round2(float64(latency.Microseconds()) / 1000), Error: err.Error()}
+	}
+	return Result{TaskID: task.ID, Up: true, Latency: round2(float64(latency.Microseconds()) / 1000)}
+}
+
+type icmpPacketConn interface {
+	SetDeadline(time.Time) error
+	WriteTo([]byte, net.Addr) (int, error)
+	ReadFrom([]byte) (int, net.Addr, error)
+	Close() error
+}
+
+var resolveICMPAddr = net.ResolveIPAddr
+var listenICMPPacket = func(network, address string) (icmpPacketConn, error) {
+	return icmp.ListenPacket(network, address)
+}
+
+func probeICMP(host string, timeout time.Duration) (time.Duration, error) {
+	addr, err := resolveICMPAddr("ip", host)
+	if err != nil {
+		return 0, err
+	}
+	network, protocol := "ip4:icmp", 1
+	var echoType, replyType icmp.Type = ipv4.ICMPTypeEcho, ipv4.ICMPTypeEchoReply
+	if addr.IP.To4() == nil {
+		network, protocol, echoType, replyType = "ip6:ipv6-icmp", 58, ipv6.ICMPTypeEchoRequest, ipv6.ICMPTypeEchoReply
+	}
+	conn, err := listenICMPPacket(network, "")
+	if err != nil {
+		return 0, fmt.Errorf("ICMP 探测不可执行: %w", err)
+	}
+	defer conn.Close()
+	deadline := time.Now().Add(timeout)
+	if err := conn.SetDeadline(deadline); err != nil {
+		return 0, err
+	}
+	message := icmp.Message{Type: echoType, Code: 0, Body: &icmp.Echo{ID: os.Getpid() & 0xffff, Seq: 1, Data: []byte("nebula-monitor")}}
+	data, err := message.Marshal(nil)
+	if err != nil {
+		return 0, err
+	}
+	start := time.Now()
+	if _, err := conn.WriteTo(data, addr); err != nil {
+		return 0, err
+	}
+	buf := make([]byte, 1500)
+	for {
+		n, _, err := conn.ReadFrom(buf)
+		if err != nil {
+			return time.Since(start), err
+		}
+		reply, err := icmp.ParseMessage(protocol, buf[:n])
+		if err != nil || reply.Type != replyType {
+			continue
+		}
+		echo, ok := reply.Body.(*icmp.Echo)
+		if ok && echo.ID == os.Getpid()&0xffff && echo.Seq == 1 {
+			return time.Since(start), nil
+		}
+	}
 }
 
 // ResultToMetrics 将拨测结果转为指标。
@@ -187,12 +291,12 @@ func ResultToMetrics(r Result, task Task, now int64) []model.Metric {
 	}
 	out = append(out, model.Metric{Name: "dial_test_up", Labels: labels, Value: upVal, Timestamp: now})
 	out = append(out, model.Metric{Name: "dial_test_latency", Labels: labels, Value: r.Latency, Timestamp: now})
-	if task.Type == TaskTypeHTTPS && r.CertExpiry > 0 {
+	if task.Type == TaskTypeHTTPS && r.CertNotAfter != 0 {
 		out = append(out, model.Metric{Name: "dial_test_cert_expiry", Labels: labels, Value: r.CertExpiry, Timestamp: now})
 	}
 	return out
 }
 
 func round2(v float64) float64 {
-	return float64(int(v*100+0.5)) / 100
+	return math.Round(v*100) / 100
 }

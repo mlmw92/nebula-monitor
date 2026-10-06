@@ -58,7 +58,9 @@ func TestAckStoreUseSQLiteBackfillsAndUpserts(t *testing.T) {
 
 	// 处置一条：库里必须**真的**落盘（用库读回来验证，而不是只看内存）
 	key := ackKey("r1", "h1", "cpu", 1)
-	s.Close("r1", "h1", "cpu", 1, "ops", "误报关闭")
+	if _, err := s.Close("r1", "h1", "cpu", 1, "ops", "误报关闭"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Comment("r1", "h1", "cpu", 1, "ops", "已确认"); err != nil {
 		t.Fatalf("评论失败: %v", err)
 	}
@@ -87,6 +89,77 @@ func TestAckStoreUseSQLiteBackfillsAndUpserts(t *testing.T) {
 	}
 }
 
+func TestAckStoreWriteFailureDoesNotReportOrCacheSuccess(t *testing.T) {
+	store := openAckTestDB(t)
+	s := NewAckStore("")
+	if err := s.UseSQLite(store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Mark("r1", "h1", "cpu", 1, "ops"); err == nil {
+		t.Fatal("closed database write must fail")
+	}
+	if _, ok := s.Get("r1", "h1", "cpu", 1); ok {
+		t.Fatal("failed write must not remain in memory cache")
+	}
+}
+
+func TestAckStoreFailedCommentDoesNotMutateCachedSlice(t *testing.T) {
+	store := openAckTestDB(t)
+	s := NewAckStore("")
+	if err := s.UseSQLite(store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Comment("r1", "h1", "cpu", 1, "ops", "first"); err != nil {
+		t.Fatal(err)
+	}
+	before, ok := s.Get("r1", "h1", "cpu", 1)
+	if !ok || len(before.Comments) != 1 {
+		t.Fatalf("seed comments: %+v", before)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Comment("r1", "h1", "cpu", 1, "ops", "second"); err == nil {
+		t.Fatal("closed database comment must fail")
+	}
+	after, _ := s.Get("r1", "h1", "cpu", 1)
+	if len(after.Comments) != 1 || after.Comments[0].Text != "first" {
+		t.Fatalf("failed comment mutated cache: %+v", after.Comments)
+	}
+}
+
+func TestAckStorePruneFailureKeepsCache(t *testing.T) {
+	store := openAckTestDB(t)
+	s := NewAckStore("")
+	if err := s.UseSQLite(store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Mark("r1", "h1", "cpu", 1, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	item := s.acks[ackKey("r1", "h1", "cpu", 1)]
+	item.Time = 1
+	s.acks[ackKey("r1", "h1", "cpu", 1)] = item
+	s.mu.Unlock()
+	if _, err := store.DB().Exec(`UPDATE alert_acks SET time_ms=1`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := s.PruneHandled(2)
+	if err == nil || removed != 0 {
+		t.Fatalf("failed prune must report zero and error: removed=%d err=%v", removed, err)
+	}
+	if _, ok := s.Get("r1", "h1", "cpu", 1); !ok {
+		t.Fatal("failed prune removed cached record")
+	}
+}
+
 // 保留策略：**待处理（pending）永不删**，已处置按时间删；库与内存同步。
 func TestAckStorePruneHandledKeepsPending(t *testing.T) {
 	store := openAckTestDB(t)
@@ -97,8 +170,12 @@ func TestAckStorePruneHandledKeepsPending(t *testing.T) {
 	}
 	old := int64(1_600_000_000_000) // 很久以前
 	// 一条已处置（会被清）、一条待处理（必须留下）
-	s.Mark("r1", "h1", "cpu", 1, "ops")
-	s.update("r2", "h2", "mem", 2, "ops", func(i *AckInfo) { i.Status = StatusPending })
+	if _, err := s.Mark("r1", "h1", "cpu", 1, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.update("r2", "h2", "mem", 2, "ops", func(i *AckInfo) { i.Status = StatusPending }); err != nil {
+		t.Fatal(err)
+	}
 	s.mu.Lock()
 	for k, v := range s.acks {
 		v.Time = old
@@ -110,7 +187,11 @@ func TestAckStorePruneHandledKeepsPending(t *testing.T) {
 		t.Fatalf("回写时间失败: %v", err)
 	}
 
-	if removed := s.PruneHandled(old + 1000); removed != 1 {
+	removed, err := s.PruneHandled(old + 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
 		t.Fatalf("应只清掉已处置的那 1 条，实际 %d", removed)
 	}
 	loaded, err := loadAcksFromDB(db)
