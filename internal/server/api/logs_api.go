@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nebula/monitor/internal/model"
+	"github.com/nebula/monitor/internal/server/asset"
 	"github.com/nebula/monitor/internal/server/auth"
 	"github.com/nebula/monitor/internal/server/logparse"
 	"github.com/nebula/monitor/internal/server/logstore"
@@ -87,9 +88,11 @@ func (a *API) handleLogsQuery(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	p := Principal(r)
 	writeJSON(w, http.StatusOK, logQueryResponse{
 		LogQueryResult: res,
-		Assets:         a.logsAssetMap(Principal(r), res.Lines),
+		Assets:         a.logsAssetMap(p, res.Lines),
+		PodAssets:      a.logsPodAssetMap(p, res.Lines),
 	})
 }
 
@@ -102,6 +105,9 @@ type logQueryResponse struct {
 	// Assets 的键是 `<source>|<node>`，值是该组合对应的资产（可能多条：同名来源
 	// 在多台机器上都可能配置）。前端据此把日志行标到资产上，并提供跳转。
 	Assets map[string][]logAssetRef `json:"assets,omitempty"`
+	// PodAssets 是**容器日志**（行上带 origin）的资产映射，键 `<namespace>|<pod>`。
+	// 与 Assets 分开：容器日志要标的是那个 Pod，而不是"某台机器上的某类来源"。
+	PodAssets map[string][]logAssetRef `json:"podAssets,omitempty"`
 }
 
 // logAssetRef 是日志行指向的资产（只给跳转与展示所需的最小字段）。
@@ -144,22 +150,7 @@ func (a *API) logsAssetMap(p *auth.Principal, lines []model.LogHit) map[string][
 			slog.Warn("日志关联资产失败", "source", hit.Source, "node", hit.Node, "err", err)
 			continue
 		}
-		refs := make([]logAssetRef, 0, len(items))
-		for _, item := range items {
-			// 资源范围与其它入口同一口径：范围外的资产不出现在映射里
-			if !a.nodeInScope(p, item.Node) {
-				continue
-			}
-			title := titles[item.TypeKey]
-			if title == "" {
-				title = item.TypeKey
-			}
-			refs = append(refs, logAssetRef{
-				ID: item.ID, TypeKey: item.TypeKey, TypeTitle: title,
-				NaturalKey: item.NaturalKey, Name: item.Name, Node: item.Node,
-			})
-		}
-		if len(refs) > 0 {
+		if refs := a.assetRefs(p, items, titles); len(refs) > 0 {
 			out[key] = refs
 		}
 	}
@@ -168,6 +159,75 @@ func (a *API) logsAssetMap(p *auth.Principal, lines []model.LogHit) map[string][
 	}
 	return out
 }
+
+// logsPodAssetMap 解析本页出现的**容器身份** → Pod 资产，键为 `<namespace>|<pod>`。
+//
+// 与 logsAssetMap 分成两张表而不是合成一张：两者的键在不同的身份空间里——(来源, 节点)
+// 说的是"某台机器上的某类来源"，(命名空间, Pod) 说的是"一个具体容器"。合成一张，
+// 读代码的人必须先推断键的形态才知道该查哪个，而两者的取值口径完全一样（见 assetRefs）。
+func (a *API) logsPodAssetMap(p *auth.Principal, lines []model.LogHit) map[string][]logAssetRef {
+	if a.assets == nil || len(lines) == 0 {
+		return nil
+	}
+	const maxPairs = 20
+	titles := assetTypeTitles()
+	seen := map[string]bool{}
+	out := map[string][]logAssetRef{}
+	for _, hit := range lines {
+		if hit.Origin.Empty() {
+			continue
+		}
+		key := PodAssetKey(hit.Origin)
+		if seen[key] {
+			continue
+		}
+		if len(seen) >= maxPairs {
+			break
+		}
+		seen[key] = true
+		items, err := a.assets.AssetsByPod(hit.Node, hit.Origin.Namespace, hit.Origin.Pod)
+		if err != nil {
+			slog.Warn("Pod 日志关联资产失败", "namespace", hit.Origin.Namespace, "pod", hit.Origin.Pod, "err", err)
+			continue
+		}
+		if refs := a.assetRefs(p, items, titles); len(refs) > 0 {
+			out[key] = refs
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// assetRefs 把资产转成日志页需要的最小引用，并按**调用者的资源范围**裁剪。
+//
+// 范围裁剪放在这里而不是各调用点：它是安全边界，多一处漏掉就是一次越权
+// （"日志里看到了本不该看到的资产名"）。
+func (a *API) assetRefs(p *auth.Principal, items []asset.Asset, titles map[string]string) []logAssetRef {
+	refs := make([]logAssetRef, 0, len(items))
+	for _, item := range items {
+		if !a.nodeInScope(p, item.Node) {
+			continue
+		}
+		title := titles[item.TypeKey]
+		if title == "" {
+			title = item.TypeKey
+		}
+		refs = append(refs, logAssetRef{
+			ID: item.ID, TypeKey: item.TypeKey, TypeTitle: title,
+			NaturalKey: item.NaturalKey, Name: item.Name, Node: item.Node,
+		})
+	}
+	return refs
+}
+
+// PodAssetKey 是容器资产映射的键（与前端拼法一致：`<namespace>|<pod>`）。
+//
+// 不含节点：节点已经在日志行上，而"某个命名空间下的某个 Pod"在前端一次查找里
+// 就是唯一的（同一页不会出现两个节点上的同名 Pod 映射到同一键——真出现也应当
+// 一并列出候选，由人来看）。
+func PodAssetKey(o *model.LogOrigin) string { return o.Namespace + "|" + o.Pod }
 
 // parseLogQuery 解析并校验查询参数。
 //

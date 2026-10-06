@@ -459,6 +459,14 @@ func (s *Service) AssetsByLogSource(source, node string) ([]Asset, error) {
 	return s.store.assetsByLogSource(source, node)
 }
 
+// AssetsByPod 按「节点 + 命名空间 + Pod 名」找容器资产（供 Pod 日志 → 资产联动）。
+//
+// 返回多条是正常结果（同一节点上两个集群出现同名 Pod）：调用方原样呈现候选，
+// 不能自己挑一条——挑错就是"看的是另一个 Pod"。
+func (s *Service) AssetsByPod(node, namespace, name string) ([]Asset, error) {
+	return s.store.assetsByPodIdentity(node, namespace, name)
+}
+
 // InstancesByAddr 按实例地址找中间件实例资产（供告警 → 资产联动）。
 //
 // 返回多条是**正常结果**：同一地址可能在不同类型的实例里都出现（例如

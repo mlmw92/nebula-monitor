@@ -244,6 +244,13 @@ func (s *Store) Append(b model.LogBatch) (accepted, dropped int, reason string, 
 	if !model.IsValidLogSourceName(b.Source) {
 		return 0, 0, "invalid", fmt.Errorf("source 名非法")
 	}
+	// 容器身份（可选）与外部后端同一套校验：两个后端必须接受/拒绝同一批输入，
+	// 否则"换后端"会变成"有些 Agent 突然开始报错"。
+	origin, ok := model.NormalizeLogOrigin(b.Origin)
+	if !ok {
+		return 0, 0, "invalid", fmt.Errorf("容器身份非法")
+	}
+	b.Origin = origin
 	node := sanitizeNodeName(b.Node)
 	if node == "" {
 		return 0, 0, "invalid", fmt.Errorf("node 为空")
@@ -289,6 +296,9 @@ func (s *Store) Append(b model.LogBatch) (accepted, dropped int, reason string, 
 			// 结构化字段在**落盘时**提取：与原文写在同一条 JSON 里，
 			// 因此不需要另建索引，检索仍是"顺序读 + 有界扫描"（见 query.go）。
 			Fields: s.extractFields(b.Source, line.Text),
+			// 容器身份随行落盘：检索时要靠它把行标到 Pod 资产上，事后无处可补。
+			// 批次级携带（一批 = 一个文件），这里展开到每一行。
+			Origin: b.Origin,
 		}
 		data, err := json.Marshal(rec)
 		if err != nil {

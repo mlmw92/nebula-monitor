@@ -5,7 +5,9 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/nebula/monitor/internal/model"
 	"github.com/nebula/monitor/internal/server/asset"
 )
 
@@ -98,6 +100,92 @@ func TestRoutes_LogsQueryAssetMappingRespectsScope(t *testing.T) {
 		if key == "applog|db-01" {
 			t.Fatalf("范围外资产不得出现在映射里：%v", assets)
 		}
+	}
+}
+
+// Pod 日志 → 资产联动：行上带容器身份时，响应要给出「命名空间|Pod → 容器资产」映射。
+//
+// 与主机来源的映射（assets）分开：容器日志要标的是那个 Pod，而不是"某台机器上的某类来源"。
+func TestRoutes_LogsQueryReturnsPodAssetMapping(t *testing.T) {
+	a, store := newLogsTestAPI(t)
+	svc := attachAssetService(t, a)
+	declarePodAsset(t, svc, "https://10.0.0.9:6443", "nebula-demo", "web-1", "web-01")
+
+	now := time.Now().UnixMilli()
+	if _, _, _, err := store.Append(model.LogBatch{
+		Source: "podlog", Node: "web-01",
+		Origin: &model.LogOrigin{Namespace: "nebula-demo", Pod: "web-1", Container: "nginx"},
+		Lines:  []model.LogLine{{Ts: now - 60_000, Text: "error: pod line", Pattern: "err"}},
+	}); err != nil {
+		t.Fatalf("造 Pod 日志失败：%v", err)
+	}
+
+	body := decodeBody(t, logsQuery(a, logsReader(), ""))
+	lines, _ := body["lines"].([]any)
+	var podLine map[string]any
+	for _, raw := range lines {
+		line, _ := raw.(map[string]any)
+		if line["source"] == "podlog" {
+			podLine = line
+		}
+	}
+	if podLine == nil {
+		t.Fatalf("Pod 日志应被检索到：%v", body)
+	}
+	origin, _ := podLine["origin"].(map[string]any)
+	if origin["namespace"] != "nebula-demo" || origin["pod"] != "web-1" || origin["container"] != "nginx" {
+		t.Fatalf("行上应带容器身份：%v", podLine)
+	}
+
+	pods, _ := body["podAssets"].(map[string]any)
+	if len(pods) != 1 {
+		t.Fatalf("只应有本页出现过的容器身份映射：%v", pods)
+	}
+	refs, ok := pods["nebula-demo|web-1"].([]any)
+	if !ok || len(refs) != 1 {
+		t.Fatalf("容器身份应映射到一条资产：%v", pods)
+	}
+	ref, _ := refs[0].(map[string]any)
+	if ref["typeKey"] != asset.TypePod || ref["naturalKey"] != asset.PodNaturalKey("https://10.0.0.9:6443", "nebula-demo", "web-1") {
+		t.Fatalf("资产引用不符：%v", ref)
+	}
+	// 普通文件日志（行上没有身份）不该出现在容器映射里
+	if _, ok := pods["|"]; ok {
+		t.Fatalf("没有身份的行不应产生映射：%v", pods)
+	}
+}
+
+// 台账里没有对应 Pod（或未注入台账）时，日志照常返回、只是没有映射：
+// 资产是补充信息，不该让"日志查到了"变成"页面报错"。
+func TestRoutes_LogsQueryPodMappingIsOptional(t *testing.T) {
+	a, store := newLogsTestAPI(t)
+	attachAssetService(t, a) // 台账是空的：没有任何 Pod 资产
+	now := time.Now().UnixMilli()
+	if _, _, _, err := store.Append(model.LogBatch{
+		Source: "podlog", Node: "web-01",
+		Origin: &model.LogOrigin{Namespace: "nebula-demo", Pod: "web-1", Container: "nginx"},
+		Lines:  []model.LogLine{{Ts: now - 60_000, Text: "error: pod line"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := decodeBody(t, logsQuery(a, logsReader(), ""))
+	if _, ok := body["podAssets"]; ok {
+		t.Fatalf("没有对应资产时不应有映射字段：%v", body)
+	}
+	if lines, _ := body["lines"].([]any); len(lines) == 0 {
+		t.Fatal("日志本身应照常返回")
+	}
+}
+
+// declarePodAsset 落一个容器资产（命名空间是属性、节点是归属主机）。
+func declarePodAsset(t *testing.T, svc *asset.Service, cluster, ns, name, node string) {
+	t.Helper()
+	if _, _, err := svc.Apply(asset.Observation{
+		TypeKey: asset.TypePod, NaturalKey: asset.PodNaturalKey(cluster, ns, name),
+		Name: name, Node: node, Source: asset.SourceDiscovery,
+		Attrs: map[string]string{"namespace": ns},
+	}); err != nil {
+		t.Fatalf("落容器资产失败: %v", err)
 	}
 }
 

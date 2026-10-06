@@ -1265,6 +1265,53 @@ func escapeLike(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
+// assetsByPodIdentity 找出「某节点上、某命名空间里、名字匹配」的 Pod 资产（供 Pod 日志 → 资产联动）。
+//
+// 为什么用 (节点, 命名空间, 名字) 而不是自然键：Pod 的自然键里含**集群**
+// （见 PodNaturalKey），而容器日志路径里没有集群标识——采集侧只知道"这个文件属于哪个 Pod"。
+// 节点 + 命名空间 + 名字在台账里足以唯一定位：同一台机器上不可能有两个同名 Pod。
+//
+// 返回多条是**正常结果**（同一节点上挂了两个集群、且命名空间与 Pod 名相同时会出现）：
+// 调用方必须原样呈现候选，不能自己挑一条——挑错就是"看的是另一个 Pod"。
+//
+// node 为空表示"不知道在哪台机器上"（Pod 落在未注册节点时台账里就是空串）：
+// 此时退回只按命名空间 + 名字找，**不能**用 node='' 去匹配——那会把"不知道在哪"当成"就在这台"。
+func (s *Store) assetsByPodIdentity(node, namespace, name string) ([]Asset, error) {
+	namespace = strings.TrimSpace(namespace)
+	name = strings.TrimSpace(name)
+	if namespace == "" || name == "" {
+		return nil, nil
+	}
+	node = strings.TrimSpace(node)
+	cond := "AND a.node=?"
+	args := []any{TypePod, namespace, name, node}
+	if node == "" {
+		cond = ""
+		args = args[:3]
+	}
+	rows, err := s.db.Query(
+		`SELECT a.id FROM assets a
+		 JOIN asset_attrs t ON t.asset_id=a.id
+		 WHERE a.type_key=? AND t.key='namespace' AND t.value=? AND a.name=? `+cond+`
+		 ORDER BY a.id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("按容器身份查询资产失败: %w", err)
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("读取容器资产失败: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("读取容器资产失败: %w", err)
+	}
+	return s.assetsByIDs(ids)
+}
+
 // assetsByLogSource 找出「人工声明了该日志来源」且归属节点匹配的资产。
 //
 // 节点也参与匹配：同一个来源名（如 applog）在多台机器上都会配置，只按来源名找

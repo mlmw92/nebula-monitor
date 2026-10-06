@@ -60,6 +60,8 @@ type AssetProvider interface {
 	InstancesByAddr(addr string) ([]asset.Asset, error)
 	// AssetsByLogSource 按「人工声明的日志来源 + 归属节点」找资产（日志 → 资产联动）。
 	AssetsByLogSource(source, node string) ([]asset.Asset, error)
+	// AssetsByPod 按「归属节点 + 命名空间 + Pod 名」找容器资产（Pod 日志 → 资产联动）。
+	AssetsByPod(node, namespace, name string) ([]asset.Asset, error)
 	// SuppressedLinks 返回被人工隐藏（逻辑删除）的关联，供界面展示并可恢复。
 	SuppressedLinks(ref asset.Ref) ([]asset.SuppressedLink, error)
 	// 关系的人工维护：采集侧走 LinkDiscovered（此处不暴露，采集不经过 API 层），

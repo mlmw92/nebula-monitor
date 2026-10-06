@@ -109,10 +109,22 @@ const vlStreamFields = "node,source"
 
 // vlReservedFields 是协议保留字段：解析出的业务字段若与它们同名，必须丢弃。
 // 否则一条日志的内容就能覆盖它自己的来源/节点/时间（等于伪造归属）。
+//
+// k8s_* 三个身份字段同样在列：它们是**采集侧解析出的容器身份**，若允许日志正文
+// 覆盖它们，一条日志就能把自己标到别人的 Pod 资产上——那是伪造归属，不是格式问题。
 var vlReservedFields = map[string]struct{}{
 	"_time": {}, "_msg": {}, "_stream": {}, "_stream_id": {},
 	"node": {}, "source": {}, "pattern": {},
+	vlFieldOriginNamespace: {}, vlFieldOriginPod: {}, vlFieldOriginContainer: {},
 }
+
+// 容器身份在后端里的字段名。加 k8s_ 前缀是为了不与正文里解析出的业务字段撞名
+// （正文里出现 pod / namespace 这类名字太常见了）。
+const (
+	vlFieldOriginNamespace = "k8s_namespace"
+	vlFieldOriginPod       = "k8s_pod"
+	vlFieldOriginContainer = "k8s_container"
+)
 
 // Append 写入一批日志，返回接受与丢弃的行数。
 //
@@ -126,6 +138,11 @@ func (v *VictoriaLogs) Append(b model.LogBatch) (accepted, dropped int, reason s
 	// 否则"换后端"会变成"有些 Agent 突然开始报错"。
 	if !model.IsValidLogSourceName(b.Source) {
 		return 0, 0, "invalid", fmt.Errorf("source 名非法")
+	}
+	// 容器身份与本地后端同一套校验：两个后端必须接受/拒绝同一批输入
+	origin, ok := model.NormalizeLogOrigin(b.Origin)
+	if !ok {
+		return 0, 0, "invalid", fmt.Errorf("容器身份非法")
 	}
 	node := sanitizeNodeName(b.Node)
 	if node == "" {
@@ -153,6 +170,13 @@ func (v *VictoriaLogs) Append(b model.LogBatch) (accepted, dropped int, reason s
 		obj["source"] = b.Source
 		if line.Pattern != "" {
 			obj["pattern"] = line.Pattern
+		}
+		if origin != nil {
+			// 身份字段**最后写**（且在解析字段之前已由 vlReservedFields 挡掉同名业务字段）：
+			// 它来自采集侧解析出的文件路径，是权威值。
+			obj[vlFieldOriginNamespace] = origin.Namespace
+			obj[vlFieldOriginPod] = origin.Pod
+			obj[vlFieldOriginContainer] = origin.Container
 		}
 		for k, val := range parseFields(text) {
 			if _, reserved := vlReservedFields[k]; reserved {
@@ -422,6 +446,15 @@ func parseVLLines(raw []byte) ([]model.LogHit, error) {
 			hit.Node = sanitizeNodeName(hit.Node)
 		}
 		hit.Pattern = stringField(obj, "pattern")
+		// 容器身份从**存储字段**读回（与 node/source/pattern 同一取向），而不是从正文猜：
+		// 正文里恰好出现 k8s_pod=... 的行不该被当成"来自某个 Pod"。
+		if o, ok := model.NormalizeLogOrigin(&model.LogOrigin{
+			Namespace: stringField(obj, vlFieldOriginNamespace),
+			Pod:       stringField(obj, vlFieldOriginPod),
+			Container: stringField(obj, vlFieldOriginContainer),
+		}); ok {
+			hit.Origin = o
+		}
 		// 字段在**读取时**按同一套规则重新提取：后端里存的字段可能来自别的写入工具
 		// （或旧版本的规则），重新提取才能保证"两个后端返回的 Fields 完全一致"。
 		hit.Fields = parseFields(hit.Text)

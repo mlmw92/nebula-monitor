@@ -73,6 +73,15 @@ func (r *Receiver) HandleLogs(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "invalid source name", http.StatusBadRequest)
 		return
 	}
+	// 容器身份（可选）：与来源名同一取向——**规则由 model 统一给出**，采集侧解析时判一次、
+	// 这里再判一次。非法身份直接回 400（而不是"丢掉身份照收"）：身份决定这些行被标到哪个
+	// Pod 资产上，一个不可信的身份比没有身份更危险；而合法的 Agent 永远不会发出非法身份。
+	origin, ok := model.NormalizeLogOrigin(batch.Origin)
+	if !ok {
+		http.Error(w, "invalid log origin", http.StatusBadRequest)
+		return
+	}
+	batch.Origin = origin
 	if len(batch.Lines) == 0 {
 		writeLogResult(w, model.LogAppendResult{})
 		return

@@ -79,6 +79,40 @@ func TestHandleLogs_StoresAndReportsAccepted(t *testing.T) {
 	}
 }
 
+// TestHandleLogs_RejectsInvalidOrigin 非法的容器身份回 400，而不是"丢掉身份照收"：
+// 身份决定这些行被标到哪个 Pod 资产上，不可信的身份比没有身份更危险
+// （伪造归属会让运维在别人的资产下看到自己的日志）。
+func TestHandleLogs_RejectsInvalidOrigin(t *testing.T) {
+	root := t.TempDir()
+	r, _ := newLogsReceiver(t, root, 0, 0, 0)
+
+	bad := sampleBatch("podlog", 1)
+	bad.Origin = &model.LogOrigin{Namespace: "nebula-demo", Pod: "web_1", Container: "nginx"}
+	if rec := postLogs(r, logBody(t, bad), nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("非法身份应 400，got %d（%s）", rec.Code, rec.Body.String())
+	}
+	// 只给一半身份同样非法：定位不到资产可接受，定位错不可接受
+	half := sampleBatch("podlog", 1)
+	half.Origin = &model.LogOrigin{Pod: "web-1", Container: "nginx"}
+	if rec := postLogs(r, logBody(t, half), nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("缺 namespace 应 400，got %d", rec.Code)
+	}
+
+	// 合法身份：照常接收，且身份随行落盘（大写会被规范化为小写）
+	ok := sampleBatch("podlog", 1)
+	ok.Origin = &model.LogOrigin{Namespace: "nebula-demo", Pod: "Web-1", Container: "NGINX"}
+	if rec := postLogs(r, logBody(t, ok), nil); rec.Code != http.StatusOK {
+		t.Fatalf("合法身份应 200，got %d（%s）", rec.Code, rec.Body.String())
+	}
+	data, err := os.ReadFile(filepath.Join(root, "podlog", time.Now().Format("2006-01-02"), "n1.log"))
+	if err != nil {
+		t.Fatalf("应落盘：%v", err)
+	}
+	if !strings.Contains(string(data), `"pod":"web-1"`) || !strings.Contains(string(data), `"container":"nginx"`) {
+		t.Fatalf("容器身份应随行落盘（且已规范化为小写）：%s", data)
+	}
+}
+
 // TestHandleLogs_DisabledWithoutStore 未注入存储器 = 该能力关闭，明确回 503
 // （与「不配置 logSources 的 Agent」恰好对称：谁都不该悄悄半开）。
 func TestHandleLogs_DisabledWithoutStore(t *testing.T) {
