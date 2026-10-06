@@ -165,7 +165,7 @@ func (e *Executor) run(cmd model.OpsCommand) model.OpsResult {
 		}
 		return e.svcRestart(unit)
 	case model.OpsKindContainerWorkloads, model.OpsKindContainerPods,
-		model.OpsKindContainerDescribe, model.OpsKindContainerEvents:
+		model.OpsKindContainerDescribe, model.OpsKindContainerEvents, model.OpsKindContainerLogs:
 		// 容器类动作全部只读，参数与护栏集中在 runContainer（见 container.go）。
 		return e.runContainer(cmd)
 	case model.OpsKindFilePush:

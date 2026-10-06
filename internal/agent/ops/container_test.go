@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -41,6 +42,11 @@ func (f *fakeQuerier) QueryEvents(_ context.Context, cluster, ns, name string) (
 
 func (f *fakeQuerier) QueryObject(_ context.Context, cluster, ns, resource, name string) (*model.ContainerQueryResult, error) {
 	return f.record("object|" + cluster + "|" + ns + "|" + resource + "|" + name)
+}
+
+func (f *fakeQuerier) QueryLogs(_ context.Context, cluster, ns, pod, container string, tailLines, sinceSeconds int) (*model.ContainerQueryResult, error) {
+	return f.record("logs|" + cluster + "|" + ns + "|" + pod + "|" + container +
+		"|" + strconv.Itoa(tailLines) + "|" + strconv.Itoa(sinceSeconds))
 }
 
 func sampleResult(kind string) *model.ContainerQueryResult {
@@ -116,6 +122,21 @@ func TestContainer_LocalParamValidationRunsBeforeQuery(t *testing.T) {
 			"cluster": "c", "namespace": "n", "resource": "secrets", "name": "db"}, "资源类型不合法"},
 		{"对象名路径穿越", model.OpsKindContainerDescribe, map[string]string{
 			"cluster": "c", "namespace": "n", "resource": "pods", "name": "../secrets"}, "对象名不合法"},
+		// 日志：命名空间必填（Pod 名只在命名空间内唯一）、行数与时间窗有硬上限。
+		{"日志缺命名空间", model.OpsKindContainerLogs, map[string]string{"cluster": "c", "name": "web-1"}, "必须指定命名空间"},
+		{"日志缺 Pod 名", model.OpsKindContainerLogs, map[string]string{"cluster": "c", "namespace": "n"}, "Pod 名不合法"},
+		{"日志 Pod 名路径穿越", model.OpsKindContainerLogs, map[string]string{
+			"cluster": "c", "namespace": "n", "name": "../secrets"}, "Pod 名不合法"},
+		{"日志容器名不合法", model.OpsKindContainerLogs, map[string]string{
+			"cluster": "c", "namespace": "n", "name": "web-1", "container": "a b"}, "容器名不合法"},
+		{"日志行数超上限", model.OpsKindContainerLogs, map[string]string{
+			"cluster": "c", "namespace": "n", "name": "web-1", "tailLines": "9999"}, "行数不合法"},
+		{"日志行数非数字", model.OpsKindContainerLogs, map[string]string{
+			"cluster": "c", "namespace": "n", "name": "web-1", "tailLines": "all"}, "行数不合法"},
+		{"日志行数为零", model.OpsKindContainerLogs, map[string]string{
+			"cluster": "c", "namespace": "n", "name": "web-1", "tailLines": "0"}, "行数不合法"},
+		{"日志时间窗超上限", model.OpsKindContainerLogs, map[string]string{
+			"cluster": "c", "namespace": "n", "name": "web-1", "sinceSeconds": "999999"}, "时间窗不合法"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -164,6 +185,38 @@ func TestContainer_SuccessCarriesStructuredPayload(t *testing.T) {
 	}
 	if got.Total != 812 || !got.Truncated || len(got.Rows) != 1 || got.Columns[0] != "名称" {
 		t.Fatalf("结构化载荷内容不符，实际 %+v", got)
+	}
+}
+
+// Pod 日志：默认行数必须落到模型常量上，且显式参数原样传到查询实现。
+// 这是"静默夹值"的反面用例——超上限一律拒绝，不偷偷改小。
+func TestContainer_LogsAppliesDefaultsAndPassesArgs(t *testing.T) {
+	f := &fakeQuerier{result: sampleResult(model.OpsKindContainerLogs)}
+	e := newTestExecutor(config.OpsGuards{})
+	e.SetK8sQuerier(f)
+	if !contains(e.Supported(), model.OpsKindContainerLogs) {
+		t.Fatalf("容器动作应包含日志查询，实际 %v", e.Supported())
+	}
+
+	res := e.Execute(model.OpsCommand{ID: "t1", Kind: model.OpsKindContainerLogs,
+		Params: map[string]string{"cluster": "prod-k8s", "namespace": "default", "name": "web-1"}})
+	if res.State != model.OpsStateSucceeded {
+		t.Fatalf("应成功，实际 %+v", res)
+	}
+	want := "logs|prod-k8s|default|web-1||" + strconv.Itoa(model.OpsLogDefaultTailLines) + "|0"
+	if f.last != want {
+		t.Fatalf("默认参数不符：got %q want %q", f.last, want)
+	}
+
+	res = e.Execute(model.OpsCommand{ID: "t2", Kind: model.OpsKindContainerLogs,
+		Params: map[string]string{"cluster": "c", "namespace": "n", "name": "web-1", "container": "app",
+			"tailLines": strconv.Itoa(model.OpsLogMaxTailLines), "sinceSeconds": strconv.Itoa(model.OpsLogMaxSinceSeconds)}})
+	if res.State != model.OpsStateSucceeded {
+		t.Fatalf("边界值应被接受，实际 %+v", res)
+	}
+	want = "logs|c|n|web-1|app|" + strconv.Itoa(model.OpsLogMaxTailLines) + "|" + strconv.Itoa(model.OpsLogMaxSinceSeconds)
+	if f.last != want {
+		t.Fatalf("显式参数不符：got %q want %q", f.last, want)
 	}
 }
 

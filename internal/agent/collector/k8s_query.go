@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -30,6 +32,16 @@ const (
 	containerMaxWorkloads = 300
 	containerMaxPods      = 500
 	containerMaxEvents    = 200
+
+	// containerMaxLogBytes 是单次日志拉取的字节预算（96 KiB）。
+	//
+	// 取值不是"随便定大一点"：回执要 JSON 序列化后搭在下一轮上报的请求体里，
+	// 而 ops 层对结构化结果还有 256 KiB 的硬上限。96 KiB 文本编码后约 120 KiB，
+	// 留足余量；再多只会让"日志太长"变成"这台机器突然不上报了"。
+	containerMaxLogBytes = 96 << 10
+	// containerLogLineMaxRunes 是单行的最大字符数：一行几十万字符的日志（如未换行的 JSON）
+	// 会把整份回执顶爆，宁可截断并显式说明截了几行。
+	containerLogLineMaxRunes = 500
 )
 
 // ContainerQueryResult 定义在 internal/model——它**是协议载荷**（随 OpsResult.JSON 上行、
@@ -396,6 +408,116 @@ func eventTime(e cqEvent) string {
 		}
 	}
 	return ""
+}
+
+// QueryLogs 拉取某个 Pod 的最近日志。
+//
+// 与列表类查询的差别：apiserver 的 `/log` 子资源返回**纯文本**（不是 JSON），且没有分页，
+// 边界完全靠 tailLines / sinceSeconds 两个参数（上层已按上限校过，这里再兜一次字节预算）。
+//
+// 刻意不提供"全量日志下载"：那等于给平台开了一条把任意业务数据搬走的通道，
+// 且会把回执体积从几十 KB 推到不可控。要看全量应该上机器或走日志后端。
+func (c *K8sCollector) QueryLogs(ctx context.Context, cluster, namespace, pod, container string, tailLines, sinceSeconds int) (*ContainerQueryResult, error) {
+	cfg, conn, err := c.queryConn(cluster)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.client.CloseIdleConnections()
+
+	res := newContainerResult(model.OpsKindContainerLogs, cfg.Name, namespace, []string{"日志"})
+
+	q := url.Values{}
+	q.Set("tailLines", strconv.Itoa(tailLines))
+	if sinceSeconds > 0 {
+		q.Set("sinceSeconds", strconv.Itoa(sinceSeconds))
+	}
+	if container != "" {
+		q.Set("container", container)
+	}
+	path := "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods/" + url.PathEscape(pod) + "/log?" + q.Encode()
+	text, overflow, err := c.getText(ctx, conn, path, containerMaxLogBytes)
+	if err != nil {
+		return nil, err
+	}
+	if overflow {
+		// 字节预算先于行数用尽：丢掉可能被切断的半行，并把截断显式说出来。
+		if idx := strings.LastIndexByte(text, '\n'); idx >= 0 {
+			text = text[:idx]
+		} else {
+			text = ""
+		}
+	}
+
+	clipped := 0
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		short := truncateLine(line, containerLogLineMaxRunes)
+		if short != line {
+			clipped++
+		}
+		addRow(res, short)
+	}
+	res.Total = len(res.Rows)
+	// 行数打满即视为"更早的还有"：apiserver 只保证返回最后 N 行，不告诉我们上面还有多少。
+	if overflow || res.Total >= tailLines {
+		res.Truncated = true
+	}
+
+	scope := fmt.Sprintf("Pod %s/%s", namespace, pod)
+	if container != "" {
+		scope += " · 容器 " + container
+	} else {
+		scope += " · 第一个容器"
+	}
+	notice := fmt.Sprintf("%s · 最近 %d 行", scope, tailLines)
+	if sinceSeconds > 0 {
+		notice += fmt.Sprintf("（时间窗 %d 秒）", sinceSeconds)
+	}
+	if res.Truncated {
+		notice += "；已达上限，更早的日志未拉取"
+	}
+	if clipped > 0 {
+		notice += fmt.Sprintf("；%d 行因过长被截断", clipped)
+	}
+	res.Notice = notice
+	return res, nil
+}
+
+// getText 向 apiserver 发起 GET 并返回原始文本（Pod 日志不是 JSON，不能走 getJSON）。
+//
+// overflow 表示正文超过 maxBytes 被截断——调用方据此把"日志比预算更长"如实标出来，
+// 而不是让使用者以为"日志就到这里了"。
+func (c *K8sCollector) getText(ctx context.Context, conn *k8sConn, path string, maxBytes int64) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, conn.apiServer+path, nil)
+	if err != nil {
+		return "", false, err
+	}
+	if conn.token != "" {
+		req.Header.Set("Authorization", "Bearer "+conn.token)
+	}
+	req.Header.Set("Accept", "text/plain")
+	resp, err := conn.client.Do(req)
+	if err != nil {
+		return "", false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", false, fmt.Errorf("apiserver 返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return "", false, err
+	}
+	if int64(len(raw)) > maxBytes {
+		return string(raw[:maxBytes]), true, nil
+	}
+	return string(raw), false, nil
 }
 
 // ---- 单对象详情 ----

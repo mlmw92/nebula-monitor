@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/nebula/monitor/internal/model"
@@ -30,6 +31,8 @@ type K8sQuerier interface {
 	QueryPods(ctx context.Context, cluster, namespace string) (*model.ContainerQueryResult, error)
 	QueryEvents(ctx context.Context, cluster, namespace, name string) (*model.ContainerQueryResult, error)
 	QueryObject(ctx context.Context, cluster, namespace, resource, name string) (*model.ContainerQueryResult, error)
+	// QueryLogs 拉取某个 Pod 的最近日志；tailLines/sinceSeconds 已在调用方按上限校过。
+	QueryLogs(ctx context.Context, cluster, namespace, pod, container string, tailLines, sinceSeconds int) (*model.ContainerQueryResult, error)
 }
 
 // containerKinds 是容器类动作清单（全部只读）。
@@ -38,6 +41,7 @@ var containerKinds = []string{
 	model.OpsKindContainerPods,
 	model.OpsKindContainerDescribe,
 	model.OpsKindContainerEvents,
+	model.OpsKindContainerLogs,
 }
 
 // SetK8sQuerier 注入容器查询实现。
@@ -102,6 +106,29 @@ func (e *Executor) runContainer(cmd model.OpsCommand) model.OpsResult {
 			return fail("对象名不合法：" + name)
 		}
 		res, err = e.k8s.QueryObject(ctx, cluster, namespace, resource, name)
+	case model.OpsKindContainerLogs:
+		// 日志必须指定命名空间：Pod 名只在命名空间内唯一，用"全部命名空间"去猜等于随机取一个。
+		if namespace == "" {
+			return fail("拉取日志必须指定命名空间")
+		}
+		name := strings.TrimSpace(cmd.Params["name"])
+		if !model.OpsObjectNamePattern.MatchString(name) {
+			return fail("Pod 名不合法：" + name)
+		}
+		container := strings.TrimSpace(cmd.Params["container"])
+		if container != "" && !model.OpsNamespacePattern.MatchString(container) {
+			return fail("容器名不合法：" + container)
+		}
+		tailLines, ok := boundedCount(cmd.Params["tailLines"], model.OpsLogDefaultTailLines, model.OpsLogMaxTailLines)
+		if !ok {
+			return fail(fmt.Sprintf("行数不合法（应为 1-%d 的整数）：%s", model.OpsLogMaxTailLines, cmd.Params["tailLines"]))
+		}
+		// 时间窗留空表示"不按时间过滤"，所以下界是 0 而不是 1。
+		sinceSeconds, ok := boundedCount(cmd.Params["sinceSeconds"], 0, model.OpsLogMaxSinceSeconds)
+		if !ok {
+			return fail(fmt.Sprintf("时间窗不合法（应为 1-%d 秒的整数）：%s", model.OpsLogMaxSinceSeconds, cmd.Params["sinceSeconds"]))
+		}
+		res, err = e.k8s.QueryLogs(ctx, cluster, namespace, name, container, tailLines, sinceSeconds)
 	default:
 		return fail("本机不支持该动作：" + cmd.Kind)
 	}
@@ -126,6 +153,25 @@ func (e *Executor) runContainer(cmd model.OpsCommand) model.OpsResult {
 		Data: map[string]string{"概览": summary},
 		JSON: string(payload),
 	}
+}
+
+// boundedCount 解析可选的正整数参数：留空取默认值，非数字或超界一律拒绝。
+//
+// 为什么"超界"也拒绝而不是静默夹到上限：静默夹值会让用户以为"我拉了 5000 行"，
+// 而实际只有 500 行——他可能据此判断"日志里没有那条错误"，这是最坏的一类误判。
+func boundedCount(raw string, def, max int) (int, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 || n > max {
+		return 0, false
+	}
+	if n == 0 && def > 0 {
+		return 0, false // 显式写 0 与"留空"语义不同，行数不能为 0
+	}
+	return n, true
 }
 
 // containerSummary 生成一句给人看的结论（任务列表里直接显示 Message）。

@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/nebula/monitor/internal/model"
@@ -45,6 +46,7 @@ const (
 	KindContainerPods      = model.OpsKindContainerPods
 	KindContainerDescribe  = model.OpsKindContainerDescribe
 	KindContainerEvents    = model.OpsKindContainerEvents
+	KindContainerLogs      = model.OpsKindContainerLogs
 
 	// KindFilePush 向目标机器分发文件（**写**，默认被本机护栏挡下）。
 	// 它不复用 guards.ops.write/units，而是有自己的 guards.ops.file（见 model.OpsKindFilePush）。
@@ -152,6 +154,26 @@ var catalog = []Action{
 				Example: "default", Desc: "留空表示全部命名空间"},
 			{Name: "name", Title: "对象名", Pattern: objectNamePattern.String(),
 				Example: "web-7d9f8c6b5-x2k4p", Desc: "留空表示该命名空间的全部事件"},
+		},
+	},
+	{
+		Kind: KindContainerLogs, Title: "查看 Pod 日志", Group: "容器", ReadOnly: true,
+		Desc: fmt.Sprintf("拉取某个 Pod 最近若干行日志（只读）。行数与时间窗都有硬上限（默认 %d 行、最多 %d 行 / %d 小时），刻意不提供全量下载；日志是业务自己的输出，可能含敏感内容",
+			model.OpsLogDefaultTailLines, model.OpsLogMaxTailLines, model.OpsLogMaxSinceSeconds/3600),
+		Params: []Param{
+			{Name: "cluster", Title: "集群", Required: true, Pattern: clusterPattern.String(),
+				Example: "prod-k8s", Desc: "目标机器 agent.yaml 里 k8sInstances[].name 的取值"},
+			{Name: "namespace", Title: "命名空间", Required: true, Pattern: namespacePattern.String(),
+				Example: "default", Desc: "日志必须指定命名空间（Pod 名只在命名空间内唯一）"},
+			{Name: "name", Title: "Pod 名", Required: true, Pattern: objectNamePattern.String(),
+				Example: "web-7d9f8c6b5-x2k4p"},
+			{Name: "container", Title: "容器", Pattern: namespacePattern.String(),
+				Example: "app", Desc: "留空表示该 Pod 的第一个容器"},
+			{Name: "tailLines", Title: "行数", Pattern: model.OpsLogTailLinesPattern.String(),
+				Example: strconv.Itoa(model.OpsLogDefaultTailLines),
+				Desc:    fmt.Sprintf("留空按 %d，最多 %d", model.OpsLogDefaultTailLines, model.OpsLogMaxTailLines)},
+			{Name: "sinceSeconds", Title: "时间窗（秒）", Pattern: model.OpsLogSinceSecondsPattern.String(),
+				Example: "3600", Desc: fmt.Sprintf("留空表示不按时间过滤，最多 %d", model.OpsLogMaxSinceSeconds)},
 		},
 	},
 	{

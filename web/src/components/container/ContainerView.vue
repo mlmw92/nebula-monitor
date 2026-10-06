@@ -115,9 +115,10 @@
               >
                 <template #default="{ row }">{{ row.cells[i] }}</template>
               </el-table-column>
-              <el-table-column v-if="canDescribe" label="操作" width="90" fixed="right">
+              <el-table-column v-if="canDescribe || canLogs" label="操作" :width="canLogs ? 130 : 90" fixed="right">
                 <template #default="{ row }">
-                  <el-button link size="small" @click.stop="describeRow(row)">详情</el-button>
+                  <el-button v-if="canDescribe" link size="small" @click.stop="describeRow(row)">详情</el-button>
+                  <el-button v-if="canLogs" link size="small" @click.stop="openLogs(row)">日志</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -175,6 +176,38 @@
           <el-table-column prop="field" label="字段" width="150" />
           <el-table-column prop="value" label="值" min-width="300" show-overflow-tooltip />
         </el-table>
+      </template>
+    </el-drawer>
+    <!-- Pod 日志：与详情同一套异步规矩——拉一次就缓存，要看最新的点「重新拉取」 -->
+    <el-drawer v-model="logsVisible" :title="logsTitle" size="720px">
+      <div class="detail-bar">
+        <span class="muted">
+          <template v-if="logsBusy">正在拉取（等待 Agent 上报）…</template>
+          <template v-else-if="logsState.at">上次刷新 {{ refreshedText(logsState.at) }}</template>
+          <template v-else>尚未拉取</template>
+        </span>
+        <div class="logs-toolbar">
+          <el-input
+            v-model="logsContainer"
+            placeholder="容器（留空为第一个）"
+            size="small"
+            clearable
+            class="logs-container"
+          />
+          <el-button size="small" :loading="logsBusy" @click="fetchLogs(true)">重新拉取</el-button>
+        </div>
+      </div>
+      <div v-if="logsBusy && !logs" class="drawer-loading">正在拉取（等待 Agent 上报）…</div>
+      <el-alert v-else-if="logsError" type="error" :closable="false" show-icon :title="logsError" />
+      <template v-else-if="logs">
+        <div v-if="logs.notice" class="result-notice">{{ logs.notice }}</div>
+        <!-- 日志必须按原样呈现（保留空白与换行）：重排过的堆栈/表格等于换了一份内容 -->
+        <pre v-if="logText" class="log-pre">{{ logText }}</pre>
+        <EmptyState
+          v-else
+          title="这段时间窗内没有日志"
+          :hints="['容器可能还没启动，或该时间段确实没有输出', '可换一个容器名，或直接上机器查看完整日志']"
+        />
       </template>
     </el-drawer>
   </div>
@@ -237,6 +270,8 @@ const currentCluster = computed(() => clusters.value.find((c) => keyOf(c) === cl
 const result = computed(() => q.value.result)
 const canQuery = computed(() => !!currentCluster.value && currentCluster.value.up && !q.value.busy)
 const canDescribe = computed(() => !!DETAIL_SPEC[activeTab.value])
+// 日志只对 Pod 有意义：工作负载/事件列表里的对象不是容器实例。
+const canLogs = computed(() => activeTab.value === 'pods')
 
 // 详情抽屉也走同一套缓存：重复点同一行同样是一次 15 秒的下发，没理由重来一遍。
 const detailKey = ref({ cluster: '', kind: '', namespace: '', name: '' })
@@ -248,6 +283,21 @@ const detailState = computed(() => containerDetailState(
 const detailBusy = computed(() => detailState.value.busy)
 const detailError = computed(() => detailState.value.error)
 const detail = computed(() => detailState.value.result)
+
+// Pod 日志抽屉：与详情共用同一套「异步下发 + 缓存 + 上次刷新」状态机。
+// 缓存键里带上容器名：换容器是换内容，不能把上一个容器的日志显示在新容器名下。
+const logsVisible = ref(false)
+const logsTitle = ref('Pod 日志')
+const logsKey = ref({ cluster: '', kind: '', namespace: '', name: '' })
+const logsTarget = ref(null)
+const logsContainer = ref('')
+const logsState = computed(() => containerDetailState(
+  logsKey.value.cluster, logsKey.value.kind, logsKey.value.namespace, logsKey.value.name
+))
+const logsBusy = computed(() => logsState.value.busy)
+const logsError = computed(() => logsState.value.error)
+const logs = computed(() => logsState.value.result)
+const logText = computed(() => (logs.value?.rows || []).map((cells) => cells[0]).join('\n'))
 
 const timers = new Set()
 
@@ -498,13 +548,16 @@ function parsePayload(task) {
 }
 
 async function cancel(tab) {
-  const task = query[tab].task
+  // 与 run 用同一处取法：`q` 是当前 Tab 的计算属性，这里按传入的 tab 取状态，
+  // 免得"看着是 A 的按钮、撤的是 B 的任务"。
+  const item = containerQueryState(clusterKey.value, tab)
+  const task = item.task
   if (!task) return
   try {
     await cancelOpsTasks({ ids: [task.id] })
-    query[tab].error = ''
-    query[tab].busy = false
-    query[tab].task = null
+    item.error = ''
+    item.busy = false
+    item.task = null
     ElMessage.success('已撤回')
   } catch (e) {
     ElMessage.error(e.message || '撤回失败：任务可能已被 Agent 领取')
@@ -583,6 +636,82 @@ async function describeRow(row, force = false) {
 // refreshDetail 是抽屉里的「刷新」：显式重新下发同一个对象的详情。
 function refreshDetail() {
   if (detailRow.value) describeRow(detailRow.value, true)
+}
+
+/* ===== Pod 日志 ===== */
+
+// openLogs 打开某个 Pod 的日志抽屉。默认**命中缓存不再下发**（与详情同一规矩）：
+// 点一下就是一次 15 秒的下发，用户点开往往只是"看看"。
+function openLogs(row) {
+  const spec = DETAIL_SPEC.pods
+  const cells = row.cells || []
+  const ns = cells[spec.nsCol]
+  const pod = cells[spec.nameCol]
+  if (!ns || !pod) return
+  logsTarget.value = { namespace: ns, pod }
+  logsContainer.value = ''
+  logsTitle.value = '日志 · ' + pod
+  logsVisible.value = true
+  fetchLogs(false)
+}
+
+// fetchLogs 拉取当前 Pod 的最近日志；force=true 表示用户明确要求重新拉取。
+//
+// 行数与时间窗由服务端动作目录的规格兜住（默认 200 行、最多 500 行 / 24 小时）：
+// 界面不提供"全量下载"，那是另一条通道的事，不是这一页能顺手打开的。
+async function fetchLogs(force = false) {
+  const target = logsTarget.value
+  if (!target || !currentCluster.value) return
+  const container = logsContainer.value.trim()
+  const cacheName = target.pod + (container ? '/' + container : '')
+  logsKey.value = {
+    cluster: clusterKey.value, kind: 'container.logs', namespace: target.namespace, name: cacheName,
+  }
+  const st = containerDetailState(clusterKey.value, 'container.logs', target.namespace, cacheName)
+  if (st.result && !force) return
+
+  st.error = ''
+  st.task = null
+  st.busy = true
+  try {
+    const params = {
+      cluster: currentCluster.value.name || currentCluster.value.instance,
+      namespace: target.namespace,
+      name: target.pod,
+    }
+    if (container) params.container = container
+    const res = await createOpsTask({
+      node: currentCluster.value.node,
+      kind: 'container.logs',
+      params,
+      reason: 'Pod 日志',
+    })
+    const task = res && res.task
+    if (!task || !task.id) throw new Error('服务端未返回任务 ID')
+    st.task = task
+    await waitTask(
+      task.id,
+      () => {},
+      (t, err) => {
+        st.busy = false
+        if (err) {
+          st.error = err
+        } else if (t.state !== 'succeeded') {
+          st.error = taskFailureText(t)
+        } else {
+          st.result = parsePayload(t)
+          if (!st.result) {
+            st.error = t.message || '未返回结构化结果'
+          } else {
+            st.at = Date.now()
+          }
+        }
+      }
+    )
+  } catch (e) {
+    st.error = e.message || '下发失败'
+    st.busy = false
+  }
 }
 
 onMounted(async () => {
@@ -720,5 +849,28 @@ onBeforeUnmount(() => {
   text-align: center;
   color: var(--t3);
   font-size: var(--fs-sm);
+}
+.logs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.logs-container {
+  width: 200px;
+}
+/* 日志按原样呈现：pre-wrap 保留缩进与换行，等宽字体让堆栈/表格对得齐。
+   行数上限由服务端动作目录兜住，这里只负责滚动，不做二次截断。 */
+.log-pre {
+  margin: 0;
+  padding: 12px;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  background: var(--bg-sunken, rgba(0, 0, 0, 0.04));
+  border-radius: 6px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

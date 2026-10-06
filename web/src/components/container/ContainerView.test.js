@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import http from '../../api/http'
-import { createOpsTask, getOpsTask, listOpsTasks } from '../../api/ops'
+import { createOpsTask, getOpsTask, listOpsTasks, cancelOpsTasks } from '../../api/ops'
 import ContainerView from './ContainerView.vue'
 import { resetContainerQueryCache } from './queryCache'
 
@@ -201,6 +201,75 @@ describe('ContainerView 容器与工作负载页', () => {
     expect(calls()).toBe(1) // 条件对不上就不能顶替，"全部命名空间"的查询结果里不该混进某个命名空间的对象
     expect(w.text()).not.toContain('wrong-ns')
     expect(w.text()).toContain('row-for-t1')
+  })
+
+  // 排队中的任务可以撤回：这条路径此前引用了未定义的状态对象，
+  // 点下去必抛 ReferenceError（控制台报错、按钮看着没反应），因此单独钉住。
+  it('排队中的任务可撤回，且撤的是那条任务', async () => {
+    getOpsTask.mockImplementation(async (id) => ({ task: { id, state: 'queued' } }))
+    cancelOpsTasks.mockResolvedValue({})
+
+    const w = mountView()
+    await settle(w)
+
+    const btn = w.findAll('button').find((b) => b.text().includes('撤回'))
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+    await settle(w)
+
+    expect(cancelOpsTasks).toHaveBeenCalledWith({ ids: ['t1'] })
+  })
+
+  // Pod 日志：行上的「日志」必须下发 container.logs（带命名空间与 Pod 名），
+  // 并把回执按原样展示——日志重排过就等于换了一份内容。
+  it('Pod 行上的「日志」下发 container.logs 并按原样展示日志行', async () => {
+    getOpsTask.mockImplementation(async (id) => {
+      if (id === 't3') {
+        return {
+          task: {
+            id,
+            state: 'succeeded',
+            json: JSON.stringify({
+              kind: 'container.logs',
+              columns: ['日志'],
+              rows: [['line-1'], ['line-2']],
+              total: 2,
+              truncated: false,
+              notice: 'Pod default/web-1 · 最近 200 行',
+            }),
+          },
+        }
+      }
+      return {
+        task: {
+          id,
+          state: 'succeeded',
+          json: JSON.stringify({
+            columns: ['命名空间', '名称'], rows: [['default', 'web-1']], total: 1, truncated: false,
+          }),
+        },
+      }
+    })
+
+    const w = mountView()
+    await settle(w)
+    const tabs = w.findAll('.el-tabs__item')
+    await tabs[1].trigger('click') // Pod
+    await settle(w)
+
+    const logBtn = w.findAll('button').find((b) => b.text() === '日志')
+    expect(logBtn).toBeTruthy()
+    await logBtn.trigger('click')
+    await settle(w)
+
+    const call = createOpsTask.mock.calls.at(-1)[0]
+    expect(call.kind).toBe('container.logs')
+    expect(call.params).toMatchObject({ cluster: CLUSTER_A.name, namespace: 'default', name: 'web-1' })
+
+    // 抽屉走 teleport，断言落在 body 上
+    expect(document.body.textContent).toContain('line-1')
+    expect(document.body.textContent).toContain('line-2')
+    expect(document.body.textContent).toContain('最近 200 行')
   })
 
   it('点「查询」= 手动刷新：会重新下发并更新时间', async () => {

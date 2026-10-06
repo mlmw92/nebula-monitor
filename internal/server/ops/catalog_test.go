@@ -1,8 +1,11 @@
 package ops
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/nebula/monitor/internal/model"
 )
 
 // 动作目录与参数校验：这是第三道护栏的实体部分。
@@ -108,6 +111,12 @@ func TestValidate_ContainerActions(t *testing.T) {
 			"cluster": "prod-k8s", "namespace": "default", "resource": "pods", "name": "web-7d9f8c6b5-x2k4p",
 		}},
 		{"事件（全命名空间）", KindContainerEvents, map[string]string{"cluster": "prod-k8s"}},
+		{"Pod 日志（默认行数）", KindContainerLogs, map[string]string{
+			"cluster": "prod-k8s", "namespace": "default", "name": "web-7d9f8c6b5-x2k4p"}},
+		{"Pod 日志（指定容器与上限）", KindContainerLogs, map[string]string{
+			"cluster": "prod-k8s", "namespace": "default", "name": "web-7d9f8c6b5-x2k4p",
+			"container": "app", "tailLines": strconv.Itoa(model.OpsLogMaxTailLines),
+			"sinceSeconds": strconv.Itoa(model.OpsLogMaxSinceSeconds)}},
 	}
 	for _, tc := range ok {
 		t.Run(tc.name, func(t *testing.T) {
@@ -153,6 +162,18 @@ func TestValidate_ContainerActions(t *testing.T) {
 			"cluster": "c", "namespace": "n", "resource": "pods", "name": "Web"}, "不合法"},
 		{"集群名带空格", KindContainerWorkloads, map[string]string{"cluster": "prod k8s"}, "不合法"},
 		{"集群名是选项", KindContainerWorkloads, map[string]string{"cluster": "--server"}, "不合法"},
+		// Pod 日志：命名空间与 Pod 名必填（Pod 名只在命名空间内唯一），
+		// 行数/时间窗是纯数字白名单（它们会被拼进 apiserver 的查询串）。
+		{"日志缺命名空间", KindContainerLogs, map[string]string{"cluster": "c", "name": "web-1"}, "缺少必填参数"},
+		{"日志缺 Pod 名", KindContainerLogs, map[string]string{"cluster": "c", "namespace": "n"}, "缺少必填参数"},
+		{"日志容器名带空格", KindContainerLogs, map[string]string{
+			"cluster": "c", "namespace": "n", "name": "web-1", "container": "a b"}, "不合法"},
+		{"日志行数非数字", KindContainerLogs, map[string]string{
+			"cluster": "c", "namespace": "n", "name": "web-1", "tailLines": "all"}, "不合法"},
+		{"日志行数带符号", KindContainerLogs, map[string]string{
+			"cluster": "c", "namespace": "n", "name": "web-1", "tailLines": "-1"}, "不合法"},
+		{"日志时间窗非数字", KindContainerLogs, map[string]string{
+			"cluster": "c", "namespace": "n", "name": "web-1", "sinceSeconds": "1h"}, "不合法"},
 	}
 	for _, tc := range reject {
 		t.Run(tc.name, func(t *testing.T) {

@@ -31,6 +31,12 @@ const (
 	OpsKindContainerDescribe = "container.describe"
 	// OpsKindContainerEvents 命名空间/对象的事件列表（只读，按时间倒序）。
 	OpsKindContainerEvents = "container.events"
+	// OpsKindContainerLogs 拉取某个 Pod 的最近日志（只读）。
+	//
+	// 与其它容器动作的差别：产出是**业务自己写出的文本行**，而不是对象表格，
+	// 内容可能含业务数据与凭据。因此行数与时间窗都必须有硬上限，且**不提供全量下载**——
+	// 要看全量应该上机器或走日志后端，不该把平台当成 kubectl。
+	OpsKindContainerLogs = "container.logs"
 
 	// OpsKindFilePush 向目标机器分发一个文件（**写操作**，需目标机器显式放行）。
 	//
@@ -82,6 +88,24 @@ var (
 	// 只接受 0xxx：setuid/setgid/sticky（1xxx-7xxx）刻意不允许——分发一个 setuid 文件
 	// 等价于远程提权，那不该是"顺手能做的事"。
 	OpsFileModePattern = regexp.MustCompile(`^0[0-7]{3}$`)
+
+	// OpsLogTailLinesPattern / OpsLogSinceSecondsPattern 是 container.logs 数值参数的白名单。
+	//
+	// 只放十进制数字：范围在 Agent 侧再校一次（见下面两个上限）。两道都要，
+	// 因为这两个值会被拼进 apiserver 的查询串，宽松字符集等于给了一条注入路径。
+	OpsLogTailLinesPattern   = regexp.MustCompile(`^[0-9]{1,4}$`)
+	OpsLogSinceSecondsPattern = regexp.MustCompile(`^[0-9]{1,6}$`)
+)
+
+// 日志拉取的硬上限。取值依据：够定位一次故障（几十行上下文 + 最近一小时），
+// 同时把回执体积压在几十 KB —— 回执要搭在下一轮上报的请求体里。
+const (
+	// OpsLogDefaultTailLines 是未指定行数时的默认值。
+	OpsLogDefaultTailLines = 200
+	// OpsLogMaxTailLines 是单次可拉取的最大行数。
+	OpsLogMaxTailLines = 500
+	// OpsLogMaxSinceSeconds 是单次可回溯的最大时间窗（24 小时）。
+	OpsLogMaxSinceSeconds = 86400
 )
 
 // OpsFileMaxBytes 是单次分发的文件大小上限（256KiB）。
