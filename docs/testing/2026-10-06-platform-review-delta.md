@@ -436,7 +436,62 @@ P0 首批落地后，按全景表 §五「建议的 P1 候选」推进。本批�
 
 ### 11.7 仍未做
 
-- **Pod 日志进入集中日志检索**（§3.8 的另一半）：需要 Agent 侧协议扩展——`logSources[].paths` 支持通配符 + 按来源**选择性**上报路径（Server 据此解析 pod 身份并解析到资产）。这意味着全部 Agent 需重分发，属独立立项；本批只做了 Server 侧绑定（不需要 Agent 配合的那一半）。
+- ~~**Pod 日志进入集中日志检索**（§3.8 的另一半）~~ → **已于 2026-10-06 落地**（见 §十二）：实现路径与当初的设想不同——**不从 Agent 上报路径、也不需要 Server 解析路径**，而是采集侧就地解析出容器身份随批次上报（只上报身份）。仍然需要 Agent 升级（新配置项 `podLogs` 与新字段），但**协议只加了一个可选字段**，旧 Server 收到会忽略它、旧 Agent 不升级则行为不变。
 - **通知消息里带资产与影响面**（§3.1 的延伸）：通知模板目前只有事件字段与 labels；要在通知里写"影响 N 个资产"，需要先定义资产信息的模板占位符与截断口径。
 - **日志字段倒排索引**、**批量命令/脚本执行**：见 §11.5。
 - ~~上一批的联调清单（§10.4）仍未执行~~ → **已于 2026-10-06 在真实 VictoriaLogs v1.53.0 上执行完毕**（八项全过，见 §10.4）。
+
+---
+
+## 十二、第八轮：Pod 日志进集中日志检索（2026-10-06 续七）
+
+§3.8 的另一半。此前标注「需 Agent 协议扩展、属独立立项」，本批做完并明确了一条**更小的**协议扩展路径。
+
+| 层 | 内容 |
+|---|---|
+| 配置 | `logSources[].podLogs: true`（默认 false）；开启时**启动期校验** paths 落在 `/var/log/pods/` 下（身份从路径解析，路径不在那里就必然解析不出身份） |
+| 采集 | paths 支持通配符（`/var/log/pods/*/*/*.log`）；单轮文件数上限 200 且截断可见；通配符零匹配不算失败；pod 来源清理已消失文件的偏移 |
+| 协议 | 批次级 `model.LogBatch.Origin{namespace,pod,container}`；**只上报解析出的身份，不上报路径**；`model.NormalizeLogOrigin` 采集侧与服务端共用同一条规则 |
+| 落库 | 本地后端随行写同一条 JSON；VictoriaLogs 写 `k8s_namespace`/`k8s_pod`/`k8s_container` 并**列入保留字段**（正文不得覆盖身份），且不进字段目录 |
+| 检索 | `pods=<命名空间>\|<Pod>` 过滤（可重复，服务端上限 8 个）；命中行带 `origin`；两个后端语义一致（没有身份的行不命中任何容器条件） |
+| 联动 | 响应新增 `podAssets`（键 `<命名空间>\|<Pod>`）；`Store.assetsByPodIdentity` 按「节点 + 命名空间 + Pod 名」反查，**类型必须是 pod**、节点为空时不匹配空串 |
+| 前端 | 行上展示「命名空间/Pod · 容器」并标到 Pod 资产（与主机来源映射分开展示，两套归属不串台）；「只看」按容器收窄（节点+来源+容器）；生效中的容器条件可删 |
+
+### 12.1 设计取舍
+
+- **身份从文件路径解析，而不是读 K8s API 或按容器 ID 反查**：采集侧读的就是那台机器上的文件，"这个文件属于哪个 Pod"是本地事实——不需要 Agent 持有集群凭据（与只读管理面走 kubeconfig 是两条独立路径），也没有 API 往返与缓存失效问题。代价是解析规则绑定 kubelet 的目录布局，因此开启时**启动期校验路径**，把"配错了却没有任何提示"堵在配置期。
+- **只上报身份、不上报路径**：路径会暴露被监控机的目录结构，而检索与联动只需要"属于哪个 Pod"。这也让协议扩展只有一个可选字段（`LogBatch.Origin`）：旧 Server 忽略它、旧 Agent 行为不变。
+- **身份是协议字段，不是业务字段**：独立过滤参数 `pods=`（不让它走 `field=` 通道，那等于把"哪些名字是身份"交给用户去记）；VL 侧写成**保留字段**——否则一条日志的正文就能伪造自己的归属（把自己标到别人的 Pod 资产上）；也不进字段目录（避免污染界面的字段筛选候选）。
+- **批次级携带身份**（一批 = 一个文件）：同一文件的行必然同属一个容器，逐行重复既费流量又给"同批出现两个身份"留口子。
+- **非法身份回 400 而不是"丢掉身份照收"**：定位不到资产是可接受的降级，**定位错**不是；而合法 Agent 永远不会发出非法身份。
+- **通配符零匹配不算失败**（`up` 保持 1）：Pod 是短命的，此刻没匹配到文件是正常状态；记成离线会让"日志采集不可用"在每次缩容时误报，最后没人再看这个信号。
+- **只对 pod 来源清理偏移**：容器日志路径带 Pod UID，文件回收后永不再出现，留着会让偏移文件无界增长（而它每轮都要整体重写）；普通文件可能轮转后重建，删偏移会静默跳过开头内容——那是丢日志。
+- **容器资产反查不用自然键**：Pod 自然键含**集群**，而容器日志路径里没有集群标识；「节点 + 命名空间 + 名字」在同一节点上足以唯一定位（同名多候选只在"同机多集群"时出现，调用方原样呈现候选）。
+
+### 12.2 本轮新增用例与执行证据
+
+| 用例 | 文件 | 断言 |
+|---|---|---|
+| `TestParsePodLogPath`（14 组） | `internal/agent/collector/podlogpath_test.go` | 标准布局/重启序号/带点号 Pod 名/大写折叠；缺容器目录、多一层、下划线分段不符、文件名非序号、空路径、非法字符一律解析失败 |
+| `TestExpandLogPaths` / `TestExpandSourcePaths_CapsFileCount` | `internal/agent/collector/podlogs_test.go` | 无通配符原样返回（既有配置零行为变化）、通配符结果有序、非法模式不致命；文件数被夹到上限且**回报跳过数** |
+| `TestLogCollector_PodOriginPerFile` | 同上 | 一个来源匹配到多个 Pod 文件时**每个文件带自己的身份**、每文件各一批 |
+| `TestLogCollector_PrunesVanishedPodOffsets` / `...NonPodSourceKeepsOffsets` | 同上 | pod 来源清理已消失文件偏移；非 pod 来源**不清理**（轮转重建不能丢开头） |
+| `TestLogCollector_GlobZeroMatchKeepsUp` | 同上 | 通配符零匹配时 `up=1` |
+| `TestNormalizeLogOrigin`（17 组）/ `TestLogOriginEmpty` | `internal/model/log_test.go` | 合法/规范化/全空视为无身份；缺一段、下划线、斜杠、空格、中文、首尾非法、超长一律拒绝 |
+| `TestLogSources_*`（podLogs 两组 + YAML） | `internal/agent/config/config_logs_test.go` | podLogs 路径不在容器日志目录即拒绝；`podLogs` 的 YAML tag 真的能解析出来（写错会静默变 false） |
+| `TestBackendContract_LogOrigin` | `internal/server/logstore/origin_contract_test.go` | 身份落得住读得回、**正文里的 `k8s_pod` 不得变成行上身份**、非法身份两个后端都拒 |
+| `TestBackendContract_PodFilter` | 同上 | 单个容器精确命中（同名不同命名空间不算）、多容器「或」、**没有身份的行不命中**、不存在的容器无命中 |
+| `TestHandleLogs_RejectsInvalidOrigin` | `internal/server/receiver/logs_test.go` | 非法/半截身份 400；合法身份 200 且**按小写规范化落盘** |
+| `TestAssetsByPod`（7 组）/ `...RequiresPodType` | `internal/server/asset/podidentity_test.go` | 节点+命名空间+名字精确命中、不指定节点返回全部候选、节点/命名空间/名字不匹配为空、空值为空、**同名主机资产不算 Pod** |
+| `TestRoutes_LogsQueryReturnsPodAssetMapping` / `...PodMappingIsOptional` | `internal/server/api/logs_asset_api_test.go` | 行带 `origin`、`podAssets` 键与内容、未注入台账时日志照常返回 |
+| `TestRoutes_LogsQueryPodFilter` | 同上 | 单容器/多容器过滤、命中行带身份、非法形态 400（不退化成"不限"） |
+| LogsView 容器日志 3 组 | `web/src/components/LogsView.podlogs.test.js` | 展示身份与 Pod 资产并跳台账、普通文件行仍走主机映射（不串台）、「只看」拼出 `pods=` 且条件可删 |
+
+**执行结果**：`go build ./...`、`go vet ./...` 通过；`go test -count=1 ./...` 全绿（30 包）；`npm --prefix web test` **16 文件 87 项**通过；`npm --prefix web run build` 通过。
+
+### 12.3 仍未做 / 未覆盖边界
+
+- **未在真实 k3s 集群上端到端验证**：dev-server 的 Agent 未开启 `podLogs`（其 k3s 是 2026-10-02 为容器只读管理面搭的），因此"真实 kubelet 写出的文件 → 身份解析 → 资产联动"这条链路只有单测与夹具覆盖。要验证需在目标机上加一段 `podLogs` 来源并确认台账里已有对应 Pod 资产（k3s 的容器清单落台账由既有采集负责）。
+- **容器过滤不含 `container` 维度**：排障时关心的是"这个 Pod 怎么了"，同 Pod 多容器一起看才有上下文；按容器收窄留作需要时再加。
+- **`/var/log/containers/*.log`（docker 时代的软链目录）未支持**：只认 kubelet 的 `/var/log/pods/` 布局（软链名不含 UID，解析规则不同）。用软链路径配置会被解析成"没有身份"并给出告警，而不是猜。
+- **Pod 资产与日志行的时钟/命名空间一致性**：身份靠名字匹配，若台账里的 Pod 名与 kubelet 目录里的名字写法不一致（理论上不会），表现为"有身份但没有资产标签"（不报错）。
