@@ -33,7 +33,10 @@
         <div class="form-item">
           <span class="label">集中日志保留</span>
           <el-input-number v-model="form.logsDays" :min="0" :max="3650" size="small" controls-position="right" />
-          <span class="field-hint inline">天（0 = 不清理；按日期分片整天删除，当天不删）</span>
+          <span v-if="externalLogs" class="field-hint inline">
+            天（当前日志走外部后端 {{ status.logsBackend }}，该值不生效——保留期由后端自己配置）
+          </span>
+          <span v-else class="field-hint inline">天（0 = 不清理；按日期分片整天删除，当天不删）</span>
         </div>
         <div class="form-item">
           <span class="label">清理周期</span>
@@ -78,8 +81,16 @@
           {{ status.reports?.files ?? '—' }} 个文件 · {{ fileSize(status.reports?.bytes) }}
         </el-descriptions-item>
         <el-descriptions-item label="集中日志">
-          {{ status.logs?.files ?? '—' }} 个文件 · {{ fileSize(status.logs?.bytes) }}
-          <span class="field-hint inline">来源 {{ status.logs?.sources ?? 0 }} · 日期分片 {{ status.logs?.days ?? 0 }}</span>
+          <!-- 外部后端（如 VictoriaLogs）的占用与保留由该后端自己管，这里拿不到文件口径。
+               必须说清楚：否则「0 个文件 0 B」看起来像日志功能坏了。 -->
+          <template v-if="externalLogs">
+            {{ status.logsBackend }} 外部后端
+            <span class="field-hint inline">保留与容量由该后端负责（如 VictoriaLogs 的 -retentionPeriod），平台不统计也不清理</span>
+          </template>
+          <template v-else>
+            {{ status.logs?.files ?? '—' }} 个文件 · {{ fileSize(status.logs?.bytes) }}
+            <span class="field-hint inline">来源 {{ status.logs?.sources ?? 0 }} · 日期分片 {{ status.logs?.days ?? 0 }}</span>
+          </template>
         </el-descriptions-item>
         <el-descriptions-item label="审计事件">
           {{ status.audit?.count ?? '—' }} / {{ status.audit?.cap ?? '—' }} 条
@@ -111,9 +122,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import http from '../../api/http'
+
+// 日志是否走外部后端（后端标识不是 local 就是外部）：决定"集中日志"那一行
+// 展示文件占用还是"由外部后端负责"，以及保留天数是否生效。
+const externalLogs = computed(() => {
+  const backend = status.value?.logsBackend
+  return !!backend && backend !== 'local'
+})
 
 const loading = ref(false)
 const saving = ref(false)
