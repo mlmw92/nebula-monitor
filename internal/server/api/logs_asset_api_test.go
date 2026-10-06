@@ -177,6 +177,53 @@ func TestRoutes_LogsQueryPodMappingIsOptional(t *testing.T) {
 	}
 }
 
+// `pods=<命名空间>|<Pod>`：只看某个容器的日志（容器身份是协议字段，不走字段过滤通道）。
+func TestRoutes_LogsQueryPodFilter(t *testing.T) {
+	a, store := newLogsTestAPI(t)
+	now := time.Now().UnixMilli()
+	appendPod := func(ns, pod, text string, ts int64) {
+		t.Helper()
+		if _, _, _, err := store.Append(model.LogBatch{
+			Source: "podlog", Node: "web-01",
+			Origin: &model.LogOrigin{Namespace: ns, Pod: pod, Container: "app"},
+			Lines:  []model.LogLine{{Ts: ts, Text: text}},
+		}); err != nil {
+			t.Fatalf("造数据失败：%v", err)
+		}
+	}
+	appendPod("nebula-demo", "web-1", "error: web-1 line", now-60_000)
+	appendPod("nebula-demo", "web-2", "error: web-2 line", now-70_000)
+
+	// 不带 pods：本页既有普通文件日志、也有容器日志
+	all := decodeLogResult(t, logsQuery(a, logsReader(), ""))
+	if len(all.Lines) < 3 {
+		t.Fatalf("不带过滤时应返回全部日志：%+v", all.Lines)
+	}
+
+	// 只带一个容器
+	one := decodeLogResult(t, logsQuery(a, logsReader(), "?pods=nebula-demo%7Cweb-1"))
+	if len(one.Lines) != 1 || one.Lines[0].Text != "error: web-1 line" {
+		t.Fatalf("应按容器过滤：%+v", one.Lines)
+	}
+	if one.Lines[0].Origin == nil || one.Lines[0].Origin.Pod != "web-1" {
+		t.Fatalf("命中行应带容器身份：%+v", one.Lines[0])
+	}
+
+	// 多个容器是「或」
+	two := decodeLogResult(t, logsQuery(a, logsReader(), "?pods=nebula-demo%7Cweb-1&pods=nebula-demo%7Cweb-2"))
+	if len(two.Lines) != 2 {
+		t.Fatalf("多个容器应「或」命中：%+v", two.Lines)
+	}
+
+	// 非法形态必须明确报错，而不是"退化成不限"（后者会让人以为过滤生效了）
+	for _, bad := range []string{"?pods=web-1", "?pods=nebula-demo%7C", "?pods=%7Cweb-1", "?pods=nebula_demo%7Cweb-1"} {
+		rec := logsQuery(a, logsReader(), bad)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s 应 400，实际 %d（%s）", bad, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 // declarePodAsset 落一个容器资产（命名空间是属性、节点是归属主机）。
 func declarePodAsset(t *testing.T, svc *asset.Service, cluster, ns, name, node string) {
 	t.Helper()

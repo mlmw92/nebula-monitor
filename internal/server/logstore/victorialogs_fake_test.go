@@ -346,28 +346,96 @@ func fakeCompileLogsQL(query string) (func(map[string]any) bool, error) {
 	if query == "" {
 		return nil, fmt.Errorf("empty query")
 	}
-	parts := fakeSplitAnd(query)
-	conds := make([]func(map[string]any) bool, 0, len(parts))
-	for _, part := range parts {
-		cond, err := fakeCompileFilter(part)
-		if err != nil {
-			return nil, err
-		}
-		conds = append(conds, cond)
+	return fakeCompileExpr(query)
+}
+
+// fakeCompileExpr 解析一个表达式：先按顶层 OR 拆、再按顶层 AND 拆，最后落到叶子过滤器。
+//
+// 为什么要支持 OR：适配器的容器身份过滤会产出
+// `((k8s_namespace:="a" AND k8s_pod:="b") OR (k8s_namespace:="c" AND k8s_pod:="d"))`
+// ——假后端只认 AND 的话，这条查询会被判成"无法解析"，用例随即给出错误的结论。
+// 假后端必须能解析适配器**真正会产出**的语法（见文件头"文档化子集"的说明）。
+func fakeCompileExpr(s string) (func(map[string]any) bool, error) {
+	s = strings.TrimSpace(s)
+	for fakeFullyWrapped(s) {
+		s = strings.TrimSpace(s[1 : len(s)-1])
 	}
-	return func(e map[string]any) bool {
-		for _, cond := range conds {
-			if !cond(e) {
+	if alts := fakeSplitTop(s, " OR "); len(alts) > 1 {
+		conds := make([]func(map[string]any) bool, 0, len(alts))
+		for _, alt := range alts {
+			cond, err := fakeCompileExpr(alt)
+			if err != nil {
+				return nil, err
+			}
+			conds = append(conds, cond)
+		}
+		return func(e map[string]any) bool {
+			for _, cond := range conds {
+				if cond(e) {
+					return true
+				}
+			}
+			return false
+		}, nil
+	}
+	if parts := fakeSplitTop(s, " AND "); len(parts) > 1 {
+		conds := make([]func(map[string]any) bool, 0, len(parts))
+		for _, part := range parts {
+			cond, err := fakeCompileExpr(part)
+			if err != nil {
+				return nil, err
+			}
+			conds = append(conds, cond)
+		}
+		return func(e map[string]any) bool {
+			for _, cond := range conds {
+				if !cond(e) {
+					return false
+				}
+			}
+			return true
+		}, nil
+	}
+	return fakeCompileFilter(s)
+}
+
+// fakeFullyWrapped 判断整段是否被**一对**括号完整包住（`(a) AND (b)` 不是）。
+func fakeFullyWrapped(s string) bool {
+	if len(s) < 2 || s[0] != '(' || s[len(s)-1] != ')' {
+		return false
+	}
+	depth := 0
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			if c == '\\' {
+				i++
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'', '`':
+			quote = c
+		case '(':
+			depth++
+		case ')':
+			depth--
+			// 括号在中间就闭合了：说明整段不是"被一对括号包住"
+			if depth == 0 && i != len(s)-1 {
 				return false
 			}
 		}
-		return true
-	}, nil
+	}
+	return depth == 0 && quote == 0
 }
 
-// fakeSplitAnd 按顶层 " AND " 切分（跳过括号内与引号内的内容）。
-func fakeSplitAnd(s string) []string {
-	const sep = " AND "
+// fakeSplitTop 按顶层分隔符切分（跳过括号内与引号内的内容）。
+func fakeSplitTop(s, sep string) []string {
 	var parts []string
 	depth, start := 0, 0
 	var quote byte

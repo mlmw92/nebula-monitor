@@ -542,6 +542,17 @@ func buildLogsQL(q model.LogQuery) string {
 	if len(q.Sources) > 0 {
 		parts = append(parts, logsQLFieldName("source")+":in("+logsQLValueList(q.Sources)+")")
 	}
+	if len(q.Pods) > 0 {
+		// 容器身份过滤：多个 Pod 之间是「或」，整体与其它条件是「与」。
+		// 身份字段在写入时就是**精确值**，这里用 `:=`（等值）而不是 `:`（按词）——
+		// 按词匹配会让 `k8s_pod:web` 命中 `web-2`。
+		alts := make([]string, 0, len(q.Pods))
+		for _, p := range sortedPodFilters(q.Pods) {
+			alts = append(alts, "("+logsQLFieldName(vlFieldOriginNamespace)+":="+logsQLQuote(p.Namespace)+
+				" AND "+logsQLFieldName(vlFieldOriginPod)+":="+logsQLQuote(p.Pod)+")")
+		}
+		parts = append(parts, strings.Join(alts, " OR "))
+	}
 	// 字段过滤按键排序：同一次查询必须产出同一条 LogsQL，
 	// 否则测试断言与现场排障都没法复现（map 遍历顺序是随机的）。
 	keys := make([]string, 0, len(q.Fields))
@@ -563,6 +574,27 @@ func buildLogsQL(q model.LogQuery) string {
 		parts[i] = "(" + p + ")"
 	}
 	return strings.Join(parts, " AND ")
+}
+
+// sortedPodFilters 按 (命名空间, Pod) 排序并去重：同一次查询必须产出同一条 LogsQL，
+// 否则测试断言与现场排障都没法复现（与字段过滤同一取向）。
+func sortedPodFilters(pods []model.LogPodFilter) []model.LogPodFilter {
+	out := make([]model.LogPodFilter, 0, len(pods))
+	seen := make(map[model.LogPodFilter]bool, len(pods))
+	for _, p := range pods {
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Namespace != out[j].Namespace {
+			return out[i].Namespace < out[j].Namespace
+		}
+		return out[i].Pod < out[j].Pod
+	})
+	return out
 }
 
 // logsQLQuote 把值包成 LogsQL 字符串字面量。

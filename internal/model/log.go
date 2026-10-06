@@ -56,6 +56,24 @@ func (o *LogOrigin) Empty() bool {
 	return o == nil || (o.Namespace == "" && o.Pod == "" && o.Container == "")
 }
 
+// MatchesPodFilter 判断本行是否命中容器过滤条件（filters 为空表示不限）。
+//
+// 没有身份的行**不命中**任何容器过滤：它不属于任何 Pod，"不限"以外的条件都排除了它。
+func (o *LogOrigin) MatchesPodFilter(filters []LogPodFilter) bool {
+	if len(filters) == 0 {
+		return true
+	}
+	if o.Empty() {
+		return false
+	}
+	for _, f := range filters {
+		if o.Namespace == f.Namespace && o.Pod == f.Pod {
+			return true
+		}
+	}
+	return false
+}
+
 // LogSink 接收某个文件本轮读到的行（采集器**逐文件**调用它：一批 = 一个文件）。
 //
 // 放在 model 而不是采集器包里：它是「采集 → 上行」两侧共同的契约，
@@ -128,6 +146,20 @@ type LogQuery struct {
 	// 与 Keyword 的分工：关键词在原文里找子串，字段在解析出的键值上做等值判断——
 	// 「status=500」用关键词会命中任何含该串的行（包括别的字段的值），用字段才是语义正确的筛法。
 	Fields map[string]string
+	// Pods 是容器身份过滤（为空表示不限，多个之间是「或」）。
+	//
+	// 为什么不走 Fields：身份是**协议字段**而不是从正文解析出的业务字段——它不参与
+	// 字段目录、也不该被正文伪造（见 NormalizeLogOrigin）。分开成独立维度，
+	// 检索条件与资产联动用的是同一套身份。
+	Pods []LogPodFilter
+}
+
+// LogPodFilter 是「只看某个容器」的过滤条件（命名空间 + Pod 名）。
+//
+// 不含 container：排障时关心的是"这个 Pod 怎么了"，同一 Pod 的多个容器一起看才有上下文。
+type LogPodFilter struct {
+	Namespace string
+	Pod       string
 }
 
 // LogQueryResult 是检索结果。

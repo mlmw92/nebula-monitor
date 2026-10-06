@@ -156,6 +156,10 @@ func (s *Store) Query(q model.LogQuery, cursor Cursor) (model.LogQueryResult, er
 		if len(q.Sources) > 0 && !containsStr(q.Sources, h.Source) {
 			return false
 		}
+		// 容器身份过滤：没有身份的行不命中任何容器条件（它不属于任何 Pod）
+		if !h.Origin.MatchesPodFilter(q.Pods) {
+			return false
+		}
 		// 结构化字段是**精确**等值匹配（且要求全部命中）：
 		// 「status=500」用关键词会命中任何含该串的行（包括别的字段的值），那不是语义正确的筛法。
 		if !matchFields(h.Fields, q.Fields) {

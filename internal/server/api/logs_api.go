@@ -278,6 +278,12 @@ func parseLogQuery(r *http.Request) (model.LogQuery, error) {
 	}
 	q.Fields = fields
 
+	pods, err := parseLogPodFilters(qv["pods"])
+	if err != nil {
+		return q, err
+	}
+	q.Pods = pods
+
 	q.Limit = logstore.DefaultLimit
 	if v := strings.TrimSpace(qv.Get("limit")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -331,6 +337,46 @@ func parseLogFieldFilters(raw []string) (map[string]string, error) {
 			return nil, fmt.Errorf("字段过滤条件过多（上限 %d 个）", MaxLogFieldFilters)
 		}
 		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// MaxLogPodFilters 是一次查询允许携带的容器过滤条件数上限。
+const MaxLogPodFilters = 8
+
+// parseLogPodFilters 解析容器身份过滤（`pods=<namespace>|<pod>`，可重复出现）。
+//
+// 为什么不用 `field=k8s_pod:web-1`：身份是协议字段（不进字段目录、也不允许被正文伪造），
+// 让它走字段通道等于把"哪些名字是身份"这件事交给用户去记；分开成独立参数，
+// 校验规则与采集侧、资产联动用的是同一套。
+func parseLogPodFilters(raw []string) ([]model.LogPodFilter, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make([]model.LogPodFilter, 0, len(raw))
+	for _, item := range raw {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		ns, pod, ok := strings.Cut(item, "|")
+		ns, pod = strings.TrimSpace(ns), strings.TrimSpace(pod)
+		if !ok || ns == "" || pod == "" {
+			return nil, fmt.Errorf("pods 需为 <命名空间>|<Pod> 形态（如 pods=nebula-demo|web-1）")
+		}
+		// 与写入侧同一条规则：查不到的名字在这里就报错，而不是返回一个空结果
+		for _, part := range []string{ns, pod} {
+			if len(part) > model.MaxLogOriginPartLen || !model.LogOriginPartPattern.MatchString(part) {
+				return nil, fmt.Errorf("容器身份 %q 不合法（命名空间与 Pod 名需为 k8s 的 DNS 名称）", item)
+			}
+		}
+		if len(out) >= MaxLogPodFilters {
+			return nil, fmt.Errorf("容器过滤条件过多（上限 %d 个）", MaxLogPodFilters)
+		}
+		out = append(out, model.LogPodFilter{Namespace: ns, Pod: pod})
 	}
 	if len(out) == 0 {
 		return nil, nil
