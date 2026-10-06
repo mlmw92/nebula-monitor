@@ -289,6 +289,16 @@ func main() {
 	reportGen.SetAnalyzer(analyzer)
 	// 报告的分节同样来自注册表：模板派生类型会作为独立一节出现在报告里
 	reportGen.SetMiddlewareRegistry(mwRegistry)
+	// 报告周期化调度：默认**关闭**（要人显式打开），配置文件不存在时用默认值建立。
+	// 建不起来（如目录不可写）不阻断启动：报告仍可在 Web 端手动生成。
+	var reportSched *report.Scheduler
+	if sched, err := report.NewScheduler(filepath.Join(cfg.DataDir, "report_schedule.yaml"),
+		report.ScheduleConfig{Enabled: false, Type: string(report.ReportWeekly), IntervalHours: report.DefaultScheduleIntervalHours},
+		reportGen); err != nil {
+		slog.Error("初始化报告调度失败（周期化报告不可用，手动生成不受影响）", "err", err)
+	} else {
+		reportSched = sched
+	}
 
 	// 数据大屏模块显隐配置管理：独立文件（Web 端设置写入），不存在则用默认全开初始化并落盘。
 	screenMgr, err := screencfg.New(cfg.ScreenFile, config.DefaultScreenConfig())
@@ -378,6 +388,10 @@ func main() {
 	rest.SetPipelineStore(pipelineStore)
 	rest.SetSelfMon(mon)
 	rest.SetRetention(retentionMgr)
+	// 报告周期化调度：仅在调度器建起来时注入（未注入时接口回 503，而不是假装能用）
+	if reportSched != nil {
+		rest.SetReportScheduler(reportSched)
+	}
 	// 集中日志检索（C2）：与上行共用同一个后端实例（读写两侧必然是同一个后端）
 	rest.SetLogStore(logBackend)
 	rest.SetMiddlewareRegistry(mwRegistry)
@@ -409,6 +423,11 @@ func main() {
 	go selfmon.NewReporter(rawStore, mon, selfmon.DefaultReportInterval).Run(runCtx)
 	// 数据保留：按周期清理超期数据（策略可在「系统设置 → 数据保留」调整，保存即热生效）
 	go retentionMgr.Run(runCtx)
+	// 报告周期化调度（全景表 11-4）：配置文件与运行状态同文件（跨重启保留上次运行时间，
+	// 否则频繁重启的机器每次启动都会重新生成一份报告——报告要拉一整个周期的数据）。
+	if reportSched != nil {
+		go reportSched.Run(runCtx)
+	}
 
 	// 认证中间件（启用 auth 时保护 /api/v1/* 业务接口）。
 	// authStore 显式传入（非包级单例），避免多实例部署与测试之间的状态污染。

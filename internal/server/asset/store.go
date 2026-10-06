@@ -1226,6 +1226,86 @@ func (s *Store) assetsByIDs(ids []int64) ([]Asset, error) {
 	return out, nil
 }
 
+// assetsByInstanceAddr 找出「实例地址 == addr」的中间件实例资产。
+//
+// 为什么按**地址后缀**匹配而不是精确自然键：告警事件只带实例标签（`127.0.0.1:6379`），
+// 不带中间件类型；而台账的自然键是 `<类型>:<地址>`。类型可以拿指标名前缀去猜，
+// 但模板派生类型的指标名与类型 key 并不一一对应——猜错会命中**另一条**资产，
+// 那比"没找到"更糟（用户会以为看的就是这个实例）。因此按地址精确匹配，
+// 命中多条时全部返回，由界面区分。
+func (s *Store) assetsByInstanceAddr(addr string) ([]Asset, error) {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(
+		`SELECT id FROM assets WHERE type_key=? AND (natural_key=? OR natural_key LIKE ? ESCAPE '\')
+		 ORDER BY natural_key`, TypeMiddlewareInst, addr, "%:"+escapeLike(addr))
+	if err != nil {
+		return nil, fmt.Errorf("查询实例资产失败: %w", err)
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("读取实例资产失败: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("读取实例资产失败: %w", err)
+	}
+	return s.assetsByIDs(ids)
+}
+
+// escapeLike 转义 LIKE 模式里的通配符：实例地址里出现 `_`（主机名常见）或 `%`
+// 时，不转义就会变成通配匹配，把不相干的资产也捞进来。
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
+
+// assetsByLogSource 找出「人工声明了该日志来源」且归属节点匹配的资产。
+//
+// 节点也参与匹配：同一个来源名（如 applog）在多台机器上都会配置，只按来源名找
+// 会把所有机器上的同名来源混成一条——那比"找不到"更糟，用户会看到一台机器的日志
+// 被标成另一台机器的资产。
+//
+// node 为空时只按来源名找（调用方拿不到节点时的退化路径）。
+func (s *Store) assetsByLogSource(source, node string) ([]Asset, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return nil, nil
+	}
+	cond := "AND a.node=?"
+	args := []any{LogSourceKey, SourceManual, source, node}
+	if strings.TrimSpace(node) == "" {
+		cond = ""
+		args = args[:3]
+	}
+	rows, err := s.db.Query(
+		`SELECT a.id FROM assets a
+		 JOIN asset_attrs t ON t.asset_id=a.id
+		 WHERE t.key=? AND t.source=? AND t.value=? `+cond+`
+		 ORDER BY a.id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("按日志来源查询资产失败: %w", err)
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("读取日志来源资产失败: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("读取日志来源资产失败: %w", err)
+	}
+	return s.assetsByIDs(ids)
+}
+
 // topologyAround 从 rootID 出发做 depth 跳邻域遍历，返回节点（含跳数）、边与是否被上限截断。
 //
 // 逐层 BFS 而不是一条递归 SQL：每层用 IN(...) 收敛，**节点上限在每层立刻生效**——

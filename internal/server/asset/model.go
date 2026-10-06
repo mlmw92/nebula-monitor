@@ -246,6 +246,24 @@ func (a Asset) Owner() string {
 	return ""
 }
 
+// LogSourceKey 是「本资产的日志来自哪个采集来源」的约定属性键（对应 agent.yaml 的
+// logSources[].id）。
+//
+// 为什么放在**资产侧**而不是日志侧：日志行只带 (source, node)，而"这个来源属于哪条资产"
+// 是运维的声明、不是采集能推断的事实。把声明放在资产上，Agent 与日志协议都不用改
+// （改协议意味着所有 Agent 都要重分发）；日志检索时按 (source, node) 反查即可。
+//
+// 只用**人工值**：采集侧不可能上报它，出现采集值只可能是脏数据。
+const LogSourceKey = "logSource"
+
+// LogSource 返回人工声明的日志来源 id（空串表示未声明）。
+func (a Asset) LogSource() string {
+	if v, ok := a.ValueFrom(LogSourceKey, SourceManual); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
 // SourceMix 统计人工值数量与「人工、采集并存」的字段数量。
 //
 // conflict 的语义是**同一字段**两种来源都有值——这是资产台账最需要人处理的一类数据：

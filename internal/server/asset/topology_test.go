@@ -253,6 +253,43 @@ func TestTopologyHidesUnattributedNodesFromRestrictedUsers(t *testing.T) {
 	}
 }
 
+// 按实例地址找资产（告警 → 资产联动的入口）。
+//
+// 地址里出现 LIKE 通配符（下划线是主机名里的常见字符）时**不得**变成通配匹配：
+// 那会把不相干的实例一起捞进来，而界面上看不出哪条才是告警说的那个。
+func TestInstancesByAddr(t *testing.T) {
+	svc, _ := newTestService(t)
+	seedInstance(t, svc, "redis", "127.0.0.1:6379", "web-01")
+	// 同一地址、不同类型：两条都是有效候选，必须全部返回（挑一条就是"看的是另一个实例"）
+	seedInstance(t, svc, "k8s", "127.0.0.1:6379", "web-01")
+	seedInstance(t, svc, "redis", "db_1:6379", "web-01")
+	// 与 db_1 只差一个字符：不转义 `_` 时会被它一起命中
+	seedInstance(t, svc, "redis", "dbX1:6379", "web-01")
+
+	got, err := svc.InstancesByAddr("127.0.0.1:6379")
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("同地址不同类型的实例应全部返回，实际 %d：%+v", len(got), got)
+	}
+
+	underscore, err := svc.InstancesByAddr("db_1:6379")
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if len(underscore) != 1 || underscore[0].NaturalKey != "redis:db_1:6379" {
+		t.Fatalf("下划线必须按字面匹配：%+v", underscore)
+	}
+
+	if got, err := svc.InstancesByAddr(""); err != nil || len(got) != 0 {
+		t.Fatalf("空地址应返回空：%+v err=%v", got, err)
+	}
+	if got, err := svc.InstancesByAddr("9.9.9.9:1234"); err != nil || len(got) != 0 {
+		t.Fatalf("不存在的地址应返回空：%+v err=%v", got, err)
+	}
+}
+
 // 结果必须稳定：同一份数据两次查询顺序一致，否则前端力导向图每次打开都会重新洗牌。
 func TestTopologyOrderIsStable(t *testing.T) {
 	svc, _ := newTestService(t)

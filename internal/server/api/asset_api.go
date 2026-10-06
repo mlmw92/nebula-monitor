@@ -30,6 +30,9 @@ type AssetProvider interface {
 	Stats(f asset.ListFilter, changesSince int64) (asset.Stats, error)
 	Get(ref asset.Ref) (asset.Asset, bool, error)
 	GetByID(id int64) (asset.Asset, bool, error)
+	// GetHostByName 按主机名找主机资产，**忽略大小写**：告警/上报侧的主机名写法
+	// 与台账的规范键可能只差大小写，严格比对会把同一台机器判成"没有资产"。
+	GetHostByName(name string) (asset.Asset, bool, error)
 	Apply(ob asset.Observation) (asset.Asset, bool, error)
 	// ResetManual 清除指定字段的人工值（原型里的「恢复采集值」）。
 	ResetManual(ref asset.Ref, keys []string, actor string) (asset.Asset, error)
@@ -53,6 +56,10 @@ type AssetProvider interface {
 	Links(ref asset.Ref) ([]asset.Link, error)
 	// Topology 返回以某资产为中心、N 跳以内的关系邻域（已按可见节点裁剪）。
 	Topology(ref asset.Ref, depth, maxNodes int, allowedNodes []string) (asset.Topology, error)
+	// InstancesByAddr 按实例地址找中间件实例资产（告警事件只带实例标签，不带类型）。
+	InstancesByAddr(addr string) ([]asset.Asset, error)
+	// AssetsByLogSource 按「人工声明的日志来源 + 归属节点」找资产（日志 → 资产联动）。
+	AssetsByLogSource(source, node string) ([]asset.Asset, error)
 	// SuppressedLinks 返回被人工隐藏（逻辑删除）的关联，供界面展示并可恢复。
 	SuppressedLinks(ref asset.Ref) ([]asset.SuppressedLink, error)
 	// 关系的人工维护：采集侧走 LinkDiscovered（此处不暴露，采集不经过 API 层），
@@ -496,24 +503,8 @@ func (a *API) handleAssetTopology(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	// 跳数与节点数都**夹紧**而不是报错：它们只影响"看多大范围"，
-	// 传个奇怪的值不该让整张图打不开（与列表 limit 的既有约定一致）。
-	depth := assetIntParam(q.Get("depth"), 0)
-	if depth <= 0 {
-		depth = asset.DefaultTopologyDepth
-	}
-	if depth > asset.MaxTopologyDepth {
-		depth = asset.MaxTopologyDepth
-	}
-	maxNodes := assetIntParam(q.Get("limit"), 0)
-	if maxNodes <= 0 {
-		maxNodes = asset.DefaultTopologyNodes
-	}
-	if maxNodes > asset.MaxTopologyNodes {
-		maxNodes = asset.MaxTopologyNodes
-	}
-
-	res, err := a.assets.Topology(assetRefOf(item), depth, maxNodes, a.assetAllowedNodes(Principal(r)))
+	depth, maxNodes := assetTopologyBounds(q.Get("depth"), q.Get("limit"))
+	payload, err := a.assetTopologyPayload(assetRefOf(item), depth, maxNodes, Principal(r))
 	if errors.Is(err, asset.ErrOutOfScope) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "资产不存在"})
 		return
@@ -523,7 +514,39 @@ func (a *API) handleAssetTopology(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询资产关系图失败"})
 		return
 	}
+	writeJSON(w, http.StatusOK, payload)
+}
 
+// assetTopologyBounds 解析并**夹紧**跳数与节点数上限。
+//
+// 夹紧而不是报错：它们只影响"看多大范围"，传个奇怪的值不该让整张图打不开
+// （与列表 limit 的既有约定一致）。
+func assetTopologyBounds(depthRaw, limitRaw string) (int, int) {
+	depth := assetIntParam(depthRaw, 0)
+	if depth <= 0 {
+		depth = asset.DefaultTopologyDepth
+	}
+	if depth > asset.MaxTopologyDepth {
+		depth = asset.MaxTopologyDepth
+	}
+	maxNodes := assetIntParam(limitRaw, 0)
+	if maxNodes <= 0 {
+		maxNodes = asset.DefaultTopologyNodes
+	}
+	if maxNodes > asset.MaxTopologyNodes {
+		maxNodes = asset.MaxTopologyNodes
+	}
+	return depth, maxNodes
+}
+
+// assetTopologyPayload 组装关系图载荷。接口与「告警影响面」共用同一份组装逻辑：
+// 两处的范围裁剪、节点字段、边的来源标记必须完全一致，否则同一张图在两个入口
+// 会给出不同的可见范围——那种不一致只在现场才被发现。
+func (a *API) assetTopologyPayload(ref asset.Ref, depth, maxNodes int, p *auth.Principal) (map[string]interface{}, error) {
+	res, err := a.assets.Topology(ref, depth, maxNodes, a.assetAllowedNodes(p))
+	if err != nil {
+		return nil, err
+	}
 	staleBefore := assetStaleBefore(time.Now())
 	titles := assetTypeTitles()
 	nodes := make([]assetTopologyNodeView, 0, len(res.Nodes))
@@ -556,13 +579,13 @@ func (a *API) handleAssetTopology(w http.ResponseWriter, r *http.Request) {
 			Source: string(e.Source),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	return map[string]interface{}{
 		"root":      nodeKeyOf(res.Root.TypeKey, res.Root.NaturalKey),
 		"depth":     res.Depth,
 		"truncated": res.Truncated,
 		"nodes":     nodes,
 		"edges":     edges,
-	})
+	}, nil
 }
 
 // nodeKeyOf 是关系图节点的标识（与前端 linkForm.peer 的拼法一致）。

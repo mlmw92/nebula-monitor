@@ -66,6 +66,15 @@ func IsValidLogPatternName(s string) bool {
 	return LogPatternNamePattern.MatchString(s)
 }
 
+// LogPatternMetricName 返回某来源某模式对应的指标名：`<来源>_log_<模式>_total`。
+//
+// 放在 model 里而不是各侧拼字符串：Agent 侧**产出**这个指标、Server 侧用它**建告警规则**，
+// 两边拼法必须逐字一致——不一致的症状是"规则配好了却永远没有数据"，
+// 而没有任何一处会报错（这正是模式名必须限制字符集的原因，见 LogPatternNamePattern）。
+func LogPatternMetricName(source, pattern string) string {
+	return source + "_log_" + pattern + "_total"
+}
+
 // LogQuery 是检索请求（Server 侧解析查询参数后传入存储层）。
 type LogQuery struct {
 	From    int64    // 起始时间（毫秒，含）

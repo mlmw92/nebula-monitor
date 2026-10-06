@@ -120,6 +120,8 @@ type API struct {
 	// 集中日志存储（C2；可空，未注入时检索接口返回 503）。
 	// 用接口而不是具体类型：日志后端可替换（默认自研落盘，可选 VictoriaLogs，ADR-0002）。
 	logs           logstore.LogStore
+	// 报告周期化调度（可空；未注入时相关接口返回 503）
+	reportSched ReportScheduleProvider
 	assets         AssetProvider          // 资产台账（可空；未注入时资产接口返回 503）
 	startedAt      time.Time              // 进程启动时间，供 /healthz、/readyz 报告运行时长
 }
@@ -215,6 +217,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/assets/{id}/links", a.permit(a.handleAssetLinks, "assets:read"))
 	// 关系图（拓扑）：与 /links 同权限、同范围口径——它给的是 N 跳邻域，不是更多信息量。
 	mux.HandleFunc("GET /api/v1/assets/{id}/topology", a.permit(a.handleAssetTopology, "assets:read"))
+	// 由日志模式生成告警规则模板：只做"把模式名翻译成指标名"这一件事，
+	// 因此权限与检索一致（保存规则本身仍需 alerts:write）。
+	mux.HandleFunc("GET /api/v1/logs/rule-template", a.permit(a.handleLogRuleTemplate, "logs:read"))
+	// 告警影响面：把告警的指标标签（node/instance）对到台账资产，并给出近期变更与波及范围。
+	// 权限用 assets:read 而不是 alerts:read：这里暴露的是资产信息，调用方自己提供标签。
+	mux.HandleFunc("GET /api/v1/alerts/impact", a.permit(a.handleAlertImpact, "assets:read"))
 	// 人工维护关联：与忽略 / 标签 / 标杆同为「台账维护」，共用 assets:write。
 	// 三种动作（建 / 删 / 取消抑制）共用一套寻址：toType/toKey/kind/direction。
 	// POST 从 JSON 体读，DELETE 从**查询串**读（DELETE 的请求体在 HTTP 语义里没有定义，
@@ -422,6 +430,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/report/generate", a.permit(a.handleReportGenerate, "report:export"))
 	mux.HandleFunc("GET /api/v1/report/download", a.permit(a.handleReportDownload, "report:export"))
 	mux.HandleFunc("GET /api/v1/report/history", a.permit(a.handleReportHistory, "report:read"))
+	// 报告周期化调度：读现状用 report:read；改配置与立即生成用 report:export
+	// （它们都会产出报告文件、占用磁盘，与手动生成是同一类动作）
+	mux.HandleFunc("GET /api/v1/report/schedule", a.permit(a.handleReportScheduleGet, "report:read"))
+	mux.HandleFunc("PUT /api/v1/report/schedule", a.permit(a.handleReportScheduleSave, "report:export"))
+	mux.HandleFunc("POST /api/v1/report/schedule/run", a.permit(a.handleReportScheduleRun, "report:export"))
 
 	// 代理模式状态查询（网闸场景 Edge/Hub 代理连接状态）
 	mux.HandleFunc("GET /api/v1/proxy/status", a.permit(a.handleProxyStatus, "agent:read"))

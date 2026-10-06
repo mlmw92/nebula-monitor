@@ -141,7 +141,10 @@ func (c *LogCollector) buildLogMetrics(src config.LogSourceConfig, res collectRe
 		if name == "" {
 			continue // 全量模式（all: true）没有模式名；这些行已由 log_lines_total 计入
 		}
-		out = append(out, mk("log_"+name+"_total", float64(n), nil))
+		// 指标名由 model 统一拼：Server 侧用它建告警规则，两边必须逐字一致
+		out = append(out, model.Metric{
+			Node: c.node, Name: model.LogPatternMetricName(src.ID, name), Value: float64(n), Timestamp: now,
+		})
 	}
 	for reason, n := range res.dropped {
 		out = append(out, mk("log_dropped_total", float64(n), map[string]string{"reason": reason}))

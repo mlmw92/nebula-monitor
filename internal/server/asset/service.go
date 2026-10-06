@@ -451,6 +451,23 @@ func (s *Service) SuppressedLinks(ref Ref) ([]SuppressedLink, error) {
 	return s.store.suppressedLinksOf(a.ID)
 }
 
+// AssetsByLogSource 按日志来源与归属节点找资产（供日志 → 资产联动）。
+//
+// 返回多条是**正常结果**：同一条来源可能被多台机器上的同名资产声明。
+// 调用方（日志检索）只在本页命中的 (source, node) 上反查，因此调用量受页大小约束。
+func (s *Service) AssetsByLogSource(source, node string) ([]Asset, error) {
+	return s.store.assetsByLogSource(source, node)
+}
+
+// InstancesByAddr 按实例地址找中间件实例资产（供告警 → 资产联动）。
+//
+// 返回多条是**正常结果**：同一地址可能在不同类型的实例里都出现（例如
+// `redis:127.0.0.1:6379` 与 `k8s:127.0.0.1:6379` 只在类型上不同）。
+// 调用方必须原样呈现候选，不能自己挑一条——挑错就是"看的是另一个实例"。
+func (s *Service) InstancesByAddr(addr string) ([]Asset, error) {
+	return s.store.assetsByInstanceAddr(addr)
+}
+
 // Topology 返回以 ref 为中心、depth 跳以内的关系邻域。
 //
 // 资源范围在这里裁剪，而不是"取回来再过滤"：范围外的节点一旦进入结果集，
