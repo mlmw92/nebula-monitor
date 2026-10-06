@@ -137,6 +137,41 @@ func podKeyPrefix(cluster, namespace string) string {
 	return strings.TrimSpace(cluster) + "/" + strings.TrimSpace(namespace) + "/"
 }
 
+// ContainerIdentity 是容器类资产（pod / workload）的自然键解出的身份。
+type ContainerIdentity struct {
+	Cluster   string
+	Namespace string
+	Kind      string
+	Name      string
+}
+
+// ParseContainerKey 从 pod / workload 的自然键解出身份三元组。
+//
+// 为什么由服务端解：集群是 apiserver 地址，本身含 `://` 与可能的端口，键里因此有斜杠——
+// 前端 split 一次就可能解错（把 https: 当成命名空间），而**解错的联动不会报错**，
+// 只会跳到另一个 Pod 上。拼法与解析放在同一处，改的时候两边一起改。
+//
+// 形态：<cluster>/<namespace>/<kind>/<name>，其中 cluster 可含 `/`，因此从右往左取三段。
+func ParseContainerKey(typeKey, naturalKey string) (ContainerIdentity, bool) {
+	if typeKey != TypePod && typeKey != TypeWorkload {
+		return ContainerIdentity{}, false
+	}
+	parts := strings.Split(strings.TrimSpace(naturalKey), "/")
+	if len(parts) < 4 {
+		return ContainerIdentity{}, false
+	}
+	ident := ContainerIdentity{
+		Cluster:   strings.Join(parts[:len(parts)-3], "/"),
+		Namespace: parts[len(parts)-3],
+		Kind:      parts[len(parts)-2],
+		Name:      parts[len(parts)-1],
+	}
+	if ident.Cluster == "" || ident.Namespace == "" || ident.Kind == "" || ident.Name == "" {
+		return ContainerIdentity{}, false
+	}
+	return ident, true
+}
+
 // Attr 是一条资产属性。
 //
 // 同一 key 允许同时存在采集值与人工值（联合主键含 source），因此这里不能只看 value。

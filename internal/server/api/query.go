@@ -205,6 +205,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// 摘要与列表同权限、同筛选参数：顶部健康度数字必须能点进列表看到同一个集合。
 	// 字面量路径比 {id} 更具体，ServeMux 会优先匹配，两者不冲突。
 	mux.HandleFunc("GET /api/v1/assets/summary", a.permit(a.handleAssetSummary, "assets:read"))
+	// 按「类型 + 自然键」精确查一条：供跨页联动（如容器页的 Pod → 台账资产）使用。
+	// 字面量路径比 {id} 更具体，ServeMux 会优先匹配。
+	mux.HandleFunc("GET /api/v1/assets/lookup", a.permit(a.handleAssetLookup, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}", a.permit(a.handleAssetDetail, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}/history", a.permit(a.handleAssetHistory, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}/links", a.permit(a.handleAssetLinks, "assets:read"))

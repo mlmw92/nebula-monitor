@@ -114,6 +114,18 @@ type assetView struct {
 	IgnoreReason string `json:"ignoreReason,omitempty"`
 	IgnoredBy    string `json:"ignoredBy,omitempty"`
 	IgnoredAt    int64  `json:"ignoredAt,omitempty"`
+	// Container 是容器类资产（pod / workload）的身份，供跨页联动直接使用。
+	// 由服务端从自然键解出，不让前端去 split：集群是 apiserver 地址（含 ://），
+	// 解错的联动不报错、只会跳到另一个对象上（见 asset.ParseContainerKey）。
+	Container *assetContainerView `json:"container,omitempty"`
+}
+
+// assetContainerView 是容器类资产的身份三元组（对 pod 而言 Kind 恒为 pod）。
+type assetContainerView struct {
+	Cluster   string `json:"cluster"`
+	Namespace string `json:"namespace"`
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
 }
 
 // assetLinkView 是关联关系的对外形态。
@@ -216,6 +228,11 @@ func toAssetView(a asset.Asset, staleBefore int64) assetView {
 		HasDiscovery: a.HasDiscovery(),
 		Ignored:      a.Ignored, IgnoreReason: a.IgnoreReason, IgnoredBy: a.IgnoredBy, IgnoredAt: a.IgnoredAt,
 	}
+	if ident, ok := asset.ParseContainerKey(a.TypeKey, a.NaturalKey); ok {
+		view.Container = &assetContainerView{
+			Cluster: ident.Cluster, Namespace: ident.Namespace, Kind: ident.Kind, Name: ident.Name,
+		}
+	}
 	for k, v := range a.Labels {
 		view.Labels[k] = v
 	}
@@ -277,6 +294,67 @@ func (a *API) handleAssets(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toAssetView(item, filter.StaleBefore))
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"assets": out, "total": total})
+}
+
+// handleAssetLookup 按「类型 + 自然键」精确查一条资产（跨页联动的地基）。
+//
+// 为什么单开一个接口而不是复用列表的 keyword：容器页手上只有「集群 / 命名空间 / Pod 名」，
+// 拼出来的自然键必须**精确**命中。用模糊搜索去猜，一旦拼错就会命中另一条资产——
+// 那比"没找到"更糟：用户会点进一条不相干的记录，还以为自己看的就是这个 Pod。
+//
+// 范围外与不存在一律 404：不给范围探测留信息（与 assetInScope 的既有约定一致）。
+// 已从台账隐藏（ignored）的资产照常返回，由视图里的 ignored 字段说明——隐藏是管理动作，
+// 不是"这条不存在"，联动方据此给出"已被隐藏"而不是"没找到"。
+func (a *API) handleAssetLookup(w http.ResponseWriter, r *http.Request) {
+	if a.assets == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "资产台账未启用"})
+		return
+	}
+	q := r.URL.Query()
+	typeKey := strings.TrimSpace(q.Get("type"))
+	key := strings.TrimSpace(q.Get("key"))
+	// 容器类资产允许直接给身份（cluster/namespace/name[+kind]），由服务端拼键：
+	// 前端不该知道自然键的拼法——拼错不会报错，只会命中另一条资产。
+	//
+	// 身份缺一块必须 400 而不是拼出半截键去查：那会得到 404，联动方会把"请求写错了"
+	// 显示成"这个对象还没进台账"，把客户端 bug 伪装成数据缺失。
+	if key == "" {
+		cluster := strings.TrimSpace(q.Get("cluster"))
+		namespace := strings.TrimSpace(q.Get("namespace"))
+		name := strings.TrimSpace(q.Get("name"))
+		switch typeKey {
+		case asset.TypePod:
+			if cluster == "" || namespace == "" || name == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Pod 查询需要 cluster / namespace / name"})
+				return
+			}
+			key = asset.PodNaturalKey(cluster, namespace, name)
+		case asset.TypeWorkload:
+			kind := strings.TrimSpace(q.Get("kind"))
+			if cluster == "" || namespace == "" || kind == "" || name == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "工作负载查询需要 cluster / namespace / kind / name"})
+				return
+			}
+			key = asset.WorkloadNaturalKey(cluster, namespace, kind, name)
+		}
+	}
+	if typeKey == "" || key == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "缺少 type 或 key 参数"})
+		return
+	}
+	item, found, err := a.assets.Get(asset.Ref{TypeKey: typeKey, NaturalKey: key})
+	if err != nil {
+		slog.Error("查询资产失败", "type", typeKey, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询资产失败"})
+		return
+	}
+	if !found || !a.nodeInScope(Principal(r), item.Node) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "资产不存在"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"asset": toAssetView(item, assetStaleBefore(time.Now())),
+	})
 }
 
 // assetListFilter 解析台账的筛选参数。
