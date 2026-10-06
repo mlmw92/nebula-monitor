@@ -30,13 +30,17 @@ func writeAcks(t *testing.T, path string, list []alert.AckInfo) {
 	}
 }
 
+// VictoriaMetrics 的 /flags 是**纯文本**（每行 `-flag="value"`，只列显式设置过的参数），
+// 不是 JSON。这条用例用真实格式，避免"假响应恰好被实现接受"盖住真实不一致
+// （2026-10-06 实机联调：按 JSON 解析对真实 VM 必然失败，保留策略页一直显示解析错误）。
 func TestProbeTSDBRetention(t *testing.T) {
 	withFlags := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/flags" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_, _ = w.Write([]byte(`{"-retentionPeriod":"3","-maxSeries":"0"}`))
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("-httpListenAddr=\":8428\"\n-storageDataPath=\"/var/lib/victoria-metrics-data\"\n-retentionPeriod=\"3\"\n-maxSeries=0\n"))
 	}))
 	defer withFlags.Close()
 	got, err := ProbeTSDBRetention(withFlags.URL)
@@ -47,13 +51,18 @@ func TestProbeTSDBRetention(t *testing.T) {
 		t.Fatalf("保留参数不符：%q", got)
 	}
 
-	// 后端未暴露保留参数：应给出可读原因，而不是假装纳管
+	// 真实 VM 常见情形：只列显式设置的参数，没配保留期就**没有**这一行。
+	// 此时必须给出可读原因，而不是解析错误，也不是假装纳管。
 	noRetention := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"-maxSeries":"0"}`))
+		_, _ = w.Write([]byte("-httpListenAddr=\":8428\"\n-storageDataPath=\"/var/lib/victoria-metrics-data\"\n"))
 	}))
 	defer noRetention.Close()
-	if _, err := ProbeTSDBRetention(noRetention.URL); err == nil {
+	_, err = ProbeTSDBRetention(noRetention.URL)
+	if err == nil {
 		t.Fatal("未暴露保留参数时应返回错误")
+	}
+	if !strings.Contains(err.Error(), "未显式暴露保留参数") {
+		t.Fatalf("应给出可读原因，实际: %v", err)
 	}
 
 	if _, err := ProbeTSDBRetention("http://127.0.0.1:1"); err == nil {
@@ -61,6 +70,35 @@ func TestProbeTSDBRetention(t *testing.T) {
 	}
 	if _, err := ProbeTSDBRetention("  "); err == nil {
 		t.Fatal("未配置地址时应返回错误")
+	}
+}
+
+// parseTSDBFlagLine 是"读对端文本"的地方，边界比看上去多：空行、没有等号的行、
+// 值不带引号、值为空——任一处理不当都会让"探测保留期"变成"探测失败"。
+func TestParseTSDBFlagLine(t *testing.T) {
+	cases := []struct {
+		line  string
+		key   string
+		value string
+		ok    bool
+	}{
+		{`-retentionPeriod="3"`, "-retentionPeriod", "3", true},
+		{`-maxSeries=0`, "-maxSeries", "0", true},
+		{`-loggerLevel="INFO"`, "-loggerLevel", "INFO", true},
+		{`-flagWithEmptyValue=""`, "-flagWithEmptyValue", "", true},
+		{"  -trimmed=\"x\"  ", "-trimmed", "x", true},
+		{"", "", "", false},
+		{"   ", "", "", false},
+		{"notaflag=1", "", "", false},   // 不带前导 -
+		{"-noEqualsSign", "", "", false}, // 没有等号
+		{"-=\"v\"", "", "", false},       // 键为空
+	}
+	for _, c := range cases {
+		key, value, ok := parseTSDBFlagLine(c.line)
+		if ok != c.ok || key != c.key || value != c.value {
+			t.Errorf("parseTSDBFlagLine(%q) = (%q, %q, %v)，期望 (%q, %q, %v)",
+				c.line, key, value, ok, c.key, c.value, c.ok)
+		}
 	}
 }
 

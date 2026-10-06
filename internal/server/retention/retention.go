@@ -16,8 +16,8 @@ package retention
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -55,6 +55,8 @@ const (
 	minIntervalHours = 1
 	// tsdbProbeTimeout 探测时序库保留参数的超时。
 	tsdbProbeTimeout = 2 * time.Second
+	// tsdbProbeMaxBytes 是读取 /flags 响应的上限：探测不该变成"把对端的响应整个读进内存"。
+	tsdbProbeMaxBytes = 1 << 20
 )
 
 // Config 是本地数据保留策略（Web 端可改，保存即热生效）。
@@ -408,6 +410,11 @@ func (m *Manager) lastResult() *CleanupResult {
 
 // ProbeTSDBRetention 只读探测时序库的保留参数（VictoriaMetrics 系列暴露 /flags）。
 //
+// /flags 返回的是**纯文本**（每行 `-flag="value"`，Content-Type: text/plain），
+// 而且只列**显式设置过**的参数。原先按 JSON 解析，对真实 VictoriaMetrics 必然失败——
+// 2026-10-06 实机联调发现：保留策略页的 TSDB 一段一直显示"解析 /flags 失败"，
+// 而单元测试用的是自造的 JSON 响应，恰好把这个不一致盖住了。
+//
 // 返回 (参数描述, 错误)。错误表示无法读取，调用方应提示「需在时序库侧配置」——
 // 指标保留由时序库自身启动参数决定，Server 无法在运行期修改。
 func ProbeTSDBRetention(addr string) (string, error) {
@@ -424,14 +431,40 @@ func ProbeTSDBRetention(addr string) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("时序库返回 HTTP %d", resp.StatusCode)
 	}
-	var flags map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&flags); err != nil {
-		return "", fmt.Errorf("解析 /flags 失败: %v", err)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, tsdbProbeMaxBytes))
+	if err != nil {
+		return "", fmt.Errorf("读取时序库参数失败: %v", err)
 	}
-	for key, value := range flags {
+	for _, line := range strings.Split(string(body), "\n") {
+		key, value, ok := parseTSDBFlagLine(line)
+		if !ok {
+			continue
+		}
+		// 保留期参数名在不同后端/版本下略有差异（-retentionPeriod / -retentionFilter），
+		// 用后缀匹配比写死一个名字更耐用。
 		if strings.HasSuffix(key, "retentionPeriod") || strings.HasSuffix(key, "retentionFilter") {
 			return key + "=" + value, nil
 		}
 	}
 	return "", fmt.Errorf("时序库未显式暴露保留参数，当前保留期由其后端默认值决定")
+}
+
+// parseTSDBFlagLine 解析 /flags 的一行：`-key="value"`（值可能带引号，也可能不带）。
+// 空行与不认识的形态返回 ok=false，由调用方跳过。
+func parseTSDBFlagLine(line string) (key, value string, ok bool) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "-") {
+		return "", "", false
+	}
+	line = strings.TrimPrefix(line, "-")
+	i := strings.IndexByte(line, '=')
+	if i <= 0 {
+		return "", "", false
+	}
+	key = strings.TrimSpace(line[:i])
+	value = strings.Trim(strings.TrimSpace(line[i+1:]), `"`)
+	if key == "" {
+		return "", "", false
+	}
+	return "-" + key, value, true
 }
