@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	// 纯 Go 的 SQLite 实现：不引入 CGO，交叉编译（linux amd64/arm64/arm）与离线包不受影响。
@@ -1153,6 +1154,168 @@ func (s *Store) suppressedLinksOf(assetID int64) ([]SuppressedLink, error) {
 		out = append(out, sl)
 	}
 	return out, rows.Err()
+}
+
+// linkRow 是邻域遍历用的一条边（带两端 id）。
+//
+// 与领域类型 Link 分开：Link 用 Ref 表达两端（面向读接口），而逐跳展开必须按 id
+// 收敛 IN(...)，否则每一层都要把 Ref 再翻译回 id 去查一次。
+type linkRow struct {
+	ID        int64
+	FromID    int64
+	ToID      int64
+	Kind      LinkKind
+	Source    Source
+	CreatedAt int64
+}
+
+// linkRowsTouching 取与给定资产集合相关的全部边（出边与入边都算）。
+func (s *Store) linkRowsTouching(ids []int64) ([]linkRow, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	ph := placeholders(len(ids))
+	args := make([]any, 0, len(ids)*2)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.db.Query(
+		`SELECT id,from_id,to_id,kind,source,created_at FROM asset_links
+		 WHERE from_id IN (`+ph+`) OR to_id IN (`+ph+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("查询资产关联失败: %w", err)
+	}
+	defer rows.Close()
+	var out []linkRow
+	for rows.Next() {
+		var r linkRow
+		var kind, source string
+		if err := rows.Scan(&r.ID, &r.FromID, &r.ToID, &kind, &source, &r.CreatedAt); err != nil {
+			return nil, fmt.Errorf("读取资产关联失败: %w", err)
+		}
+		r.Kind, r.Source = LinkKind(kind), Source(source)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// assetsByIDs 按主键批量取资产（含属性）。
+func (s *Store) assetsByIDs(ids []int64) ([]Asset, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.db.Query(`SELECT `+assetSelectColumns+`
+	      FROM assets a LEFT JOIN asset_attrs t ON t.asset_id=a.id
+	      WHERE a.id IN (`+placeholders(len(ids))+`)
+	      ORDER BY a.id,t.key,t.source`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("查询资产列表失败: %w", err)
+	}
+	defer rows.Close()
+	out, err := scanAssets(rows)
+	if err != nil {
+		return nil, fmt.Errorf("读取资产列表失败: %w", err)
+	}
+	return out, nil
+}
+
+// topologyAround 从 rootID 出发做 depth 跳邻域遍历，返回节点（含跳数）、边与是否被上限截断。
+//
+// 逐层 BFS 而不是一条递归 SQL：每层用 IN(...) 收敛，**节点上限在每层立刻生效**——
+// 否则一个高度连接的资产会在展开完成之后才被截断，代价已经付过了。
+// 被上限挡在门外的节点，其相关的边也一并丢弃：图里不该出现指向"不存在的节点"的边。
+func (s *Store) topologyAround(rootID int64, depth, maxNodes int) ([]TopologyNode, []TopologyEdge, bool, error) {
+	if depth < 1 {
+		depth = 1
+	}
+	if maxNodes <= 0 {
+		maxNodes = DefaultTopologyNodes
+	}
+	depthOf := map[int64]int{rootID: 0}
+	frontier := []int64{rootID}
+	linkRows := map[int64]linkRow{}
+	truncated := false
+
+	for level := 0; level < depth && len(frontier) > 0; level++ {
+		rows, err := s.linkRowsTouching(frontier)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		var next []int64
+		for _, r := range rows {
+			linkRows[r.ID] = r
+			for _, id := range [2]int64{r.FromID, r.ToID} {
+				if _, seen := depthOf[id]; seen {
+					continue
+				}
+				if len(depthOf) >= maxNodes {
+					truncated = true
+					continue
+				}
+				depthOf[id] = level + 1
+				next = append(next, id)
+			}
+		}
+		frontier = next
+	}
+
+	ids := make([]int64, 0, len(depthOf))
+	for id := range depthOf {
+		ids = append(ids, id)
+	}
+	assets, err := s.assetsByIDs(ids)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	byID := make(map[int64]Asset, len(assets))
+	nodes := make([]TopologyNode, 0, len(assets))
+	for _, a := range assets {
+		byID[a.ID] = a
+		nodes = append(nodes, TopologyNode{Asset: a, Depth: depthOf[a.ID], Root: a.ID == rootID})
+	}
+	// 稳定排序：跳数 → 类型 → 自然键。同一份数据两次查询结果必须一致，
+	// 否则前端力导向图每次打开都会"重新洗牌"。
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if nodes[i].Depth != nodes[j].Depth {
+			return nodes[i].Depth < nodes[j].Depth
+		}
+		if nodes[i].Asset.TypeKey != nodes[j].Asset.TypeKey {
+			return nodes[i].Asset.TypeKey < nodes[j].Asset.TypeKey
+		}
+		return nodes[i].Asset.NaturalKey < nodes[j].Asset.NaturalKey
+	})
+
+	edges := make([]TopologyEdge, 0, len(linkRows))
+	for _, r := range linkRows {
+		from, ok1 := byID[r.FromID]
+		to, ok2 := byID[r.ToID]
+		if !ok1 || !ok2 {
+			continue // 端点被上限挡在外面：这条边在本次邻域里不成立
+		}
+		edges = append(edges, TopologyEdge{
+			FromID: r.FromID, ToID: r.ToID,
+			From: Ref{TypeKey: from.TypeKey, NaturalKey: from.NaturalKey},
+			To:   Ref{TypeKey: to.TypeKey, NaturalKey: to.NaturalKey},
+			Kind: r.Kind, Source: r.Source, CreatedAt: r.CreatedAt,
+		})
+	}
+	sort.SliceStable(edges, func(i, j int) bool {
+		if edges[i].Kind != edges[j].Kind {
+			return edges[i].Kind < edges[j].Kind
+		}
+		if edges[i].From.NaturalKey != edges[j].From.NaturalKey {
+			return edges[i].From.NaturalKey < edges[j].From.NaturalKey
+		}
+		return edges[i].To.NaturalKey < edges[j].To.NaturalKey
+	})
+	return nodes, edges, truncated, nil
 }
 
 // linksOf 取与某资产直接相关的关联（出边与入边都返回）。

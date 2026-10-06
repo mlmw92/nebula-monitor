@@ -451,6 +451,78 @@ func (s *Service) SuppressedLinks(ref Ref) ([]SuppressedLink, error) {
 	return s.store.suppressedLinksOf(a.ID)
 }
 
+// Topology 返回以 ref 为中心、depth 跳以内的关系邻域。
+//
+// 资源范围在这里裁剪，而不是"取回来再过滤"：范围外的节点一旦进入结果集，
+// 任何一处忘记过滤都会变成越权；让它们根本不出现，才是唯一稳妥的做法。
+// allowedNodes 为 nil 表示全局（不过滤）；非 nil 时**归属节点为空**的资产也不可见——
+// 与 nodeInScope 的取向一致：不知道属于哪台机器就不算在范围内。
+//
+// 中心资产本身不在范围内时返回 ErrOutOfScope（与标杆条件写同一语义：看不到就该 404）。
+func (s *Service) Topology(ref Ref, depth, maxNodes int, allowedNodes []string) (Topology, error) {
+	a, err := s.resolve(ref)
+	if err != nil {
+		return Topology{}, err
+	}
+	if allowedNodes != nil && !nodeAllowed(allowedNodes, a.Node) {
+		return Topology{}, ErrOutOfScope
+	}
+	if depth <= 0 {
+		depth = DefaultTopologyDepth
+	}
+	if depth > MaxTopologyDepth {
+		depth = MaxTopologyDepth
+	}
+	if maxNodes <= 0 {
+		maxNodes = DefaultTopologyNodes
+	}
+	if maxNodes > MaxTopologyNodes {
+		maxNodes = MaxTopologyNodes
+	}
+
+	nodes, edges, truncated, err := s.store.topologyAround(a.ID, depth, maxNodes)
+	if err != nil {
+		return Topology{}, err
+	}
+	out := Topology{
+		Root:      Ref{TypeKey: a.TypeKey, NaturalKey: a.NaturalKey},
+		Depth:     depth,
+		Truncated: truncated,
+		Nodes:     make([]TopologyNode, 0, len(nodes)),
+		Edges:     make([]TopologyEdge, 0, len(edges)),
+	}
+	visible := make(map[int64]bool, len(nodes))
+	for _, n := range nodes {
+		if allowedNodes != nil && !nodeAllowed(allowedNodes, n.Asset.Node) {
+			continue
+		}
+		visible[n.Asset.ID] = true
+		out.Nodes = append(out.Nodes, n)
+	}
+	for _, e := range edges {
+		// 两端都可见这条边才成立：只留一半等于把"另一端是谁"（节点名、自然键）
+		// 透给范围外的人，那正是范围裁剪要挡住的东西。
+		if !visible[e.FromID] || !visible[e.ToID] {
+			continue
+		}
+		out.Edges = append(out.Edges, e)
+	}
+	return out, nil
+}
+
+// nodeAllowed 判断资产归属节点是否在可见集合内（空归属对受限用户一律不可见）。
+func nodeAllowed(allowed []string, node string) bool {
+	if node == "" {
+		return false
+	}
+	for _, n := range allowed {
+		if n == node {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveLinkPair 校验关联类型并把两端解析成资产，供上面几个方法共用。
 func (s *Service) resolveLinkPair(from, to Ref, kind LinkKind) (Asset, Asset, error) {
 	if !kind.Valid() {

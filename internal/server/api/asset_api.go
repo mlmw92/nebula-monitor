@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -50,6 +51,8 @@ type AssetProvider interface {
 	ClearBaseline(typeKey string) error
 	// Links 返回资产的直接关联（出边与入边）。
 	Links(ref asset.Ref) ([]asset.Link, error)
+	// Topology 返回以某资产为中心、N 跳以内的关系邻域（已按可见节点裁剪）。
+	Topology(ref asset.Ref, depth, maxNodes int, allowedNodes []string) (asset.Topology, error)
 	// SuppressedLinks 返回被人工隐藏（逻辑删除）的关联，供界面展示并可恢复。
 	SuppressedLinks(ref asset.Ref) ([]asset.SuppressedLink, error)
 	// 关系的人工维护：采集侧走 LinkDiscovered（此处不暴露，采集不经过 API 层），
@@ -455,6 +458,124 @@ func (a *API) handleAssetLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, payload)
+}
+
+// assetTopologyNodeView / assetTopologyEdgeView 是关系图（拓扑）的对外形态。
+//
+// 节点用 `typeKey|naturalKey` 作为 key：台账界面一直以它寻址（关联关系的对端就是它），
+// 图与表共用同一套标识，前端也就不必自己拼第二套键。
+type assetTopologyNodeView struct {
+	Key        string `json:"key"`
+	ID         int64  `json:"id"`
+	TypeKey    string `json:"typeKey"`
+	TypeTitle  string `json:"typeTitle"`
+	NaturalKey string `json:"naturalKey"`
+	Name       string `json:"name"`
+	Node       string `json:"node"`
+	Status     string `json:"status"`
+	Owner      string `json:"owner,omitempty"`
+	Ignored    bool   `json:"ignored,omitempty"`
+	Root       bool   `json:"root,omitempty"`
+	Depth      int    `json:"depth"`
+}
+
+type assetTopologyEdgeView struct {
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Kind   string `json:"kind"`
+	Source string `json:"source"`
+}
+
+// handleAssetTopology 返回以某资产为中心、N 跳以内的关系邻域。
+//
+// 与 /links 的分工：/links 给**直接**关系（表格逐条看），这里给邻域（图上找影响面）。
+// 两者共用同一套范围裁剪口径——否则「表里看不到、图里看得到」本身就是一条越权旁路。
+func (a *API) handleAssetTopology(w http.ResponseWriter, r *http.Request) {
+	item, ok := a.assetInScope(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	// 跳数与节点数都**夹紧**而不是报错：它们只影响"看多大范围"，
+	// 传个奇怪的值不该让整张图打不开（与列表 limit 的既有约定一致）。
+	depth := assetIntParam(q.Get("depth"), 0)
+	if depth <= 0 {
+		depth = asset.DefaultTopologyDepth
+	}
+	if depth > asset.MaxTopologyDepth {
+		depth = asset.MaxTopologyDepth
+	}
+	maxNodes := assetIntParam(q.Get("limit"), 0)
+	if maxNodes <= 0 {
+		maxNodes = asset.DefaultTopologyNodes
+	}
+	if maxNodes > asset.MaxTopologyNodes {
+		maxNodes = asset.MaxTopologyNodes
+	}
+
+	res, err := a.assets.Topology(assetRefOf(item), depth, maxNodes, a.assetAllowedNodes(Principal(r)))
+	if errors.Is(err, asset.ErrOutOfScope) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "资产不存在"})
+		return
+	}
+	if err != nil {
+		slog.Error("查询资产关系图失败", "asset", item.NaturalKey, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询资产关系图失败"})
+		return
+	}
+
+	staleBefore := assetStaleBefore(time.Now())
+	titles := assetTypeTitles()
+	nodes := make([]assetTopologyNodeView, 0, len(res.Nodes))
+	for _, n := range res.Nodes {
+		title := titles[n.Asset.TypeKey]
+		if title == "" {
+			title = n.Asset.TypeKey // 自定义类型：退化成 key，好过留空
+		}
+		nodes = append(nodes, assetTopologyNodeView{
+			Key:        nodeKeyOf(n.Asset.TypeKey, n.Asset.NaturalKey),
+			ID:         n.Asset.ID,
+			TypeKey:    n.Asset.TypeKey,
+			TypeTitle:  title,
+			NaturalKey: n.Asset.NaturalKey,
+			Name:       n.Asset.Name,
+			Node:       n.Asset.Node,
+			Status:     assetStatusOf(n.Asset, staleBefore),
+			Owner:      n.Asset.Owner(),
+			Ignored:    n.Asset.Ignored,
+			Root:       n.Root,
+			Depth:      n.Depth,
+		})
+	}
+	edges := make([]assetTopologyEdgeView, 0, len(res.Edges))
+	for _, e := range res.Edges {
+		edges = append(edges, assetTopologyEdgeView{
+			From:   nodeKeyOf(e.From.TypeKey, e.From.NaturalKey),
+			To:     nodeKeyOf(e.To.TypeKey, e.To.NaturalKey),
+			Kind:   string(e.Kind),
+			Source: string(e.Source),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"root":      nodeKeyOf(res.Root.TypeKey, res.Root.NaturalKey),
+		"depth":     res.Depth,
+		"truncated": res.Truncated,
+		"nodes":     nodes,
+		"edges":     edges,
+	})
+}
+
+// nodeKeyOf 是关系图节点的标识（与前端 linkForm.peer 的拼法一致）。
+func nodeKeyOf(typeKey, naturalKey string) string { return typeKey + "|" + naturalKey }
+
+// assetTypeTitles 返回资产类型 key → 标题（内置类型；自定义类型由调用方退化成 key）。
+func assetTypeTitles() map[string]string {
+	types := asset.BuiltinTypes()
+	out := make(map[string]string, len(types))
+	for _, t := range types {
+		out[t.Key] = t.Title
+	}
+	return out
 }
 
 // assetLinksPayload 组装关联载荷：可见的边 + 被人工隐藏的边。

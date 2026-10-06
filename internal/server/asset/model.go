@@ -351,6 +351,56 @@ type SuppressedLink struct {
 	CreatedBy string
 }
 
+// 关系图（拓扑）的邻域展开边界。
+//
+// 两个上限都是**硬上限**，不是"默认值可以随便调"：关系图是逐跳展开的，
+// 一台跑了几十个实例的主机在两跳内就能连到全库——没有上限的图查询等于
+// 把"看一眼关系"变成"把整张表拉进内存"。
+const (
+	// DefaultTopologyDepth / MaxTopologyDepth 是展开跳数（中心为 0 跳）。
+	// 3 跳是"实例 → 主机 → 同机其它实例 → 它们的归属"这个最常见的排障半径。
+	DefaultTopologyDepth = 2
+	MaxTopologyDepth     = 3
+	// DefaultTopologyNodes / MaxTopologyNodes 是单次邻域的节点数上限。
+	DefaultTopologyNodes = 200
+	MaxTopologyNodes     = 500
+)
+
+// TopologyNode 是关系图里的一个节点。
+//
+// 节点身份用 Ref（类型 + 自然键）而不是自增 id：台账界面一直以
+// `<typeKey>|<naturalKey>` 寻址（关联关系的对端就是它），图与表用同一套标识，
+// 两张视图才不会各说各话。Asset.ID 仍然带上，供"点节点打开详情"直接用。
+type TopologyNode struct {
+	Asset Asset
+	// Depth 是到中心的跳数：中心为 0。界面据此把"直接影响"与"间接影响"分开呈现。
+	Depth int
+	// Root 标记本次邻域的中心节点。
+	Root bool
+}
+
+// TopologyEdge 是关系图里的一条边（两端用 Ref 表达，另附 id 供服务端裁剪时对齐）。
+type TopologyEdge struct {
+	FromID, ToID int64
+	From, To     Ref
+	Kind         LinkKind
+	Source       Source
+	CreatedAt    int64
+}
+
+// Topology 是一次邻域查询的结果。
+type Topology struct {
+	Root  Ref
+	Depth int
+	// Nodes 与 Edges 都只包含**当前调用者可见**的部分（资源范围已在此裁剪）。
+	Nodes []TopologyNode
+	Edges []TopologyEdge
+	// Truncated 表示因节点上限提前停止展开。必须显式回传：
+	// 静默截断会让人以为"关系就这么多"，从而漏掉真实的影响面——
+	// 那正是这张图存在的意义。
+	Truncated bool
+}
+
 // ChangeRecord 是一条字段级变更。
 //
 // 与审计的分工：审计回答「谁调了什么接口」，变更记录回答「哪个字段从什么变成什么」。
