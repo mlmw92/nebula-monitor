@@ -291,6 +291,15 @@ func queryPGPrimaryAddr(ctx context.Context, db *sql.DB) string {
 		"SELECT conninfo FROM pg_stat_wal_receiver LIMIT 1").Scan(&conninfo); err != nil {
 		return ""
 	}
+	return parsePGConninfo(conninfo)
+}
+
+// parsePGConninfo 从 libpq 连接串里取出 `host:port`；取不到返回空串。
+//
+// 单独抽出来是为了能直接测字符串：真实路径要先有一个 standby（dev-server 的 PG 是单机），
+// 而这段解析恰恰是最容易出细节错的地方——值可能带引号（含空格时 libpq 会加），
+// host 与 port 也必须**同时**存在，拼不出地址的连接串一律丢掉。
+func parsePGConninfo(conninfo string) string {
 	var host, port string
 	for _, field := range strings.Fields(conninfo) {
 		switch {
