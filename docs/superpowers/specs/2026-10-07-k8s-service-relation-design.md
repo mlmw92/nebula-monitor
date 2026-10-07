@@ -175,23 +175,37 @@ type K8sService struct {
    全景表行 104 / 194 与相关设计件的对账。用例：标签映射（service / exposes 都有中文名）、
    文案断言（不再声称 `exposes` 只能人工维护）。
 
-### 6.2 实机验证计划（dev-server，**Server 与 Agent 都要升**）
+### 6.2 实机验证结果（2026-10-07，dev-server，**Server 与 Agent 同升 1.30.47**）
 
-dev-server 上有 k3s（记忆里记着只读 SA 与验证负载），Service 是真实存在的：
+`dist/k8s-service-e2e.py`（带 `seed` / `core` / `cleanup`）：**10 项断言全过**。
 
-1. **采集**：升级后看上报体里出现 `k8sServices`，条数与 `kubectl get svc -A`（排除系统命名空间的规则要对齐）一致；
-2. **资产**：台账里出现 `service` 类型资产，自然键形状正确、归属节点 = 集群上报主机；
-3. **关系（决定性）**：`GET /api/v1/assets/link-stats` 里出现 **`exposes`** 边；取一条边核对两端
-   （service → 它真正的后端 Pod），与 `kubectl get endpoints` 对照一致；
-4. **无后端不建边（决定性）**：找一个无 Endpoint 的 Service（如 `ExternalName` 或选择器无匹配的）
-   → 它**只有资产、没有边**；
-5. **幂等**：等下一轮上报后边数不增长（`ON CONFLICT` 生效）；
-6. **范围**：受限用户（按分组）能看到 service 资产，且看不到范围外集群的；
-7. **旧 Agent 兼容**：本机若有未升级的 Agent，其上报不含 `k8sServices` → **不报错、不产生半截数据**。
+**为什么必须自己造负载**：这台集群的业务命名空间里只有一个 `default/kubernetes`（apiserver 的后端
+**不是 Pod**），而 `kube-system` 的两个 Service 被清单的命名空间规则排除——不造就没有可验的边，
+而"没有边"与"关系没实现"在界面上长得一模一样。`seed` 造了 `nebula-svc-check`：Deployment 2 副本
+（离线 pause 镜像）+ 一个有后端的 Service `web` + 一个选择器无匹配的 Service `orphan`。
+
+| 判据 | 实测 |
+|---|---|
+| 前置：只读 SA 的权限 | 能 `list services` 与 `list endpointslices.discovery.k8s.io`（**这条不通时整条链路会"有资产、零关系"**，看起来像没实现，所以单独先验） |
+| 资产与属性 | 台账 3 个 service 资产 = 集群 5 个 − `kube-system` 2 个（`default/kubernetes`、`web`、`orphan`）；`web` 的 `type=ClusterIP`、`backends=2`；归属节点 = 集群上报主机 `VM-0-10-ubuntu` |
+| **边与 Endpoints 对账（决定性）** | `web` 有 **2 条 `exposes` 边**，对端与 `kubectl get endpoints web` 给出的两个后端 **逐条一致**（`web-747484d45f-5dxn9`、`web-747484d45f-t6mpl`）；来源全是 `discovery` |
+| **无后端不建边（决定性）** | `orphan`（选择器无匹配）**只有资产、没有任何边**——不猜后端是谁 |
+| 关系视图 | `link-stats` 出现 **`service → pod` 的 `exposes` 分组（2 条）**——该种类的第一个自动生产者 |
+| 幂等 | 跨一轮上报（等 45 秒）后 `web` 的边数**仍是 2** |
+| 范围 | 受限身份（分组「国内」）能看到本集群的 service 资产 |
+
+**核对中自己踩的坑（不是产品问题）**：脚本把关联响应当成嵌套的 `{to:{name}}` 读，读出一串空串，
+白红了一条；实际响应是**平铺**的（`fromKey` / `toKey` / `peerKey`）。形状先探再断言——探针见
+本轮临时脚本（已删），结论记在这里。另外 `eq()` 的**失败分支**少传了一个参数，导致第一次失败时
+直接抛 `TypeError` 把真实值盖住了（两处都是我的脚本问题，产品行为正确）。
+
+**收尾**：`kubectl delete ns nebula-svc-check` 已删；集群回到 3 个 Service；服务状态与升级前一致
+（`victoria-logs` 仍 inactive）。台账里那两条 service 资产会随停止上报转为 `missing`（不物理删除，
+是既有约定），符合预期。
 
 **未覆盖边界（不得视为通过）**：大规模集群（数千 Service / 数万后端）的采集耗时与上报体体积
-（上限逻辑有用例，但没有压测）；`NodePort`/`LoadBalancer` 的端口语义（本批不带端口级边）；
-跨命名空间的 Service（不存在，但 EndpointSlice 的 `targetRef` 命名空间要与 Service 一致才建边）。
+（上限逻辑有用例，但没有压测）；`NodePort` / `LoadBalancer` 的端口语义（本批不带端口级边）；
+**旧 Agent 兼容**只靠用例覆盖（这台机器两端都已升级，没有旧 Agent 可验）；浏览器实点。
 
 ## 7. 待评审
 
