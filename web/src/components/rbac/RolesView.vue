@@ -29,10 +29,25 @@
         <el-table-column label="权限数" width="90">
           <template #default="{ row }">{{ Array.isArray(row.permissions) ? row.permissions.length : 0 }}</template>
         </el-table-column>
-        <el-table-column label="默认范围" min-width="140">
+        <el-table-column label="默认范围" min-width="190">
           <template #default="{ row }">
             <el-tag v-if="row.scope_mode === 'restricted'" size="small" type="warning" effect="plain">受限</el-tag>
             <el-tag v-else size="small" type="success" effect="plain">全部</el-tag>
+            <!-- 业务范围是第二个维度，与节点范围取交集。没配就不显示：否则「全部」容易被读成
+                 「业务上也不限」，而实际语义是「该维度不生效」。 -->
+            <template v-if="row.asset_mode === 'limited'">
+              <el-tag
+                v-for="l in (row.asset_labels || [])"
+                :key="l.key + '=' + l.value"
+                size="small"
+                type="info"
+                effect="plain"
+                class="grp-tag"
+              >{{ l.key }}={{ l.value }}</el-tag>
+              <el-tag v-if="!(row.asset_labels || []).length" size="small" type="danger" effect="plain" class="grp-tag">
+                业务范围为空 → 无可见资产
+              </el-tag>
+            </template>
           </template>
         </el-table-column>
         <el-table-column label="操作" min-width="140" fixed="right" v-if="auth.canAny(['roles:manage', 'roles:read'])">
@@ -77,6 +92,37 @@
             <p v-if="form.scopeMode === 'restricted' && !form.scopeGroups.length" class="scope-warn">
               受限模式未选任何分组时，归属此角色的用户将看不到任何节点资源。
             </p>
+            <!-- 业务维度：与节点维度是两个独立维度，**取交集**（都放行才看得见）。
+                 默认「不限」= 该维度不生效，因此存量角色的行为不会因为这次上线而变化。 -->
+            <div class="scope-sub">
+              <div class="scope-sub-title">
+                业务范围（按资产标签 <code>{{ assetKey }}</code> 划）
+              </div>
+              <el-radio-group v-model="form.assetMode">
+                <el-radio value="all">不限</el-radio>
+                <el-radio value="limited">限定取值</el-radio>
+              </el-radio-group>
+              <el-select
+                v-if="form.assetMode === 'limited'"
+                v-model="form.assetValues"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                :reserve-keyword="false"
+                placeholder="选择或直接输入标签值（如 pay）"
+                style="width: 100%; margin-top: 10px"
+              >
+                <el-option v-for="v in assetValueOptions" :key="v" :label="v" :value="v" />
+              </el-select>
+              <p class="scope-note">
+                与上面的节点范围是<b>且</b>的关系：两个范围都放行才看得见该资产。
+                标签值要先打在资产上（台账 → 资产 → 标签/批量维护）；<b>没打标签的资产不属于任何业务范围</b>。
+              </p>
+              <p v-if="form.assetMode === 'limited' && !form.assetValues.length" class="scope-warn">
+                限定了业务范围却没有取值时，归属此角色的人将看不到任何资产（这是"无权限"，不是"不限"）。
+              </p>
+            </div>
           </div>
         </el-form-item>
         <el-form-item label="权限点">
@@ -125,7 +171,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import http from '../../api/http'
@@ -165,11 +211,19 @@ function domainLabel(d) {
 }
 
 const roles = ref([])
-const catalog = reactive({ domains: [] })
+const catalog = reactive({ domains: [], assetScopeLabelKey: '' })
 const groupNames = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const activeDomains = ref([])
+
+// 业务范围的约定标签键由服务端给出（可配）：硬编码在前端的话，部署方改过键之后
+// 表单会静默地去查一个不存在的键，看起来像"没有可选值"。
+const assetKey = computed(
+  () => auth.principal.assetScopeLabelKey || catalog.assetScopeLabelKey || 'biz'
+)
+// 候选值（可选）：拿不到就留空，表单仍允许直接输入——不因为"没有候选项"就把能力藏起来。
+const assetValueOptions = ref([])
 
 const formVisible = ref(false)
 const editing = ref(false)
@@ -179,6 +233,9 @@ const form = reactive({
   permissions: [],
   scopeMode: 'global',
   scopeGroups: [],
+  // 业务维度：默认「不限」（= 该维度不生效），与后端的空模式一致。
+  assetMode: 'all',
+  assetValues: [],
 })
 
 async function loadAll() {
@@ -193,13 +250,26 @@ async function loadAll() {
       typeof x === 'string' ? { name: x, builtin: false, permissions: [] } : x
     )
     catalog.domains = (c && c.domains) || []
+    catalog.assetScopeLabelKey = (c && c.assetScopeLabelKey) || ''
     const gs = Array.isArray(g) ? g : g.groups || []
     groupNames.value = gs.map((x) => (typeof x === 'string' ? x : x.name)).filter(Boolean)
     activeDomains.value = catalog.domains.map((d) => d.domain)
+    await loadAssetValues()
   } catch (e) {
     ElMessage.error(e.message || '加载角色数据失败')
   } finally {
     loading.value = false
+  }
+}
+
+// loadAssetValues 取该标签键下的候选取值（服务端按调用者的可见节点收窄）。
+// 失败（例如没有 assets:read）只是没有候选，不影响填写——`allow-create` 仍可直接输入。
+async function loadAssetValues() {
+  try {
+    const d = await http.get('/api/v1/assets/label-values?key=' + encodeURIComponent(assetKey.value))
+    assetValueOptions.value = (d && d.values) || []
+  } catch (e) {
+    assetValueOptions.value = []
   }
 }
 
@@ -209,6 +279,8 @@ function resetForm() {
   form.permissions = []
   form.scopeMode = 'global'
   form.scopeGroups = []
+  form.assetMode = 'all'
+  form.assetValues = []
 }
 
 function openCreate() {
@@ -224,6 +296,8 @@ function openEdit(row) {
   form.permissions = Array.isArray(row.permissions) ? [...row.permissions] : []
   form.scopeMode = row.scope_mode === 'restricted' ? 'restricted' : 'global'
   form.scopeGroups = Array.isArray(row.scope_groups) ? [...row.scope_groups] : []
+  form.assetMode = row.asset_mode === 'limited' ? 'limited' : 'all'
+  form.assetValues = Array.isArray(row.asset_labels) ? row.asset_labels.map((x) => x.value) : []
   formVisible.value = true
 }
 
@@ -233,10 +307,14 @@ function togglePerm(key, val) {
   else if (!val && i >= 0) form.permissions.splice(i, 1)
 }
 
-function buildScope() {
-  return form.scopeMode === 'restricted'
-    ? { mode: 'restricted', groups: [...form.scopeGroups] }
-    : { mode: 'global', groups: [] }
+// buildAssetLabels 拼业务范围的选择器。
+//
+// 不限时返回**空数组**而不是省略该字段：服务端不允许"声明 all 却带着选择器"，
+// 显式给空数组才表达"这次就是把业务维度关掉"，与"没传这个字段（不改）"区分开。
+function buildAssetLabels() {
+  return form.assetMode === 'limited'
+    ? form.assetValues.map((v) => ({ key: assetKey.value, value: v }))
+    : []
 }
 
 async function saveRole() {
@@ -252,6 +330,8 @@ async function saveRole() {
         permissions: [...form.permissions],
         scopeMode: form.scopeMode,
         scopeGroups: [...form.scopeGroups],
+        assetMode: form.assetMode,
+        assetLabels: buildAssetLabels(),
       })
       ElMessage.success('已保存')
     } else {
@@ -261,6 +341,8 @@ async function saveRole() {
         permissions: [...form.permissions],
         scopeMode: form.scopeMode,
         scopeGroups: [...form.scopeGroups],
+        assetMode: form.assetMode,
+        assetLabels: buildAssetLabels(),
       })
       ElMessage.success('已创建')
     }
@@ -324,6 +406,24 @@ onMounted(loadAll)
   margin: 8px 0 0;
   font-size: 13px;
   color: #e6a23c;
+}
+/* 业务范围是第二个维度，与节点范围是「且」的关系：视觉上也要能看出这是两块，
+   否则很容易被读成"选一个就行"。 */
+.scope-sub {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-color, rgba(128, 128, 128, 0.25));
+}
+.scope-sub-title {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.scope-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
 }
 .perm-matrix {
   width: 100%;

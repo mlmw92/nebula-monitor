@@ -48,6 +48,8 @@ type AssetProvider interface {
 	// LabelsByAssetIDs 批量取资产标签：差异项只有 asset_id、没有标签，业务范围这一维
 	// 无法下推到 SQL，只能在取回后补判（逐条查会变成 N+1）。
 	LabelsByAssetIDs(ids []int64) (map[int64]map[string]string, error)
+	// DistinctLabelValues 取某标签键的候选取值：供角色/用户的业务范围表单做下拉。
+	DistinctLabelValues(key string, nodes []string) ([]string, error)
 	Baselines() ([]asset.Baseline, error)
 	BaselinesInNodes(nodes []string) ([]asset.Baseline, error)
 	BaselineForType(typeKey string) (asset.Baseline, bool, error)
@@ -696,6 +698,34 @@ func (a *API) assetAllowedNodes(p *auth.Principal) []string {
 		out = append(out, n.Hostname)
 	}
 	return out
+}
+
+// handleAssetLabelValues 列出某个标签键的**候选取值**（供角色/用户的业务范围表单使用）。
+//
+// 为什么单开一个接口：范围表单要让人从"实际存在的取值"里选，而不是手打一个查不到的值——
+// 打错的症状是"这个账号什么都看不到"（业务维度 fail-closed），现场很难联想到是拼写问题。
+//
+// 取值按调用者的**可见节点**收窄：配范围的人只该看到他自己看得见的那些值
+// （与 ScopeCovers「不得超过操作者自身范围」是同一取向）。
+func (a *API) handleAssetLabelValues(w http.ResponseWriter, r *http.Request) {
+	if a.assets == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "资产台账未启用"})
+		return
+	}
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	if key == "" {
+		// 不给默认键：调用方应当先取到约定的标签键（见 /auth/permissions 的 assetScopeLabelKey），
+		// 由它明文传过来——静默替调用方猜一个键，猜错时返回空列表，看起来像"没有可选值"。
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "缺少 key 参数"})
+		return
+	}
+	values, err := a.assets.DistinctLabelValues(key, a.assetAllowedNodes(Principal(r)))
+	if err != nil {
+		slog.Error("查询标签取值失败", "key", key, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询标签取值失败"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"key": key, "values": values})
 }
 
 // handleAssetDetail 返回单个资产详情。

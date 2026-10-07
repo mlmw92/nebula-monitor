@@ -21,7 +21,7 @@
             <span v-if="!row.roles || !row.roles.length" class="muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="数据范围" min-width="160">
+        <el-table-column label="数据范围" min-width="200">
           <template #default="{ row }">
             <template v-if="row.scope && row.scope.mode === 'restricted'">
               <el-tag size="small" type="warning" effect="plain">受限</el-tag>
@@ -31,6 +31,21 @@
               </span>
             </template>
             <el-tag v-else size="small" type="success" effect="plain">全部</el-tag>
+            <!-- 业务范围是第二个维度，与节点范围取交集；没配就不显示，避免把「全部」
+                 读成「业务上也不限」（实际语义是"该维度不生效"）。 -->
+            <span v-if="row.scope && row.scope.assetMode === 'limited'" class="scope-groups">
+              <el-tag
+                v-for="l in (row.scope.assetLabels || [])"
+                :key="l.key + '=' + l.value"
+                size="small"
+                type="info"
+                effect="plain"
+                class="grp-tag"
+              >{{ l.key }}={{ l.value }}</el-tag>
+              <el-tag v-if="!(row.scope.assetLabels || []).length" size="small" type="danger" effect="plain" class="grp-tag">
+                业务范围为空 → 无可见资产
+              </el-tag>
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="90">
@@ -94,6 +109,38 @@
             <p v-if="form.scopeMode === 'restricted' && !form.scopeGroups.length" class="scope-warn">
               受限模式未选任何分组时，该用户将看不到任何节点资源。
             </p>
+            <!-- 业务维度：与节点维度独立，两者**取交集**。默认「不限」= 该维度不生效。
+                 这一项通常不必按人配（角色上配一次即可），但"某个人这次只让它看某业务线"
+                 是真实需求，且它**只收窄**：用户自己配了限定就生效，不会被角色的"不限"抵消。 -->
+            <div class="scope-sub">
+              <div class="scope-sub-title">
+                业务范围（按资产标签 <code>{{ assetKey }}</code> 划，可选）
+              </div>
+              <el-radio-group v-model="form.assetMode">
+                <el-radio value="all">不限</el-radio>
+                <el-radio value="limited">限定取值</el-radio>
+              </el-radio-group>
+              <el-select
+                v-if="form.assetMode === 'limited'"
+                v-model="form.assetValues"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                :reserve-keyword="false"
+                placeholder="选择或直接输入标签值（如 pay）"
+                style="width: 100%; margin-top: 10px"
+              >
+                <el-option v-for="v in assetValueOptions" :key="v" :label="v" :value="v" />
+              </el-select>
+              <p class="scope-note">
+                与节点范围是<b>且</b>的关系。<b>这里配了限定就一定会生效</b>（不会被角色上的"不限"抵消）——
+                它只用来给这个人单独收窄。
+              </p>
+              <p v-if="form.assetMode === 'limited' && !form.assetValues.length" class="scope-warn">
+                限定了业务范围却没有取值时，该用户将看不到任何资产（这是"无权限"，不是"不限"）。
+              </p>
+            </div>
           </div>
         </el-form-item>
       </el-form>
@@ -122,7 +169,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import http from '../../api/http'
@@ -170,7 +217,25 @@ const form = reactive({
   roles: [],
   scopeMode: 'global',
   scopeGroups: [],
+  // 业务维度：默认「不限」（= 该维度不生效），与后端的空模式一致。
+  assetMode: 'all',
+  assetValues: [],
 })
+
+// 业务范围的约定标签键由服务端给出（/auth/me）：它可配，写死在前端会在改了键的部署上静默失效。
+const assetKey = computed(() => auth.principal.assetScopeLabelKey || 'biz')
+const assetValueOptions = ref([])
+
+// loadAssetValues 取候选标签值；失败（例如没有 assets:read）只是没有候选，
+// `allow-create` 仍允许直接输入——不因为"看不到候选"就把这个能力藏起来。
+async function loadAssetValues() {
+  try {
+    const d = await http.get('/api/v1/assets/label-values?key=' + encodeURIComponent(assetKey.value))
+    assetValueOptions.value = (d && d.values) || []
+  } catch (e) {
+    assetValueOptions.value = []
+  }
+}
 
 const pwdVisible = ref(false)
 const pwdForm = reactive({ username: '', password: '' })
@@ -187,6 +252,8 @@ async function loadAll() {
     roleNames.value = (Array.isArray(r) ? r : r.roles || []).map((x) => (typeof x === 'string' ? x : x.name))
     const gs = Array.isArray(g) ? g : g.groups || []
     groupNames.value = gs.map((x) => (typeof x === 'string' ? x : x.name)).filter(Boolean)
+    // 业务范围的候选取值（拿不到就只是没有候选，表单仍可手输）
+    await loadAssetValues()
   } catch (e) {
     ElMessage.error(e.message || '加载用户列表失败')
   } finally {
@@ -201,6 +268,8 @@ function resetForm() {
   form.roles = []
   form.scopeMode = 'global'
   form.scopeGroups = []
+  form.assetMode = 'all'
+  form.assetValues = []
 }
 
 function openCreate() {
@@ -217,13 +286,24 @@ function openEdit(row) {
   form.roles = Array.isArray(row.roles) ? [...row.roles] : []
   form.scopeMode = row.scope && row.scope.mode === 'restricted' ? 'restricted' : 'global'
   form.scopeGroups = row.scope && Array.isArray(row.scope.groups) ? [...row.scope.groups] : []
+  form.assetMode = row.scope && row.scope.assetMode === 'limited' ? 'limited' : 'all'
+  form.assetValues = row.scope && Array.isArray(row.scope.assetLabels) ? row.scope.assetLabels.map((x) => x.value) : []
   formVisible.value = true
 }
 
 function buildScope() {
-  return form.scopeMode === 'restricted'
+  const node = form.scopeMode === 'restricted'
     ? { mode: 'restricted', groups: [...form.scopeGroups] }
     : { mode: 'global', groups: [] }
+  // 业务维度：不限时显式给 all + 空数组。服务端不允许"声明 all 却带着选择器"，
+  // 也不把"limited 却没有选择器"当成不限（那是无权限）——两种状态都要能表达出来。
+  const asset = form.assetMode === 'limited'
+    ? {
+        assetMode: 'limited',
+        assetLabels: form.assetValues.map((v) => ({ key: assetKey.value, value: v })),
+      }
+    : { assetMode: 'all', assetLabels: [] }
+  return { ...node, ...asset }
 }
 
 async function saveUser() {
@@ -364,6 +444,23 @@ onMounted(loadAll)
   margin: 8px 0 0;
   font-size: 13px;
   color: #e6a23c;
+}
+/* 业务范围是第二个维度，与节点范围是「且」：视觉上要能看出这是两块。 */
+.scope-sub {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-color, rgba(128, 128, 128, 0.25));
+}
+.scope-sub-title {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.scope-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
 }
 .table-card {
   width: 100%;

@@ -24,11 +24,15 @@ func (a *API) handleMe(w http.ResponseWriter, r *http.Request) {
 		perms = append(perms, k)
 	}
 	writeJSON(w, 200, map[string]interface{}{
-		"username":     p.Username,
-		"displayName":  p.DisplayName,
-		"roles":        p.Roles,
-		"permissions":  perms,
-		"scope":        p.Scope,
+		"username":    p.Username,
+		"displayName": p.DisplayName,
+		"roles":       p.Roles,
+		"permissions": perms,
+		"scope":       p.Scope,
+		// 业务范围的约定标签键：角色/用户表单要显示"正在按哪个标签划范围"。
+		// 放在 /auth/me（任何登录用户都读得到）而不是权限目录（要 roles:read）：
+		// 只有 users:manage 的账号也要能正确显示这个键。
+		"assetScopeLabelKey": a.scopeLabelKey(),
 	})
 }
 
@@ -111,6 +115,10 @@ func (a *API) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	operator := AuthenticatedUser(r)
+	if err := a.checkScopeWithinOperator(r, body.Scope); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
 	u := auth.User{
 		Username:    body.Username,
 		DisplayName: body.DisplayName,
@@ -141,6 +149,12 @@ func (a *API) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "请求体解析失败"})
 		return
+	}
+	if body.Scope != nil {
+		if err := a.checkScopeWithinOperator(r, *body.Scope); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	patch := auth.UserPatch{
 		DisplayName: body.DisplayName,
@@ -262,11 +276,14 @@ func (a *API) handleGetRole(w http.ResponseWriter, r *http.Request) {
 
 // createRoleRequest 创建角色请求体。
 type createRoleRequest struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	Permissions []string   `json:"permissions"`
-	ScopeMode   string     `json:"scopeMode"`
-	ScopeGroups []string   `json:"scopeGroups"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
+	ScopeMode   string   `json:"scopeMode"`
+	ScopeGroups []string `json:"scopeGroups"`
+	// 业务范围（资产标签维度）：AssetMode 空 / "all" = 该维度不生效；"limited" + 取值 = 限定。
+	AssetMode   string            `json:"assetMode"`
+	AssetLabels []auth.AssetScope `json:"assetLabels"`
 }
 
 // handleCreateRole 创建自定义角色。
@@ -287,6 +304,12 @@ func (a *API) handleCreateRole(w http.ResponseWriter, r *http.Request) {
 		Permissions: body.Permissions,
 		ScopeMode:   body.ScopeMode,
 		ScopeGroups: body.ScopeGroups,
+		AssetMode:   body.AssetMode,
+		AssetLabels: body.AssetLabels,
+	}
+	if err := a.checkScopeWithinOperator(r, rl.RoleScope()); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
 	}
 	if err := a.authStore.CreateRole(rl, AuthenticatedUser(r), operatorScope); err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
@@ -298,10 +321,13 @@ func (a *API) handleCreateRole(w http.ResponseWriter, r *http.Request) {
 
 // updateRoleRequest 更新角色请求体。
 type updateRoleRequest struct {
-	Description  *string   `json:"description"`
-	Permissions  []string  `json:"permissions"`
-	ScopeMode    *string   `json:"scopeMode"`
-	ScopeGroups  []string  `json:"scopeGroups"`
+	Description *string   `json:"description"`
+	Permissions []string  `json:"permissions"`
+	ScopeMode   *string   `json:"scopeMode"`
+	ScopeGroups []string  `json:"scopeGroups"`
+	// nil = 本次不改（与 ScopeGroups 同一套语义）；关掉业务维度就显式给 "all"。
+	AssetMode   *string           `json:"assetMode"`
+	AssetLabels []auth.AssetScope `json:"assetLabels"`
 }
 
 // handleUpdateRole 更新自定义角色。
@@ -312,11 +338,34 @@ func (a *API) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "请求体解析失败"})
 		return
 	}
+	// 更新与创建是等价的能力（都能把范围改宽），因此更新路径同样要判"不得超过操作者自身范围"。
+	// 判的是**改完之后**的范围：只改其中一个字段也可能组出更宽的组合。
+	if cur, ok := a.authStore.LookupRole(name); ok {
+		target := cur
+		if body.ScopeMode != nil {
+			target.ScopeMode = *body.ScopeMode
+		}
+		if body.ScopeGroups != nil {
+			target.ScopeGroups = body.ScopeGroups
+		}
+		if body.AssetMode != nil {
+			target.AssetMode = *body.AssetMode
+		}
+		if body.AssetLabels != nil {
+			target.AssetLabels = body.AssetLabels
+		}
+		if err := a.checkScopeWithinOperator(r, target.RoleScope()); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 	patch := auth.RolePatch{
 		Description: body.Description,
 		Permissions: body.Permissions,
 		ScopeMode:   body.ScopeMode,
 		ScopeGroups: body.ScopeGroups,
+		AssetMode:   body.AssetMode,
+		AssetLabels: body.AssetLabels,
 	}
 	if err := a.authStore.UpdateRole(name, patch); err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
@@ -341,9 +390,37 @@ func (a *API) handleDeleteRole(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"ok": "true"})
 }
 
-// handlePermissionCatalog 返回全部权限点（按业务域分组）。
+// handlePermissionCatalog 返回全部权限点（按业务域分组）+ 业务范围的约定标签键。
+//
+// 标签键一并给出，是为了让角色/用户表单能显示"正在按哪个标签划范围"，
+// 并用它去取候选值（/assets/label-values?key=…）——键名在前端硬编码的话，
+// 部署方改过键之后表单会静默地去查一个不存在的键，看起来像"没有可选值"。
 func (a *API) handlePermissionCatalog(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]interface{}{"domains": auth.PermissionCatalog()})
+	writeJSON(w, 200, map[string]interface{}{
+		"domains":            auth.PermissionCatalog(),
+		"assetScopeLabelKey": a.scopeLabelKey(),
+	})
+}
+
+// scopeLabelKey 返回约定的业务范围标签键（未启用授权时给默认值）。
+func (a *API) scopeLabelKey() string {
+	if a.authStore == nil {
+		return auth.DefaultScopeLabelKey
+	}
+	return a.authStore.ScopeLabelKey()
+}
+
+// checkScopeWithinOperator 校验目标范围不得超过操作者自身范围（**两个维度都判**）。
+//
+// 为什么必须在这一层补：此前只有「创建自定义角色」一条路径有范围约束，创建/更新用户与
+// 更新角色都能把范围改宽——那等于受限管理员可以给自己或别人提权。范围是收窄工具，
+// 四条写路径都要过这里（节点维度由 store 兜一次，业务维度只有这里判）。
+func (a *API) checkScopeWithinOperator(r *http.Request, target auth.Scope) error {
+	p := Principal(r)
+	if p == nil {
+		return nil // 未启用认证（单管理员模式）：没有"操作者范围"可言
+	}
+	return auth.ScopeCovers(p.Scope, target)
 }
 
 // recordAuthAudit 记录权限模型相关管理操作。

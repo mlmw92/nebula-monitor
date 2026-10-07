@@ -212,6 +212,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// 按「类型 + 自然键」精确查一条：供跨页联动（如容器页的 Pod → 台账资产）使用。
 	// 字面量路径比 {id} 更具体，ServeMux 会优先匹配。
 	mux.HandleFunc("GET /api/v1/assets/lookup", a.permit(a.handleAssetLookup, "assets:read"))
+	// 标签候选取值：供角色/用户的业务范围表单做下拉。按可见节点收窄，权限沿用 assets:read。
+	mux.HandleFunc("GET /api/v1/assets/label-values", a.permit(a.handleAssetLabelValues, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}", a.permit(a.handleAssetDetail, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}/history", a.permit(a.handleAssetHistory, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}/links", a.permit(a.handleAssetLinks, "assets:read"))

@@ -940,6 +940,43 @@ func (s *Store) labelsByAssetIDs(ids []int64) (map[int64]map[string]string, erro
 	return out, rows.Err()
 }
 
+// distinctLabelValues 取某个标签键下的所有取值（去重、有序），可限定在给定节点范围内。
+//
+// 用途：角色/用户表单需要"业务范围有哪些可选值"作为候选。限定节点范围是刻意的——
+// 配范围的人只该看到他自己看得见的那些值（与「范围不得超过操作者自身范围」同一取向）。
+func (s *Store) distinctLabelValues(key string, nodes []string) ([]string, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, nil
+	}
+	q := `SELECT DISTINCT l.value FROM asset_labels l JOIN assets a ON a.id=l.asset_id WHERE l.key=?`
+	args := []any{key}
+	if nodes != nil {
+		if len(nodes) == 0 {
+			return []string{}, nil // 受限但没有任何可见节点：没有可选项
+		}
+		q += ` AND a.node IN (` + placeholders(len(nodes)) + `)`
+		for _, n := range nodes {
+			args = append(args, n)
+		}
+	}
+	q += ` ORDER BY l.value`
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("查询标签取值失败: %w", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, fmt.Errorf("读取标签取值失败: %w", err)
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 // int64sToAny 把 id 列表转成 driver 需要的 []any（IN 子句的绑定参数）。
 func int64sToAny(ids []int64) []any {
 	out := make([]any, 0, len(ids))

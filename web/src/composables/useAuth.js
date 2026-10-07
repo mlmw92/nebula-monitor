@@ -13,7 +13,10 @@ function defaults() {
     displayName: '',
     roles: [], // 角色名数组
     permissions: [], // 权限点数组
-    scope: { mode: 'global', groups: [] } // 资源范围：global 或 restricted(groups)
+    scope: { mode: 'global', groups: [] }, // 资源范围：节点分组 + 业务标签两个维度
+    // 业务范围约定的资产标签键（由服务端给出）：表单要显示"正在按哪个标签划范围"，
+    // 硬编码在前端的话，部署方改过键之后表单会静默地去查一个不存在的键。
+    assetScopeLabelKey: ''
   }
 }
 
@@ -69,8 +72,15 @@ export function useAuth() {
           principal.roles = Array.isArray(d.roles) ? d.roles : []
           principal.permissions = Array.isArray(d.permissions) ? d.permissions : []
           principal.scope = d.scope && d.scope.mode
-            ? { mode: d.scope.mode, groups: Array.isArray(d.scope.groups) ? d.scope.groups : [] }
-            : { mode: 'global', groups: [] }
+            ? {
+                mode: d.scope.mode,
+                groups: Array.isArray(d.scope.groups) ? d.scope.groups : [],
+                // 业务维度原样带上：表单要用它回显与拼请求（不用就丢掉，前端少一份隐式状态）
+                assetMode: d.scope.assetMode || '',
+                assetLabels: Array.isArray(d.scope.assetLabels) ? d.scope.assetLabels : []
+              }
+            : { mode: 'global', groups: [], assetMode: '', assetLabels: [] }
+          principal.assetScopeLabelKey = d.assetScopeLabelKey || ''
           principal.loaded = true
           persist()
         }

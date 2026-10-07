@@ -829,9 +829,34 @@ const saving = ref(false)
 const loadError = ref('')
 const summary = ref({ total: 0, missing: 0, noOwner: 0, conflict: 0, changes: 0, ignored: 0 })
 
+// 业务范围（资产标签维度）生效时的空态说明。
+//
+// 为什么必须专门说一句：摘要与列表共用同一套范围条件，所以"范围把你挡在外面"时
+// **两个数字都是 0**，与"台账真的还没有任何资产"长得一模一样。不说清楚的话，
+// 用户会去查 Agent 有没有连上、采集是不是坏了——而真正的原因是他的账号只覆盖某几条业务线。
+const scopeLimited = computed(() => {
+  const sc = auth.principal && auth.principal.scope
+  return !!sc && sc.assetMode === 'limited'
+})
+const scopeLabelText = computed(() => {
+  const sc = (auth.principal && auth.principal.scope) || {}
+  const labels = Array.isArray(sc.assetLabels) ? sc.assetLabels : []
+  return labels.map((l) => `${l.key}=${l.value}`).join('、')
+})
+
 // 列表空态：区分「台账本身就是空的」与「被筛选掉了」，并指向下一步动作
-const listEmptyTitle = computed(() => (summary.value.total > 0 ? '没有匹配的资产' : '资产台账为空'))
+const listEmptyTitle = computed(() => {
+  if (scopeLimited.value) return '当前业务范围内没有资产'
+  return summary.value.total > 0 ? '没有匹配的资产' : '资产台账为空'
+})
 const listHints = computed(() => {
+  if (scopeLimited.value) {
+    return [
+      `你的账号限定了业务标签：${scopeLabelText.value || '（未配置任何取值 → 看不到任何资产）'}`,
+      '业务范围与节点范围是「且」的关系：两个范围都放行才看得见该资产',
+      '没打标签的资产不属于任何业务范围；需要更多资产请联系管理员调整范围或补打标签',
+    ]
+  }
   if (summary.value.total > 0) {
     return [
       `台账共 ${summary.value.total} 条资产，当前筛选条件下没有匹配项`,
