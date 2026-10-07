@@ -2,6 +2,7 @@ package receiver
 
 import (
 	"log/slog"
+	"net"
 	"strconv"
 	"strings"
 
@@ -50,9 +51,15 @@ func (r *Receiver) applyAssets(p *model.ReportPayload) {
 		slog.Warn("写入主机资产失败", "node", p.Node, "err", err)
 	}
 
-	// 中间件实例资产 + runs_on 关联。
+	// 中间件实例资产与关系。**分两趟走**：
+	//   ① 先落全部实例资产；
+	//   ② 再统一维护关系（宿主 runs_on + 主从依赖 depends_on）。
+	//
+	// 顺序在这里是**正确性**而非优化：副本可能先于主库出现在同一份清单里，而 depends_on
+	// 要求两端资产都已存在——与 applyContainerInventory 里"先工作负载、后 Pod"同一类约束。
 	// 实例清单每轮都上报，Apply 内部按自然键幂等、且只在值真变化时写变更记录，
 	// 因此这里可以放心地每轮提交。
+	instances := make([]instancePlan, 0, 8)
 	for _, ob := range instanceObservations(p) {
 		if strings.TrimSpace(ob.Addr) == "" {
 			continue
@@ -65,6 +72,13 @@ func (r *Receiver) applyAssets(p *model.ReportPayload) {
 		// 容器/实例自身的运行状态与镜像：台账里"为什么不可达"要靠它们才说得清。
 		putIfNotEmpty(attrs, "status", ob.Status)
 		putIfNotEmpty(attrs, "image", ob.Image)
+		// 主从关系也落成属性：关系图回答"有这条边"，台账要能回答"这条边为什么存在"。
+		putIfNotEmpty(attrs, "replicaOf", ob.ReplicaOf)
+		// 地址里的主机部分：宿主判定不成立时，它是唯一能解释"为什么没有 runs_on 边"的线索
+		// （否则用户只能看到"这个实例没挂到任何机器上"，无从判断）。
+		if host, ok := instanceHost(ob.Addr); ok {
+			attrs["addrHost"] = host
+		}
 		if ob.HasUp {
 			attrs["up"] = strconv.FormatBool(ob.Up)
 		}
@@ -76,19 +90,196 @@ func (r *Receiver) applyAssets(p *model.ReportPayload) {
 			slog.Warn("写入中间件实例资产失败", "type", ob.Type, "instance", ob.Addr, "err", err)
 			continue
 		}
-		// 采集路径：走 LinkDiscovered —— 它会跳过被人工抑制过的边，
-		// 也不会把人工认领过的同一条边降级回 discovery。
-		if err := r.assets.LinkDiscovered(
-			asset.Ref{TypeKey: instance.TypeKey, NaturalKey: instance.NaturalKey}, hostRef, asset.LinkRunsOn,
-		); err != nil {
-			// 主机资产写入失败时这里会报错：只影响关系，不影响实例本身，故不中断循环。
-			slog.Warn("建立实例 → 主机关联失败", "type", ob.Type, "instance", ob.Addr, "err", err)
-		}
+		instances = append(instances, instancePlan{
+			ref:       asset.Ref{TypeKey: instance.TypeKey, NaturalKey: instance.NaturalKey},
+			kind:      ob.Type,
+			addr:      ob.Addr,
+			replicaOf: ob.ReplicaOf,
+		})
+	}
+	for _, it := range instances {
+		r.linkInstance(it, hostRef, p)
 	}
 
 	// K8s 容器/工作负载清单。与上面同一套原则（只以 discovery 提交、幂等、失败只记日志），
 	// 但多一条**顺序约束**，见其函数注释。
 	r.applyContainerInventory(p)
+}
+
+// instancePlan 是一条待维护关系的实例（先落资产、再建边，顺序见 applyAssets）。
+type instancePlan struct {
+	ref       asset.Ref
+	kind      string // 实例类型前缀（redis / mysql / …），用来拼主库的自然键
+	addr      string
+	replicaOf string
+}
+
+// linkInstance 维护一条实例资产的两组关系：宿主（runs_on）与主从依赖（depends_on）。
+//
+// 两条边都以**本轮上报**为准：不只是"该有的建上"，还包括"不该有的清掉"。边只增不减的话，
+// 一次误判或一次主从切换会永久留在影响面里——那是"看着像事实"的错，比缺一条边糟得多。
+func (r *Receiver) linkInstance(it instancePlan, hostRef asset.Ref, p *model.ReportPayload) {
+	r.linkInstanceHost(it, hostRef, p)
+	r.linkInstanceMaster(it)
+}
+
+// linkInstanceHost 维护「实例 runs_on 主机」。
+//
+// **只有地址里的主机确实是这台机器时才建边。** 旧口径一律挂上报节点，于是 exporter 模式、
+// 或跨机采集（Agent 去读别处的实例）会把**采集机**记成宿主——这不是"少一条边"，而是影响面里
+// 多一条假事实：真正跑该库的机器被漏掉、采集机被误标成它的宿主。
+//
+// 判定不出来时的取舍与 pod→host 一致：**不猜**。分两种情形：
+//   - 地址不是 `主机:端口` 形态（docker 的容器 ID、k8s 带 scheme 的 URL 等）：这类实例本来
+//     就跑在采集机上，按原样挂；
+//   - 地址明确指向别的机器：不建边，并把旧版本建下的错边清掉（只清采集建的，人工边不动）。
+func (r *Receiver) linkInstanceHost(it instancePlan, hostRef asset.Ref, p *model.ReportPayload) {
+	host, isAddr := instanceHost(it.addr)
+	if !isAddr || hostMatchesNode(host, p.Node, p.IP) {
+		// 采集路径：走 LinkDiscovered —— 它会跳过被人工抑制过的边，
+		// 也不会把人工认领过的同一条边降级回 discovery。
+		if err := r.assets.LinkDiscovered(it.ref, hostRef, asset.LinkRunsOn); err != nil {
+			// 主机资产写入失败时这里会报错：只影响关系，不影响实例本身，故不中断循环。
+			slog.Warn("建立实例 → 主机关联失败", "kind", it.kind, "instance", it.addr, "err", err)
+		}
+		return
+	}
+	removed, err := r.assets.UnlinkDiscovered(it.ref, hostRef, asset.LinkRunsOn)
+	if err != nil {
+		slog.Warn("撤销实例 → 主机关联失败", "kind", it.kind, "instance", it.addr, "err", err)
+		return
+	}
+	if removed {
+		slog.Info("实例地址不属于本机，已撤销旧的宿主关联",
+			"kind", it.kind, "instance", it.addr, "addrHost", host, "node", p.Node, "nodeIP", p.IP)
+	}
+}
+
+// linkInstanceMaster 维护「副本 depends_on 主库」。
+//
+// 主库不在台账（外部库、尚未纳管）时**不建边、也不造占位资产**：编一个我们不认识的资产，
+// 只会让台账里多出一条没有采集、没有责任人的记录，还会污染清单与告警匹配。
+// 反过来，副本被提升（ReplicaOf 变空）或改指别处时，旧的依赖必须清掉——否则影响面会一直
+// 显示"它还依赖那台早已不是它主库的机器"。
+func (r *Receiver) linkInstanceMaster(it instancePlan) {
+	want := ""
+	if isHostPort(it.replicaOf) {
+		// 主库的自然键与实例同构（`<类型>:<地址>`），用的是同一套地址归一化——
+		// 采集侧保证 ReplicaOf 与 Instance 同形，所以这里能精确对上，不需要任何猜测。
+		want = it.kind + ":" + it.replicaOf
+	}
+	for _, l := range r.instanceMasterLinks(it.ref) {
+		if want != "" && l.To.NaturalKey == want {
+			continue // 本轮应有的那条，留着
+		}
+		if _, err := r.assets.UnlinkDiscovered(it.ref, l.To, asset.LinkDependsOn); err != nil {
+			slog.Warn("清理过期的主从依赖失败", "instance", it.addr, "master", l.To.NaturalKey, "err", err)
+		}
+	}
+	if want == "" {
+		return
+	}
+	masterRef := asset.Ref{TypeKey: asset.TypeMiddlewareInst, NaturalKey: want}
+	if _, ok, err := r.assets.Get(masterRef); err != nil {
+		slog.Warn("查询主库资产失败", "master", want, "err", err)
+		return
+	} else if !ok {
+		return // 主库不在台账：不建边（查不到不是错误，不刷日志）
+	}
+	if err := r.assets.LinkDiscovered(it.ref, masterRef, asset.LinkDependsOn); err != nil {
+		slog.Warn("建立副本 → 主库关联失败", "instance", it.addr, "master", want, "err", err)
+	}
+}
+
+// instanceMasterLinks 取该实例**出边**里由采集建立的 depends_on（人工边不在此列）。
+func (r *Receiver) instanceMasterLinks(ref asset.Ref) []asset.Link {
+	links, err := r.assets.Links(ref)
+	if err != nil {
+		slog.Warn("查询实例关联失败", "instance", ref.NaturalKey, "err", err)
+		return nil
+	}
+	out := make([]asset.Link, 0, 2)
+	for _, l := range links {
+		if l.Kind == asset.LinkDependsOn && l.From == ref && l.Source != asset.SourceManual {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// instanceHost 从实例地址里取出"主机部分"；取不出（或根本不是地址形态）时 ok=false。
+//
+// 上报里真实存在三种形态，必须分开对待：
+//   - `host:port`（redis / mysql 等）→ 可取；
+//   - 带 scheme 的 URL（k8s 的 `https://127.0.0.1:6443`）→ 去掉 scheme 后再取；
+//   - 根本不是地址（docker 的容器 ID `abc123def456`、实例别名等）→ 取不出，
+//     这类实例本来就跑在采集机上，"取不出"不等于"不是本机"。
+func instanceHost(addr string) (string, bool) {
+	a := strings.TrimSpace(addr)
+	if a == "" {
+		return "", false
+	}
+	if i := strings.Index(a, "://"); i >= 0 {
+		a = a[i+3:]
+	}
+	host, _, err := net.SplitHostPort(a)
+	if err != nil {
+		return "", false
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "", false
+	}
+	return host, true
+}
+
+// hostMatchesNode 判断实例地址的主机部分是否就是"这台机器"：
+//   - 回环地址（127.0.0.1 / ::1 / localhost）算本机——本机实例就该挂在本机上；
+//   - 与上报 IP 相同算本机；
+//   - 与上报主机名相同（忽略大小写、忽略 FQDN 后缀）算本机。后缀这条与 Pod→主机那条边的
+//     口径一致：K8s 名字按 RFC 1123 一律小写、系统主机名保留原样，严格比对会把同一台机器
+//     判成两台（见 applyContainerInventory 的 hostNameOf）。
+//
+// 其余一律**不算**：宁可少一条边，也不把采集机记成宿主（设计件 §2.3）。
+func hostMatchesNode(host, node, nodeIP string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "" {
+		return false
+	}
+	switch h {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	if ip := strings.ToLower(strings.TrimSpace(nodeIP)); ip != "" && h == ip {
+		return true
+	}
+	n := strings.ToLower(strings.TrimSpace(node))
+	if n == "" {
+		return false
+	}
+	return h == n || shortHostName(h) == shortHostName(n)
+}
+
+// shortHostName 取主机名的第一段（FQDN → 短名），用于宽松比对。
+func shortHostName(name string) string {
+	if i := strings.Index(name, "."); i > 0 {
+		return name[:i]
+	}
+	return name
+}
+
+// isHostPort 判断一个字符串是不是 `主机:端口` 形态的地址（端口必须是数字）。
+//
+// 挡一道是为了防一类具体错误：中间件查询接口会给哨兵发现的 master 写 `sentinel:<名字>`
+// （那是给人看的标签、不是地址），拿它拼自然键会去查一个不存在的资产。虽然"查不到就不建边"
+// 也能兜住，但那会把"我们根本没有这个地址"混进"这个主库还没纳管"里，日志会误导人。
+func isHostPort(addr string) bool {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil || strings.TrimSpace(host) == "" {
+		return false
+	}
+	_, err = strconv.Atoi(port)
+	return err == nil
 }
 
 // applyContainerInventory 把本轮上报的 K8s 清单落成台账资产与关系。
@@ -241,6 +432,13 @@ type assetObs struct {
 	Status string
 	// Image 是容器镜像名（同样只有 Docker 用），用于台账里辨认这个实例到底是哪个镜像跑起来的。
 	Image string
+	// ReplicaOf 是主从关系里"主库的地址"（只有 redis / mysql / postgres 报它）。
+	//
+	// 它一直存在于上报载荷里（`model.RedisInstance.ReplicaOf` 等），此前**没有进这个结构体**
+	// ——于是采集侧辛苦取到的主从关系在映射这一步被丢掉，台账里从来没有 depends_on 边。
+	// 采集侧保证它与 Instance 同形（同一套地址归一化），因此可以直接拼自然键：
+	// 主库资产存在时精确命中，不存在时不建边（不造占位）。
+	ReplicaOf string
 }
 
 func collectObs[T any](items []T, pick func(T) assetObs) []assetObs {
@@ -256,15 +454,15 @@ func instanceObservations(p *model.ReportPayload) []assetObs {
 	var out []assetObs
 	out = append(out, collectObs(p.RedisInstances, func(i model.RedisInstance) assetObs {
 		return assetObs{Type: "redis", Addr: i.Instance, Name: i.Name, Group: i.Group, Role: i.Role,
-			Topology: i.Topology, Version: i.Version, Up: i.Up, HasUp: true}
+			Topology: i.Topology, Version: i.Version, Up: i.Up, HasUp: true, ReplicaOf: i.ReplicaOf}
 	})...)
 	out = append(out, collectObs(p.MySQLInstances, func(i model.MySQLInstance) assetObs {
 		return assetObs{Type: "mysql", Addr: i.Instance, Name: i.Name, Group: i.Group, Role: i.Role,
-			Topology: i.Topology, Version: i.Version, Up: i.Up, HasUp: true}
+			Topology: i.Topology, Version: i.Version, Up: i.Up, HasUp: true, ReplicaOf: i.ReplicaOf}
 	})...)
 	out = append(out, collectObs(p.PostgresInstances, func(i model.PostgresInstance) assetObs {
 		return assetObs{Type: "postgres", Addr: i.Instance, Name: i.Name, Group: i.Group, Role: i.Role,
-			Topology: i.Topology, Version: i.Version, Up: i.Up, HasUp: true}
+			Topology: i.Topology, Version: i.Version, Up: i.Up, HasUp: true, ReplicaOf: i.ReplicaOf}
 	})...)
 	out = append(out, collectObs(p.NginxInstances, func(i model.NginxInstance) assetObs {
 		return assetObs{Type: "nginx", Addr: i.Instance, Name: i.Name, Group: i.Group,

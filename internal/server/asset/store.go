@@ -1293,6 +1293,30 @@ func (s *Store) unlinkAssets(fromID, toID int64, kind LinkKind) error {
 	return nil
 }
 
+// unlinkDiscovered 删除一条**采集建的**边；人工认领过的（source=manual）一律不动。
+//
+// 与 unlinkAssets 的区别是"谁来纠正"：那条只服务于人工删除，且必须配套写抑制记录
+// （否则下一轮采集立刻建回来）；这一条服务于**采集侧纠正自己建错的边**（如把跨机采集的
+// 实例挂在了采集机上），刻意**不落抑制**——抑制的语义是"人工禁止这条边再出现"，
+// 而这里是"我们建错了"：判定成立时（机器迁移、地址改正）这条边应该能重新长出来。
+//
+// source 用 `<> 'manual'` 而不是 `= 'discovery'`：最早那批存量行可能没有 source（''），
+// 它们是采集建的，同样应该被纠正。
+func (s *Store) unlinkDiscovered(fromID, toID int64, kind LinkKind) (bool, error) {
+	res, err := s.db.Exec(
+		`DELETE FROM asset_links WHERE from_id=? AND to_id=? AND kind=? AND source<>'manual'`,
+		fromID, toID, string(kind))
+	if err != nil {
+		return false, fmt.Errorf("删除采集建立的关联失败: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		// 删成功但拿不到影响行数：不算失败（边已经删了），只是不知道要不要记日志
+		return false, nil
+	}
+	return n > 0, nil
+}
+
 // suppressLink 记录「这条采集来的边被人工删掉了」，采集侧据此不再重建（幂等）。
 func (s *Store) suppressLink(fromID, toID int64, kind LinkKind, by string, at int64) error {
 	if _, err := s.db.Exec(

@@ -475,6 +475,20 @@ func (s *Service) RestoreDiscovered(from, to Ref, kind LinkKind) error {
 	return s.store.clearLinkSuppression(fromAsset.ID, toAsset.ID, kind)
 }
 
+// UnlinkDiscovered 删除一条**采集建的**关联，供采集侧纠正自己建错的边。
+//
+// 与 UnlinkManual 的分工：那条是人工逻辑删除（删边 + 落抑制，采集不得重建）；
+// 这条是采集侧的自纠（只删边、**不落抑制**），因为"建错了"与"人说过它不存在"是两件事。
+// 人工认领过的边不会被删（返回 false）。
+// 返回是否真的删掉了一条，调用方据此记日志。
+func (s *Service) UnlinkDiscovered(from, to Ref, kind LinkKind) (bool, error) {
+	fromAsset, toAsset, err := s.resolveLinkPair(from, to, kind)
+	if err != nil {
+		return false, err
+	}
+	return s.store.unlinkDiscovered(fromAsset.ID, toAsset.ID, kind)
+}
+
 // SuppressedLinks 返回与某资产相关、被人工抑制掉的关联（供界面展示并可恢复）。
 func (s *Service) SuppressedLinks(ref Ref) ([]SuppressedLink, error) {
 	a, err := s.resolve(ref)

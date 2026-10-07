@@ -103,6 +103,17 @@ func (c *PostgresCollector) collectDirect(ctx context.Context, cfg model.Postgre
 		"version":  settings["server_version"],
 		"database": cfg.Database,
 	}
+	// 4. standby 上取主库地址——主从关系是"依赖"这类关联里唯一有**直接证据**的来源，
+	//    而 PostgresInstance.ReplicaOf 此前没有任何采集器填它，于是"副本 → 主库"这条边
+	//    永远建不起来（redis/mysql 早就填了）。数据就在 pg_stat_wal_receiver.conninfo 里。
+	//    取不到（不是 standby、权限不足、连接串缺 host/port）就留空：宁可不建边，不猜。
+	replicaOf := ""
+	if isStandby {
+		if primary := queryPGPrimaryAddr(ctx, db); primary != "" {
+			replicaOf = primary
+			labels["replica_of"] = primary
+		}
+	}
 
 	mk := func(name string, val float64) model.Metric {
 		return model.Metric{Node: c.node, Name: name, Labels: labels, Value: val, Timestamp: now}
@@ -151,15 +162,16 @@ func (c *PostgresCollector) collectDirect(ctx context.Context, cfg model.Postgre
 	}
 
 	pi := model.PostgresInstance{
-		Instance: normalizeRemoteAddr(cfg.Addr, ""),
-		Name:     cfg.Name,
-		Node:     c.node,
-		Role:     role,
-		Topology: cfg.Topology,
-		Group:    cfg.Name,
-		Version:  settings["server_version"],
-		Database: cfg.Database,
-		Up:       true,
+		Instance:  normalizeRemoteAddr(cfg.Addr, ""),
+		Name:      cfg.Name,
+		Node:      c.node,
+		Role:      role,
+		Topology:  cfg.Topology,
+		Group:     cfg.Name,
+		ReplicaOf: replicaOf,
+		Version:   settings["server_version"],
+		Database:  cfg.Database,
+		Up:        true,
 	}
 	return out, pi
 }
@@ -266,6 +278,32 @@ func queryPGReplication(ctx context.Context, db *sql.DB) (float64, string, bool,
 		return -1, "", true, nil
 	}
 	return lag, state, true, nil
+}
+
+// queryPGPrimaryAddr 返回 standby 所连主库的 `host:port`；取不到返回空串。
+//
+// 数据来自 pg_stat_wal_receiver.conninfo（standby 上必有，形如
+// `host=10.0.0.9 port=5432 user=repl application_name=...`）。**host 与 port 缺一不可**：
+// 拼不出地址的连接串直接丢掉，别把它当成"主库在某个奇怪的地方"——宁可不建边，也不给错依赖。
+func queryPGPrimaryAddr(ctx context.Context, db *sql.DB) string {
+	var conninfo string
+	if err := db.QueryRowContext(ctx,
+		"SELECT conninfo FROM pg_stat_wal_receiver LIMIT 1").Scan(&conninfo); err != nil {
+		return ""
+	}
+	var host, port string
+	for _, field := range strings.Fields(conninfo) {
+		switch {
+		case strings.HasPrefix(field, "host="):
+			host = strings.Trim(strings.TrimPrefix(field, "host="), "'\"")
+		case strings.HasPrefix(field, "port="):
+			port = strings.Trim(strings.TrimPrefix(field, "port="), "'\"")
+		}
+	}
+	if host == "" || port == "" {
+		return ""
+	}
+	return normalizeRemoteAddr(host+":"+port, "")
 }
 
 // queryPGDatabaseSize 查询数据库大小（字节）。
