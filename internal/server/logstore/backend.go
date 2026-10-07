@@ -67,6 +67,48 @@ type LogStore interface {
 	Sources() []string
 	// FieldNames 返回某来源已见过的结构化字段名（有序），供界面做筛选候选。
 	FieldNames(source string) []string
+	// Capability 报告"这个后端能做什么、存了什么"（批次 23）。
+	//
+	// 为什么由**实现**回答而不是接口层按配置推断：能力是后端自身的属性（本地没有索引、
+	// VictoriaLogs 有），凭配置猜就成了"把配置当能力"，而这两者在运维眼里是同一句话。
+	// 探测失败必须如实回报（见 StorageStats.Err），不能退化成 0。
+	Capability() Capability
+}
+
+// ScanBudget 是本地后端"有界扫描"的预算：一次检索最多扫多少字节与多少行。
+//
+// 外部后端没有这个概念（`nil`）——不是"预算无穷大"，而是"逐文件扫描"这件事不存在。
+type ScanBudget struct {
+	Bytes int64
+	Lines int
+}
+
+// StorageStats 是后端**实际**存了什么（探测所得，不是配置值）。
+//
+// 三态要分清：正常（Err 空）／没有日志（各项为 0 且 Err 空）／**探测不到**（Err 非空）。
+// 把最后一类显示成 0，用户会以为日志丢了——这正是这条能力端点要避免的误导。
+// 外部后端不掌握的项目（容量、保留期）留零值并由 Capability.Notes 说明，不编造。
+type StorageStats struct {
+	Sources   int
+	Nodes     int
+	OldestDay string // YYYY-MM-DD（本地后端按天分片，日期粒度就是它的天然粒度）
+	NewestDay string
+	Bytes     int64
+	// Truncated 表示探测自身触到条目上限（目录很大时提前停）：报的是"至少这么多"。
+	Truncated bool
+	Err       string
+}
+
+// Capability 是一个日志后端"能做什么、存了什么"。
+type Capability struct {
+	Backend       string
+	FullTextIndex bool
+	FieldIndex    bool
+	// ScanBudget 仅本地后端有；外部后端为 nil。
+	ScanBudget *ScanBudget
+	// Notes 是给运维看的一句话说明：能力边界、以及"哪些项为什么是空的"。
+	Notes   []string
+	Storage StorageStats
 }
 
 // VictoriaLogsOptions 是外部后端的连接参数。

@@ -28,6 +28,75 @@ import (
 // 上面的 503 判断随即失效——注入前必须显式判空（见 cmd/server 的写法）。
 func (a *API) SetLogStore(s logstore.LogStore) { a.logs = s }
 
+// logBackendResponse 是日志后端能力与现状的对外形态。
+type logBackendResponse struct {
+	Backend      string              `json:"backend"`
+	Capabilities logCapabilitiesView `json:"capabilities"`
+	Storage      logStorageView      `json:"storage"`
+}
+
+type logCapabilitiesView struct {
+	FullTextIndex bool            `json:"fullTextIndex"`
+	FieldIndex    bool            `json:"fieldIndex"`
+	// ScanBudget 仅本地后端有；外部后端为 null（"逐文件扫描"那件事不存在，不是预算无穷大）。
+	ScanBudget *scanBudgetView `json:"scanBudget"`
+	Notes      []string        `json:"notes"`
+}
+
+type scanBudgetView struct {
+	Bytes int64 `json:"bytes"`
+	Lines int   `json:"lines"`
+}
+
+type logStorageView struct {
+	Sources   int    `json:"sources"`
+	Nodes     int    `json:"nodes"`
+	OldestDay string `json:"oldestDay,omitempty"`
+	NewestDay string `json:"newestDay,omitempty"`
+	Bytes     int64  `json:"bytes"`
+	Truncated bool   `json:"truncated"`
+	// ProbeError 非空表示**探测失败**——与"没有日志"是两件事，界面必须分开显示
+	// （把探测失败显示成 0 条，用户会以为日志丢了）。
+	ProbeError string `json:"probeError,omitempty"`
+}
+
+// handleLogsBackend 报告当前日志后端的能力与现状（批次 23，只读）。权限：logs:read。
+//
+// 为什么值得单独一个端点：两个后端的检索能力完全不同（本地是"有界扫描"、VictoriaLogs
+// 是索引检索），而部署方与使用者在界面上看不到自己在哪一种下——于是"我要按字段筛百万行"
+// 这个需求，既不知道当前部署做不到，也不知道改个配置就能做到。
+// 与 /api/v1/system/retention 同一取向：只读、如实报告、**探测失败就说失败**（不显示成 0）。
+func (a *API) handleLogsBackend(w http.ResponseWriter, r *http.Request) {
+	if a.logs == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "集中日志未启用（server.yaml 的 logDir）"})
+		return
+	}
+	cap := a.logs.Capability()
+	out := logBackendResponse{
+		Backend: cap.Backend,
+		Capabilities: logCapabilitiesView{
+			FullTextIndex: cap.FullTextIndex,
+			FieldIndex:    cap.FieldIndex,
+			Notes:         cap.Notes,
+		},
+		Storage: logStorageView{
+			Sources: cap.Storage.Sources, Nodes: cap.Storage.Nodes,
+			OldestDay: cap.Storage.OldestDay, NewestDay: cap.Storage.NewestDay,
+			Bytes: cap.Storage.Bytes, Truncated: cap.Storage.Truncated,
+			ProbeError: cap.Storage.Err,
+		},
+	}
+	if cap.ScanBudget != nil {
+		out.Capabilities.ScanBudget = &scanBudgetView{
+			Bytes: cap.ScanBudget.Bytes, Lines: cap.ScanBudget.Lines,
+		}
+	}
+	if out.Capabilities.Notes == nil {
+		out.Capabilities.Notes = []string{} // 序列化成 []，不是 null
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // handleLogsQuery 处理集中日志检索。
 func (a *API) handleLogsQuery(w http.ResponseWriter, r *http.Request) {
 	if a.logs == nil {

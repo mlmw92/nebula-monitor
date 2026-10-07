@@ -204,3 +204,68 @@ describe('LogsView 日志 → 资产联动', () => {
     })
   })
 })
+
+// 后端能力提示（批次 23）。
+//
+// 这一行要回答的是"我处在哪一种后端下、能查多大"——它错起来的两种方式都不报错：
+// ① 本地后端不说"有界扫描"，用户撞到 64 MiB 预算时不知道为什么；
+// ② 探测失败被显示成"没有日志"，那会把"问不到后端"读成"日志丢了"。
+describe('LogsView 后端能力提示', () => {
+  function mockBackend(cap, truncated = false) {
+    http.get.mockImplementation(async (path) => {
+      const p = String(path)
+      if (p === '/api/v1/logs/backend') return cap
+      if (p.includes('/api/v1/logs/fields')) return { fields: {} }
+      if (p.includes('/api/v1/logs?')) {
+        return { lines: [], truncated, cursor: '', scanned: { bytes: 0, lines: 0, files: 0 } }
+      }
+      return {}
+    })
+  }
+
+  it('本地后端：说清"有界扫描 + 预算"，并在被截断时把指引指向切换后端', async () => {
+    mockBackend({
+      backend: 'local',
+      capabilities: {
+        fullTextIndex: false, fieldIndex: false,
+        scanBudget: { bytes: 64 << 20, lines: 200000 }, notes: [],
+      },
+      storage: { sources: 3, nodes: 1, oldestDay: '2026-10-01', newestDay: '2026-10-07', bytes: 1024 },
+    }, true)
+    const w = mountView()
+    await flushPromises()
+
+    expect(w.text()).toContain('有界扫描')
+    expect(w.text()).toContain('64 MiB')
+    expect(w.text()).toContain('已有 3 个来源')
+    // 撞到边界那一刻才是最需要"换后端"这句话的时候
+    expect(w.text()).toContain('需把日志后端切到 VictoriaLogs')
+  })
+
+  it('VictoriaLogs 后端：说"索引检索"，不再提切换后端', async () => {
+    mockBackend({
+      backend: 'victorialogs',
+      capabilities: { fullTextIndex: true, fieldIndex: true, scanBudget: null, notes: ['历史本地分片不会自动迁入'] },
+      storage: { sources: 2, nodes: 0, bytes: 0 },
+    })
+    const w = mountView()
+    await flushPromises()
+
+    expect(w.text()).toContain('VictoriaLogs（索引检索）')
+    expect(w.text()).toContain('关键词与字段由后端索引检索')
+    expect(w.text()).not.toContain('需把日志后端切到 VictoriaLogs')
+  })
+
+  it('探测失败：说"问不到后端"，并明确这不是"没有日志"', async () => {
+    mockBackend({
+      backend: 'victorialogs',
+      capabilities: { fullTextIndex: true, fieldIndex: true, scanBudget: null, notes: [] },
+      storage: { sources: 0, nodes: 0, bytes: 0, probeError: '探测外部后端失败: 连接被拒绝' },
+    })
+    const w = mountView()
+    await flushPromises()
+
+    expect(w.text()).toContain('日志后端探测失败')
+    expect(w.text()).toContain('这不代表没有日志')
+  })
+})

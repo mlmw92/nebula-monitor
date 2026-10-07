@@ -5,6 +5,19 @@
       desc="检索各节点上报的日志行（Agent 侧只上传 logSources.patterns 命中的行）"
     />
 
+    <!-- 当前日志后端的能力（批次 23）。**默认一行静默小字**：大多数部署一天也撞不到边界，
+         常驻大横幅只会变成噪声；真撞到边界时下面那条截断提示会带上同一句指引。 -->
+    <div v-if="backendLine" class="backend-line muted">{{ backendLine }}</div>
+    <el-alert
+      v-if="backendProbeError"
+      type="warning"
+      :closable="false"
+      show-icon
+      :title="'日志后端探测失败：' + backendProbeError"
+      description="这不代表没有日志——是平台问不到后端。先确认后端进程与配置（server.yaml 的 logBackend）。"
+      class="alert-gap"
+    />
+
     <div class="card panel">
       <div class="toolbar">
         <el-date-picker
@@ -116,7 +129,7 @@
         :closable="false"
         show-icon
         title="结果被截断：当前条件下还有更多日志"
-        description="可以点下方「加载更多」继续翻，或缩小时间范围 / 指定节点或关键词，让结果更精确。"
+        :description="truncatedDesc"
         class="alert-gap"
       />
       <el-alert
@@ -389,6 +402,49 @@ function podFilterValid(key) {
 const cursor = ref('')
 const truncated = ref(false)
 const scanned = ref({ bytes: 0, lines: 0, files: 0 })
+
+// 当前日志后端的能力与现状（批次 23）。拿不到就当没有：它只是提示，不该让日志页报错。
+const backend = ref(null)
+
+const backendProbeError = computed(() => backend.value?.storage?.probeError || '')
+
+// 一行说清"我处在哪一种后端下、能查多大"——这恰恰是过去看不到的那件事。
+const backendLine = computed(() => {
+  const cap = backend.value
+  // 没有 backend 字段就不显示：宁可不说话，也不要对着一个不认识的载荷替它宣称是哪种后端
+  if (!cap || !cap.backend) return ''
+  const parts = [cap.backend === 'victorialogs' ? '后端 VictoriaLogs（索引检索）' : '后端 本地（有界扫描）']
+  const budget = cap.capabilities?.scanBudget
+  if (budget) {
+    parts.push(`单次最多扫 ${Math.round(budget.bytes / 1048576)} MiB / ${budget.lines} 行`)
+  }
+  parts.push(cap.capabilities?.fullTextIndex
+    ? '关键词与字段由后端索引检索'
+    : '百万行级字段筛选需切到 VictoriaLogs')
+  const st = cap.storage || {}
+  if (st.sources) {
+    const span = st.oldestDay && st.newestDay ? `（${st.oldestDay} ~ ${st.newestDay}）` : ''
+    parts.push(`已有 ${st.sources} 个来源${span}`)
+  }
+  return parts.join(' · ')
+})
+
+// 截断提示按后端给指引：本地后端撞到的是"扫描预算"，答案不是"再翻几页"而是"换后端"。
+const truncatedDesc = computed(() => {
+  const base = '可以点下方「加载更多」继续翻，或缩小时间范围 / 指定节点或关键词，让结果更精确。'
+  if (backend.value && !backend.value.capabilities?.fullTextIndex) {
+    return base + '当前后端是有界扫描（每次查询有预算上限）：要在大范围里按字段筛百万行，需把日志后端切到 VictoriaLogs。'
+  }
+  return base
+})
+
+async function loadBackend() {
+  try {
+    backend.value = await http.get('/api/v1/logs/backend')
+  } catch (e) {
+    backend.value = null
+  }
+}
 const loading = ref(false)
 const loadingMore = ref(false)
 const loadError = ref('')
@@ -738,6 +794,7 @@ watch(sources, () => loadFieldCandidates())
 
 onMounted(async () => {
   applyDeepLink()
+  loadBackend() // 与检索并行：它只影响一行提示，不该拖慢首屏
   await loadMeta()
   await loadFieldCandidates()
   await search()
