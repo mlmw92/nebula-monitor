@@ -214,6 +214,14 @@
       <SectionCard title="基线合规明细" dense v-loading="loading">
         <template #actions>
           <div class="panel-tools">
+            <el-button
+              v-if="canExportMatrix"
+              size="small"
+              :loading="exportingMatrix"
+              @click="exportMatrix"
+            >
+              导出矩阵 CSV
+            </el-button>
             <el-switch
               v-model="onlyFailedBaseline"
               size="small"
@@ -275,7 +283,8 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getSecuritySummary, getSecurityEvents, getSecurityBaselines, getDefenseStatuses, postDefenseAction } from '../api/security'
+import { getSecuritySummary, getSecurityEvents, getSecurityBaselines, getDefenseStatuses, postDefenseAction, exportComplianceMatrix } from '../api/security'
+import useAuth from '../composables/useAuth'
 import { Lock } from '@element-plus/icons-vue'
 import RefreshBar from './RefreshBar.vue'
 import KpiCard from './KpiCard.vue'
@@ -305,6 +314,26 @@ const filteredBaselines = computed(() => {
   if (!onlyFailedBaseline.value) return baselines.value
   return baselines.value.filter((b) => !b.items || b.items.some((it) => !it.pass))
 })
+
+// 合规矩阵导出：服务端单设 security:export（一次把全部可见节点的合规结论落盘，
+// 与"逐台翻看"不是一个量级的动作），因此无权限时**不显示按钮**而不是点下去才 403。
+const auth = useAuth()
+const canExportMatrix = computed(() => auth.can('security:export'))
+const exportingMatrix = ref(false)
+
+async function exportMatrix() {
+  exportingMatrix.value = true
+  try {
+    const name = await exportComplianceMatrix()
+    ElMessage.success('已导出 ' + name)
+  } catch (e) {
+    // 失败必须说出来：这里两种原因都要能区分（没有权限 / 还没有基线数据），
+    // 静默失败会让人以为"导出没反应"而反复点。
+    ElMessage.error((e && e.message) || '导出失败')
+  } finally {
+    exportingMatrix.value = false
+  }
+}
 // 安全事件前端分页
 const evCurrentPage = ref(1)
 const evPageSize = ref(10)
