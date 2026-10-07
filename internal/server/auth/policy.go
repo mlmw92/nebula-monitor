@@ -160,6 +160,29 @@ func ResolveAssetScope(p *Principal) AssetScopeDecision {
 	return AssetScopeDecision{Deny: len(p.Scope.AssetSelectors()) == 0, Selectors: p.Scope.AssetSelectors()}
 }
 
+// AssetAllowed 判断一条资产（按它的标签）是否在身份的业务范围内。
+//
+// 三态与 ResolveAssetScope 一致：未限制该维度 → 恒 true；限定了但没有任何选择器 → 恒 false
+// （与节点维度 restricted+空 = 无权限同构）；否则至少一个选择器命中即通过（维度内取或）。
+//
+// 它是**单条资产**的判定，供"取到一条资产后再兜一次"的路径使用（列表侧走 store 的
+// LabelSelectors 下推，两者口径必须一致：下推管分页与总数，这里管"即使下推算错也不泄露"）。
+func AssetAllowed(p *Principal, labels map[string]string) bool {
+	if p == nil || !p.Scope.LimitsAssets() {
+		return true
+	}
+	selectors := p.Scope.AssetSelectors()
+	if len(selectors) == 0 {
+		return false
+	}
+	for _, sel := range selectors {
+		if labels[sel.Key] == sel.Value {
+			return true
+		}
+	}
+	return false
+}
+
 // HighRiskPermissions 为需要二次确认 + 审计的高风险权限点。
 var HighRiskPermissions = map[string]struct{}{
 	"system:upgrade":    {},
