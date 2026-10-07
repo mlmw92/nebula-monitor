@@ -135,17 +135,50 @@ D1~D5 按建议落地：不自建索引、能力由**后端实现自己回答**�
   VictoriaLogs（说索引检索、不再提切后端）、探测失败（"这不代表没有日志"）。
 - `go build`/`go vet`/`go test ./...` 30 包全绿；前端 **19 文件 114 项**通过（新增 3 项）、`vite build` 通过。
 
-### 7.4 实机验证计划（dev-server，升 1.30.43 后）
+### 7.4 实机验证结果（2026-10-07，dev-server 升 Server 1.30.43；Agent 未动）
 
-1. **local 现状**：端点应报 `backend=local`、`scanBudget={64MiB,20万行}`、`fullTextIndex=false`、
-   以及**真实的**来源数 / 时间跨度 / 字节（与磁盘上的分片目录对得上）。
-2. **切到 VL（关键实证）**：备份 `server.yaml` → 改 `logBackend: victorialogs` + `addr` → 重启 →
-   确认端点变成 `fullTextIndex=true` / `scanBudget=null`，**且关键词与字段检索仍然返回结果**
-   （证明"索引能力早就接线好了"，这是本批最重要的一条）。验完还原配置并重启。
-3. **探测失败的现场形态**：VL 配置成不通的地址 → 端点应带 `probeError` 而界面显示"这不代表没有日志"。
+跑法：`dist/logcap-e2e.py local`（默认后端）与 `python3 logcap-e2e.py vl`（临时切到 VL 后）。
+切换与还原由 `dist/logcap-switch-vl.sh switch|restore` 做（先备份 `server.yaml`、**还原走备份文件**
+而不是反向改回去）；VL 原本是 `disabled + inactive`，由 `dist/vl-start.sh` 起、验完停回。
 
-### 7.5 未覆盖边界（不得视为通过）
+**① local 模式：15 项全过。**`backend=local`、`fullTextIndex/fieldIndex=false`、
+`scanBudget={67108864, 200000}`、`notes` 2 条；**存储探测是真的**：`sources=3`、`nodes=1`、
+`2026-10-06 ~ 2026-10-07`、`bytes=3495450`（≈3.3 MiB）、`truncated=false`、无 `probeError`；
+**两条独立路径对账**：存储探测的来源数与 `/logs/fields` 的来源数**都是 3**；检索仍返回数据
+（扫描诊断 `scannedBytes=366 / scannedLines=1 / files=1`，是真实数值）。
+
+**② 切到 VL（本批最关键的一条）：14 项全过。**
+
+| 判据 | 实测 |
+|---|---|
+| 能力如实切换 | `backend=victorialogs`、`fullTextIndex=true`、`fieldIndex=true`、**`scanBudget=null`**（不是 0）、`notes` 3 条 |
+| 可达性探测 | `probeError` 缺席（探测成功）；`storage.sources=1`——它**是真去问 VL 的**（`stream_field_values` 取 `source`），不是拿配置充数 |
+| **索引检索仍然工作** | 显式 7 天窗口取到 5 行（`node=VM-0-10-ubuntu`、`source=nginx_access`）；由首行挑出的关键词 `WuEL` 再查仍命中（关键词确实下推给 VL） |
+| 扫描诊断 | 恒为 0（外部后端没有"逐文件扫描"这回事） |
+| **写入也跟着切** | 造一条唯一标记的 404 访问 → **19 秒后**在 VL 上按标记可检索（`node=...`），即「请求 → access.log → Agent → Server → VL → 检索」整条链路通 |
+| **换后端 = 换存储** | 直接问 VL：切换前 6 小时的行**一条都不在** VL 里（它们在本地分片）；VL 侧来源数从本地的 3 变成 1 |
+
+**③ 顺带纠正的两条口径（都不是产品缺陷，是我核对脚本的前提错了）**：
+
+1. **默认时间窗是最近 1 小时**（`logs_api.go:307`，刻意为之）。VL 里存的是更早的数据时，
+   不带 `from/to` 去查就是查不到——那是"我的查询"的问题，不是"检索坏了"。VL 模式的核对因此
+   **必须显式给窗口**（第一版在这里误报过一次）。
+2. **Agent 的隐私默认值：只上传命中 `patterns` 的行**（`config.go:193/203`，启动期强制校验，
+   `config.go:515`）。本机 `nginx_access` 配的是 `err4xx`/`err5xx`，所以打一个 `/` 拿 200 的
+   测试请求**本来就不会被上传**——第一版拿它验"写入是否切过去"，把正常行为误判成了丢数据。
+   **造流量要造会被上传的行**（这里是 404），否则验的是空气。
+
+**④ 一处已知的表述余量**：外部后端的载荷里 `bytes`/`nodes` 仍是 0（`logStorageView` 这两个字段
+没有 `omitempty`），Notes 已说明"容量与保留期平台不掌握"。前端只读 `sources` 与时间跨度，
+不显示这两项，所以界面无误导；若将来给第三方消费这个端点，应改成"省略"而不是"给 0"。
+
+**收尾**：`server.yaml` 已从备份还原（确认无残留键）、服务重启后 local 模式复验 **15 项全过**、
+VL 停回 `inactive`。切换期间写进 VL 的那几行只存在于 VL（换后端是换存储，这是设计行为，测试机上无需处理）。
+
+### 7.5 仍未覆盖边界（不得视为通过）
 
 - 浏览器实点（那一行提示与截断提示的实际观感）；
 - 真实 VL 的**大范围**字段筛选性能（本批只验"能力声明与可达性"，没有压测）；
-- 本地后端在**接近预算上限**时的现场手感（该机日志量远小于 64 MiB）。
+- 本地后端在**接近预算上限**时的现场手感（该机日志量远小于 64 MiB）；
+- **探测失败的现场形态**（`VL 地址不通 → probeError → 界面"这不代表没有日志"`）本轮没走：
+  切过去时 VL 是可达的。用例已覆盖该载荷（`logs_backend_test.go`），但实机未验。
