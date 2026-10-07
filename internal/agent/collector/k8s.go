@@ -42,10 +42,12 @@ type CollectResult struct {
 	Instances []model.K8sInstance
 	Pods      []model.K8sPod
 	Workloads []model.K8sWorkload
-	// PodsTruncated / WorkloadsTruncated 表示清单达到单轮上限被截断。
+	Services  []model.K8sService
+	// PodsTruncated / WorkloadsTruncated / ServicesTruncated 表示清单达到单轮上限被截断。
 	// 必须传到上报体上：否则中心看到的"1000 个 Pod"会被当成全部。
 	PodsTruncated      bool
 	WorkloadsTruncated bool
+	ServicesTruncated  bool
 }
 
 // Collect 采集所有 K8s 集群（等价于 CollectCtx(context.Background())）。
@@ -71,6 +73,7 @@ func (c *K8sCollector) CollectCtx(ctx context.Context) CollectResult {
 		out.Instances = append(out.Instances, r.instance)
 		out.Pods = append(out.Pods, r.pods...)
 		out.Workloads = append(out.Workloads, r.workloads...)
+		out.Services = append(out.Services, r.services...)
 	}
 
 	// 上限按**整份上报**计（不是按集群）：字段名就是 report 级的，
@@ -83,6 +86,10 @@ func (c *K8sCollector) CollectCtx(ctx context.Context) CollectResult {
 		out.Workloads = out.Workloads[:model.K8sWorkloadsMaxPerReport]
 		out.WorkloadsTruncated = true
 	}
+	if len(out.Services) > model.K8sServicesMaxPerReport {
+		out.Services = out.Services[:model.K8sServicesMaxPerReport]
+		out.ServicesTruncated = true
+	}
 	return out
 }
 
@@ -92,6 +99,7 @@ type clusterResult struct {
 	instance  model.K8sInstance
 	pods      []model.K8sPod
 	workloads []model.K8sWorkload
+	services  []model.K8sService
 }
 
 // collectCluster 采集单个 K8s 集群：指标 + 集群元信息 + 台账清单。
@@ -163,12 +171,15 @@ func (c *K8sCollector) collectCluster(ctx context.Context, cfg model.K8sInstance
 	//    而台账里的工作负载是 Deployment，member_of 需要这一跳。
 	pm, pods := c.collectPods(ctx, cfg, conn, cluster, c.replicaSetOwners(ctx, conn), now)
 	out = append(out, pm...)
-	// 5. metrics-server（可选）
+	// 5. Service 清单（含后端 Pod）：供台账建立 service → pod 关系。
+	//    它只产出清单、不产出指标——这是"发现"，不是"测量"。
+	services := c.collectServices(ctx, cfg, conn, cluster)
+	// 6. metrics-server（可选）
 	if cfg.MetricsServer {
 		out = append(out, c.collectNodeMetrics(ctx, cfg, conn, now)...)
 	}
 
-	res.metrics, res.pods, res.workloads = out, pods, ws
+	res.metrics, res.pods, res.workloads, res.services = out, pods, ws, services
 	return res
 }
 
@@ -487,6 +498,94 @@ func (c *K8sCollector) collectPods(ctx context.Context, cfg model.K8sInstanceCon
 		c.mk("k8s_pods_abnormal", float64(abnormal), cfg, conn, nil, now),
 	)
 	return out, inv
+}
+
+// collectServices 采集 Service 清单与它们的后端 Pod（供台账建立 service → pod 关系）。
+//
+// 后端**不用 selector 解析**：Pod 投影刻意不含 labels，按 selector 匹配就得先把 labels
+// 加进上报；而且 selector 命中 ≠ 真正在服务背后——未就绪的 Pod 不在 Endpoints 里，
+// 而那恰恰是运维要看的那个集合。EndpointSlice 的 targetRef 直接给出权威对应，
+// 也不必拿 IP 去反查 Pod。
+//
+// 与 Pod 清单同一取向：apiserver 少给一份清单**不该让整轮采集失败**，只 Warn 并返回 nil。
+func (c *K8sCollector) collectServices(ctx context.Context, cfg model.K8sInstanceConfig, conn *k8sConn, cluster string) []model.K8sService {
+	var list k8sServiceList
+	if err := c.getJSON(ctx, conn, "/api/v1/services", &list); err != nil {
+		slog.Warn("K8s 获取 Service 列表失败", "name", cfg.Name, "err", err)
+		return nil
+	}
+	backends := c.serviceBackends(ctx, cfg, conn)
+
+	out := make([]model.K8sService, 0, len(list.Items))
+	for _, s := range list.Items {
+		if !inventoryWanted(s.Metadata.Namespace, cfg) {
+			continue
+		}
+		svc := model.K8sService{
+			Cluster: cluster, Namespace: s.Metadata.Namespace, Name: s.Metadata.Name,
+			Type: s.Spec.Type,
+		}
+		// Headless 服务的 clusterIP 是字面量 "None"：它不是地址，写进属性会被界面
+		// 当成"这个服务有个叫 None 的地址"。ExternalName 则压根没有这个字段。
+		if ip := strings.TrimSpace(s.Spec.ClusterIP); ip != "" && ip != "None" {
+			svc.ClusterIP = ip
+		}
+		if pods := backends[s.Metadata.Namespace+"|"+s.Metadata.Name]; len(pods) > 0 {
+			if len(pods) > model.K8sServiceMaxBackends {
+				pods = pods[:model.K8sServiceMaxBackends]
+				svc.BackendsTruncated = true
+			}
+			svc.BackendPods = pods
+		}
+		out = append(out, svc)
+	}
+	return out
+}
+
+// serviceBackends 取每个 Service 的后端 Pod 名，按 `namespace|serviceName` 归并。
+//
+// 用 EndpointSlice（discovery.k8s.io/v1）而不是老的 Endpoints：它是 kube-proxy 实际消费的
+// 那份数据，且天然按服务分片（一个服务的后端可能落在多个切片里）。
+// 只收 targetRef.kind == "Pod" 的条目——手写的 Endpoints（没有 targetRef）、指向非 Pod 的
+// 条目一律跳过：**不猜**。宁可少一条边，也不要一条指错的边。
+func (c *K8sCollector) serviceBackends(ctx context.Context, cfg model.K8sInstanceConfig, conn *k8sConn) map[string][]string {
+	var list k8sEndpointSliceList
+	if err := c.getJSON(ctx, conn, "/apis/discovery.k8s.io/v1/endpointslices", &list); err != nil {
+		// 拿不到切片不是致命错误：Service 资产照落，只是这次不建关系。
+		slog.Warn("K8s 获取 EndpointSlice 失败（本次不建 service → pod 关系）", "name", cfg.Name, "err", err)
+		return nil
+	}
+	out := map[string][]string{}
+	seen := map[string]bool{}
+	for _, slice := range list.Items {
+		ns := slice.Metadata.Namespace
+		name := slice.Metadata.Labels["kubernetes.io/service-name"]
+		if ns == "" || name == "" || !inventoryWanted(ns, cfg) {
+			continue
+		}
+		for _, ep := range slice.Endpoints {
+			if ep.TargetRef.Kind != "Pod" || strings.TrimSpace(ep.TargetRef.Name) == "" {
+				continue
+			}
+			// targetRef 的命名空间与切片一致才算数。跨命名空间的引用不该出现在这里，
+			// 真出现说明数据不对——跳过它，也不去建一条可能指错的边。
+			if ref := strings.TrimSpace(ep.TargetRef.Namespace); ref != "" && ref != ns {
+				continue
+			}
+			key := ns + "|" + name
+			dedup := key + "|" + ep.TargetRef.Name
+			if seen[dedup] {
+				continue // 同一后端出现在多个切片里（滚动更新期间常见）
+			}
+			seen[dedup] = true
+			out[key] = append(out[key], ep.TargetRef.Name)
+		}
+	}
+	// 排序让上报体稳定：同一份集群状态两次采集应产生同样的顺序（否则 diff 与用例都没法做）。
+	for k := range out {
+		sort.Strings(out[k])
+	}
+	return out
 }
 
 // podStatus 推断 Pod 的**有效状态**，语义对齐 `kubectl get pods` 的 STATUS 列：
@@ -968,6 +1067,36 @@ type k8sPodList struct {
 			StartTime         string               `json:"startTime"` // RFC3339；解析失败就留空，不编一个假的
 			ContainerStatuses []k8sContainerStatus `json:"containerStatuses"`
 		} `json:"status"`
+	} `json:"items"`
+}
+
+type k8sServiceList struct {
+	Items []struct {
+		Metadata k8sObjectMeta `json:"metadata"`
+		Spec     struct {
+			Type      string `json:"type"`
+			ClusterIP string `json:"clusterIP"`
+		} `json:"spec"`
+	} `json:"items"`
+}
+
+// k8sEndpointSliceList 是 discovery.k8s.io/v1 的 EndpointSlice 列表。
+//
+// 只读两样：切片上的服务名标签（`kubernetes.io/service-name`，由控制器自动打），
+// 以及每个后端的 targetRef（它才是"这个后端是谁"的权威答案）。
+type k8sEndpointSliceList struct {
+	Items []struct {
+		Metadata struct {
+			Namespace string            `json:"namespace"`
+			Labels    map[string]string `json:"labels"`
+		} `json:"metadata"`
+		Endpoints []struct {
+			TargetRef struct {
+				Kind      string `json:"kind"`
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
+			} `json:"targetRef"`
+		} `json:"endpoints"`
 	} `json:"items"`
 }
 

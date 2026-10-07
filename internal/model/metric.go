@@ -124,10 +124,14 @@ type ReportPayload struct {
 	// 与其它清单一样是平铺的、每条自带 Cluster —— 服务端落库与截断计数都简单。
 	K8sPods      []K8sPod      `json:"k8sPods,omitempty"`      // K8s Pod 清单
 	K8sWorkloads []K8sWorkload `json:"k8sWorkloads,omitempty"` // K8s 工作负载清单
+	// K8sServices 是 Service 清单（每条自带后端 Pod 名），用于建立 service → pod 关系。
+	// 旧 Agent 不报这个字段：omitempty 让服务端那边一条 service 资产都不建，不产生半截数据。
+	K8sServices []K8sService `json:"k8sServices,omitempty"`
 	// 清单被单轮上限截断时置位：上报方知道"我看到 3000 个、报了 1000 个"，
 	// 服务端与界面才不会把它当成"集群里只有 1000 个"（沿用"截断显式回传"的既有约定）。
 	K8sPodsTruncated       bool                    `json:"k8sPodsTruncated,omitempty"`
 	K8sWorkloadsTruncated  bool                    `json:"k8sWorkloadsTruncated,omitempty"`
+	K8sServicesTruncated   bool                    `json:"k8sServicesTruncated,omitempty"`
 	MongoDBInstances       []MongoDBInstance       `json:"mongoInstances,omitempty"`         // MongoDB 实例元信息
 	FastDFSInstances       []FastDFSInstance       `json:"fastdfsInstances,omitempty"`       // FastDFS 实例元信息
 	RabbitMQInstances      []RabbitMQInstance      `json:"rabbitmqInstances,omitempty"`      // RabbitMQ 实例元信息
@@ -583,6 +587,14 @@ type K8sInstance struct {
 const (
 	K8sPodsMaxPerReport      = 1000
 	K8sWorkloadsMaxPerReport = 500
+	K8sServicesMaxPerReport  = 500
+	// K8sServiceMaxBackends 是**单个 Service** 上报的后端 Pod 数上限。
+	//
+	// 与上面三个"每份上报"的上限不同，这是**每条记录**的上限：后端数是清单体积的主要
+	// 膨胀源（服务数 × 后端数），一个大服务的后端可能上千。超限时在该条记录上
+	// **显式置位** BackendsTruncated，不静默截断——否则中心看到的"这个服务只有 200 个后端"
+	// 会被当成全部。
+	K8sServiceMaxBackends = 200
 )
 
 // K8sPod 是上报给 Server 的一个 Pod 的**台账投影**。
@@ -623,6 +635,25 @@ type K8sWorkload struct {
 	Desired   int    `json:"desired"` // 期望副本数（DaemonSet 用已调度节点数）
 	Ready     int    `json:"ready"`   // 就绪副本数
 	Image     string `json:"image,omitempty"`
+}
+
+// K8sService 是上报给 Server 的一个 Service 的**台账投影**。
+//
+// BackendPods 来自 EndpointSlice 的 targetRef（只收 kind=Pod 的条目），也就是
+// "这个服务现在真的把流量发给哪些 Pod"——**不是 selector 命中的 Pod**：
+// 未就绪的 Pod 不在 Endpoints 里，而那恰恰是运维要看的那个集合。
+//
+// 刻意不带端口：端口级关系会让边数再乘一个量级，本批只做 service → pod。
+type K8sService struct {
+	Cluster   string `json:"cluster"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Type      string `json:"type,omitempty"`      // ClusterIP / NodePort / LoadBalancer / ExternalName
+	ClusterIP string `json:"clusterIP,omitempty"` // 展示用；ExternalName 与 Headless 为空
+	// BackendPods 是后端 Pod 名（与 Service 同命名空间）。
+	BackendPods []string `json:"backendPods,omitempty"`
+	// BackendsTruncated 表示该服务的后端数超过 K8sServiceMaxBackends 被截断。
+	BackendsTruncated bool `json:"backendsTruncated,omitempty"`
 }
 
 // DiskStat 表示单个真实文件系统的容量与使用率。
