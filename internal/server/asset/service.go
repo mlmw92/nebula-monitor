@@ -345,8 +345,8 @@ func (s *Service) GetHostByName(name string) (Asset, bool, error) {
 func (s *Service) GetByID(id int64) (Asset, bool, error) { return s.store.assetByID(id) }
 
 // DistinctLabelValues 取某标签键的候选取值（供范围配置表单使用），见 store 的同名方法。
-func (s *Service) DistinctLabelValues(key string, nodes []string) ([]string, error) {
-	return s.store.distinctLabelValues(key, nodes)
+func (s *Service) DistinctLabelValues(key string, nodes []string, selectors []LabelSelector) ([]string, error) {
+	return s.store.distinctLabelValues(key, nodes, selectors)
 }
 
 // LabelsByAssetIDs 批量取资产标签（供授权兜底判定，见 store 的同名方法）。

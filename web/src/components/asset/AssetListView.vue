@@ -836,7 +836,7 @@ const summary = ref({ total: 0, missing: 0, noOwner: 0, conflict: 0, changes: 0,
 // 用户会去查 Agent 有没有连上、采集是不是坏了——而真正的原因是他的账号只覆盖某几条业务线。
 const scopeLimited = computed(() => {
   const sc = auth.principal && auth.principal.scope
-  return !!sc && sc.assetMode === 'limited'
+  return !!sc && sc.assetMode === 'limited' // useAuth 已把服务端的 snake_case 归一成这个形状
 })
 const scopeLabelText = computed(() => {
   const sc = (auth.principal && auth.principal.scope) || {}

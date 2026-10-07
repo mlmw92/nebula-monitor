@@ -33,16 +33,16 @@
             <el-tag v-else size="small" type="success" effect="plain">全部</el-tag>
             <!-- 业务范围是第二个维度，与节点范围取交集；没配就不显示，避免把「全部」
                  读成「业务上也不限」（实际语义是"该维度不生效"）。 -->
-            <span v-if="row.scope && row.scope.assetMode === 'limited'" class="scope-groups">
+            <span v-if="row.scope && row.scope.asset_mode === 'limited'" class="scope-groups">
               <el-tag
-                v-for="l in (row.scope.assetLabels || [])"
+                v-for="l in (row.scope.asset_labels || [])"
                 :key="l.key + '=' + l.value"
                 size="small"
                 type="info"
                 effect="plain"
                 class="grp-tag"
               >{{ l.key }}={{ l.value }}</el-tag>
-              <el-tag v-if="!(row.scope.assetLabels || []).length" size="small" type="danger" effect="plain" class="grp-tag">
+              <el-tag v-if="!(row.scope.asset_labels || []).length" size="small" type="danger" effect="plain" class="grp-tag">
                 业务范围为空 → 无可见资产
               </el-tag>
             </span>
@@ -286,8 +286,12 @@ function openEdit(row) {
   form.roles = Array.isArray(row.roles) ? [...row.roles] : []
   form.scopeMode = row.scope && row.scope.mode === 'restricted' ? 'restricted' : 'global'
   form.scopeGroups = row.scope && Array.isArray(row.scope.groups) ? [...row.scope.groups] : []
-  form.assetMode = row.scope && row.scope.assetMode === 'limited' ? 'limited' : 'all'
-  form.assetValues = row.scope && Array.isArray(row.scope.assetLabels) ? row.scope.assetLabels.map((x) => x.value) : []
+  // 服务端返回的 scope 是 snake_case（`asset_mode` / `asset_labels`，与 display_name / scope_mode 一致）：
+  // 按 camelCase 读会静默拿到 undefined → 表单显示"不限" → 一保存就把业务范围抹掉（权限静默放大）。
+  form.assetMode = row.scope && row.scope.asset_mode === 'limited' ? 'limited' : 'all'
+  form.assetValues = row.scope && Array.isArray(row.scope.asset_labels)
+    ? row.scope.asset_labels.map((x) => x.value)
+    : []
   formVisible.value = true
 }
 
@@ -299,10 +303,10 @@ function buildScope() {
   // 也不把"limited 却没有选择器"当成不限（那是无权限）——两种状态都要能表达出来。
   const asset = form.assetMode === 'limited'
     ? {
-        assetMode: 'limited',
-        assetLabels: form.assetValues.map((v) => ({ key: assetKey.value, value: v })),
+        asset_mode: 'limited',
+        asset_labels: form.assetValues.map((v) => ({ key: assetKey.value, value: v })),
       }
-    : { assetMode: 'all', assetLabels: [] }
+    : { asset_mode: 'all', asset_labels: [] }
   return { ...node, ...asset }
 }
 

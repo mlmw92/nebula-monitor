@@ -940,14 +940,21 @@ func (s *Store) labelsByAssetIDs(ids []int64) (map[int64]map[string]string, erro
 	return out, rows.Err()
 }
 
-// distinctLabelValues 取某个标签键下的所有取值（去重、有序），可限定在给定节点范围内。
+// distinctLabelValues 取某个标签键下的所有取值（去重、有序），按调用者的可见范围收窄。
 //
-// 用途：角色/用户表单需要"业务范围有哪些可选值"作为候选。限定节点范围是刻意的——
-// 配范围的人只该看到他自己看得见的那些值（与「范围不得超过操作者自身范围」同一取向）。
-func (s *Store) distinctLabelValues(key string, nodes []string) ([]string, error) {
+// 用途：角色/用户表单需要"业务范围有哪些可选值"作为候选。**两个维度都要收窄**（与台账列表同一取向）：
+//   - nodes：配范围的人只该看到他自己看得见的那些值；
+//   - selectors：受限用户的候选项不能越过自己的业务范围——否则他能从下拉里看出
+//     "我的机器上还有别人业务的标签值"（实测正是如此：biz=pay 的账号看到了 risk）。
+//
+// selectors 的三态与 ListFilter.Nodes 同一套：nil = 该维度不生效、非 nil 空 = 恒不可见。
+func (s *Store) distinctLabelValues(key string, nodes []string, selectors []LabelSelector) ([]string, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return nil, nil
+	}
+	if selectors != nil && len(selectors) == 0 {
+		return []string{}, nil // 业务维度限定了却没有取值：没有可选项
 	}
 	q := `SELECT DISTINCT l.value FROM asset_labels l JOIN assets a ON a.id=l.asset_id WHERE l.key=?`
 	args := []any{key}
@@ -959,6 +966,15 @@ func (s *Store) distinctLabelValues(key string, nodes []string) ([]string, error
 		for _, n := range nodes {
 			args = append(args, n)
 		}
+	}
+	if len(selectors) > 0 {
+		parts := make([]string, 0, len(selectors))
+		for _, sel := range selectors {
+			parts = append(parts, "(l2.key=? AND l2.value=?)")
+			args = append(args, sel.Key, sel.Value)
+		}
+		q += ` AND EXISTS (SELECT 1 FROM asset_labels l2 WHERE l2.asset_id=a.id AND (` +
+			strings.Join(parts, " OR ") + `))`
 	}
 	q += ` ORDER BY l.value`
 	rows, err := s.db.Query(q, args...)

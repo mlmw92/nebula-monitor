@@ -49,7 +49,8 @@ type AssetProvider interface {
 	// 无法下推到 SQL，只能在取回后补判（逐条查会变成 N+1）。
 	LabelsByAssetIDs(ids []int64) (map[int64]map[string]string, error)
 	// DistinctLabelValues 取某标签键的候选取值：供角色/用户的业务范围表单做下拉。
-	DistinctLabelValues(key string, nodes []string) ([]string, error)
+	// nodes 与 selectors 是调用者的两个范围维度（nil = 该维度不生效），候选值一并收窄。
+	DistinctLabelValues(key string, nodes []string, selectors []asset.LabelSelector) ([]string, error)
 	Baselines() ([]asset.Baseline, error)
 	BaselinesInNodes(nodes []string) ([]asset.Baseline, error)
 	BaselineForType(typeKey string) (asset.Baseline, bool, error)
@@ -719,7 +720,8 @@ func (a *API) handleAssetLabelValues(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "缺少 key 参数"})
 		return
 	}
-	values, err := a.assets.DistinctLabelValues(key, a.assetAllowedNodes(Principal(r)))
+	values, err := a.assets.DistinctLabelValues(key, a.assetAllowedNodes(Principal(r)),
+		a.assetScopeSelectors(Principal(r)))
 	if err != nil {
 		slog.Error("查询标签取值失败", "key", key, "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询标签取值失败"})

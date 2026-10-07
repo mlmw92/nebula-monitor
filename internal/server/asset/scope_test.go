@@ -99,3 +99,61 @@ func TestListFilterLabelSelectors(t *testing.T) {
 		t.Fatalf("摘要总数也必须同一套条件，实际 %d", st.Total)
 	}
 }
+
+// 候选值（范围配置表单的下拉）也必须按两个维度收窄。
+//
+// 实测发现的真实缺口：受限到 biz=pay 的账号调 `label-values?key=biz` 拿到了 ["pay","risk"]——
+// 列表与详情都挡住了，却从下拉里漏出"我的机器上还有别人业务的标签值"。
+func TestDistinctLabelValuesScoped(t *testing.T) {
+	svc, _ := newTestService(t)
+	for _, n := range []string{"web-01", "web-02"} {
+		if _, _, err := svc.Apply(hostObservation(n, map[string]string{"cpu": "8"})); err != nil {
+			t.Fatalf("写入 %s 失败: %v", n, err)
+		}
+	}
+	set := func(host string, labels map[string]string) {
+		t.Helper()
+		if _, err := svc.SetLabels(Ref{TypeKey: TypeHost, NaturalKey: host}, labels, nil, "alice"); err != nil {
+			t.Fatalf("打标签 %s 失败: %v", host, err)
+		}
+	}
+	set("web-01", map[string]string{"biz": "pay", "env": "prod"})
+	set("web-02", map[string]string{"biz": "risk", "env": "test"})
+
+	pay := []LabelSelector{{Key: "biz", Value: "pay"}}
+	values := func(key string, nodes []string, sels []LabelSelector) []string {
+		t.Helper()
+		got, err := svc.DistinctLabelValues(key, nodes, sels)
+		if err != nil {
+			t.Fatalf("DistinctLabelValues 失败: %v", err)
+		}
+		return got
+	}
+
+	// 未限制：两种取值都在
+	if got := values("biz", nil, nil); len(got) != 2 {
+		t.Fatalf("不受限时应有两个取值，实际 %v", got)
+	}
+	// 业务范围收窄后：只应看到自己范围内的那一个
+	if got := values("biz", nil, pay); len(got) != 1 || got[0] != "pay" {
+		t.Fatalf("受限到 biz=pay 时只应看到 pay，实际 %v", got)
+	}
+	// 换一个键也一样：只列**范围内资产**上的取值
+	if got := values("env", nil, pay); len(got) != 1 || got[0] != "prod" {
+		t.Fatalf("受限资产的 env 只应有 prod，实际 %v", got)
+	}
+	// 节点维度同样生效
+	if got := values("biz", []string{"web-02"}, nil); len(got) != 1 || got[0] != "risk" {
+		t.Fatalf("限定到 web-02 时只应有 risk，实际 %v", got)
+	}
+	// 三态：nil = 不过滤、非 nil 空 = 恒不可见
+	if got := values("biz", nil, []LabelSelector{}); len(got) != 0 {
+		t.Fatalf("业务维度限定了却没有取值 → 无候选，实际 %v", got)
+	}
+	if got := values("biz", []string{}, nil); len(got) != 0 {
+		t.Fatalf("节点维度限定了却没有可见节点 → 无候选，实际 %v", got)
+	}
+	if got := values("", nil, nil); got != nil {
+		t.Fatalf("空键应返回 nil（调用方负责校验），实际 %v", got)
+	}
+}

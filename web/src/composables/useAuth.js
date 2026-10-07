@@ -75,9 +75,13 @@ export function useAuth() {
             ? {
                 mode: d.scope.mode,
                 groups: Array.isArray(d.scope.groups) ? d.scope.groups : [],
-                // 业务维度原样带上：表单要用它回显与拼请求（不用就丢掉，前端少一份隐式状态）
-                assetMode: d.scope.assetMode || '',
-                assetLabels: Array.isArray(d.scope.assetLabels) ? d.scope.assetLabels : []
+                // 业务维度原样带上（表单要回显）。
+                //
+                // **授权载荷的 JSON 是 snake_case**（`auth.Scope` / `auth.User` 的既有标签：
+                // display_name / token_version / scope_mode …）。按 camelCase 读会静默拿到
+                // undefined，症状是"表单显示不限，一保存就把业务范围抹掉"——权限静默放大。
+                assetMode: d.scope.asset_mode || '',
+                assetLabels: Array.isArray(d.scope.asset_labels) ? d.scope.asset_labels : []
               }
             : { mode: 'global', groups: [], assetMode: '', assetLabels: [] }
           principal.assetScopeLabelKey = d.assetScopeLabelKey || ''
