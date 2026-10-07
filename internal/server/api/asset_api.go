@@ -45,6 +45,9 @@ type AssetProvider interface {
 	InspectRunsInNodes(limit int, nodes []string) ([]asset.InspectRun, error)
 	InspectFindings(runID int64, limit int) ([]asset.InspectFinding, error)
 	InspectFindingsInNodes(runID int64, limit int, nodes []string) ([]asset.InspectFinding, bool, error)
+	// LabelsByAssetIDs 批量取资产标签：差异项只有 asset_id、没有标签，业务范围这一维
+	// 无法下推到 SQL，只能在取回后补判（逐条查会变成 N+1）。
+	LabelsByAssetIDs(ids []int64) (map[int64]map[string]string, error)
 	Baselines() ([]asset.Baseline, error)
 	BaselinesInNodes(nodes []string) ([]asset.Baseline, error)
 	BaselineForType(typeKey string) (asset.Baseline, bool, error)
@@ -300,7 +303,7 @@ func (a *API) handleAssets(w http.ResponseWriter, r *http.Request) {
 	p := Principal(r)
 	out := make([]assetView, 0, len(items))
 	for _, item := range items {
-		if !a.nodeInScope(p, item.Node) {
+		if !a.assetVisible(p, item) {
 			continue
 		}
 		out = append(out, toAssetView(item, filter.StaleBefore))
@@ -360,7 +363,7 @@ func (a *API) handleAssetLookup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询资产失败"})
 		return
 	}
-	if !found || !a.nodeInScope(Principal(r), item.Node) {
+	if !found || !a.assetVisible(Principal(r), item) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "资产不存在"})
 		return
 	}
@@ -381,6 +384,8 @@ func (a *API) assetListFilter(w http.ResponseWriter, r *http.Request) (asset.Lis
 		Node:         strings.TrimSpace(q.Get("node")),
 		Keyword:      strings.TrimSpace(q.Get("keyword")),
 		Nodes:        a.assetAllowedNodes(Principal(r)),
+		// 业务标签维度与节点维度一起下推：两个维度是「且」，范围判定才完整。
+		LabelSelectors: a.assetScopeSelectors(Principal(r)),
 		StaleBefore:  assetStaleBefore(time.Now()),
 		OwnerMissing: assetBoolParam(q.Get("ownerMissing")),
 		HasConflict:  assetBoolParam(q.Get("conflict")),
@@ -632,7 +637,7 @@ func (a *API) assetLinksPayload(item asset.Asset, p *auth.Principal) (map[string
 		if err != nil {
 			return nil, err
 		}
-		if !found || !a.nodeInScope(p, peer.Node) {
+		if !found || !a.assetVisible(p, peer) {
 			continue
 		}
 		out = append(out, view)
@@ -657,7 +662,7 @@ func (a *API) assetLinksPayload(item asset.Asset, p *auth.Principal) (map[string
 		if err != nil {
 			return nil, err
 		}
-		if !found || !a.nodeInScope(p, peer.Node) {
+		if !found || !a.assetVisible(p, peer) {
 			continue
 		}
 		hidden = append(hidden, view)
@@ -729,6 +734,35 @@ func (a *API) handleAssetHistory(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// assetScopeSelectors 把身份的业务范围折算成资产查询用的标签选择器。
+//
+// 三态**逐字对齐** Nodes（nil = 该维度不生效；非 nil 空 = 恒不匹配），
+// 因此调用方只要把它塞进 ListFilter 就够，不需要在每个 handler 里写短路分支——
+// 短路分支散在十来个 handler 里，迟早漏掉一个，而漏掉的就是越权。
+func (a *API) assetScopeSelectors(p *auth.Principal) []asset.LabelSelector {
+	d := auth.ResolveAssetScope(p)
+	if d.Selectors == nil {
+		return nil
+	}
+	out := make([]asset.LabelSelector, 0, len(d.Selectors))
+	for _, sel := range d.Selectors {
+		out = append(out, asset.LabelSelector{Key: sel.Key, Value: sel.Value})
+	}
+	return out
+}
+
+// assetVisible 判断一条资产对本调用者是否可见：**两个维度都要过**（节点分组 + 业务标签）。
+//
+// 为什么要有这个统一入口：节点维度的判定此前散落成 `!a.nodeInScope(p, item.Node)` 十余处。
+// 加第二个维度时若逐处补一句，迟早漏掉一处——漏掉的症状是"范围外资产在某个角落里露出来"，
+// 那是安全缺陷而不是显示问题。因此**所有针对资产对象的范围兜底一律走这里**。
+func (a *API) assetVisible(p *auth.Principal, item asset.Asset) bool {
+	if !a.nodeInScope(p, item.Node) {
+		return false
+	}
+	return auth.AssetAllowed(p, item.Labels)
+}
+
 // assetInScope 解析路径上的资产 ID、校验资源范围，并就地把错误响应写出。
 // 返回 ok=false 表示响应已写出，调用方应立即返回。
 func (a *API) assetInScope(w http.ResponseWriter, r *http.Request) (asset.Asset, bool) {
@@ -747,7 +781,7 @@ func (a *API) assetInScope(w http.ResponseWriter, r *http.Request) (asset.Asset,
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询资产失败"})
 		return asset.Asset{}, false
 	}
-	if !found || !a.nodeInScope(Principal(r), item.Node) {
+	if !found || !a.assetVisible(Principal(r), item) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "资产不存在"})
 		return asset.Asset{}, false
 	}

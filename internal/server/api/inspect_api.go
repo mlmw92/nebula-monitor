@@ -10,6 +10,9 @@ import (
 	"strings"
 
 	"github.com/nebula/monitor/internal/server/asset"
+	// 业务范围的单条资产判定：差异项只有 asset_id、没有标签，只能在取回后补判
+	// （见 filterFindingsByAssetScope）
+	"github.com/nebula/monitor/internal/server/auth"
 )
 
 // assetPathInt 解析路径上的正整数参数（用于巡检记录 ID 这类没有资产上下文的 ID）。
@@ -115,6 +118,9 @@ func (a *API) handleInspectRunCreate(w http.ResponseWriter, r *http.Request) {
 			Node:    strings.TrimSpace(body.Node),
 			Keyword: strings.TrimSpace(body.Keyword),
 			Nodes:   a.assetAllowedNodes(p),
+			// 巡检范围沿用台账的两个维度（此前只跟节点分组）：否则"看不全台账"的人
+			// 会通过巡检报告看到范围外的资产名与差异项。
+			LabelSelectors: a.assetScopeSelectors(p),
 		},
 		Fields: body.Fields,
 	}
@@ -168,11 +174,49 @@ func (a *API) handleInspectFindings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "巡检记录不存在"})
 		return
 	}
+	findings, err = a.filterFindingsByAssetScope(Principal(r), findings)
+	if err != nil {
+		slog.Error("按业务范围过滤差异项失败", "run", runID, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询差异项失败"})
+		return
+	}
 	out := make([]inspectFindingView, 0, len(findings))
 	for _, f := range findings {
 		out = append(out, toInspectFindingView(f))
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"findings": out})
+}
+
+// filterFindingsByAssetScope 按**业务标签维度**过滤差异项（节点维度已由查询下推）。
+//
+// 为什么差异项要单独补一道：差异项里冗余了资产身份（资产被删也要能读历史），但它只有 asset_id、
+// 没有标签，因此业务范围无法像 nodes 那样写进 SQL。不补这一道的后果是——受限用户能在
+// 这份"证据"里看到范围外资产的名字与差异内容，而那是同类泄露里最难被注意到的一种
+// （差异项页看起来"就是个报告"，不像台账那样让人警惕）。
+//
+// 未限制该维度时原样返回，**不发出任何查询**。资产已删除时拿不到标签，按不可见处理：
+// 看不到的资产，它的差异项对这个调用者同样不该可见。
+func (a *API) filterFindingsByAssetScope(p *auth.Principal, items []asset.InspectFinding) ([]asset.InspectFinding, error) {
+	if p == nil || !p.Scope.LimitsAssets() {
+		return items, nil
+	}
+	ids := make([]int64, 0, len(items))
+	for _, f := range items {
+		if f.AssetID > 0 {
+			ids = append(ids, f.AssetID)
+		}
+	}
+	labels, err := a.assets.LabelsByAssetIDs(ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]asset.InspectFinding, 0, len(items))
+	for _, f := range items {
+		if auth.AssetAllowed(p, labels[f.AssetID]) {
+			out = append(out, f)
+		}
+	}
+	return out, nil
 }
 
 // handleInspectBaselines 列出各资产类型当前的期望值来源（标杆资产）。
@@ -214,7 +258,7 @@ func (a *API) handleAssetBaselineSet(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询标杆资产失败"})
 			return
 		}
-		if !found || !a.nodeInScope(Principal(r), owner.Node) {
+		if !found || !a.assetVisible(Principal(r), owner) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "资产不存在"})
 			return
 		}
@@ -256,7 +300,7 @@ func (a *API) handleAssetBaselineDelete(w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询标杆资产失败"})
 			return
 		}
-		if !found || !a.nodeInScope(Principal(r), owner.Node) || current.AssetID != item.ID {
+		if !found || !a.assetVisible(Principal(r), owner) || current.AssetID != item.ID {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "资产不存在"})
 			return
 		}

@@ -123,7 +123,7 @@ func (a *API) handleAssetsBatch(w http.ResponseWriter, r *http.Request) {
 			items = append(items, item)
 			continue
 		}
-		if !found || !a.nodeInScope(p, cur.Node) {
+		if !found || !a.assetVisible(p, cur) {
 			item.Error = "资产不存在"
 			items = append(items, item)
 			continue

@@ -80,7 +80,7 @@ func (a *API) handleAlertImpact(w http.ResponseWriter, r *http.Request) {
 	visible := make([]asset.Asset, 0, len(matched))
 	views := make([]assetView, 0, len(matched))
 	for _, item := range matched {
-		if !a.nodeInScope(p, item.Node) {
+		if !a.assetVisible(p, item) {
 			continue
 		}
 		visible = append(visible, item)

@@ -638,6 +638,22 @@ func assetWhere(alias string, f ListFilter) (string, []any) {
 			args = append(args, strings.TrimSpace(key))
 		}
 	}
+	if f.LabelSelectors != nil {
+		// 业务范围下推：与 Nodes 同一套三态语义（nil = 不过滤；非 nil 空 = 恒不匹配）。
+		if len(f.LabelSelectors) == 0 {
+			// 受限但没有任何选择器：恒不匹配。绝不退化成「不过滤」——那是把范围校验变成越权旁路。
+			q += " AND 1=0"
+			return q, args
+		}
+		// 维度**内**取或（与节点分组维度内取并集同构），与其它条件之间是 AND。
+		// 走同一个索引（idx_asset_labels_kv），因此"按业务范围看台账"不需要额外扫描。
+		parts := make([]string, 0, len(f.LabelSelectors))
+		for _, sel := range f.LabelSelectors {
+			parts = append(parts, "(l.key=? AND l.value=?)")
+			args = append(args, sel.Key, sel.Value)
+		}
+		q += " AND EXISTS (SELECT 1 FROM asset_labels l WHERE l.asset_id=" + alias + ".id AND (" + strings.Join(parts, " OR ") + "))"
+	}
 	switch f.Status {
 	case StatusArchived:
 		q += " AND NOT " + hasDiscoveryCond(alias)
@@ -892,6 +908,45 @@ func (s *Store) removeLabel(assetID int64, key string) error {
 		return fmt.Errorf("删除资产标签失败: %w", err)
 	}
 	return nil
+}
+
+// labelsByAssetIDs 批量取若干资产的标签（供**授权判定**的兜底使用）。
+//
+// 为什么需要它：巡检差异项里冗余了资产身份（资产被删也要能读历史），但它只有 asset_id、没有标签，
+// 因此业务范围这一维无法像 nodes 那样下推到 SQL，只能在取回后补判。逐条查会变成 N+1
+// （差异项上限 200 条），所以一次查完。
+func (s *Store) labelsByAssetIDs(ids []int64) (map[int64]map[string]string, error) {
+	out := map[int64]map[string]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.db.Query(
+		`SELECT asset_id,key,value FROM asset_labels WHERE asset_id IN (`+placeholders(len(ids))+`)`, int64sToAny(ids)...)
+	if err != nil {
+		return nil, fmt.Errorf("查询资产标签失败: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var key, value string
+		if err := rows.Scan(&id, &key, &value); err != nil {
+			return nil, fmt.Errorf("读取资产标签失败: %w", err)
+		}
+		if out[id] == nil {
+			out[id] = map[string]string{}
+		}
+		out[id][key] = value
+	}
+	return out, rows.Err()
+}
+
+// int64sToAny 把 id 列表转成 driver 需要的 []any（IN 子句的绑定参数）。
+func int64sToAny(ids []int64) []any {
+	out := make([]any, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id)
+	}
+	return out
 }
 
 // listAssets 按条件分页列出资产（含属性），按「类型 + 自然键」稳定排序。

@@ -207,7 +207,7 @@ func (a *API) logsPodAssetMap(p *auth.Principal, lines []model.LogHit) map[strin
 func (a *API) assetRefs(p *auth.Principal, items []asset.Asset, titles map[string]string) []logAssetRef {
 	refs := make([]logAssetRef, 0, len(items))
 	for _, item := range items {
-		if !a.nodeInScope(p, item.Node) {
+		if !a.assetVisible(p, item) {
 			continue
 		}
 		title := titles[item.TypeKey]

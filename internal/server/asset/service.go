@@ -70,9 +70,29 @@ type ListFilter struct {
 	//   only      只返回已忽略（摘要「已忽略」下钻用）
 	Ignored string
 	// Label 按标签过滤：`key` 表示"存在该标签键"，`key:value` 表示精确匹配键值。
-	Label  string
-	Limit  int
-	Offset int
+	Label string
+	// LabelSelectors 是**授权维度**的标签选择器（业务范围，维度内任一命中即可见）。
+	//
+	// 与上面的 Label 刻意分开：Label 是"用户想筛什么"，LabelSelectors 是"授权允许看什么"，
+	// 两者是 AND 关系。混在一起的风险是范围过滤被用户的筛选条件抹掉——那是一条越权捷径。
+	//
+	// 三态与 Nodes **逐字同一套**（同一件事不该有两种写法）：
+	//
+	//	nil      → 该维度不生效，不按标签过滤
+	//	非 nil 空 → 受限但没有任何选择器：恒不匹配（fail-closed）
+	//	非空      → 按选择器过滤
+	LabelSelectors []LabelSelector
+	Limit          int
+	Offset         int
+}
+
+// LabelSelector 是业务范围的一个标签选择器：资产带 `Key=Value` 标签即属于该范围。
+//
+// 与 auth.AssetScope 同形但**刻意不共用类型**：授权包不该依赖资产包的查询结构，
+// 资产包也不该依赖授权包（两者只在 API 层做一次显式映射，依赖方向清晰）。
+type LabelSelector struct {
+	Key   string
+	Value string
 }
 
 // 已忽略资产的可见性取值。
@@ -323,6 +343,11 @@ func (s *Service) GetHostByName(name string) (Asset, bool, error) {
 
 // GetByID 按主键取资产。
 func (s *Service) GetByID(id int64) (Asset, bool, error) { return s.store.assetByID(id) }
+
+// LabelsByAssetIDs 批量取资产标签（供授权兜底判定，见 store 的同名方法）。
+func (s *Service) LabelsByAssetIDs(ids []int64) (map[int64]map[string]string, error) {
+	return s.store.labelsByAssetIDs(ids)
+}
 
 // List 按条件分页列出资产。
 func (s *Service) List(f ListFilter) ([]Asset, error) { return s.store.listAssets(f) }

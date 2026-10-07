@@ -100,7 +100,7 @@ func (a *API) ensureLinkPeerVisible(w http.ResponseWriter, r *http.Request, peer
 	}
 	// 统一用 404 而不是区分「不存在」与「不在范围内」：两者对调用方是同一件事，
 	// 区分开就等于把范围外资产的存在性告诉了他。
-	if !found || !a.nodeInScope(Principal(r), item.Node) {
+	if !found || !a.assetVisible(Principal(r), item) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "对端资产不存在或不在可见范围内"})
 		return false
 	}
