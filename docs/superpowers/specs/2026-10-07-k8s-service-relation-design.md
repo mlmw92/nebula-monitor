@@ -196,3 +196,36 @@ dev-server 上有 k3s（记忆里记着只读 SA 与验证负载），Service �
 ## 7. 待评审
 
 D1~D10 若都按建议，则按 §6.1 的三笔开工；有异议的挑出来。
+
+## 8. 实施记录（2026-10-07，Server 与 Agent 1.30.47）
+
+三笔都已落地（D1~D10 全部按建议）：
+
+**① Agent 采集 + 上报结构**：`internal/model/metric.go` 新增 `K8sService`（含 `BackendPods` /
+`BackendsTruncated`）、`ReportPayload.K8sServices` + `K8sServicesTruncated`、常量
+`K8sServicesMaxPerReport=500` 与 `K8sServiceMaxBackends=200`；`internal/agent/collector/k8s.go`
+新增 `collectServices`（读 `/api/v1/services`，Headless 的字面量 `"None"` 不当地址带出）与
+`serviceBackends`（读 `/apis/discovery.k8s.io/v1/endpointslices`，按 `kubernetes.io/service-name`
+标签归并，只收 `targetRef.kind=Pod`、跨命名空间跳过、同一后端跨切片去重、结果排序让上报体稳定），
+接进 `CollectCtx` 的整份上报级截断；`collect_all.go` 与 `cmd/agent/main.go` 接线。
+**拿不到 EndpointSlice 不是致命错误**：Service 资产照落，只是这次不建关系。
+
+**② Server 建资产与边**：`internal/server/asset/model.go` 新增 `TypeService`、内置类型「K8s 服务」、
+`ServiceNaturalKey`，并在 `EphemeralTypes` 的注释里写明 **Service 刻意不在该列表内**；
+`internal/server/receiver/assets.go` 的 `applyContainerInventory` 增第 3 步（落 Service 资产，
+归属节点 = 集群上报主机）与第 4 步（`exposes` 边），并用 `podKeys` / `serviceKeys` 两个集合把关——
+**只对本轮真的落过的两端建边**：后端缺席时不建边、不造占位 Pod、也不刷日志。
+
+**③ 前端与文档**：`AssetListView.vue` 的 `PEER_TYPE_LABELS` 与 `AssetTopologyView.vue` 的
+`TYPE_TITLES` 补 `service`；**改掉 `AssetListView.vue:577` 那句"depends_on 与 exposes 只能人工维护"**
+（本批之后 `exposes` 有自动来源了）。
+
+**测试**：`go test ./...` 全绿；新增 6 条（Agent 侧 4 条：Service 与后端归并/去重/非 Pod 跳过 +
+Headless 与 ExternalName、单服务后端上限**显式置位**、整份上报上限**显式置位**、拿不到切片仍落资产；
+Server 侧 2 条：资产 + 边 + **幂等** + 缺席后端**不造占位** + 无后端不建边、Service **不进短命对象**）。
+前端 `npm test` **23 文件 136 项**全绿（新增 1 条：关系总览里 `service` 与 `exposes` 都显示中文名）。
+
+**未覆盖（不得视为通过）**：浏览器实点；`AssetListView.vue:577` 那句新文案只做了人工核对
+（它在"手工加边"对话框里，写用例要先把对话框打开，收益与成本不成比例）；大规模集群的采集耗时与上报体体积。
+
+**待办**：出包（**Server 与 Agent 同升**）后在 dev-server 按 §6.2 跑实机核对。
