@@ -206,6 +206,7 @@ func (a *API) handleOpsCreate(w http.ResponseWriter, r *http.Request) {
 			Status:    http.StatusCreated,
 			RemoteIP:  operatorIP,
 			Succeeded: true,
+			RequestID: RequestID(r),
 			Category:  "ops",
 			Action:    "create:" + task.Kind,
 			Detail: fmt.Sprintf("节点 %s 下发动作 %s（任务 %s%s）",
@@ -348,6 +349,7 @@ func (a *API) handleOpsCreateBatch(w http.ResponseWriter, r *http.Request) {
 		_ = a.audit.Record(audit.Event{
 			User: operator, Method: r.Method, Path: r.URL.Path,
 			Status: http.StatusCreated, RemoteIP: operatorIP, Succeeded: true,
+			RequestID: RequestID(r),
 			Category: "ops", Action: "create-batch:" + result.Kind,
 			Detail: fmt.Sprintf("批量下发 %s：目标 %d 台，成功 %d、失败 %d（批次 %s%s）",
 				result.Kind, total, created, failed, result.BatchID, reasonSuffix(body.Reason)),
@@ -442,6 +444,7 @@ func (a *API) handleOpsCancel(w http.ResponseWriter, r *http.Request) {
 		_ = a.audit.Record(audit.Event{
 			User: operator, Method: r.Method, Path: r.URL.Path,
 			Status: http.StatusOK, RemoteIP: audit.ClientIP(r), Succeeded: res.Cancelled > 0,
+			RequestID: RequestID(r),
 			Category: "ops", Action: "cancel",
 			Detail: fmt.Sprintf("取消操作任务：成功 %d、失败 %d（批次 %s）", res.Cancelled, res.Failed, body.BatchID),
 		})
@@ -475,6 +478,7 @@ func (a *API) handleOpsDelete(w http.ResponseWriter, r *http.Request) {
 		_ = a.audit.Record(audit.Event{
 			User: operator, Method: r.Method, Path: r.URL.Path,
 			Status: http.StatusOK, RemoteIP: audit.ClientIP(r), Succeeded: true,
+			RequestID: RequestID(r),
 			Category: "ops", Action: "delete",
 			Detail: fmt.Sprintf("删除操作任务记录 %s（节点 %s，状态 %s）", id, t.Node, t.State),
 		})

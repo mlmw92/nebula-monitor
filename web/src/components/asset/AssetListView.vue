@@ -444,6 +444,14 @@
                   来源 {{ rec.source === 'manual' ? '人工' : '采集' }}
                   <template v-if="rec.actor"> · 操作人 {{ rec.actor }}</template>
                 </div>
+                <!-- 正向入口：这条变更属于哪一次操作。没有关联 id 的记录（采集侧写的、
+                     以及本次升级之前的历史）不给入口——按钮点了查不到东西比没有更糟。
+                     读审计需要独立权限点，没有就整块不显示（不摆一个点不动的链接）。 -->
+                <div v-if="rec.requestId && canReadAudit" class="tl-audit">
+                  <el-button link type="primary" size="small" @click="gotoAudit(rec.requestId)">
+                    查看对应审计
+                  </el-button>
+                </div>
               </el-timeline-item>
             </el-timeline>
             <EmptyState
@@ -819,6 +827,9 @@ import TopologyGraph from './TopologyGraph.vue'
 const auth = useAuth()
 // 前端隐藏仅为体验：服务端 assets:write 是真正的边界（且属高风险权限，提交前二次确认）。
 const canWrite = computed(() => auth.can('assets:write'))
+// 读审计是独立权限点（audit:read）：没有它时不摆"查看对应审计"的入口，
+// 免得给出一个点进去只会 403 的链接。
+const canReadAudit = computed(() => auth.can('audit:read'))
 
 const items = ref([])
 const total = ref(0)
@@ -1743,6 +1754,16 @@ function gotoContainer(item) {
   router.push({ path: '/container', query })
 }
 
+// gotoAudit 跳到审计页并只筛「这一次操作」。
+//
+// 用深链（/audit?requestId=xxx）而不是就地弹个抽屉：审计行的全部信息（谁、从哪来、
+// 结果码、变更摘要）都在那一页，就地做个阉割版只会让人以为"审计就这么点内容"。
+// 关联 id 由服务端在写变更时落库，前端只负责搬它、不负责拼它。
+function gotoAudit(requestId) {
+  if (!requestId) return
+  router.push({ path: '/audit', query: { requestId } })
+}
+
 /* ================= 关系图（拓扑） ================= */
 
 // 图本身由 TopologyGraph 组件负责（与告警影响面共用）：这里只管"打开"。
@@ -2036,6 +2057,7 @@ onMounted(async () => {
 .tl-title {
   font-size: 14px;
 }
+.tl-audit { margin-top: 4px; }
 .tl-diff {
   font-size: 13px;
   color: var(--text-dim);

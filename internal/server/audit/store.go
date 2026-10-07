@@ -40,9 +40,14 @@ type Event struct {
 	RemoteIP       string    `json:"remoteIP"`
 	SourceLocation string    `json:"sourceLocation,omitempty"` // 来源 IP 属地（国家/省份/城市），由 Server 端经 ip2region 补全
 	Succeeded      bool      `json:"succeeded"`
-	Category       string    `json:"category,omitempty"`
-	Action         string    `json:"action,omitempty"`
-	Detail         string    `json:"detail,omitempty"`
+	// RequestID 是本次操作的关联 id（由审计中间件生成，见 api.RequestID）：
+	// 它把「这一次接口调用」与「它改动了哪些资产的哪些字段」对上——资产侧的同名列是
+	// asset_changes.request_id。只读请求与被跳过的上报接口没有值；本列上线前的历史行为空
+	// （不按时间与操作人回填：那会造出看着像证据、实际靠猜的关联）。
+	RequestID string `json:"requestId,omitempty"`
+	Category  string `json:"category,omitempty"`
+	Action    string `json:"action,omitempty"`
+	Detail    string `json:"detail,omitempty"`
 }
 
 // Store 持久化审计事件，提供记录与查询能力。
@@ -95,8 +100,8 @@ func readJSONEvents(path string) ([]Event, error) {
 }
 
 const insertEventSQL = `INSERT INTO audit_events(
-	time_ms, user_name, method, path, status, remote_ip, source_loc, succeeded, category, action, detail
-) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
+	time_ms, user_name, method, path, status, remote_ip, source_loc, succeeded, category, action, detail, request_id
+) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`
 
 func eventArgs(e Event) []any {
 	succeeded := 0
@@ -105,7 +110,7 @@ func eventArgs(e Event) []any {
 	}
 	return []any{
 		e.Time.UnixMilli(), e.User, e.Method, e.Path, e.Status, e.RemoteIP,
-		e.SourceLocation, succeeded, e.Category, e.Action, e.Detail,
+		e.SourceLocation, succeeded, e.Category, e.Action, e.Detail, e.RequestID,
 	}
 }
 
@@ -193,13 +198,14 @@ func (s *Store) Record(event Event) error {
 
 // QueryFilter 是审计查询条件。From/To 为毫秒时间戳（0 = 不限）。
 type QueryFilter struct {
-	User     string
-	Path     string
-	Category string
-	From     int64
-	To       int64
-	Limit    int
-	Offset   int
+	User      string
+	Path      string
+	Category  string
+	RequestID string
+	From      int64
+	To        int64
+	Limit     int
+	Offset    int
 }
 
 // auditWhere 生成**列表与计数共用**的 WHERE 片段。
@@ -221,6 +227,12 @@ func auditWhere(f QueryFilter) (string, []any) {
 	if f.Category != "" {
 		where += " AND category=?"
 		args = append(args, f.Category)
+	}
+	if f.RequestID != "" {
+		// 精确匹配：关联 id 是不透明句柄，用它是为了"从一条变更跳到那次操作"，
+		// 不是模糊找——子串匹配在这里只会把相邻操作混进来。
+		where += " AND request_id=?"
+		args = append(args, f.RequestID)
 	}
 	if f.From > 0 {
 		where += " AND time_ms >= ?"
@@ -254,7 +266,7 @@ func (s *Store) Query(f QueryFilter) ([]Event, int, error) {
 		return nil, 0, fmt.Errorf("统计审计事件失败: %w", err)
 	}
 	rows, err := db.Query(`SELECT time_ms, user_name, method, path, status, remote_ip,
-		source_loc, succeeded, category, action, detail FROM audit_events`+where+
+		source_loc, succeeded, category, action, detail, request_id FROM audit_events`+where+
 		" ORDER BY time_ms DESC, id DESC LIMIT ? OFFSET ?", append(args, f.Limit, f.Offset)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("查询审计事件失败: %w", err)
@@ -268,7 +280,7 @@ func (s *Store) Query(f QueryFilter) ([]Event, int, error) {
 			succeeded int
 		)
 		if err := rows.Scan(&timeMs, &e.User, &e.Method, &e.Path, &e.Status, &e.RemoteIP,
-			&e.SourceLocation, &succeeded, &e.Category, &e.Action, &e.Detail); err != nil {
+			&e.SourceLocation, &succeeded, &e.Category, &e.Action, &e.Detail, &e.RequestID); err != nil {
 			return nil, 0, fmt.Errorf("查询审计事件失败: %w", err)
 		}
 		e.Time = time.UnixMilli(timeMs)
@@ -292,6 +304,9 @@ func (s *Store) queryMemory(f QueryFilter) ([]Event, int, error) {
 			continue
 		}
 		if f.Category != "" && e.Category != f.Category {
+			continue
+		}
+		if f.RequestID != "" && e.RequestID != f.RequestID {
 			continue
 		}
 		if f.From > 0 && e.Time.UnixMilli() < f.From {

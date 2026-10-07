@@ -80,7 +80,9 @@ func auditFilter(r *http.Request, defaultLimit int) audit.QueryFilter {
 	to, _ := strconv.ParseInt(q.Get("to"), 10, 64)
 	return audit.QueryFilter{
 		User: q.Get("user"), Path: q.Get("path"), Category: q.Get("category"),
-		From: from, To: to, Limit: limit, Offset: offset,
+		// requestId 是"从一条资产变更跳到那次操作"的入口（精确匹配，见 auditWhere）。
+		RequestID: strings.TrimSpace(q.Get("requestId")),
+		From:      from, To: to, Limit: limit, Offset: offset,
 	}
 }
 

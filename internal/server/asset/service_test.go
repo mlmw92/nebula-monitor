@@ -565,7 +565,7 @@ func TestResetManualKeepsDiscoveryAndRecordsChange(t *testing.T) {
 	seedLedger(t, svc)
 
 	ref := Ref{TypeKey: TypeHost, NaturalKey: "mixed-01"}
-	updated, err := svc.ResetManual(ref, []string{" mem ", "mem", ""}, "alice")
+	updated, err := svc.ResetManual(ref, []string{" mem ", "mem", ""}, "alice", "")
 	if err != nil {
 		t.Fatalf("恢复采集值失败: %v", err)
 	}
@@ -591,10 +591,10 @@ func TestResetManualKeepsDiscoveryAndRecordsChange(t *testing.T) {
 	}
 
 	// 没有人工值时给明确错误，而不是静默成功
-	if _, err := svc.ResetManual(ref, []string{"mem"}, "alice"); err == nil {
+	if _, err := svc.ResetManual(ref, []string{"mem"}, "alice", ""); err == nil {
 		t.Fatal("重复恢复应报错")
 	}
-	if _, err := svc.ResetManual(ref, []string{"  "}, "alice"); err == nil {
+	if _, err := svc.ResetManual(ref, []string{"  "}, "alice", ""); err == nil {
 		t.Fatal("空字段名应报错")
 	}
 }
@@ -737,7 +737,7 @@ func TestRunInspectAddedAndMissingKinds(t *testing.T) {
 	}
 
 	// 清掉人工值：采集侧也没有该字段 → 字段从关注集合里消失 → missing
-	if _, err := svc.ResetManual(ref, []string{"vendor"}, "alice"); err != nil {
+	if _, err := svc.ResetManual(ref, []string{"vendor"}, "alice", ""); err != nil {
 		t.Fatalf("恢复采集值失败: %v", err)
 	}
 	now += 60_000
@@ -1213,7 +1213,7 @@ func TestLabelsSetFilterHistory(t *testing.T) {
 		t.Fatalf("写入失败: %v", err)
 	}
 
-	got, err := svc.SetLabels(ref, map[string]string{"env": "prod", "team": "sre"}, nil, "alice")
+	got, err := svc.SetLabels(ref, map[string]string{"env": "prod", "team": "sre"}, nil, "alice", "")
 	if err != nil {
 		t.Fatalf("写标签失败: %v", err)
 	}
@@ -1234,7 +1234,7 @@ func TestLabelsSetFilterHistory(t *testing.T) {
 
 	// 变更历史：值与原先相同不写记录，改了才写（字段名带 label: 前缀）
 	now += 1000
-	if _, err := svc.SetLabels(ref, map[string]string{"env": "prod"}, nil, "alice"); err != nil {
+	if _, err := svc.SetLabels(ref, map[string]string{"env": "prod"}, nil, "alice", ""); err != nil {
 		t.Fatalf("重复写同值失败: %v", err)
 	}
 	hist, err := svc.History(ref, 0)
@@ -1255,7 +1255,7 @@ func TestLabelsSetFilterHistory(t *testing.T) {
 	}
 
 	now += 1000
-	if _, err := svc.SetLabels(ref, map[string]string{"env": "test"}, []string{"team"}, "alice"); err != nil {
+	if _, err := svc.SetLabels(ref, map[string]string{"env": "test"}, []string{"team"}, "alice", ""); err != nil {
 		t.Fatalf("改标签失败: %v", err)
 	}
 	hist, _ = svc.History(ref, 0)
@@ -1282,10 +1282,10 @@ func TestLabelsSetFilterHistory(t *testing.T) {
 	}
 
 	// 非法输入：空键名、同时写入与删除
-	if _, err := svc.SetLabels(ref, map[string]string{"  ": "x"}, nil, "alice"); err == nil {
+	if _, err := svc.SetLabels(ref, map[string]string{"  ": "x"}, nil, "alice", ""); err == nil {
 		t.Fatal("空标签键应报错")
 	}
-	if _, err := svc.SetLabels(ref, map[string]string{"env": "x"}, []string{"env"}, "alice"); err == nil {
+	if _, err := svc.SetLabels(ref, map[string]string{"env": "x"}, []string{"env"}, "alice", ""); err == nil {
 		t.Fatal("同一键同时写入与删除应报错")
 	}
 
@@ -1297,7 +1297,7 @@ func TestLabelsSetFilterHistory(t *testing.T) {
 		t.Fatalf("巡检失败: %v", err)
 	}
 	now += 1000
-	if _, err := svc.SetLabels(ref, map[string]string{"env": "prod"}, nil, "alice"); err != nil {
+	if _, err := svc.SetLabels(ref, map[string]string{"env": "prod"}, nil, "alice", ""); err != nil {
 		t.Fatalf("改标签失败: %v", err)
 	}
 	run, err := svc.RunInspect(InspectScope{}, "alice")

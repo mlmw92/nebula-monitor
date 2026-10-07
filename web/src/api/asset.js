@@ -47,6 +47,14 @@ export async function lookupAsset(params = {}) {
 export const getAssetHistory = (id, limit = 0) =>
   http.get('/api/v1/assets/' + encodeURIComponent(id) + '/history' + (limit ? '?limit=' + limit : ''))
 
+// 按关联 id 取「这次操作改了什么」（跨资产）：审计列表的「本次改动」用它。
+//
+// 与 getAssetHistory 的分工：那条回答"这个资产经历了什么"，这条回答"那一次操作动了谁"。
+// requestId 为空时服务端直接 400 —— 空值对应的是采集侧写的变更（没有对应的接口调用），
+// 若被当成"某次操作"就会把整张变更表返回。因此这里也不做"空就查全部"的降级。
+export const getAssetChangesByRequest = (requestId, limit = 0) =>
+  http.get(withQuery('/api/v1/assets/changes', { requestId, limit: limit || undefined }))
+
 // 手工新建资产：以人工来源建档（服务端对已存在的类型 + 自然键返回 409）
 export const createAsset = (payload) => http.post('/api/v1/assets', payload)
 

@@ -435,6 +435,7 @@ func (a *API) recordAuthAudit(r *http.Request, operator, action, target string) 
 		Status:    http.StatusOK,
 		RemoteIP:  audit.ClientIP(r),
 		Succeeded: true,
+		RequestID: RequestID(r),
 		Category:  "auth",
 		Action:    action,
 		Detail:    "target=" + target,

@@ -80,15 +80,16 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_link_supp_from ON asset_link_suppressions(from_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_link_supp_to ON asset_link_suppressions(to_id)`,
 	`CREATE TABLE IF NOT EXISTS asset_changes(
-		id        INTEGER PRIMARY KEY AUTOINCREMENT,
-		asset_id  INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
-		field     TEXT NOT NULL,
-		old_value TEXT NOT NULL DEFAULT '',
-		new_value TEXT NOT NULL DEFAULT '',
-		source    TEXT NOT NULL DEFAULT '',
-		actor     TEXT NOT NULL DEFAULT '',
-		kind      TEXT NOT NULL,
-		at        INTEGER NOT NULL
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		asset_id   INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+		field      TEXT NOT NULL,
+		old_value  TEXT NOT NULL DEFAULT '',
+		new_value  TEXT NOT NULL DEFAULT '',
+		source     TEXT NOT NULL DEFAULT '',
+		actor      TEXT NOT NULL DEFAULT '',
+		kind       TEXT NOT NULL,
+		at         INTEGER NOT NULL,
+		request_id TEXT NOT NULL DEFAULT ''
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_changes_asset ON asset_changes(asset_id, at DESC)`,
 	`CREATE TABLE IF NOT EXISTS snapshots(
@@ -217,7 +218,8 @@ var schemaStatements = []string{
 		succeeded  INTEGER NOT NULL DEFAULT 0,
 		category   TEXT NOT NULL DEFAULT '',
 		action     TEXT NOT NULL DEFAULT '',
-		detail     TEXT NOT NULL DEFAULT ''
+		detail     TEXT NOT NULL DEFAULT '',
+		request_id TEXT NOT NULL DEFAULT ''
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_audit_events_time ON audit_events(time_ms DESC)`,
 	`CREATE INDEX IF NOT EXISTS idx_audit_events_user ON audit_events(user_name, time_ms DESC)`,
@@ -262,6 +264,17 @@ var schemaStatements = []string{
 	// seq 与 caps 是**有界元数据**（一个序号、每个节点一行），单独两张小表，让 ops_tasks.json 彻底退休。
 	`CREATE TABLE IF NOT EXISTS ops_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`,
 	`CREATE TABLE IF NOT EXISTS ops_caps(node TEXT PRIMARY KEY, kinds TEXT NOT NULL DEFAULT '')`,
+}
+
+// postAlterIndexes 是**依赖"后补列"**的索引，必须排在 ensureColumn 之后执行。
+//
+// 不能写进 schemaStatements：存量库那些表**还没有这一列**，建索引会报 "no such column"，
+// 而 schemaStatements 的失败会直接让服务起不来——为一条索引把一个升级中继的库打成"起不动"
+// 是不划算的。两张表都存的是**审计类追加数据**：采集侧写的变更没有关联 id，
+// 那一大片空串不必进索引，部分索引把索引本身也压小。
+var postAlterIndexes = []string{
+	`CREATE INDEX IF NOT EXISTS idx_changes_request ON asset_changes(request_id) WHERE request_id <> ''`,
+	`CREATE INDEX IF NOT EXISTS idx_audit_events_request ON audit_events(request_id) WHERE request_id <> ''`,
 }
 
 // DB 返回底层连接，供**同库的其它持久化**复用（审计事件与告警处置，见设计件批次 18）。
@@ -317,10 +330,31 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("资产库建表失败: %w", err)
 		}
 	}
-	// v1 存量库的 asset_links 没有 source 列，而 CREATE TABLE IF NOT EXISTS 不会补列，
-	// 因此显式补齐（新库建表时已含该列，这里是 no-op）。
-	if err := s.ensureLinkSourceColumn(); err != nil {
+	// 存量库补列：CREATE TABLE IF NOT EXISTS 不会给已有的表加列，因此显式补齐
+	// （新库在建表那一步就带着这些列，这里全是 no-op）。顺序不能颠倒——
+	// 表还不存在时 PRAGMA 查不到列名，会去 ALTER 一张不存在的表。
+	//
+	// v1 存量库的 asset_links 没有 source 列。存量边一律视为采集所得——
+	// 它们确实都是采集建的，语义上没有任何变化。
+	if err := s.ensureColumn("asset_links", "source",
+		`ALTER TABLE asset_links ADD COLUMN source TEXT NOT NULL DEFAULT 'discovery'`); err != nil {
 		return err
+	}
+	// 「变更 ↔ 审计」的关联 id。存量行留空，不按时间与操作人回填：那会造出
+	// 看着像证据、实际靠猜的关联，比没有关联更糟。
+	if err := s.ensureColumn("asset_changes", "request_id",
+		`ALTER TABLE asset_changes ADD COLUMN request_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("audit_events", "request_id",
+		`ALTER TABLE audit_events ADD COLUMN request_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	// 依赖上面这些列的索引（放在补列之后，理由见 postAlterIndexes 的注释）。
+	for _, stmt := range postAlterIndexes {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return fmt.Errorf("资产库建索引失败: %w", err)
+		}
 	}
 	for _, t := range BuiltinTypes() {
 		// 内置类型每次启动对齐标题：类型行被手工删除后也能自愈，
@@ -341,35 +375,35 @@ func (s *Store) migrate() error {
 	return nil
 }
 
-// ensureLinkSourceColumn 为 v1 存量库补上 asset_links.source。
+// ensureColumn 为存量库补一列（新库建表时已含该列，这里是 no-op）。
 //
 // 用「查列是否存在」而不是「按版本号判断」：手工删表、升级到一半留下的中间态都能自愈，
-// 与 schemaStatements 每次执行 IF NOT EXISTS 的取向一致。存量边一律视为采集所得——
-// 它们确实都是采集建的，语义上没有任何变化。
-func (s *Store) ensureLinkSourceColumn() error {
-	has, err := s.linkSourceColumnExists()
+// 与 schemaStatements 每次执行 IF NOT EXISTS 的取向一致。所补的都是**纯附加列**，
+// 老版本程序不读它们，因此**不提升 schemaVersion**——保留「回滚旧版本时 assets.db
+// 可直接沿用」这一既定运维性质，旧版本只是看不到这一列。
+func (s *Store) ensureColumn(table, column, alter string) error {
+	has, err := s.columnExists(table, column)
 	if err != nil {
 		return err
 	}
 	if has {
 		return nil
 	}
-	if _, err := s.db.Exec(
-		`ALTER TABLE asset_links ADD COLUMN source TEXT NOT NULL DEFAULT 'discovery'`,
-	); err != nil {
-		return fmt.Errorf("为 asset_links 补 source 列失败: %w", err)
+	if _, err := s.db.Exec(alter); err != nil {
+		return fmt.Errorf("为 %s 补 %s 列失败: %w", table, column, err)
 	}
 	return nil
 }
 
-// linkSourceColumnExists 查询 asset_links 是否已有 source 列。
+// columnExists 查询某表是否已有某列。
 //
 // 注意先把结果读完再返回：连接池是单连接（MaxOpenConns(1)），
 // 若留着未关闭的 rows 去执行 ALTER，会等不到连接而卡死。
-func (s *Store) linkSourceColumnExists() (bool, error) {
-	rows, err := s.db.Query(`PRAGMA table_info(asset_links)`)
+// 表名走的是本文件里的字面量（PRAGMA 不支持参数占位），不接受外部输入。
+func (s *Store) columnExists(table, column string) (bool, error) {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
-		return false, fmt.Errorf("读取 asset_links 结构失败: %w", err)
+		return false, fmt.Errorf("读取 %s 结构失败: %w", table, err)
 	}
 	defer rows.Close()
 	found := false
@@ -380,14 +414,14 @@ func (s *Store) linkSourceColumnExists() (bool, error) {
 			dflt             sql.NullString
 		)
 		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			return false, fmt.Errorf("读取 asset_links 结构失败: %w", err)
+			return false, fmt.Errorf("读取 %s 结构失败: %w", table, err)
 		}
-		if name == "source" {
+		if name == column {
 			found = true
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("读取 asset_links 结构失败: %w", err)
+		return false, fmt.Errorf("读取 %s 结构失败: %w", table, err)
 	}
 	return found, nil
 }
@@ -554,8 +588,9 @@ func (s *Store) upsertAttr(assetID int64, a Attr) error {
 // appendChange 追加一条变更记录。
 func (s *Store) appendChange(c ChangeRecord) error {
 	if _, err := s.db.Exec(
-		`INSERT INTO asset_changes(asset_id,field,old_value,new_value,source,actor,kind,at) VALUES(?,?,?,?,?,?,?,?)`,
-		c.AssetID, c.Field, c.Old, c.New, string(c.Source), c.Actor, string(c.Kind), c.At,
+		`INSERT INTO asset_changes(asset_id,field,old_value,new_value,source,actor,kind,at,request_id)
+		 VALUES(?,?,?,?,?,?,?,?,?)`,
+		c.AssetID, c.Field, c.Old, c.New, string(c.Source), c.Actor, string(c.Kind), c.At, c.RequestID,
 	); err != nil {
 		return fmt.Errorf("写入资产变更记录失败: %w", err)
 	}
@@ -568,7 +603,7 @@ func (s *Store) changesOf(assetID int64, limit int) ([]ChangeRecord, error) {
 		limit = defaultHistoryLimit
 	}
 	rows, err := s.db.Query(
-		`SELECT id,field,old_value,new_value,source,actor,kind,at FROM asset_changes
+		`SELECT id,field,old_value,new_value,source,actor,kind,at,request_id FROM asset_changes
 		 WHERE asset_id=? ORDER BY at DESC, id DESC LIMIT ?`, assetID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("查询资产变更记录失败: %w", err)
@@ -578,13 +613,70 @@ func (s *Store) changesOf(assetID int64, limit int) ([]ChangeRecord, error) {
 	for rows.Next() {
 		c := ChangeRecord{AssetID: assetID}
 		var source, actor, kind string
-		if err := rows.Scan(&c.ID, &c.Field, &c.Old, &c.New, &source, &actor, &kind, &c.At); err != nil {
+		if err := rows.Scan(&c.ID, &c.Field, &c.Old, &c.New, &source, &actor, &kind, &c.At, &c.RequestID); err != nil {
 			return nil, fmt.Errorf("读取资产变更记录失败: %w", err)
 		}
 		c.Source, c.Actor, c.Kind = Source(source), actor, ChangeKind(kind)
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// maxChangesByRequest 是"这次操作改了什么"一次最多返回的条数。
+//
+// 设上限的理由：一次全选批量操作能改到几百条资产，不限量就是让一个查询把整张表读回内存。
+// 取满时**显式回报已截断**而不是静默丢弃——静默截断会让人以为"这次就动了这些"，
+// 与拓扑图的 Truncated 同一个取向。
+const maxChangesByRequest = 500
+
+// changesByRequest 取某次操作（关联 id）改动的字段，跨资产、按发生顺序。
+//
+// 排序用**升序**而不是变更历史那种倒序：这个视图回答的是"这次操作依次动了什么"，
+// 顺序本身就是信息（先改了名字、再打了标签）。
+// 资产范围在 SQL 里下推（复用台账那套 WHERE），理由见 ChangeScope。
+func (s *Store) changesByRequest(requestID string, scope ChangeScope, limit int) ([]ChangeRecordItem, bool, error) {
+	if limit <= 0 || limit > maxChangesByRequest {
+		limit = maxChangesByRequest
+	}
+	// Ignored 显式设为"不过滤"：忽略本身也是一次操作，把被忽略的资产从它的操作记录里抹掉，
+	// 恰好会让"谁把这台机器忽略了"查不到。
+	where, args := assetWhere("a", ListFilter{
+		Nodes:          scope.Nodes,
+		LabelSelectors: scope.LabelSelectors,
+		Ignored:        IgnoreFilterWith,
+	})
+	rows, err := s.db.Query(
+		`SELECT c.id,c.asset_id,c.field,c.old_value,c.new_value,c.source,c.actor,c.kind,c.at,c.request_id,
+			a.type_key,a.natural_key,a.name,a.node
+		 FROM asset_changes c JOIN assets a ON a.id=c.asset_id`+where+
+			` AND c.request_id=? ORDER BY c.at, c.id LIMIT ?`,
+		append(args, requestID, limit+1)...)
+	if err != nil {
+		return nil, false, fmt.Errorf("查询操作变更记录失败: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ChangeRecordItem, 0, limit)
+	for rows.Next() {
+		var (
+			it            ChangeRecordItem
+			source, actor string
+			kind          string
+		)
+		if err := rows.Scan(&it.ID, &it.AssetID, &it.Field, &it.Old, &it.New, &source, &actor, &kind,
+			&it.At, &it.RequestID, &it.TypeKey, &it.NaturalKey, &it.Name, &it.Node); err != nil {
+			return nil, false, fmt.Errorf("读取操作变更记录失败: %w", err)
+		}
+		it.Source, it.Actor, it.Kind = Source(source), actor, ChangeKind(kind)
+		out = append(out, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	truncated := len(out) > limit
+	if truncated {
+		out = out[:limit]
+	}
+	return out, truncated, nil
 }
 
 // assetWhere 构造资产筛选的 WHERE 子句（不含 ORDER BY / LIMIT），alias 为表别名。
@@ -1127,7 +1219,7 @@ func (s *Store) assetStats(f ListFilter, changesSince int64) (Stats, error) {
 //
 // 删除与记录放在同一事务：否则会出现「界面显示已恢复、历史里查不到」这类自相矛盾。
 // 只删 source=manual，不动采集值——"恢复采集值"从来不需要写采集侧。
-func (s *Store) deleteManualAttrs(assetID int64, keys []string, at int64, actor string) ([]Attr, error) {
+func (s *Store) deleteManualAttrs(assetID int64, keys []string, at int64, actor, requestID string) ([]Attr, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("开启事务失败: %w", err)
@@ -1150,8 +1242,9 @@ func (s *Store) deleteManualAttrs(assetID int64, keys []string, at int64, actor 
 			return nil, fmt.Errorf("删除人工值失败: %w", err)
 		}
 		if _, err := tx.Exec(
-			`INSERT INTO asset_changes(asset_id,field,old_value,new_value,source,actor,kind,at) VALUES(?,?,?,?,?,?,?,?)`,
-			assetID, key, value, "", string(SourceManual), actor, string(ChangeUpdate), at,
+			`INSERT INTO asset_changes(asset_id,field,old_value,new_value,source,actor,kind,at,request_id)
+			 VALUES(?,?,?,?,?,?,?,?,?)`,
+			assetID, key, value, "", string(SourceManual), actor, string(ChangeUpdate), at, requestID,
 		); err != nil {
 			return nil, fmt.Errorf("写入资产变更记录失败: %w", err)
 		}

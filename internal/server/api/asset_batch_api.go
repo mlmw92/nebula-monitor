@@ -112,6 +112,9 @@ func (a *API) handleAssetsBatch(w http.ResponseWriter, r *http.Request) {
 
 	p := Principal(r)
 	actor := assetActor(r)
+	// 整批共用一个关联 id：一次批量操作 = 一次请求 = 一条审计，
+	// 于是"这次操作改了哪些资产的哪些字段"能把整批串成一条线（这正是它最该回答的问题）。
+	requestID := RequestID(r)
 	items := make([]assetBatchItem, 0, len(ids))
 	okCount := 0
 
@@ -130,7 +133,7 @@ func (a *API) handleAssetsBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		item.Name = assetDisplayName(cur)
 		item.Node = cur.Node
-		if err := a.applyAssetBatchOp(op, cur, body, actor); err != nil {
+		if err := a.applyAssetBatchOp(op, cur, body, actor, requestID); err != nil {
 			// 失败原因原样透出：服务端给的说明（如"标签键不能为空"）就是下一步该做什么
 			item.Error = err.Error()
 		} else {
@@ -148,6 +151,7 @@ func (a *API) handleAssetsBatch(w http.ResponseWriter, r *http.Request) {
 		_ = a.audit.Record(audit.Event{
 			User: operator, Method: r.Method, Path: r.URL.Path,
 			Status: http.StatusOK, RemoteIP: operatorIP, Succeeded: true,
+			RequestID: RequestID(r),
 			Category: "assets", Action: "batch:" + op,
 			Detail: fmt.Sprintf("批量%s：目标 %d 条，成功 %d、失败 %d%s",
 				opLabel, total, okCount, failed, assetReasonSuffix(body.Reason)),
@@ -177,14 +181,15 @@ func (a *API) handleAssetsBatch(w http.ResponseWriter, r *http.Request) {
 //
 // 全部复用**单条写方法**（Apply / ResetManual / SetLabels / Ignore / Restore）：
 // 批量不该有"另一条写路径"——否则字段级变更历史、审计与校验迟早出现两套口径。
-func (a *API) applyAssetBatchOp(op string, cur asset.Asset, body assetBatchBody, actor string) error {
+func (a *API) applyAssetBatchOp(op string, cur asset.Asset, body assetBatchBody, actor, requestID string) error {
 	ref := asset.Ref{TypeKey: cur.TypeKey, NaturalKey: cur.NaturalKey}
 	switch op {
 	case "owner":
 		_, _, err := a.assets.Apply(asset.Observation{
 			TypeKey: ref.TypeKey, NaturalKey: ref.NaturalKey, Name: cur.Name, Node: cur.Node,
 			Source: asset.SourceManual, Actor: actor,
-			Attrs: map[string]string{asset.OwnerKey: strings.TrimSpace(body.Owner)},
+			Attrs:     map[string]string{asset.OwnerKey: strings.TrimSpace(body.Owner)},
+			RequestID: requestID,
 		})
 		return err
 	case "ownerClear":
@@ -195,10 +200,10 @@ func (a *API) applyAssetBatchOp(op string, cur asset.Asset, body assetBatchBody,
 		if strings.TrimSpace(cur.Owner()) == "" {
 			return nil
 		}
-		_, err := a.assets.ResetManual(ref, []string{asset.OwnerKey}, actor)
+		_, err := a.assets.ResetManual(ref, []string{asset.OwnerKey}, actor, requestID)
 		return err
 	case "labels":
-		_, err := a.assets.SetLabels(ref, body.Labels, body.Remove, actor)
+		_, err := a.assets.SetLabels(ref, body.Labels, body.Remove, actor, requestID)
 		return err
 	case "ignore":
 		_, err := a.assets.Ignore(ref, actor, strings.TrimSpace(body.Reason))
@@ -347,6 +352,7 @@ func (a *API) handleAssetExport(w http.ResponseWriter, r *http.Request) {
 		_ = a.audit.Record(audit.Event{
 			User: AuthenticatedUser(r), Method: r.Method, Path: r.URL.Path,
 			Status: http.StatusOK, RemoteIP: audit.ClientIP(r), Succeeded: true,
+			RequestID: RequestID(r),
 			Category: "assets", Action: "export",
 			Detail: fmt.Sprintf("导出资产清单 %d 条%s", len(rows), assetFilterSuffix(filter)),
 		})

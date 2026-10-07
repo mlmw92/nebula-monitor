@@ -35,8 +35,12 @@ type AssetProvider interface {
 	GetHostByName(name string) (asset.Asset, bool, error)
 	Apply(ob asset.Observation) (asset.Asset, bool, error)
 	// ResetManual 清除指定字段的人工值（原型里的「恢复采集值」）。
-	ResetManual(ref asset.Ref, keys []string, actor string) (asset.Asset, error)
+	// actor 与 requestID 一起构成"这次变更是谁、属于哪次操作"，见 asset.ChangeRecord.RequestID。
+	ResetManual(ref asset.Ref, keys []string, actor, requestID string) (asset.Asset, error)
 	History(ref asset.Ref, limit int) ([]asset.ChangeRecord, error)
+	// ChangesByRequest 按关联 id 取"这次操作改了什么"（跨资产，受 scope 约束）。
+	// 返回的 truncated 表示被上限截断，必须透出给界面。
+	ChangesByRequest(requestID string, scope asset.ChangeScope, limit int) ([]asset.ChangeRecordItem, bool, error)
 	// Snapshots 列出资产的配置快照头（时间倒序）。
 	Snapshots(ref asset.Ref, limit int) ([]asset.Snapshot, error)
 	// 差异巡检（inspect）：读结论 + 维护标杆，都不改动资产本身。
@@ -81,7 +85,7 @@ type AssetProvider interface {
 	Restore(ref asset.Ref, actor string) (asset.Asset, error)
 	Purge(ref asset.Ref) (baselineCleared bool, err error)
 	// SetLabels 写入/覆盖标签，并删除 remove 中列出的键。
-	SetLabels(ref asset.Ref, labels map[string]string, remove []string, actor string) (asset.Asset, error)
+	SetLabels(ref asset.Ref, labels map[string]string, remove []string, actor, requestID string) (asset.Asset, error)
 }
 
 // SetAssetService 注入资产台账服务（可选；未注入时资产接口返回 503，与其它可选能力一致）。
@@ -222,13 +226,17 @@ func assetSourceKind(manual, conflict int) string {
 }
 
 type assetChangeView struct {
-	Field  string `json:"field"`
-	Old    string `json:"old,omitempty"`
-	New    string `json:"new,omitempty"`
-	Source string `json:"source"`
-	Actor  string `json:"actor,omitempty"`
-	Kind   string `json:"kind"`
-	At     int64  `json:"at"`
+	ID int64 `json:"id"`
+	// RequestID 是这次变更所属操作的关联 id；为空表示它来自采集（没有对应的接口调用）。
+	// 界面据此决定要不要给「查看对应审计」入口——空值不给，不去猜。
+	RequestID string `json:"requestId,omitempty"`
+	Field     string `json:"field"`
+	Old       string `json:"old,omitempty"`
+	New       string `json:"new,omitempty"`
+	Source    string `json:"source"`
+	Actor     string `json:"actor,omitempty"`
+	Kind      string `json:"kind"`
+	At        int64  `json:"at"`
 }
 
 func toAssetView(a asset.Asset, staleBefore int64) assetView {
@@ -757,12 +765,73 @@ func (a *API) handleAssetHistory(w http.ResponseWriter, r *http.Request) {
 	out := make([]assetChangeView, 0, len(records))
 	for _, rec := range records {
 		out = append(out, assetChangeView{
+			ID: rec.ID, RequestID: rec.RequestID,
 			Field: rec.Field, Old: rec.Old, New: rec.New,
 			Source: string(rec.Source), Actor: rec.Actor, Kind: string(rec.Kind), At: rec.At,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"id": item.ID, "typeKey": item.TypeKey, "naturalKey": item.NaturalKey, "records": out,
+	})
+}
+
+// assetChangeItemView 是"这次操作改了什么"的一行：变更本身 + 它所属资产的身份。
+// 带身份是为了界面能直接显示"哪个资产的哪个字段"并跳过去，而不是只给一串数字。
+type assetChangeItemView struct {
+	ID         int64  `json:"id"`
+	AssetID    int64  `json:"assetId"`
+	TypeKey    string `json:"typeKey"`
+	NaturalKey string `json:"naturalKey"`
+	Name       string `json:"name,omitempty"`
+	Node       string `json:"node,omitempty"`
+	Field      string `json:"field"`
+	Old        string `json:"old,omitempty"`
+	New        string `json:"new,omitempty"`
+	Source     string `json:"source"`
+	Actor      string `json:"actor,omitempty"`
+	Kind       string `json:"kind"`
+	At         int64  `json:"at"`
+}
+
+// handleAssetChangesByRequest 返回某次操作（关联 id）改动的字段，跨资产、按发生顺序。
+//
+// 这是「变更 ↔ 审计」关联的**反向入口**，与 GET /api/v1/audit/events?requestId= 成对：
+// 审计侧回答"谁在什么时候调了哪个接口"，这里回答"那次调用到底动了什么"。
+// 两个范围维度（节点 + 业务标签）都下推到 SQL——少一个维度，受限用户就能从"这次操作
+// 改了什么"里看到范围外资产的字段名与值，而资产详情那条路是拦住的。
+// 返回的 truncated 表示条数被上限截断，必须透出（静默截断会让人以为"这次就动了这些"）。
+func (a *API) handleAssetChangesByRequest(w http.ResponseWriter, r *http.Request) {
+	if a.assets == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "资产台账未启用"})
+		return
+	}
+	requestID := strings.TrimSpace(r.URL.Query().Get("requestId"))
+	if requestID == "" {
+		// 空值不能放行：它对应的是**采集侧写的变更**（没有对应的操作），
+		// 放过去等于把整张变更表当成"这一次操作"返回。
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "缺少 requestId"})
+		return
+	}
+	p := Principal(r)
+	items, truncated, err := a.assets.ChangesByRequest(requestID, asset.ChangeScope{
+		Nodes:          a.assetAllowedNodes(p),
+		LabelSelectors: a.assetScopeSelectors(p),
+	}, assetIntParam(r.URL.Query().Get("limit"), 0))
+	if err != nil {
+		slog.Error("查询操作变更记录失败", "requestId", requestID, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询操作变更记录失败"})
+		return
+	}
+	out := make([]assetChangeItemView, 0, len(items))
+	for _, it := range items {
+		out = append(out, assetChangeItemView{
+			ID: it.ID, AssetID: it.AssetID, TypeKey: it.TypeKey, NaturalKey: it.NaturalKey,
+			Name: it.Name, Node: it.Node, Field: it.Field, Old: it.Old, New: it.New,
+			Source: string(it.Source), Actor: it.Actor, Kind: string(it.Kind), At: it.At,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"requestId": requestID, "changes": out, "truncated": truncated,
 	})
 }
 
@@ -911,6 +980,7 @@ func (a *API) handleAssetCreate(w http.ResponseWriter, r *http.Request) {
 	created, _, err := a.assets.Apply(asset.Observation{
 		TypeKey: ref.TypeKey, NaturalKey: ref.NaturalKey, Name: strings.TrimSpace(body.Name), Node: node,
 		Source: asset.SourceManual, Actor: assetActor(r), Attrs: cleanAssetAttrs(body.Attrs),
+		RequestID: RequestID(r),
 	})
 	if err != nil {
 		slog.Error("新建资产失败", "asset", ref.NaturalKey, "err", err)
@@ -952,7 +1022,7 @@ func (a *API) handleAssetUpdate(w http.ResponseWriter, r *http.Request) {
 	// 先恢复再写入：同一个字段同时出现在两者里时，最终留下的是本次提交的人工值（可预期）。
 	if len(reset) > 0 {
 		if _, err := a.assets.ResetManual(asset.Ref{TypeKey: item.TypeKey, NaturalKey: item.NaturalKey},
-			reset, assetActor(r)); err != nil {
+			reset, assetActor(r), RequestID(r)); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
@@ -973,6 +1043,7 @@ func (a *API) handleAssetUpdate(w http.ResponseWriter, r *http.Request) {
 	updated, _, err := a.assets.Apply(asset.Observation{
 		TypeKey: item.TypeKey, NaturalKey: item.NaturalKey, Name: name, Node: item.Node,
 		Source: asset.SourceManual, Actor: assetActor(r), Attrs: attrs,
+		RequestID: RequestID(r),
 	})
 	if err != nil {
 		slog.Error("更新资产失败", "asset", item.NaturalKey, "err", err)

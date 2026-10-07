@@ -254,6 +254,7 @@ func (s *Service) Apply(ob Observation) (Asset, bool, error) {
 		if err := s.store.appendChange(ChangeRecord{
 			AssetID: id, Field: "asset", New: naturalKey,
 			Source: src, Actor: ob.Actor, Kind: ChangeInitial, At: at,
+			RequestID: ob.RequestID,
 		}); err != nil {
 			return Asset{}, false, err
 		}
@@ -270,6 +271,7 @@ func (s *Service) Apply(ob Observation) (Asset, bool, error) {
 		if err := s.store.appendChange(ChangeRecord{
 			AssetID: cur.ID, Field: field, Old: pair[0], New: pair[1],
 			Source: src, Actor: ob.Actor, Kind: ChangeUpdate, At: at,
+			RequestID: ob.RequestID,
 		}); err != nil {
 			return Asset{}, false, err
 		}
@@ -296,6 +298,7 @@ func (s *Service) Apply(ob Observation) (Asset, bool, error) {
 		if err := s.store.appendChange(ChangeRecord{
 			AssetID: cur.ID, Field: key, Old: old, New: value,
 			Source: src, Actor: ob.Actor, Kind: ChangeUpdate, At: at,
+			RequestID: ob.RequestID,
 		}); err != nil {
 			return Asset{}, false, err
 		}
@@ -385,7 +388,7 @@ func (s *Service) Stats(f ListFilter, changesSince int64) (Stats, error) {
 // 只删人工值：采集值一直没被动过，所以"恢复"是**删除**而不是写回——
 // 写回会把当前采集值固化成一条人工值，此后采集再变反而显示成"人工值覆盖"，
 // 等于用一个更隐蔽的错误替换了原来那个。
-func (s *Service) ResetManual(ref Ref, keys []string, actor string) (Asset, error) {
+func (s *Service) ResetManual(ref Ref, keys []string, actor, requestID string) (Asset, error) {
 	a, err := s.resolve(ref)
 	if err != nil {
 		return Asset{}, err
@@ -401,7 +404,7 @@ func (s *Service) ResetManual(ref Ref, keys []string, actor string) (Asset, erro
 	if len(want) == 0 {
 		return Asset{}, errors.New("未指定要恢复的字段")
 	}
-	removed, err := s.store.deleteManualAttrs(a.ID, want, s.now(), actor)
+	removed, err := s.store.deleteManualAttrs(a.ID, want, s.now(), actor, requestID)
 	if err != nil {
 		return Asset{}, err
 	}
@@ -613,6 +616,22 @@ func (s *Service) History(ref Ref, limit int) ([]ChangeRecord, error) {
 		return nil, err
 	}
 	return s.store.changesOf(a.ID, limit)
+}
+
+// ChangesByRequest 返回某次操作（关联 id，见 ChangeRecord.RequestID）改动的字段，跨资产。
+//
+// 这是「变更 ↔ 审计」关联的**反向入口**：审计回答"谁在什么时候调了哪个接口"，
+// 这里回答"那次调用实际动了哪些资产的哪些字段"——单看任一侧都答不了后者。
+// 返回的 truncated 表示条数被上限截断（见 maxChangesByRequest），必须显式回报给界面。
+//
+// 关联 id 为空直接拒绝：空值是采集侧写的变更（没有对应的"某次接口调用"），
+// 放行就等于把**所有**采集变更当成"这一次操作"，把关联语义变成噪声。
+func (s *Service) ChangesByRequest(requestID string, scope ChangeScope, limit int) ([]ChangeRecordItem, bool, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return nil, false, errors.New("关联 id 不能为空")
+	}
+	return s.store.changesByRequest(requestID, scope, limit)
 }
 
 // Snapshot 抽取指定关注字段的当前生效值，存成一份配置快照。
@@ -1029,7 +1048,8 @@ func (s *Service) Purge(ref Ref) (baselineCleared bool, err error) {
 func labelField(key string) string { return "label:" + key }
 
 // SetLabels 写入/覆盖标签，并删除 remove 中列出的键；返回更新后的资产。
-func (s *Service) SetLabels(ref Ref, labels map[string]string, remove []string, actor string) (Asset, error) {
+// actor 与 requestID 一起构成"这次变更是谁、属于哪次操作"（见 ChangeRecord.RequestID）。
+func (s *Service) SetLabels(ref Ref, labels map[string]string, remove []string, actor, requestID string) (Asset, error) {
 	a, err := s.resolve(ref)
 	if err != nil {
 		return Asset{}, err
@@ -1069,6 +1089,7 @@ func (s *Service) SetLabels(ref Ref, labels map[string]string, remove []string, 
 		if err := s.store.appendChange(ChangeRecord{
 			AssetID: a.ID, Field: labelField(k), Old: old, New: "",
 			Source: SourceManual, Actor: actor, Kind: ChangeUpdate, At: at,
+			RequestID: requestID,
 		}); err != nil {
 			return Asset{}, err
 		}
@@ -1095,6 +1116,7 @@ func (s *Service) SetLabels(ref Ref, labels map[string]string, remove []string, 
 		if err := s.store.appendChange(ChangeRecord{
 			AssetID: a.ID, Field: labelField(k), Old: oldValue, New: value,
 			Source: SourceManual, Actor: actor, Kind: ChangeUpdate, At: at,
+			RequestID: requestID,
 		}); err != nil {
 			return Asset{}, err
 		}

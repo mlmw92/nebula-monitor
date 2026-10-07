@@ -8,12 +8,23 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import http, { getToken, setToken } from '../api/http'
+import { useAuth } from '../composables/useAuth'
 import AuditView from './AuditView.vue'
 
 vi.mock('../api/http', () => ({
   default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn() },
   getToken: vi.fn(() => ''),
   setToken: vi.fn(),
+}))
+
+// 审计页用路由 query 认领「只看这一次操作」（深链 /audit?requestId=xxx），
+// 并用 router.replace 把被关掉的条件从地址栏摘掉；测试里用 mock 观察这两件事。
+const routerPush = vi.fn()
+const routerReplace = vi.fn()
+let routeQuery = {}
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerPush, replace: routerReplace }),
+  useRoute: () => ({ query: routeQuery, path: '/audit' }),
 }))
 
 // jsdom 未实现 ResizeObserver，Element Plus 的表格会用到它。
@@ -171,5 +182,115 @@ describe('AuditView 时间范围与分页', () => {
 
     expect(lastURL()).toContain(`from=${from.getTime()}`)
     expect(lastURL()).toContain(`to=${to.getTime()}`)
+  })
+})
+
+// 「变更 ↔ 审计」关联的前端一半。
+//
+// 关联的价值在于两边能互相跳得过去，因此这里盯的是三件事：
+//   ① 从资产变更历史带过来的 requestId 要真的进查询串（否则"跳过来却还在看全部"）；
+//   ② 关掉它时要连地址栏一起清（否则刷新一次条件又回来，用户以为关不掉）；
+//   ③ 没有关联 id 的行不给入口（点了查不到东西比没有按钮更糟）。
+describe('AuditView 与资产变更的关联', () => {
+  let wrapper
+
+  const linked = { ...oneEvent, requestId: 'abc123' }
+  const change = {
+    id: 7, assetId: 3, typeKey: 'host', naturalKey: 'web-01', name: 'web-01',
+    field: 'env', old: '', new: 'prod', source: 'manual', actor: 'admin', at: 1_800_000_000_000,
+  }
+
+  function mockData({ events = [linked], changes = [change], truncated = false } = {}) {
+    http.get.mockImplementation(async (path) => {
+      if (path.startsWith('/api/v1/audit/events')) return { events, total: events.length }
+      if (path.startsWith('/api/v1/assets/changes')) return { requestId: 'abc123', changes, truncated }
+      return {}
+    })
+  }
+
+  async function clickChanges() {
+    const button = wrapper.findAll('button').find((b) => b.text().includes('本次改动'))
+    expect(button).toBeTruthy()
+    await button.trigger('click')
+    await flushPromises()
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    routeQuery = {}
+    mockData()
+  })
+
+  afterEach(() => {
+    if (wrapper) wrapper.unmount()
+    wrapper = undefined
+    document.body.innerHTML = ''
+  })
+
+  it('深链 ?requestId= 直接按这一次操作过滤，并显示成可关闭的条件', async () => {
+    routeQuery = { requestId: 'abc123' }
+    wrapper = mountView()
+    await flushPromises()
+
+    expect(lastURL()).toContain('requestId=abc123')
+    expect(wrapper.text()).toContain('本次操作 abc123')
+  })
+
+  it('关掉条件时连同地址栏一起清掉', async () => {
+    routeQuery = { requestId: 'abc123' }
+    wrapper = mountView()
+    await flushPromises()
+
+    const tag = wrapper.findAll('.el-tag').find((t) => t.text().includes('本次操作'))
+    expect(tag).toBeTruthy()
+    await tag.find('.el-tag__close').trigger('click')
+    await flushPromises()
+
+    expect(routerReplace).toHaveBeenCalled()
+    expect(lastURL()).not.toContain('requestId=')
+  })
+
+  it('「本次改动」按关联 id 取回这次操作动过的字段', async () => {
+    wrapper = mountView()
+    await flushPromises()
+    await clickChanges()
+
+    const called = http.get.mock.calls.map((c) => c[0]).find((u) => u.includes('/api/v1/assets/changes'))
+    expect(called).toContain('requestId=abc123')
+    // 抽屉里要把"哪个资产的哪个字段从什么变成什么"说清楚
+    expect(document.body.textContent).toContain('env')
+    expect(document.body.textContent).toContain('prod')
+    expect(document.body.textContent).toContain('web-01')
+  })
+
+  it('改动被截断时显式说明，不让人以为"这次就动了这些"', async () => {
+    mockData({ truncated: true })
+    wrapper = mountView()
+    await flushPromises()
+    await clickChanges()
+
+    expect(document.body.textContent).toContain('超过上限')
+  })
+
+  it('没有关联 id 的行不给入口（旧数据 / 采集上报查不到审计）', async () => {
+    mockData({ events: [{ ...oneEvent }] })
+    wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.findAll('button').some((b) => b.text().includes('本次改动'))).toBe(false)
+  })
+
+  it('没有 assets:read 权限时不摆入口', async () => {
+    const { principal } = useAuth()
+    principal.loaded = true
+    principal.permissions = ['audit:read']
+    try {
+      wrapper = mountView()
+      await flushPromises()
+      expect(wrapper.findAll('button').some((b) => b.text().includes('本次改动'))).toBe(false)
+    } finally {
+      principal.loaded = false
+      principal.permissions = []
+    }
   })
 })

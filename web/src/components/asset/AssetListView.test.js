@@ -119,6 +119,15 @@ async function openLinksTab(w) {
   await flushPromises()
 }
 
+// openHistoryTab 打开详情抽屉并切到「变更历史」页签（变更与审计的关联入口在这里）。
+async function openHistoryTab(w) {
+  await flushPromises()
+  const tab = w.findAll('.el-tabs__item').find((t) => t.text().includes('变更历史'))
+  expect(tab).toBeTruthy()
+  await tab.trigger('click')
+  await flushPromises()
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   wrappers = []
@@ -221,5 +230,40 @@ describe('AssetListView 关系图', () => {
     await flushPromises()
 
     expect(w.text()).toContain('查询资产关系图失败')
+  })
+})
+
+// 变更记录 → 审计的入口（「变更 ↔ 审计」关联的前向一半）。
+//
+// 盯两件事：有关联 id 的记录要能跳到审计页、并且把 id 带上（否则跳过去还在看全部审计）；
+// 没有关联 id 的记录（采集侧写的、升级前的历史）不给入口——按钮点了查不到东西更糟。
+describe('AssetListView 变更历史与审计的关联', () => {
+  const linkedRecord = {
+    id: 7, requestId: 'abc123', field: 'env', old: '', new: 'prod',
+    source: 'manual', actor: 'admin', kind: 'update', at: 1_800_000_000_000,
+  }
+  const collectedRecord = {
+    id: 8, field: 'cpuCores', old: '4', new: '8',
+    source: 'discovery', kind: 'update', at: 1_800_000_001_000,
+  }
+
+  it('带关联 id 的记录给出「查看对应审计」，点了带上 requestId 跳审计页', async () => {
+    getAssetHistory.mockResolvedValue({ records: [linkedRecord, collectedRecord] })
+    const w = mountView()
+    await openHistoryTab(w)
+
+    const buttons = w.findAll('button').filter((b) => b.text().includes('查看对应审计'))
+    // 两条记录里只有带 requestId 的那条有入口
+    expect(buttons.length).toBe(1)
+    await buttons[0].trigger('click')
+    expect(routerPush).toHaveBeenCalledWith({ path: '/audit', query: { requestId: 'abc123' } })
+  })
+
+  it('采集侧的记录没有入口（它没有对应的接口调用）', async () => {
+    getAssetHistory.mockResolvedValue({ records: [collectedRecord] })
+    const w = mountView()
+    await openHistoryTab(w)
+
+    expect(w.findAll('button').some((b) => b.text().includes('查看对应审计'))).toBe(false)
   })
 })

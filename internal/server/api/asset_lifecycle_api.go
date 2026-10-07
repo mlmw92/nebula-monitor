@@ -116,7 +116,7 @@ func (a *API) handleAssetLabels(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体不是合法 JSON"})
 		return
 	}
-	if _, err := a.assets.SetLabels(assetRefOf(item), body.Labels, body.Remove, assetActor(r)); err != nil {
+	if _, err := a.assets.SetLabels(assetRefOf(item), body.Labels, body.Remove, assetActor(r), RequestID(r)); err != nil {
 		slog.Error("维护资产标签失败", "asset", item.NaturalKey, "err", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

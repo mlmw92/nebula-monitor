@@ -17,7 +17,7 @@ func TestListFilterLabelSelectors(t *testing.T) {
 	}
 	setLabels := func(host string, labels map[string]string) {
 		t.Helper()
-		if _, err := svc.SetLabels(Ref{TypeKey: TypeHost, NaturalKey: host}, labels, nil, "alice"); err != nil {
+		if _, err := svc.SetLabels(Ref{TypeKey: TypeHost, NaturalKey: host}, labels, nil, "alice", ""); err != nil {
 			t.Fatalf("写标签 %s 失败: %v", host, err)
 		}
 	}
@@ -113,7 +113,7 @@ func TestDistinctLabelValuesScoped(t *testing.T) {
 	}
 	set := func(host string, labels map[string]string) {
 		t.Helper()
-		if _, err := svc.SetLabels(Ref{TypeKey: TypeHost, NaturalKey: host}, labels, nil, "alice"); err != nil {
+		if _, err := svc.SetLabels(Ref{TypeKey: TypeHost, NaturalKey: host}, labels, nil, "alice", ""); err != nil {
 			t.Fatalf("打标签 %s 失败: %v", host, err)
 		}
 	}

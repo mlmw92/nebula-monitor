@@ -422,6 +422,8 @@ type Topology struct {
 // ChangeRecord 是一条字段级变更。
 //
 // 与审计的分工：审计回答「谁调了什么接口」，变更记录回答「哪个字段从什么变成什么」。
+// 两者由 RequestID 串起来（见该字段），合起来才回答得了「**那一次操作**把哪些资产的
+// 哪些字段从什么改成了什么」——单独任何一侧都答不了这个问题。
 type ChangeRecord struct {
 	ID      int64
 	AssetID int64
@@ -432,6 +434,34 @@ type ChangeRecord struct {
 	Actor   string
 	Kind    ChangeKind
 	At      int64
+	// RequestID 是这次变更所属操作的关联 id（与审计事件同名列对应）。
+	//
+	// **人工操作有值，采集侧留空**——采集驱动的变化没有对应的"某次接口调用"，
+	// 留空比编一个更像诚实的做法。空值在界面上不显示入口（不去猜、不按时间与操作人关联：
+	// 那种关联看着像证据，实际是猜的）。
+	RequestID string
+}
+
+// ChangeScope 是"按关联 id 查变更"时要一并下推的资产范围，两个维度与台账列表同源
+// （见 ListFilter.Nodes / ListFilter.LabelSelectors）：少一个维度，改名/打标签这类操作
+// 就能从"这次操作改了什么"里看到范围外资产的字段名与值。
+type ChangeScope struct {
+	Nodes          []string
+	LabelSelectors []LabelSelector
+}
+
+// ChangeRecordItem 是"某次操作改了什么"的一行：变更本身 + 它所属资产的身份。
+//
+// 为什么冗余带身份：这个视图是**跨资产**的（一次批量操作可能改了几十条），
+// 只给 asset_id 的话界面只能显示一串数字，而"改了哪个资产的哪个字段"才是它要回答的问题。
+// 只带展示用的四个字段，不带整条资产——资产被删掉后这些变更记录也随之级联删除，
+// 不存在"指着一条已经不存在的资产"的情况。
+type ChangeRecordItem struct {
+	ChangeRecord
+	TypeKey    string
+	NaturalKey string
+	Name       string
+	Node       string
 }
 
 // Snapshot 是某资产在某一时刻被抽取的**关注字段集合**（用于前后比对与合规比对）。
@@ -533,6 +563,9 @@ type Observation struct {
 	Source     Source
 	Actor      string
 	Attrs      map[string]string
+	// RequestID 是发起这次上报的管理请求的关联 id（人工在界面上新增/编辑资产时由 API 层填入），
+	// 采集侧上报留空。它只影响变更记录的关联列，不参与任何比对与去重语义。
+	RequestID string
 }
 
 // normalizeValue 用于判断「值是否真的变化」：忽略首尾空白与大小写差异，

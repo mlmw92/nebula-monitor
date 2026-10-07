@@ -133,6 +133,44 @@ func TestPruneByTimeAndRows(t *testing.T) {
 	}
 }
 
+// 按关联 id 过滤（入库模式）：这是"从一条资产变更跳到那次操作"的查询路径。
+// 顺带钉住"精确匹配"这个决定——关联 id 是不透明句柄，子串匹配会把相邻操作一并带出来。
+func TestQueryFilterByRequestIDOnSQLite(t *testing.T) {
+	store := New("")
+	db := openTestDB(t)
+	if err := store.UseSQLite(db.DB()); err != nil {
+		t.Fatalf("切入库模式失败: %v", err)
+	}
+	for _, ev := range []Event{
+		{User: "alice", Method: "PUT", Path: "/api/v1/assets/1", Category: "management", RequestID: "rid-1"},
+		{User: "alice", Method: "PUT", Path: "/api/v1/assets/2", Category: "management", RequestID: "rid-2"},
+		{User: "agent", Method: "POST", Path: "/api/v1/report", Category: "management"}, // 上报：无关联 id
+	} {
+		if err := store.Record(ev); err != nil {
+			t.Fatalf("写入失败: %v", err)
+		}
+	}
+
+	events, total, err := store.Query(QueryFilter{RequestID: "rid-1"})
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if total != 1 || len(events) != 1 || events[0].RequestID != "rid-1" {
+		t.Fatalf("按关联 id 应命中 1 条，实际 total=%d len=%d %#v", total, len(events), events)
+	}
+	if events[0].Path != "/api/v1/assets/1" {
+		t.Fatalf("命中的应是 rid-1 那条，实际 %q", events[0].Path)
+	}
+
+	// 子串不算命中，空 id 也不该被当成条件把"无关联"的行捞出来。
+	if _, total, err := store.Query(QueryFilter{RequestID: "rid-"}); err != nil || total != 0 {
+		t.Fatalf("关联 id 应精确匹配，实际 total=%d err=%v", total, err)
+	}
+	if _, total, err := store.Query(QueryFilter{RequestID: ""}); err != nil || total != 3 {
+		t.Fatalf("空关联 id 表示不过滤，实际 total=%d err=%v", total, err)
+	}
+}
+
 // 坏文件**不阻断启动、也不改名**：宁可丢历史，也不能因为一份坏 JSON 让服务起不来，
 // 更不能把现场改没了。
 func TestUseSQLiteKeepsCorruptFile(t *testing.T) {

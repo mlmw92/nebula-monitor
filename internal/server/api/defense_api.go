@@ -149,6 +149,7 @@ func (a *API) handleDefenseAction(w http.ResponseWriter, r *http.Request) {
 			Status:    http.StatusAccepted,
 			RemoteIP:  operatorIP,
 			Succeeded: true,
+			RequestID: RequestID(r),
 			Category:  "security",
 			Action:    "intrusion_defense:" + action,
 			Detail:    fmt.Sprintf("节点 %s 防护任务已创建，任务ID %s，白名单 %s", nodeName, cmd.ID, strings.Join(ignoreIPs, ",")),

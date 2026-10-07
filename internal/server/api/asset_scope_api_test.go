@@ -66,11 +66,11 @@ func TestAssetBusinessScope(t *testing.T) {
 	a, svc := assetTestAPI(t)
 	// 夹具：web-01 是 biz=pay；web-01 上的 redis 实例是 biz=risk；db-01 不打标签
 	if _, err := svc.SetLabels(asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"},
-		map[string]string{auth.DefaultScopeLabelKey: "pay"}, nil, "admin"); err != nil {
+		map[string]string{auth.DefaultScopeLabelKey: "pay"}, nil, "admin", ""); err != nil {
 		t.Fatalf("打标签失败: %v", err)
 	}
 	riskRef := asset.Ref{TypeKey: asset.TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6379"}
-	if _, err := svc.SetLabels(riskRef, map[string]string{auth.DefaultScopeLabelKey: "risk"}, nil, "admin"); err != nil {
+	if _, err := svc.SetLabels(riskRef, map[string]string{auth.DefaultScopeLabelKey: "risk"}, nil, "admin", ""); err != nil {
 		t.Fatalf("打标签失败: %v", err)
 	}
 
