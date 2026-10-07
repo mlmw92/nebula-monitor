@@ -54,7 +54,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Odometer, Monitor, Bell, Message, Connection, Document, Files, Setting,
-  DataLine, Histogram, Grid, Lock, List, Aim, Tools, Search,
+  DataLine, Histogram, Grid, Lock, List, Aim, Tools, Search, Share,
 } from '@element-plus/icons-vue'
 import http from '../api/http'
 import { useAuth } from '../composables/useAuth'
@@ -75,6 +75,7 @@ const TITLES = {
   'metrics-explore': '指标浏览',
   'system-dashboards': '自定义仪表盘',
   assets: '资产台账',
+  'assets-topology': '关系视图',
   inspect: '配置巡检',
   ops: '节点操作',
   alerts: '告警中心',
@@ -100,6 +101,7 @@ const ICONS = {
   'metrics-explore': DataLine,
   'system-dashboards': Grid,
   assets: Files,
+  'assets-topology': Share,
   inspect: Aim,
   ops: Tools,
   alerts: Bell,

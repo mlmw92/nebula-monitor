@@ -382,6 +382,11 @@ const (
 	// DefaultTopologyNodes / MaxTopologyNodes 是单次邻域的节点数上限。
 	DefaultTopologyNodes = 200
 	MaxTopologyNodes     = 500
+	// MaxTopologyEdges 是"以一组边为中心"取子图时的边数上限（批次 22 的全库视图）。
+	//
+	// 与节点上限是两件事：邻域关心"能摊开多少节点"，而按筛选取子图时真正决定规模的是边。
+	// 1000 条边 × 两条端大致落在 500 节点里，正好与节点上限同量级；超了就显式标截断。
+	MaxTopologyEdges = 1000
 )
 
 // TopologyNode 是关系图里的一个节点。
@@ -404,6 +409,64 @@ type TopologyEdge struct {
 	Kind         LinkKind
 	Source       Source
 	CreatedAt    int64
+}
+
+// LinkStat 是关系总览的一行：一类"同形态"的边及其条数（批次 22 的全库视图）。
+//
+// 它回答"库里整体有哪些关系"——按 (来源类型 × 关系种类 × 目标类型 × 边来源) 聚合，
+// 因此行数与台账规模**无关**（几十行封顶），不需要任何截断。这与"把整张图倒进力导向"
+// 是两条路：全库规模下力导向不可读（能力全景自己写下的判断），聚合才是那个问题的答案。
+type LinkStat struct {
+	FromType string
+	Kind     LinkKind
+	ToType   string
+	Source   Source
+	Count    int
+	// Sample 是这类边里的一条真实边（两端带名字）：让"这行到底是什么"不点进去也能看懂。
+	Sample LinkStatSample
+}
+
+// LinkStatSample 是聚合行里附带的一条样本边。
+type LinkStatSample struct {
+	FromKey, FromName string
+	ToKey, ToName     string
+}
+
+// LinkOverview 是关系总览的完整答案（聚合分组 + 两个数字）。
+type LinkOverview struct {
+	Groups []LinkStat
+	// AssetsWithoutLinks 是"在范围内、但没有任何一条两端都在范围内的边"的资产数。
+	// 它是台账质量的信号：纳管了却没接线。
+	AssetsWithoutLinks int
+	// TotalLinks 是范围内可见的边总数（等于各分组之和）。
+	TotalLinks int
+}
+
+// TopologyFilter 是"以一组边为中心"取子图的筛选条件（批次 22）。
+//
+// 与以单个资产为中心的邻域不是一回事：那里是"从一个点逐跳摊开"，这里先按条件选出**边**、
+// 再把边的两端取成节点。四个维度之间是"且"，每个维度内部是"或"（与列表页的筛选语义一致）。
+type TopologyFilter struct {
+	Kinds     []LinkKind
+	Sources   []Source
+	Types     []string // 资产类型：**两端任一**命中即选中这条边
+	Nodes     []string // 归属节点：同样是两端任一命中
+	Scope     ChangeScope
+	MaxEdges  int
+	MaxNodes  int
+}
+
+// TopologyGraph 是按筛选取到的子图。
+//
+// 与 Topology 的区别只有一处：没有中心（Root）——这张图不是"从谁出发"，而是"符合条件的那批边"。
+type TopologyGraph struct {
+	Nodes []TopologyNode
+	Edges []TopologyEdge
+	// Total 是**符合筛选的边总数**（不含上限）。界面据此说明"显示了 N / 共 M 条"——
+	// 只给 truncated 布尔值，用户不知道被截掉了多少。
+	Total int
+	// Truncated 表示结果被边/节点上限截断。必须显式回传：静默截断会让人以为"关系就这么多"。
+	Truncated bool
 }
 
 // Topology 是一次邻域查询的结果。

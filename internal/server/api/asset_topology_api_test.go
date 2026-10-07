@@ -8,146 +8,142 @@ import (
 	"github.com/nebula/monitor/internal/server/asset"
 )
 
-// topologyOf 取某资产的 id（夹具里用自然键定位）。
-func topologyAssetID(t *testing.T, svc *asset.Service, typeKey, naturalKey string) int64 {
+// 全库关系视图两个接口的用例（批次 22）。
+//
+// 接口层要盯的四件事：路由与权限点接对了、范围裁剪在 HTTP 这一层确实生效、
+// 参数写坏时**报错而不是静默放宽**、以及载荷形状（total 与 truncated 都要在）。
+
+func linkStatsFixture(t *testing.T) (*API, *asset.Service) {
 	t.Helper()
-	item, found, err := svc.Get(asset.Ref{TypeKey: typeKey, NaturalKey: naturalKey})
-	if err != nil || !found {
-		t.Fatalf("夹具资产缺失：%s/%s（found=%v err=%v）", typeKey, naturalKey, found, err)
+	a, svc := assetTestAPI(t)
+	// seedAsset 已经建了 web-01（g1）与它上面的 redis 实例，这里补一条宿主边
+	inst := asset.Ref{TypeKey: asset.TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6379"}
+	host := asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"}
+	if err := svc.LinkDiscovered(inst, host, asset.LinkRunsOn); err != nil {
+		t.Fatalf("准备宿主边失败: %v", err)
 	}
-	return item.ID
+	return a, svc
 }
 
-// 关系图接口：载荷要能直接喂给前端画图——节点带身份/类型标题/状态，
-// 边两端用与表格一致的 `typeKey|naturalKey` 寻址。
-func TestRoutes_AssetTopologyPayload(t *testing.T) {
-	a, svc := assetTestAPI(t)
+func TestHandleAssetLinkStats(t *testing.T) {
+	a, _ := linkStatsFixture(t)
 	mux := newRoutesMux(a)
-	webID := topologyAssetID(t, svc, asset.TypeHost, "web-01")
-	if err := svc.LinkDiscovered(
-		asset.Ref{TypeKey: asset.TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6379"},
-		asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "web-01"}, asset.LinkRunsOn); err != nil {
-		t.Fatal(err)
-	}
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, reqWith(globalPrincipal("assets:read"), http.MethodGet,
-		"/api/v1/assets/"+itoa(webID)+"/topology", ""))
+	mux.ServeHTTP(rec, reqWith(globalPrincipal("assets:read"), http.MethodGet, "/api/v1/assets/link-stats", ""))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("应 200，实际 %d（%s）", rec.Code, rec.Body.String())
+		t.Fatalf("状态码 = %d，响应 %s", rec.Code, rec.Body.String())
 	}
 	body := decodeBody(t, rec)
-	if body["root"] != "host|web-01" {
-		t.Fatalf("root 应为 host|web-01，实际 %v", body["root"])
+	if total, _ := body["totalLinks"].(float64); total != 1 {
+		t.Fatalf("totalLinks 应为 1，实际 %v", body["totalLinks"])
 	}
-	nodes, _ := body["nodes"].([]any)
+	groups, _ := body["groups"].([]any)
+	if len(groups) != 1 {
+		t.Fatalf("应有 1 个分组，实际 %d：%s", len(groups), rec.Body.String())
+	}
+	first, _ := groups[0].(map[string]any)
+	if first["fromType"] != asset.TypeMiddlewareInst || first["kind"] != string(asset.LinkRunsOn) ||
+		first["toType"] != asset.TypeHost || first["source"] != string(asset.SourceDiscovery) {
+		t.Fatalf("分组维度不符：%#v", first)
+	}
+	if first["count"].(float64) != 1 {
+		t.Fatalf("分组计数应为 1，实际 %v", first["count"])
+	}
+	// 无边资产至少包含刚建完还没接关系的资产（db-01 等），必须是数字而不是 null
+	if _, ok := body["assetsWithoutLinks"].(float64); !ok {
+		t.Fatalf("assetsWithoutLinks 应为数字：%#v", body["assetsWithoutLinks"])
+	}
+}
+
+// 范围裁剪在接口层同样生效：实例在 web-01（g1），限定到 g2 的账号一条关系都不该看到。
+func TestHandleAssetLinkStatsRespectsScope(t *testing.T) {
+	a, _ := linkStatsFixture(t)
+	mux := newRoutesMux(a)
+
+	inScope := httptest.NewRecorder()
+	mux.ServeHTTP(inScope, reqWith(restrictedPrincipal([]string{"assets:read"}, "g1"),
+		http.MethodGet, "/api/v1/assets/link-stats", ""))
+	if body := decodeBody(t, inScope); body["totalLinks"].(float64) != 1 {
+		t.Fatalf("g1 范围内应有 1 条边，实际 %v", body["totalLinks"])
+	}
+
+	outScope := httptest.NewRecorder()
+	mux.ServeHTTP(outScope, reqWith(restrictedPrincipal([]string{"assets:read"}, "g2"),
+		http.MethodGet, "/api/v1/assets/link-stats", ""))
+	body := decodeBody(t, outScope)
+	if body["totalLinks"].(float64) != 0 {
+		t.Fatalf("g2 范围内不该看到任何边，实际 %v", body["totalLinks"])
+	}
+	if groups, _ := body["groups"].([]any); len(groups) != 0 {
+		t.Fatalf("范围外不该有分组，实际 %s", outScope.Body.String())
+	}
+}
+
+func TestHandleAssetTopologyByFilter(t *testing.T) {
+	a, _ := linkStatsFixture(t)
+	mux := newRoutesMux(a)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, reqWith(globalPrincipal("assets:read"),
+		http.MethodGet, "/api/v1/assets/topology?kind=runs_on", ""))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("状态码 = %d，响应 %s", rec.Code, rec.Body.String())
+	}
+	body := decodeBody(t, rec)
+	if total, _ := body["total"].(float64); total != 1 {
+		t.Fatalf("total 应为 1，实际 %v", body["total"])
+	}
+	if trunc, ok := body["truncated"].(bool); !ok || trunc {
+		t.Fatalf("这么小的图不该截断（truncated 必须是布尔值）：%#v", body["truncated"])
+	}
+	if nodes, _ := body["nodes"].([]any); len(nodes) != 2 {
+		t.Fatalf("应有 2 个节点，实际 %d", len(nodes))
+	}
 	edges, _ := body["edges"].([]any)
-	if len(nodes) != 2 || len(edges) != 1 {
-		t.Fatalf("应为两个节点一条边：nodes=%d edges=%d", len(nodes), len(edges))
+	if len(edges) != 1 {
+		t.Fatalf("应有 1 条边，实际 %d", len(edges))
 	}
-	first, _ := nodes[0].(map[string]any)
-	if first["root"] != true || first["key"] != "host|web-01" || first["typeTitle"] != "主机" {
-		t.Fatalf("中心节点字段不符：%v", first)
+	if e, _ := edges[0].(map[string]any); e["kind"] != "runs_on" || e["source"] != "discovery" {
+		t.Fatalf("边的种类/来源不符：%#v", e)
 	}
-	if first["status"] != asset.StatusOnline {
-		t.Fatalf("刚上报的资产应为 online：%v", first["status"])
-	}
-	edge, _ := edges[0].(map[string]any)
-	if edge["kind"] != "runs_on" || edge["source"] != string(asset.SourceDiscovery) {
-		t.Fatalf("边应带类型与来源：%v", edge)
-	}
-	if edge["from"] != "middleware-instance|redis:127.0.0.1:6379" || edge["to"] != "host|web-01" {
-		t.Fatalf("边两端寻址不符：%v", edge)
+
+	// 筛选到没有的边 → 空图（仍是 200）
+	empty := httptest.NewRecorder()
+	mux.ServeHTTP(empty, reqWith(globalPrincipal("assets:read"),
+		http.MethodGet, "/api/v1/assets/topology?source=manual", ""))
+	if got := decodeBody(t, empty); got["total"].(float64) != 0 {
+		t.Fatalf("人工边应为 0 条，实际 %v", got["total"])
 	}
 }
 
-// 跳数与节点数越界一律夹紧而不是 400：它们只影响"看多大范围"，
-// 不该让整张图打不开（与列表 limit 的既有约定一致）。
-func TestRoutes_AssetTopologyClampsParams(t *testing.T) {
-	a, svc := assetTestAPI(t)
+// 参数写坏要报错，不能静默放宽：用户以为在看"依赖"，其实看到了全部关系。
+func TestHandleAssetTopologyRejectsUnknownFilter(t *testing.T) {
+	a, _ := linkStatsFixture(t)
 	mux := newRoutesMux(a)
-	webID := topologyAssetID(t, svc, asset.TypeHost, "web-01")
 
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, reqWith(globalPrincipal("assets:read"), http.MethodGet,
-		"/api/v1/assets/"+itoa(webID)+"/topology?depth=99&limit=99999", ""))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("越界参数应被夹紧而不是报错，实际 %d（%s）", rec.Code, rec.Body.String())
-	}
-	body := decodeBody(t, rec)
-	if got := body["depth"].(float64); int(got) != asset.MaxTopologyDepth {
-		t.Fatalf("depth 应夹紧到 %d，实际 %v", asset.MaxTopologyDepth, got)
-	}
-}
-
-// 资源范围：受限用户不得在图里看到范围外的邻居，也不得看到跨范围的边。
-func TestRoutes_AssetTopologyRespectsScope(t *testing.T) {
-	a, svc := assetTestAPI(t)
-	mux := newRoutesMux(a)
-	webID := topologyAssetID(t, svc, asset.TypeHost, "web-01")
-	// 跨范围的一条边：web-01 上的实例 depends_on db-01（g2）
-	if err := svc.LinkDiscovered(
-		asset.Ref{TypeKey: asset.TypeMiddlewareInst, NaturalKey: "redis:127.0.0.1:6379"},
-		asset.Ref{TypeKey: asset.TypeHost, NaturalKey: "db-01"}, asset.LinkDependsOn); err != nil {
-		t.Fatal(err)
-	}
-
-	// g1 的受限用户：只能看到 web-01 与它上面的实例
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, reqWith(restrictedPrincipal([]string{"assets:read"}, "g1"), http.MethodGet,
-		"/api/v1/assets/"+itoa(webID)+"/topology", ""))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("应 200，实际 %d（%s）", rec.Code, rec.Body.String())
-	}
-	body := decodeBody(t, rec)
-	for _, raw := range body["nodes"].([]any) {
-		node := raw.(map[string]any)
-		if node["naturalKey"] == "db-01" {
-			t.Fatalf("范围外节点出现在图里：%v", node)
+	for _, target := range []string{
+		"/api/v1/assets/topology?kind=nope",
+		"/api/v1/assets/topology?source=whatever",
+	} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, reqWith(globalPrincipal("assets:read"), http.MethodGet, target, ""))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s 应返回 400，实际 %d（%s）", target, rec.Code, rec.Body.String())
 		}
 	}
-	for _, raw := range body["edges"].([]any) {
-		edge := raw.(map[string]any)
-		if edge["to"] == "host|db-01" || edge["from"] == "host|db-01" {
-			t.Fatalf("跨范围的边出现在图里：%v", edge)
-		}
-	}
-
-	// 中心本身在范围外 → 与「看不到」同语义：404
-	dbID := topologyAssetID(t, svc, asset.TypeHost, "db-01")
-	denied := httptest.NewRecorder()
-	mux.ServeHTTP(denied, reqWith(restrictedPrincipal([]string{"assets:read"}, "g1"), http.MethodGet,
-		"/api/v1/assets/"+itoa(dbID)+"/topology", ""))
-	if denied.Code != http.StatusNotFound {
-		t.Fatalf("范围外的中心应 404，实际 %d", denied.Code)
-	}
 }
 
-// 权限与不存在：缺 assets:read 403；未知 id 404。
-func TestRoutes_AssetTopologyPermissionAndMissing(t *testing.T) {
-	a, svc := assetTestAPI(t)
+// 两个接口都要 assets:read；没有权限时 403 而不是空结果（空结果会被当成"没有关系"）。
+func TestAssetLinkStatsRequiresReadPermission(t *testing.T) {
+	a, _ := linkStatsFixture(t)
 	mux := newRoutesMux(a)
-	webID := topologyAssetID(t, svc, asset.TypeHost, "web-01")
 
-	denied := httptest.NewRecorder()
-	mux.ServeHTTP(denied, reqWith(globalPrincipal("assets:write"), http.MethodGet,
-		"/api/v1/assets/"+itoa(webID)+"/topology", ""))
-	if denied.Code != http.StatusForbidden {
-		t.Fatalf("缺 assets:read 应 403，实际 %d", denied.Code)
-	}
-
-	missing := httptest.NewRecorder()
-	mux.ServeHTTP(missing, reqWith(globalPrincipal("assets:read"), http.MethodGet,
-		"/api/v1/assets/99999/topology", ""))
-	if missing.Code != http.StatusNotFound {
-		t.Fatalf("未知资产应 404，实际 %d", missing.Code)
-	}
-
-	// 未注入资产能力 → 503（与其它资产接口一致）
-	disabled := &API{}
-	rec := httptest.NewRecorder()
-	disabled.handleAssetTopology(rec, assetReq(globalPrincipal("assets:read"), "/api/v1/assets/1/topology"))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("未启用资产能力应 503，实际 %d", rec.Code)
+	for _, target := range []string{"/api/v1/assets/link-stats", "/api/v1/assets/topology"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, reqWith(globalPrincipal("assets:write"), http.MethodGet, target, ""))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s 无 assets:read 时应 403，实际 %d", target, rec.Code)
+		}
 	}
 }

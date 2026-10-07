@@ -36,6 +36,9 @@ const routes = [
       { path: 'container', name: 'container', component: () => import('../components/container/ContainerView.vue'), meta: { perm: 'container:read' } },
       // 资产台账（D2）：读取需 assets:read；人工维护由后端 assets:write 校验（前端按钮同权限门控）
       { path: 'assets', name: 'assets', component: () => import('../components/asset/AssetListView.vue'), meta: { perm: 'assets:read' } },
+  // 关系视图（全库）：与台账同权限点（读的都是资产信息）。独立页而不是台账页的一个页签——
+  // 台账页已经有列表 + 筛选 + 详情抽屉，再塞"总览 + 图"会变成三个东西挤在一页。
+  { path: 'assets/topology', name: 'assets-topology', component: () => import('../components/asset/AssetTopologyView.vue'), meta: { perm: 'assets:read' } },
       // 配置巡检（D2）：看记录/差异需 inspect:read；触发巡检是独立权限点 inspect:run（页面内门控）
       { path: 'inspect', name: 'inspect', component: () => import('../components/asset/InspectView.vue'), meta: { perm: 'inspect:read' } },
       // 节点操作（下行通道）：看任务列表与动作目录需 ops:read；下发是独立的 ops:exec（高风险，页面内门控）

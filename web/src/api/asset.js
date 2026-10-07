@@ -67,6 +67,33 @@ export const updateAsset = (id, payload) => http.put('/api/v1/assets/' + encodeU
 // 与列表共用同一套筛选参数：顶部数字点进去必须看到同一个集合。
 export const getAssetSummary = (params = {}) => http.get(withQuery('/api/v1/assets/summary', params))
 
+// 关系总览（全库视图上半段）：按「来源类型 × 关系种类 × 目标类型 × 边来源」聚合的计数，
+// 外加两个数字（关系总数、无边资产数）。
+//
+// 聚合口径让行数与台账规模**无关**，因此它不分页、也不截断——这正是"全库"能被看清的原因：
+// 全库规模下把每条边都画出来是不可读的（力导向图会散成一团）。
+export const getLinkStats = () => http.get('/api/v1/assets/link-stats')
+
+// 关系子图（全库视图下半段）：以"一组边"为中心，而不是以某个资产为中心。
+//
+// kind/type/node 是可重复参数，必须发成 `kind=a&kind=b`；URLSearchParams 的 append 才是这个语义
+// （直接塞数组会被序列化成 `a,b`，服务端只认逗号那一整串，筛选会静默失效）。
+export const getTopologyGraph = (params = {}) => {
+  const q = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== undefined && item !== null && item !== '') q.append(key, item)
+      }
+      continue
+    }
+    q.append(key, value)
+  }
+  const s = q.toString()
+  return http.get('/api/v1/assets/topology' + (s ? '?' + s : ''))
+}
+
 // 资产的直接关联（出边 + 入边）；范围外的对端由服务端剔除，前端拿到的都是可见资产。
 // 返回 { links, suppressed }：suppressed 是被人工隐藏（逻辑删除）的边 ——
 // 它必须能看见且能恢复，否则「删掉的关系就永远回不来」。

@@ -582,6 +582,38 @@ func (s *Service) Topology(ref Ref, depth, maxNodes int, allowedNodes []string) 
 	return out, nil
 }
 
+// LinkOverview 返回关系总览：按形态聚合的计数 + 无边资产数（批次 22 的全库视图上半段）。
+//
+// 两个查询**都**按 scope 在 SQL 里裁剪，且**边的两端都要可见**——聚合计数同样会泄露
+// "范围外还有多少东西"：只判一端时，受限用户看到的是自己机器指向看不见对象的边数。
+func (s *Service) LinkOverview(scope ChangeScope) (LinkOverview, error) {
+	groups, err := s.store.linkStats(scope)
+	if err != nil {
+		return LinkOverview{}, err
+	}
+	without, err := s.store.assetsWithoutLinks(scope)
+	if err != nil {
+		return LinkOverview{}, err
+	}
+	total := 0
+	for _, g := range groups {
+		total += g.Count
+	}
+	return LinkOverview{Groups: groups, AssetsWithoutLinks: without, TotalLinks: total}, nil
+}
+
+// TopologyByFilter 按筛选取关系子图（先选边、再取两端为节点），范围同样在 SQL 里下推。
+//
+// 与 Topology（单资产邻域）的区别：这张图**没有中心**，回答的是"符合条件的那批关系长什么样"。
+// 上限与截断沿用同一套约定（见 TopologyGraph.Total 的注释：只给布尔值用户不知道被截了多少）。
+func (s *Service) TopologyByFilter(flt TopologyFilter) (TopologyGraph, error) {
+	nodes, edges, total, truncated, err := s.store.topologyByFilter(flt)
+	if err != nil {
+		return TopologyGraph{}, err
+	}
+	return TopologyGraph{Nodes: nodes, Edges: edges, Total: total, Truncated: truncated}, nil
+}
+
 // nodeAllowed 判断资产归属节点是否在可见集合内（空归属对受限用户一律不可见）。
 func nodeAllowed(allowed []string, node string) bool {
 	if node == "" {

@@ -217,6 +217,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// 按关联 id 取"这次操作改了什么"（跨资产）：变更历史的**反向入口**，供审计列表使用。
 	// 权限沿用 assets:read（暴露的是资产信息），范围在 SQL 里下推；字面量路径比 {id} 更具体。
 	mux.HandleFunc("GET /api/v1/assets/changes", a.permit(a.handleAssetChangesByRequest, "assets:read"))
+	// 全库关系视图（批次 22）两段：总览（聚合，规模无关）与筛选子图（以一组边为中心）。
+	// 权限沿用 assets:read；两者都在 SQL 里下推范围（含"边的两端都要可见"）。
+	// 注意与 `/assets/{id}/topology` 的区别：那条以单个资产为中心，这条以一批边为中心。
+	mux.HandleFunc("GET /api/v1/assets/link-stats", a.permit(a.handleAssetLinkStats, "assets:read"))
+	mux.HandleFunc("GET /api/v1/assets/topology", a.permit(a.handleAssetTopologyByFilter, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}", a.permit(a.handleAssetDetail, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}/history", a.permit(a.handleAssetHistory, "assets:read"))
 	mux.HandleFunc("GET /api/v1/assets/{id}/links", a.permit(a.handleAssetLinks, "assets:read"))

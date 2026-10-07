@@ -66,6 +66,10 @@ type AssetProvider interface {
 	Links(ref asset.Ref) ([]asset.Link, error)
 	// Topology 返回以某资产为中心、N 跳以内的关系邻域（已按可见节点裁剪）。
 	Topology(ref asset.Ref, depth, maxNodes int, allowedNodes []string) (asset.Topology, error)
+	// LinkOverview 是关系总览（按形态聚合 + 无边资产数），范围在 SQL 里下推。
+	LinkOverview(scope asset.ChangeScope) (asset.LinkOverview, error)
+	// TopologyByFilter 按筛选取关系子图（先选边、再取两端为节点），范围同样下推。
+	TopologyByFilter(flt asset.TopologyFilter) (asset.TopologyGraph, error)
 	// InstancesByAddr 按实例地址找中间件实例资产（告警事件只带实例标签，不带类型）。
 	InstancesByAddr(addr string) ([]asset.Asset, error)
 	// AssetsByLogSource 按「人工声明的日志来源 + 归属节点」找资产（日志 → 资产联动）。
@@ -565,10 +569,26 @@ func (a *API) assetTopologyPayload(ref asset.Ref, depth, maxNodes int, p *auth.P
 	if err != nil {
 		return nil, err
 	}
+	nodes, edges := assetTopologyNodesAndEdges(res.Nodes, res.Edges)
+	return map[string]interface{}{
+		"root":      nodeKeyOf(res.Root.TypeKey, res.Root.NaturalKey),
+		"depth":     res.Depth,
+		"truncated": res.Truncated,
+		"nodes":     nodes,
+		"edges":     edges,
+	}, nil
+}
+
+// assetTopologyNodesAndEdges 把节点与边转成对外形态，供**两个入口共用**：
+// 单资产邻域 `/assets/{id}/topology` 与全库筛选子图 `/assets/topology`（批次 22）。
+//
+// 必须共用：节点字段、类型标题的回退（自定义类型退化成 key）、边的来源标记只能有一处定义，
+// 否则同一张图在两个入口会给出不同的形态——那类不一致只在现场才被发现。
+func assetTopologyNodesAndEdges(inNodes []asset.TopologyNode, inEdges []asset.TopologyEdge) ([]assetTopologyNodeView, []assetTopologyEdgeView) {
 	staleBefore := assetStaleBefore(time.Now())
 	titles := assetTypeTitles()
-	nodes := make([]assetTopologyNodeView, 0, len(res.Nodes))
-	for _, n := range res.Nodes {
+	nodes := make([]assetTopologyNodeView, 0, len(inNodes))
+	for _, n := range inNodes {
 		title := titles[n.Asset.TypeKey]
 		if title == "" {
 			title = n.Asset.TypeKey // 自定义类型：退化成 key，好过留空
@@ -588,8 +608,8 @@ func (a *API) assetTopologyPayload(ref asset.Ref, depth, maxNodes int, p *auth.P
 			Depth:      n.Depth,
 		})
 	}
-	edges := make([]assetTopologyEdgeView, 0, len(res.Edges))
-	for _, e := range res.Edges {
+	edges := make([]assetTopologyEdgeView, 0, len(inEdges))
+	for _, e := range inEdges {
 		edges = append(edges, assetTopologyEdgeView{
 			From:   nodeKeyOf(e.From.TypeKey, e.From.NaturalKey),
 			To:     nodeKeyOf(e.To.TypeKey, e.To.NaturalKey),
@@ -597,13 +617,7 @@ func (a *API) assetTopologyPayload(ref asset.Ref, depth, maxNodes int, p *auth.P
 			Source: string(e.Source),
 		})
 	}
-	return map[string]interface{}{
-		"root":      nodeKeyOf(res.Root.TypeKey, res.Root.NaturalKey),
-		"depth":     res.Depth,
-		"truncated": res.Truncated,
-		"nodes":     nodes,
-		"edges":     edges,
-	}, nil
+	return nodes, edges
 }
 
 // nodeKeyOf 是关系图节点的标识（与前端 linkForm.peer 的拼法一致）。
@@ -615,6 +629,144 @@ func assetTypeTitles() map[string]string {
 	out := make(map[string]string, len(types))
 	for _, t := range types {
 		out[t.Key] = t.Title
+	}
+	return out
+}
+
+// linkStatView 是关系总览的一行（对外形态）。
+type linkStatView struct {
+	FromType string             `json:"fromType"`
+	Kind     string             `json:"kind"`
+	ToType   string             `json:"toType"`
+	Source   string             `json:"source"`
+	Count    int                `json:"count"`
+	Sample   linkStatSampleView `json:"sample"`
+}
+
+type linkStatSampleView struct {
+	FromKey  string `json:"fromKey"`
+	FromName string `json:"fromName,omitempty"`
+	ToKey    string `json:"toKey"`
+	ToName   string `json:"toName,omitempty"`
+}
+
+// handleAssetLinkStats 返回关系总览：按 (来源类型 × 关系种类 × 目标类型 × 边来源) 聚合的条数，
+// 外加"无边资产"计数。需 assets:read。
+//
+// 这是全库关系视图的**上半段**：聚合口径让行数与台账规模无关，因此它不需要截断；
+// 下半段（按筛选画子图）见 handleAssetTopology。两个范围维度都在 SQL 里下推。
+func (a *API) handleAssetLinkStats(w http.ResponseWriter, r *http.Request) {
+	if a.assets == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "资产台账未启用"})
+		return
+	}
+	p := Principal(r)
+	ov, err := a.assets.LinkOverview(asset.ChangeScope{
+		Nodes:          a.assetAllowedNodes(p),
+		LabelSelectors: a.assetScopeSelectors(p),
+	})
+	if err != nil {
+		slog.Error("统计资产关系失败", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "统计资产关系失败"})
+		return
+	}
+	groups := make([]linkStatView, 0, len(ov.Groups))
+	for _, g := range ov.Groups {
+		groups = append(groups, linkStatView{
+			FromType: g.FromType, Kind: string(g.Kind), ToType: g.ToType,
+			Source: string(g.Source), Count: g.Count,
+			Sample: linkStatSampleView{
+				FromKey: g.Sample.FromKey, FromName: g.Sample.FromName,
+				ToKey: g.Sample.ToKey, ToName: g.Sample.ToName,
+			},
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"groups":             groups,
+		"totalLinks":         ov.TotalLinks,
+		"assetsWithoutLinks": ov.AssetsWithoutLinks,
+	})
+}
+
+// handleAssetTopologyByFilter 按筛选返回关系子图（先按条件选边、再取两端为节点）。需 assets:read。
+//
+// 与 `/assets/{id}/topology` 的分工：那条回答"这台资产牵动谁"（以点为中心逐跳摊开），
+// 这条回答"符合条件的那批关系长什么样"（以一组边为中心），因此没有 root / depth。
+// 上限与截断沿用同一套约定：静默截断会让人以为"关系就这么多"，所以 total 与 truncated 都要回传。
+func (a *API) handleAssetTopologyByFilter(w http.ResponseWriter, r *http.Request) {
+	if a.assets == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "资产台账未启用"})
+		return
+	}
+	q := r.URL.Query()
+	kinds, err := linkKindsParam(q["kind"])
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	sources, err := linkSourcesParam(q["source"])
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	p := Principal(r)
+	graph, err := a.assets.TopologyByFilter(asset.TopologyFilter{
+		Kinds:    kinds,
+		Sources:  sources,
+		Types:    cleanQueryValues(q["type"]),
+		Nodes:    cleanQueryValues(q["node"]),
+		MaxEdges: assetIntParam(q.Get("limit"), 0),
+		Scope: asset.ChangeScope{
+			Nodes:          a.assetAllowedNodes(p),
+			LabelSelectors: a.assetScopeSelectors(p),
+		},
+	})
+	if err != nil {
+		slog.Error("查询资产关系子图失败", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询资产关系子图失败"})
+		return
+	}
+	nodes, edges := assetTopologyNodesAndEdges(graph.Nodes, graph.Edges)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"nodes": nodes, "edges": edges, "total": graph.Total, "truncated": graph.Truncated,
+	})
+}
+
+// linkKindsParam 解析可重复的 kind 参数。**不认识的值直接 400，不静默丢弃**：
+// 把筛选条件悄悄放宽，比报错糟得多——用户以为在看"依赖"，其实在看全部关系。
+func linkKindsParam(values []string) ([]asset.LinkKind, error) {
+	out := make([]asset.LinkKind, 0, len(values))
+	for _, v := range cleanQueryValues(values) {
+		k := asset.LinkKind(v)
+		if !k.Valid() {
+			return nil, fmt.Errorf("未知的关系种类: %q", v)
+		}
+		out = append(out, k)
+	}
+	return out, nil
+}
+
+// linkSourcesParam 解析 source 参数（discovery / manual），同样不静默丢弃。
+func linkSourcesParam(values []string) ([]asset.Source, error) {
+	out := make([]asset.Source, 0, len(values))
+	for _, v := range cleanQueryValues(values) {
+		switch asset.Source(v) {
+		case asset.SourceDiscovery, asset.SourceManual:
+			out = append(out, asset.Source(v))
+		default:
+			return nil, fmt.Errorf("未知的关系来源: %q", v)
+		}
+	}
+	return out, nil
+}
+
+// cleanQueryValues 去掉可重复参数里的空白与空项。
+func cleanQueryValues(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			out = append(out, s)
+		}
 	}
 	return out
 }

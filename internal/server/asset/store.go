@@ -2168,11 +2168,289 @@ func (s *Store) baselinesOf() ([]Baseline, error) {
 	defer rows.Close()
 	var out []Baseline
 	for rows.Next() {
-		var b Baseline
-		if err := rows.Scan(&b.TypeKey, &b.AssetID, &b.AssetKey, &b.SnapshotID, &b.SetBy, &b.SetAt); err != nil {
-			return nil, fmt.Errorf("读取巡检标杆失败: %w", err)
-		}
-		out = append(out, b)
+	var b Baseline
+	if err := rows.Scan(&b.TypeKey, &b.AssetID, &b.AssetKey, &b.SnapshotID, &b.SetBy, &b.SetAt); err != nil {
+		return nil, fmt.Errorf("读取巡检标杆失败: %w", err)
+	}
+	out = append(out, b)
 	}
 	return out, rows.Err()
-}
+	}
+
+	// ===== 关系总览与筛选子图（批次 22：全库视图）=====
+	//
+	// 两个查询回答两件不同的事：
+	//   - linkStats：**库里整体有哪些关系**（按形态聚合，行数与规模无关）；
+	//   - topologyByFilter：**某个子集长什么样**（先按条件选边、再把两端取成节点）。
+	//
+	// 共同的一条安全边界：**边的两端都必须可见**。只判一端，受限用户就能从"计数"或"图上多出来的
+	// 一个节点"里看出范围外资产的存在与规模——那正是范围裁剪要挡住的东西。
+
+	// scopeConds 把资产范围折算成可直接拼进 WHERE 的片段（形如 ` AND f.node IN (?)`）。
+	//
+	// 复用 assetWhere 而不是另写一套范围判定：节点维度的三态、业务标签维度的"受限但无选择器 → 恒不匹配"
+	// 只能有一处实现，否则"列表里看不见、总览却数得出来"这类越权迟早出现。
+	func scopeConds(alias string, scope ChangeScope) (string, []any) {
+	where, args := assetWhere(alias, ListFilter{
+	Nodes:          scope.Nodes,
+	LabelSelectors: scope.LabelSelectors,
+	})
+	return strings.TrimPrefix(where, " WHERE 1=1"), args
+	}
+
+	// linkStats 按 (来源类型, 关系种类, 目标类型, 边来源) 聚合关系条数。
+	func (s *Store) linkStats(scope ChangeScope) ([]LinkStat, error) {
+	fromCond, fromArgs := scopeConds("f", scope)
+	toCond, toArgs := scopeConds("t", scope)
+	where := " WHERE 1=1" + fromCond + toCond
+	args := append(append([]any{}, fromArgs...), toArgs...)
+
+	rows, err := s.db.Query(
+	`SELECT f.type_key, l.kind, t.type_key, l.source, COUNT(*), MIN(l.id)
+	 FROM asset_links l
+	 JOIN assets f ON f.id=l.from_id
+	 JOIN assets t ON t.id=l.to_id`+where+
+		` GROUP BY f.type_key, l.kind, t.type_key, l.source
+	   ORDER BY COUNT(*) DESC, f.type_key, l.kind, t.type_key, l.source`, args...)
+	if err != nil {
+	return nil, fmt.Errorf("统计资产关系失败: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]LinkStat, 0, 16)
+	sampleIDs := make([]int64, 0, 16)
+	for rows.Next() {
+	var st LinkStat
+	var kind, src string
+	var sampleID int64
+	if err := rows.Scan(&st.FromType, &kind, &st.ToType, &src, &st.Count, &sampleID); err != nil {
+		return nil, fmt.Errorf("读取资产关系统计失败: %w", err)
+	}
+	st.Kind, st.Source = LinkKind(kind), Source(src).normalized()
+	out = append(out, st)
+	sampleIDs = append(sampleIDs, sampleID)
+	}
+	if err := rows.Err(); err != nil {
+	return nil, err
+	}
+	if err := s.fillLinkSamples(out, sampleIDs); err != nil {
+	return nil, err
+	}
+	return out, nil
+	}
+
+	// fillLinkSamples 一次取回各组样本边（避免逐组查询变成 N+1）。
+	func (s *Store) fillLinkSamples(stats []LinkStat, ids []int64) error {
+	if len(ids) == 0 {
+	return nil
+	}
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+	args = append(args, id)
+	}
+	rows, err := s.db.Query(
+	`SELECT l.id, f.natural_key, f.name, t.natural_key, t.name
+	 FROM asset_links l
+	 JOIN assets f ON f.id=l.from_id
+	 JOIN assets t ON t.id=l.to_id
+	 WHERE l.id IN (`+placeholders(len(ids))+`)`, args...)
+	if err != nil {
+	return fmt.Errorf("查询关系样本失败: %w", err)
+	}
+	defer rows.Close()
+	byID := map[int64]LinkStatSample{}
+	for rows.Next() {
+	var id int64
+	var sample LinkStatSample
+	if err := rows.Scan(&id, &sample.FromKey, &sample.FromName, &sample.ToKey, &sample.ToName); err != nil {
+		return fmt.Errorf("读取关系样本失败: %w", err)
+	}
+	byID[id] = sample
+	}
+	if err := rows.Err(); err != nil {
+	return err
+	}
+	for i := range stats {
+	stats[i].Sample = byID[ids[i]]
+	}
+	return nil
+	}
+
+	// assetsWithoutLinks 统计"在范围内、但没有任何一条两端都在范围内的边"的资产数。
+	//
+	// 它是台账质量的信号（纳管了却没接线）。两个口径上的选择与台账首页可比：
+	//   - **两端都要在范围内**才算"有边"，否则受限用户会看到偏小的数字（差异本身就是范围外的信息）；
+	//   - 排除短命运行时对象（容器/工作负载）与被忽略的资产——它们本来就不在首页资产数里。
+	func (s *Store) assetsWithoutLinks(scope ChangeScope) (int, error) {
+	// Ignored 用零值（= 不含已忽略）：与台账首页的资产数同口径——被忽略的资产本来就不算在里面。
+	where, args := assetWhere("a", ListFilter{
+		Nodes:          scope.Nodes,
+		LabelSelectors: scope.LabelSelectors,
+		ExcludeTypes:   EphemeralTypes(),
+	})
+	fromCond, fromArgs := scopeConds("f", scope)
+	toCond, toArgs := scopeConds("t", scope)
+	// 参数顺序必须与 SQL 里各子句出现的顺序一致：外层 WHERE → 第一个 EXISTS（对端为 t）→ 第二个（对端为 f）。
+	args = append(args, toArgs...)
+	args = append(args, fromArgs...)
+
+	var n int
+	if err := s.db.QueryRow(
+	`SELECT COUNT(*) FROM assets a`+where+
+		` AND NOT EXISTS (SELECT 1 FROM asset_links l JOIN assets t ON t.id=l.to_id
+	       WHERE l.from_id=a.id`+toCond+`)
+	   AND NOT EXISTS (SELECT 1 FROM asset_links l JOIN assets f ON f.id=l.from_id
+	       WHERE l.to_id=a.id`+fromCond+`)`, args...).Scan(&n); err != nil {
+	return 0, fmt.Errorf("统计无边资产失败: %w", err)
+	}
+	return n, nil
+	}
+
+	// topologyByFilter 按筛选取子图：先选边、再取两端为节点。
+	//
+	// 返回 (节点, 边, 符合筛选的边总数, 是否截断, err)。与邻域查询共用 assetsByIDs 与同一套排序口径，
+	// 两张图的节点形态一致。
+	func (s *Store) topologyByFilter(flt TopologyFilter) ([]TopologyNode, []TopologyEdge, int, bool, error) {
+	maxEdges := flt.MaxEdges
+	if maxEdges <= 0 || maxEdges > MaxTopologyEdges {
+	maxEdges = MaxTopologyEdges
+	}
+	maxNodes := flt.MaxNodes
+	if maxNodes <= 0 || maxNodes > MaxTopologyNodes {
+	maxNodes = MaxTopologyNodes
+	}
+
+	fromCond, fromArgs := scopeConds("f", flt.Scope)
+	toCond, toArgs := scopeConds("t", flt.Scope)
+	where := " WHERE 1=1" + fromCond + toCond
+	args := append(append([]any{}, fromArgs...), toArgs...)
+
+	if len(flt.Kinds) > 0 {
+	where += " AND l.kind IN (" + placeholders(len(flt.Kinds)) + ")"
+	for _, k := range flt.Kinds {
+		args = append(args, string(k))
+	}
+	}
+	if len(flt.Sources) > 0 {
+	where += " AND l.source IN (" + placeholders(len(flt.Sources)) + ")"
+	for _, src := range flt.Sources {
+		args = append(args, string(src.normalized()))
+	}
+	}
+	// 类型与归属节点都是"两端任一命中"：筛选问的是"这批边里有没有这类资产参与"，
+	// 而不是"两端都必须是它"（后者会把绝大部分边筛掉，图上只剩两条腿一样的结构）。
+	if len(flt.Types) > 0 {
+	ph := placeholders(len(flt.Types))
+	where += " AND (f.type_key IN (" + ph + ") OR t.type_key IN (" + ph + "))"
+	for _, t := range flt.Types {
+		args = append(args, t)
+	}
+	for _, t := range flt.Types {
+		args = append(args, t)
+	}
+	}
+	if len(flt.Nodes) > 0 {
+	ph := placeholders(len(flt.Nodes))
+	where += " AND (f.node IN (" + ph + ") OR t.node IN (" + ph + "))"
+	for _, n := range flt.Nodes {
+		args = append(args, n)
+	}
+	for _, n := range flt.Nodes {
+		args = append(args, n)
+	}
+	}
+
+	var total int
+	if err := s.db.QueryRow(
+	`SELECT COUNT(*) FROM asset_links l
+	 JOIN assets f ON f.id=l.from_id JOIN assets t ON t.id=l.to_id`+where, args...).Scan(&total); err != nil {
+	return nil, nil, 0, false, fmt.Errorf("统计符合条件的关系失败: %w", err)
+	}
+
+	rows, err := s.db.Query(
+	`SELECT l.id, l.from_id, l.to_id, l.kind, l.source, l.created_at
+	 FROM asset_links l
+	 JOIN assets f ON f.id=l.from_id JOIN assets t ON t.id=l.to_id`+where+
+		` ORDER BY l.id LIMIT ?`, append(args, maxEdges+1)...)
+	if err != nil {
+	return nil, nil, 0, false, fmt.Errorf("查询关系子图失败: %w", err)
+	}
+	defer rows.Close()
+
+	type rawEdge struct {
+	id, fromID, toID, at int64
+	kind, src            string
+	}
+	raw := make([]rawEdge, 0, maxEdges)
+	for rows.Next() {
+	var e rawEdge
+	if err := rows.Scan(&e.id, &e.fromID, &e.toID, &e.kind, &e.src, &e.at); err != nil {
+		return nil, nil, 0, false, fmt.Errorf("读取关系子图失败: %w", err)
+	}
+	raw = append(raw, e)
+	}
+	if err := rows.Err(); err != nil {
+	return nil, nil, 0, false, err
+	}
+	truncated := len(raw) > maxEdges
+	if truncated {
+	raw = raw[:maxEdges]
+	}
+
+	// 节点集合按边的顺序收，收满上限就停：**先到先得**是刻意的——
+	// 顺序由边 id 决定（稳定），因此同一份数据两次查询看到的是同一张图。
+	ids := make([]int64, 0, maxNodes)
+	seen := map[int64]bool{}
+	for _, e := range raw {
+	for _, id := range [2]int64{e.fromID, e.toID} {
+		if seen[id] {
+			continue
+		}
+		if len(ids) >= maxNodes {
+			truncated = true
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	}
+
+	assets, err := s.assetsByIDs(ids)
+	if err != nil {
+	return nil, nil, 0, false, err
+	}
+	byID := make(map[int64]Asset, len(assets))
+	for _, a := range assets {
+	byID[a.ID] = a
+	}
+	nodes := make([]TopologyNode, 0, len(assets))
+	for _, a := range assets {
+	// Depth 统一为 0：这张图没有中心，界面不该显示"几跳"（那是邻域才有的概念）。
+	nodes = append(nodes, TopologyNode{Asset: a})
+	}
+	sort.SliceStable(nodes, func(i, j int) bool {
+	if nodes[i].Asset.TypeKey != nodes[j].Asset.TypeKey {
+		return nodes[i].Asset.TypeKey < nodes[j].Asset.TypeKey
+	}
+	return nodes[i].Asset.NaturalKey < nodes[j].Asset.NaturalKey
+	})
+
+	edges := make([]TopologyEdge, 0, len(raw))
+	for _, e := range raw {
+	from, ok1 := byID[e.fromID]
+	to, ok2 := byID[e.toID]
+	if !ok1 || !ok2 {
+		continue // 端点被节点上限挡在外面：这条边在本次子图里不成立
+	}
+	edges = append(edges, TopologyEdge{
+		FromID: e.fromID, ToID: e.toID,
+		From: Ref{TypeKey: from.TypeKey, NaturalKey: from.NaturalKey},
+		To:   Ref{TypeKey: to.TypeKey, NaturalKey: to.NaturalKey},
+		Kind: LinkKind(e.kind), Source: Source(e.src).normalized(), CreatedAt: e.at,
+	})
+	}
+	if len(edges) < len(raw) {
+	truncated = true
+	}
+	return nodes, edges, total, truncated, nil
+	}
