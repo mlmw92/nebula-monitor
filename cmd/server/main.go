@@ -237,6 +237,9 @@ func main() {
 	// 资产台账（内嵌 SQLite 单文件）：库路径留空时取 <DataDir>/assets.db。
 	// 打开失败**不阻断启动**——台账是次要能力，缺它时监控主链路仍应可用。
 	var assetSvc *asset.Service
+	// 周期化巡检调度（设计件 2026-10-07-inspect-schedule-design.md）：构造在资产服务之后
+	// （它要调 RunInspect），启动在下面的后台任务块里（与报告调度同一位置）。
+	var inspectSched *asset.InspectScheduler
 	assetPath := cfg.AssetStoreFile
 	if assetPath == "" {
 		assetPath = filepath.Join(cfg.DataDir, "assets.db")
@@ -398,6 +401,16 @@ func main() {
 	// 资产台账接口：仅在库可用时注入（传 nil 具体值进接口会得到「非 nil 接口」，必须显式判断）
 	if assetSvc != nil {
 		rest.SetAssetService(assetSvc)
+		// 周期化巡检：配置与运行状态同文件；范围折算由 API 层提供（它持有身份仓库与节点管理器，
+		// 而 asset 包刻意不依赖 auth 包，依赖方向保持清晰）。
+		// 构造失败**不阻断启动**：它是次要能力，缺它时巡检仍可手动触发。
+		if s, err := asset.NewInspectScheduler(filepath.Join(cfg.DataDir, "inspect_schedule.yaml"),
+			asset.InspectScheduleConfig{}, assetSvc, rest.InspectScopeSnapshot); err != nil {
+			slog.Error("周期化巡检配置不可用，该能力已关闭", "err", err)
+		} else {
+			inspectSched = s
+			rest.SetInspectScheduler(s)
+		}
 	}
 	// 告警侧同样读注册表：服务离线规则的服务类型校验都读它
 	alert.SetMiddlewareRegistry(mwRegistry)
@@ -427,6 +440,10 @@ func main() {
 	// 否则频繁重启的机器每次启动都会重新生成一份报告——报告要拉一整个周期的数据）。
 	if reportSched != nil {
 		go reportSched.Run(runCtx)
+	}
+	// 周期化巡检（同上：配置带运行状态、跨重启保留上次执行时间，避免频繁重启的机器反复体检）
+	if inspectSched != nil {
+		go inspectSched.Run(runCtx)
 	}
 
 	// 认证中间件（启用 auth 时保护 /api/v1/* 业务接口）。

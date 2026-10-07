@@ -122,7 +122,10 @@ type API struct {
 	logs           logstore.LogStore
 	// 报告周期化调度（可空；未注入时相关接口返回 503）
 	reportSched ReportScheduleProvider
-	assets         AssetProvider          // 资产台账（可空；未注入时资产接口返回 503）
+	// 周期化巡检（可空；未注入时相关接口返回 503）。与报告调度同构，但它多一件事：
+	// 范围要按身份折算（见 InspectScopeSnapshot），因为巡检范围是**授权**的一部分。
+	inspectSched InspectScheduleProvider
+	assets       AssetProvider          // 资产台账（可空；未注入时资产接口返回 503）
 	startedAt      time.Time              // 进程启动时间，供 /healthz、/readyz 报告运行时长
 }
 
@@ -263,6 +266,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/inspect/runs", a.permit(a.handleInspectRuns, "inspect:read"))
 	mux.HandleFunc("GET /api/v1/inspect/runs/{id}/findings", a.permit(a.handleInspectFindings, "inspect:read"))
 	mux.HandleFunc("GET /api/v1/inspect/baselines", a.permit(a.handleInspectBaselines, "inspect:read"))
+	// 周期化巡检：读 inspect:read；改配置与立即执行都用 inspect:run（不新增权限点——
+	// "定时"只是替我触发，能力等价；与报告页"读 report:read、改与跑 report:export"同构）。
+	mux.HandleFunc("GET /api/v1/inspect/schedule", a.permit(a.handleInspectScheduleGet, "inspect:read"))
+	mux.HandleFunc("PUT /api/v1/inspect/schedule", a.permit(a.handleInspectScheduleSave, "inspect:run"))
+	mux.HandleFunc("POST /api/v1/inspect/schedule/run", a.permit(a.handleInspectScheduleRun, "inspect:run"))
 	// 中间件类型展示开关：读 middleware:read，写 system:config（与品牌/大屏展示配置同级）
 	mux.HandleFunc("GET /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigGET, "middleware:read"))
 	mux.HandleFunc("PUT /api/v1/middleware/view-config", a.permit(a.handleMiddlewareViewConfigPUT, "system:config"))
