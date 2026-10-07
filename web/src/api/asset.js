@@ -149,6 +149,18 @@ export const setAssetBaseline = (id) => http.post('/api/v1/assets/' + encodeURIC
 // 清除该资产所属类型的标杆（幂等）。
 export const clearAssetBaseline = (id) => http.del('/api/v1/assets/' + encodeURIComponent(id) + '/baseline')
 
+// ---- 周期化巡检（把巡检从"只能人工点"变成"可定时跑"）----
+//
+// 读配置要 inspect:read，改配置与立即执行都要 inspect:run（与报告页"读 report:read、
+// 改与跑 report:export"同构）。**范围不在请求体里**：它由服务端按配置保存者的身份折算，
+// 并随其权限收窄——范围是授权的一部分，不是页面上可勾选的选项。
+export const getInspectSchedule = () => http.get('/api/v1/inspect/schedule')
+
+export const saveInspectSchedule = (cfg) => http.put('/api/v1/inspect/schedule', cfg)
+
+// 立即执行一次（服务端会按调用者的当前范围再收窄一次）
+export const runInspectScheduleNow = () => http.post('/api/v1/inspect/schedule/run', {})
+
 // 配置快照（巡检基线；只在首次或字段真变化时新增）
 export const listAssetSnapshots = (id, limit = 0) =>
   http.get(withQuery('/api/v1/assets/' + encodeURIComponent(id) + '/snapshots', { limit }))

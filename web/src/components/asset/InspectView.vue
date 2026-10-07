@@ -32,6 +32,81 @@
       </div>
     </div>
 
+    <!-- 周期化巡检：默认关闭，打开后按间隔自动跑一次。
+         与上方「执行巡检」的分工：那个是"现在跑一次"，这里是"以后每隔一段时间自动跑一次"。
+         界面刻意**不提供范围开关**：范围由服务端按配置保存者的身份折算，并随他权限收窄——
+         范围是授权的一部分，不是页面上的一个选项（否则受限用户能靠勾一个更宽的范围越权）。 -->
+    <SectionCard title="周期化巡检">
+      <div class="filter-bar">
+        <el-switch v-model="schedule.enabled" :disabled="!canRun" @change="saveSchedule" />
+        <span class="muted">每</span>
+        <el-input-number
+          v-model="schedule.intervalHours"
+          :min="1"
+          :max="720"
+          size="small"
+          controls-position="right"
+          :disabled="!canRun"
+          @change="saveSchedule"
+        />
+        <span class="muted">小时自动巡检一次</span>
+        <el-select
+          v-model="schedule.type"
+          placeholder="全部类型"
+          clearable
+          size="small"
+          style="width: 140px"
+          :disabled="!canRun"
+          @change="saveSchedule"
+        >
+          <el-option label="主机" value="host" />
+          <el-option label="中间件实例" value="middleware-instance" />
+        </el-select>
+        <el-input
+          v-model="schedule.node"
+          clearable
+          size="small"
+          placeholder="归属节点"
+          style="width: 130px"
+          :disabled="!canRun"
+          @change="saveSchedule"
+        />
+        <el-input
+          v-model="schedule.keyword"
+          clearable
+          size="small"
+          placeholder="关键词"
+          style="width: 170px"
+          :disabled="!canRun"
+          @change="saveSchedule"
+        />
+        <el-button size="small" :loading="scheduleRunning" :disabled="!canRun" @click="runScheduleNow">
+          立即执行一次
+        </el-button>
+        <span v-if="!canRun" class="muted">缺 inspect:run 权限，只能查看</span>
+      </div>
+      <div class="muted schedule-hint">
+        <template v-if="scheduleLoadError">{{ scheduleLoadError }}</template>
+        <template v-else-if="schedule.lastRunAt">
+          上次{{ schedule.lastManual ? '手动' : '定时' }}执行 {{ fmtTime(schedule.lastRunAt) }}
+          <span v-if="schedule.lastRunId">· 记录 #{{ schedule.lastRunId }}</span>
+          <span v-if="schedule.nextAt && schedule.enabled">· 下次约 {{ fmtTime(schedule.nextAt) }}</span>
+        </template>
+        <template v-else>尚未执行过。关闭时不影响上方的「执行巡检」。</template>
+      </div>
+      <!-- 上一轮没跑（占用中 / 范围为空 / 范围来源账号已不存在）或跑失败：必须显式说出来，
+           否则"巡检怎么不跑了"只能靠翻文件时间猜。 -->
+      <el-alert
+        v-if="schedule.lastError"
+        class="tip"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="上一次巡检没有执行或执行失败"
+        :description="schedule.lastError"
+      />
+    </SectionCard>
+
     <!-- 巡检记录 -->
     <SectionCard title="巡检记录" dense>
       <el-table
@@ -71,7 +146,12 @@
           </template>
         </el-table-column>
         <el-table-column label="操作人" width="140">
-          <template #default="{ row }">{{ row.actor || '—' }}</template>
+          <template #default="{ row }">
+            <!-- 定时触发的留痕是 schedule（不是某个登录用户）：它没有请求上下文，
+                 界面要让人一眼分清"这条是机器跑的"还是"某人点的" -->
+            <el-tag v-if="row.actor === 'schedule'" size="small" type="info">定时</el-tag>
+            <span v-else>{{ row.actor || '—' }}</span>
+          </template>
         </el-table-column>
         <el-table-column label="备注">
           <template #default="{ row }">
@@ -194,6 +274,9 @@ import {
   listInspectFindings,
   listInspectBaselines,
   clearAssetBaseline,
+  getInspectSchedule,
+  saveInspectSchedule,
+  runInspectScheduleNow,
 } from '../../api/asset'
 import { useAuth } from '../../composables/useAuth'
 import { printPage } from '../../utils/print'
@@ -211,6 +294,25 @@ const selectedRun = ref(null)
 const loading = ref(false)
 const findingLoading = ref(false)
 const running = ref(false)
+
+// 周期化巡检（配置与运行状态同文件；默认关闭）。
+// 这里只放可编辑的四项 + 运行状态；**范围**不在其中——它由服务端按身份折算。
+const schedule = ref({
+  enabled: false,
+  intervalHours: 24,
+  type: '',
+  node: '',
+  keyword: '',
+  lastRunAt: 0,
+  lastRunId: 0,
+  lastManual: false,
+  lastError: '',
+  // 下次预计执行时间放在同一个对象里：模板读的是 schedule.nextAt，
+  // 存到另一个 ref 里会让那一行**永远不渲染**（且不报错）
+  nextAt: 0,
+})
+const scheduleLoadError = ref('')
+const scheduleRunning = ref(false)
 
 const KIND_LABELS = { added: '新增', changed: '变更', missing: '缺失', deviation: '合规偏差' }
 const kindLabel = (k) => KIND_LABELS[k] || k
@@ -289,6 +391,71 @@ async function runInspect() {
   }
 }
 
+// applySchedule 把服务端返回的配置 + 运行状态铺到界面上。
+// 只取界面上真正用得到的字段：范围（scope）**只读**，不往表单里放——放进去就会被误当成可编辑项。
+function applySchedule(data) {
+  const cfg = (data && data.config) || {}
+  schedule.value = {
+    enabled: !!cfg.enabled,
+    intervalHours: cfg.intervalHours || 24,
+    type: cfg.type || '',
+    node: cfg.node || '',
+    keyword: cfg.keyword || '',
+    lastRunAt: cfg.lastRunAt || 0,
+    lastRunId: cfg.lastRunId || 0,
+    lastManual: !!cfg.lastManual,
+    lastError: cfg.lastError || '',
+    nextAt: (data && data.nextAt) || 0,
+  }
+}
+
+async function loadSchedule() {
+  try {
+    applySchedule(await getInspectSchedule())
+    scheduleLoadError.value = ''
+  } catch (e) {
+    // 取不到就说清楚，而不是把开关显示成"关着"——那会让人以为是自己的配置
+    scheduleLoadError.value = '周期化巡检不可用：' + (e.message || '请稍后重试')
+  }
+}
+
+async function saveSchedule() {
+  if (!canRun.value) return
+  try {
+    applySchedule(
+      await saveInspectSchedule({
+        enabled: schedule.value.enabled,
+        intervalHours: schedule.value.intervalHours,
+        type: schedule.value.type,
+        node: schedule.value.node,
+        keyword: schedule.value.keyword,
+      }),
+    )
+    ElMessage.success(schedule.value.enabled ? '已开启周期化巡检' : '已关闭周期化巡检')
+  } catch (e) {
+    ElMessage.error(e.message || '保存周期化巡检配置失败')
+    // 保存失败时不能让界面停在一个"看起来生效了"的开关位置：拉回服务端的真实状态
+    await loadSchedule()
+  }
+}
+
+async function runScheduleNow() {
+  if (!canRun.value) return
+  scheduleRunning.value = true
+  try {
+    const run = await runInspectScheduleNow()
+    ElMessage.success(`巡检完成：覆盖 ${run.assets} 个资产，差异 ${run.findings} 条`)
+    await loadRuns()
+    if (run.runId) await selectRun({ id: run.runId })
+  } catch (e) {
+    ElMessage.error(e.message || '执行巡检失败')
+  } finally {
+    scheduleRunning.value = false
+    // 无论成败都刷新：失败/未执行的原因在 lastError 里，界面上要能看到
+    await loadSchedule()
+  }
+}
+
 async function clearBaseline(row) {
   try {
     await ElMessageBox.confirm(
@@ -312,6 +479,7 @@ async function clearBaseline(row) {
 onMounted(() => {
   loadRuns()
   loadBaselines()
+  loadSchedule()
 })
 </script>
 
@@ -336,6 +504,9 @@ onMounted(() => {
 .field-label { font-size: 13px; color: var(--text-dim); white-space: nowrap; }
 .mono { font-family: var(--mono); }
 .note { margin: 10px 0 0; line-height: 20px; }
+/* 周期化巡检：控件行沿用执行区那套 .filter-bar；下面这行小字与失败告警与报告页同一读法 */
+.schedule-hint { margin-top: 10px; }
+.tip { margin-top: 10px; }
 .alert-gap { margin-bottom: 12px; }
 .has-finding { color: var(--warn); font-weight: 600; }
 .warn-text { color: var(--warn); font-size: 13px; }
