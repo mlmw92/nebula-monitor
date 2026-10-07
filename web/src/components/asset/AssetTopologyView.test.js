@@ -105,6 +105,29 @@ describe('关系视图（全库）', () => {
     expect(wrapper.find('.ov-table .mono').attributes('title')).toBe('redis:10.0.0.10:7000 → VM-0-10-ubuntu')
   })
 
+  // Service 是本批新增的资产类型，也是 exposes 的**第一个自动来源**：
+  // 总览里必须显示中文名（「K8s 服务」/「暴露」），不能是原始 key——
+  // 否则用户看到一行 "service → pod / exposes" 根本不知道它在说什么关系。
+  it('新增的 service 类型与 exposes 种类都有中文名', async () => {
+    getLinkStats.mockResolvedValue({
+      groups: [{
+        fromType: 'service', kind: 'exposes', toType: 'pod', source: 'discovery', count: 2,
+        sample: {
+          fromKey: 'https://10.0.0.9:6443/default/service/web', fromName: 'web',
+          toKey: 'https://10.0.0.9:6443/default/pod/web-abc', toName: 'web-abc',
+        },
+      }],
+      totalLinks: 2,
+      assetsWithoutLinks: 0,
+    })
+    wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('K8s 服务')
+    expect(wrapper.text()).toContain('暴露')
+    expect(wrapper.text()).toContain('web → web-abc')
+  })
+
   it('点总览的一行把「种类 + 边来源 + 来源类型」三个维度一起带给图', async () => {
     wrapper = mountView()
     await flushPromises()

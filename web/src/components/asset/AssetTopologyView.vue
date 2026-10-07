@@ -188,6 +188,7 @@ const TYPE_TITLES = {
   'middleware-instance': '中间件实例',
   pod: '容器（Pod）',
   workload: '工作负载',
+  service: 'K8s 服务',
 }
 const typeTitle = (k) => TYPE_TITLES[k] || k
 

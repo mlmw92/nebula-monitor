@@ -574,7 +574,7 @@
       </el-form>
       <div class="muted">
         候选只列出你可见范围内的资产（范围外的对端即便手工填也会被服务端拒绝）。
-        目前 runs_on 与 member_of 多由采集建立，depends_on 与 exposes 只能人工维护。
+        目前 runs_on、member_of 与 exposes（K8s 服务 → 后端 Pod）由采集自动建立，depends_on 只能人工维护。
       </div>
       <template #footer>
         <el-button @click="linkAddVisible = false">取消</el-button>
@@ -966,7 +966,7 @@ function typeLabel(row) {
 }
 // 关系对端的类型标签：不复用 typeLabel（它要 row），但语义必须一致——
 // 否则「容器 → 主机」的 runs_on 会被显示成「实例 → 主机」。位置太窄，用短名，认不出的回落到类型标题。
-const PEER_TYPE_LABELS = { host: '主机', 'middleware-instance': '实例', pod: '容器', workload: '工作负载' }
+const PEER_TYPE_LABELS = { host: '主机', 'middleware-instance': '实例', pod: '容器', workload: '工作负载', service: 'K8s 服务' }
 const peerTypeLabel = (t) => PEER_TYPE_LABELS[t] || labelOf(t)
 // 「上报状态」：描述 Agent 是否还在上报这条资产，与实例/容器自身是否可用无关。
 // 措辞刻意避开"在线/离线"——那是采集侧的探活结果，两者同词会让人觉得自相矛盾。
