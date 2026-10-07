@@ -89,6 +89,11 @@ const (
 	// TypeWorkload 是 K8s 工作负载（Deployment / StatefulSet / DaemonSet），
 	// 自然键 = <集群>/<命名空间>/<kind>/<名称>。
 	TypeWorkload = "workload"
+	// TypeService 是 K8s Service，自然键 = <集群>/<命名空间>/service/<名称>。
+	//
+	// 与 Pod/Workload 不同，它**不是短命对象**（见 EphemeralTypes）：Service 停止上报就是真失联，
+	// 应当计入台账首页与健康度摘要——这正是它与那两个类型相反的取舍。
+	TypeService = "service"
 )
 
 // EphemeralTypes 是**运行时短命对象**的资产类型：它们天生高 churn（滚动更新、Job、扩缩容），
@@ -98,6 +103,9 @@ const (
 // 被替换掉的旧 Pod 停止上报后会被判为失联，计入之后页面顶部会出现"失联 200"，
 // 把真实故障埋掉；而没人会为滚动更新掉的 Pod 指派责任人。
 // 显式按类型筛选时仍然全量可见（含已消失的）。
+//
+// 注意 K8s Service（TypeService）**不在**这个列表里：它是稳定对象，停止上报就是真失联，
+// 应当计入台账与健康度——与 Pod/Workload 的取舍正好相反，这是刻意的。
 func EphemeralTypes() []string { return []string{TypePod, TypeWorkload} }
 
 // AssetType 是资产的定义：字段集合、是否内置、是否允许人工维护。
@@ -121,6 +129,7 @@ func BuiltinTypes() []AssetType {
 		{Key: TypeMiddlewareInst, Title: "中间件实例", Builtin: true},
 		{Key: TypePod, Title: "容器（Pod）", Builtin: true},
 		{Key: TypeWorkload, Title: "工作负载", Builtin: true},
+		{Key: TypeService, Title: "K8s 服务", Builtin: true},
 	}
 }
 
@@ -329,6 +338,11 @@ func PodNaturalKey(cluster, namespace, name string) string {
 // WorkloadNaturalKey 同 PodNaturalKey，<kind> 取 deployment / statefulset / daemonset。
 func WorkloadNaturalKey(cluster, namespace, kind, name string) string {
 	return podKeyPrefix(cluster, namespace) + strings.TrimSpace(kind) + "/" + strings.TrimSpace(name)
+}
+
+// ServiceNaturalKey 同 PodNaturalKey，kind 固定为 service。
+func ServiceNaturalKey(cluster, namespace, name string) string {
+	return podKeyPrefix(cluster, namespace) + "service/" + strings.TrimSpace(name)
 }
 
 func podKeyPrefix(cluster, namespace string) string {

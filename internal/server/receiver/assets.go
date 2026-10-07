@@ -287,10 +287,12 @@ func isHostPort(addr string) bool {
 // **顺序是硬约束：先工作负载、后 Pod。** member_of（Pod → 工作负载）要求两端资产都已存在
 // （LinkDiscovered 的契约），顺序反了这批边就整条建不出来——这不是优化，是正确性。
 //
-// 两条边的口径见设计件 §关系设计：
+// 三条边的口径见设计件 §关系设计：
 //   - runs_on：仅在 spec.nodeName 对应**已存在的主机资产**时才建。建不成不报错、也**不造占位主机**
 //     ——"我们不知道那台机器"比编一个主机资产更诚实，而且服务端本来就有一个写入失败的日志。
 //   - member_of：Pod → 所属工作负载（采集侧已把 ReplicaSet 那一跳解析掉）。
+//   - exposes：Service → 后端 Pod。后端是采集侧从 EndpointSlice 的 targetRef 取的
+//     （不是 selector 命中：未就绪的 Pod 不在 Endpoints 里）。这也是 exposes 的**第一个自动来源**。
 func (r *Receiver) applyContainerInventory(p *model.ReportPayload) {
 	// 主机资产的**规范名**查询（记忆化）：Pod 的范围归属与 runs_on 都以它为前提，
 	// 而成百上千个 Pod 往往只分布在少数几个节点上——每个节点只查一次。
@@ -348,6 +350,11 @@ func (r *Receiver) applyContainerInventory(p *model.ReportPayload) {
 	}
 
 	// 2. Pod：先落资产，再建两条边
+	//
+	// podKeys 记下"这一轮真的落过的 Pod"：第 4 步的 service → pod 边只对它们尝试。
+	// 这样既不会给不存在的 Pod 建边，也不会为"合法缺席"（被截断、落在系统命名空间）刷日志
+	// ——与 member_of 用 workloadKeys 把关是同一取向。
+	podKeys := map[string]bool{}
 	for _, pod := range p.K8sPods {
 		if strings.TrimSpace(pod.Cluster) == "" || strings.TrimSpace(pod.Name) == "" {
 			continue
@@ -382,6 +389,7 @@ func (r *Receiver) applyContainerInventory(p *model.ReportPayload) {
 			continue
 		}
 		podRef := asset.Ref{TypeKey: cur.TypeKey, NaturalKey: cur.NaturalKey}
+		podKeys[asset.TypePod+"|"+cur.NaturalKey] = true
 
 		if node != "" {
 			if err := r.assets.LinkDiscovered(podRef,
@@ -400,6 +408,64 @@ func (r *Receiver) applyContainerInventory(p *model.ReportPayload) {
 					asset.Ref{TypeKey: asset.TypeWorkload, NaturalKey: key}, asset.LinkMemberOf); err != nil {
 					slog.Warn("建立容器 → 工作负载关联失败", "pod", pod.Name, "workload", pod.OwnerName, "err", err)
 				}
+			}
+		}
+	}
+
+	// 3. Service：先落资产。Service 跨节点、没有单一归属节点，范围与工作负载同口径挂
+	//    **集群的上报主机**（落空串 = 受限用户一律不可见，那等于把它藏起来）。
+	serviceKeys := map[string]bool{}
+	for _, svc := range p.K8sServices {
+		if strings.TrimSpace(svc.Cluster) == "" || strings.TrimSpace(svc.Name) == "" {
+			continue
+		}
+		attrs := map[string]string{}
+		putIfNotEmpty(attrs, "namespace", svc.Namespace)
+		putIfNotEmpty(attrs, "type", svc.Type)
+		putIfNotEmpty(attrs, "clusterIP", svc.ClusterIP)
+		// 后端数写进属性：它是"这个服务背后有没有人"最直接的答案。
+		attrs["backends"] = strconv.Itoa(len(svc.BackendPods))
+		if svc.BackendsTruncated {
+			// 只报了 200 个后端时必须让中心知道"还有更多"，否则 200 会被当成全部。
+			attrs["backendsTruncated"] = "true"
+		}
+		key := asset.ServiceNaturalKey(svc.Cluster, svc.Namespace, svc.Name)
+		cur, _, err := r.assets.Apply(asset.Observation{
+			TypeKey: asset.TypeService, NaturalKey: key,
+			Name:   svc.Name,
+			Node:   p.Node,
+			Source: asset.SourceDiscovery, Actor: "agent", Attrs: attrs,
+		})
+		if err != nil {
+			slog.Warn("写入 K8s 服务资产失败", "service", svc.Name, "err", err)
+			continue
+		}
+		serviceKeys[asset.TypeService+"|"+cur.NaturalKey] = true
+	}
+
+	// 4. Service → 后端 Pod（exposes）。放在最后是因为**两端必须先存在**（LinkDiscovered 的契约）：
+	//    第 2 步已经落过 Pod，第 3 步落过 Service，到这里才谈得上建边。
+	//
+	//    后端 Pod 不在本轮清单里就跳过——被截断、或落在被排除的系统命名空间时它本来就不在台账里。
+	//    这不是错误，不该刷日志；已建成的边是持久的，不会因为某一轮缺席而消失。
+	for _, svc := range p.K8sServices {
+		if strings.TrimSpace(svc.Cluster) == "" || strings.TrimSpace(svc.Name) == "" || len(svc.BackendPods) == 0 {
+			continue
+		}
+		svcKey := asset.ServiceNaturalKey(svc.Cluster, svc.Namespace, svc.Name)
+		if !serviceKeys[asset.TypeService+"|"+svcKey] {
+			continue
+		}
+		for _, podName := range svc.BackendPods {
+			podKey := asset.PodNaturalKey(svc.Cluster, svc.Namespace, podName)
+			if !podKeys[asset.TypePod+"|"+podKey] {
+				continue
+			}
+			if err := r.assets.LinkDiscovered(
+				asset.Ref{TypeKey: asset.TypeService, NaturalKey: svcKey},
+				asset.Ref{TypeKey: asset.TypePod, NaturalKey: podKey},
+				asset.LinkExposes); err != nil {
+				slog.Warn("建立服务 → 容器关联失败", "service", svc.Name, "pod", podName, "err", err)
 			}
 		}
 	}
