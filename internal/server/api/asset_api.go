@@ -56,6 +56,12 @@ type AssetProvider interface {
 	// nodes 与 selectors 是调用者的两个范围维度（nil = 该维度不生效），候选值一并收窄。
 	DistinctLabelValues(key string, nodes []string, selectors []asset.LabelSelector) ([]string, error)
 	Baselines() ([]asset.Baseline, error)
+	// TypeModels 返回配置项模型（类型 × 字段画像）：模型本身不受范围限制，
+	// **统计按 f 统计**（含资源范围两个维度），属性值不出现在结果里。
+	TypeModels(f asset.ListFilter, nodes []string) ([]asset.TypeModel, error)
+	// UpdateTypeModel 保存某类型的模型（运行态字段 / 关注字段 / 属性说明）。
+	// 类型不存在时返回 asset.ErrTypeNotFound（接口层据此回 404）。
+	UpdateTypeModel(typeKey string, sch asset.TypeSchema) error
 	BaselinesInNodes(nodes []string) ([]asset.Baseline, error)
 	BaselineForType(typeKey string) (asset.Baseline, bool, error)
 	SetBaselineIfCurrent(ref asset.Ref, actor string, currentAssetID int64, nodes []string) (asset.Baseline, error)

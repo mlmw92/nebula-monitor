@@ -261,6 +261,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// 字面量路径比 {id} 更具体，ServeMux 会优先匹配（与 /assets/summary 同理）。
 	mux.HandleFunc("POST /api/v1/assets/batch", a.permit(a.handleAssetsBatch, "assets:write"))
 	mux.HandleFunc("GET /api/v1/assets/export", a.permit(a.handleAssetExport, "assets:export"))
+	// 配置项模型：读 assets:read；改模型用 assets:write（与「标杆 = 台账数据维护」同一取向，
+	// 不新增权限点）。路径与 /assets 前缀不冲突（字面量段不同）。
+	mux.HandleFunc("GET /api/v1/asset-types", a.permit(a.handleAssetTypes, "assets:read"))
+	mux.HandleFunc("PUT /api/v1/asset-types/{key}", a.permit(a.handleAssetTypeModelSave, "assets:write"))
 	// 配置巡检（inspect）：只给结论、不改配置，因此「跑」与「改」分成两个权限点
 	mux.HandleFunc("POST /api/v1/inspect/runs", a.permit(a.handleInspectRunCreate, "inspect:run"))
 	mux.HandleFunc("GET /api/v1/inspect/runs", a.permit(a.handleInspectRuns, "inspect:read"))

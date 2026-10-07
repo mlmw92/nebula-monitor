@@ -2,6 +2,7 @@ package asset
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -424,6 +425,162 @@ func (s *Store) columnExists(table, column string) (bool, error) {
 		return false, fmt.Errorf("读取 %s 结构失败: %w", table, err)
 	}
 	return found, nil
+}
+
+// ---- 配置项模型（类型 × 字段）的读写与统计 ----
+
+// typeSchemas 读所有类型的模型（一次查询；调用方做进程内缓存，见 Service.typeSchemaOf）。
+//
+// 解析失败的单个类型**跳过并继续**（在 Service 层记日志）：一份坏 schema 不该让整个台账读不出来。
+func (s *Store) typeSchemas() (map[string]TypeSchema, error) {
+	rows, err := s.db.Query(`SELECT key, schema FROM asset_types`)
+	if err != nil {
+		return nil, fmt.Errorf("读取资产类型模型失败: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]TypeSchema{}
+	for rows.Next() {
+		var key, raw string
+		if err := rows.Scan(&key, &raw); err != nil {
+			return nil, fmt.Errorf("读取资产类型模型失败: %w", err)
+		}
+		sch, err := DecodeTypeSchema(raw)
+		if err != nil {
+			// 坏 schema 按"没有模型"处理（用内置默认），但不静默：留给调用方记日志
+			out[key] = TypeSchema{}
+			continue
+		}
+		out[key] = sch
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("读取资产类型模型失败: %w", err)
+	}
+	return out, nil
+}
+
+// listTypes 返回全部类型（按类型键排序；schema 原样带出，由调用方解释）。
+func (s *Store) listTypes() ([]AssetType, error) {
+	rows, err := s.db.Query(`SELECT key,title,builtin,schema FROM asset_types ORDER BY key`)
+	if err != nil {
+		return nil, fmt.Errorf("查询资产类型失败: %w", err)
+	}
+	defer rows.Close()
+	out := make([]AssetType, 0, 8)
+	for rows.Next() {
+		var t AssetType
+		var builtin int
+		if err := rows.Scan(&t.Key, &t.Title, &builtin, &t.Schema); err != nil {
+			return nil, fmt.Errorf("查询资产类型失败: %w", err)
+		}
+		t.Builtin = builtin != 0
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("查询资产类型失败: %w", err)
+	}
+	return out, nil
+}
+
+// typeModel 取单个类型（含 schema 原文）；不存在返回 ok=false。
+func (s *Store) typeModel(typeKey string) (AssetType, bool, error) {
+	var t AssetType
+	var builtin int
+	err := s.db.QueryRow(`SELECT key,title,builtin,schema FROM asset_types WHERE key=?`, typeKey).
+		Scan(&t.Key, &t.Title, &builtin, &t.Schema)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AssetType{}, false, nil
+	}
+	if err != nil {
+		return AssetType{}, false, fmt.Errorf("查询资产类型失败: %w", err)
+	}
+	t.Builtin = builtin != 0
+	return t, true, nil
+}
+
+// saveTypeSchema 只更新 schema 列（标题与内置标记由播种管理）。
+func (s *Store) saveTypeSchema(typeKey string, sch TypeSchema) error {
+	data, err := json.Marshal(sch)
+	if err != nil {
+		return fmt.Errorf("序列化类型模型失败: %w", err)
+	}
+	res, err := s.db.Exec(`UPDATE asset_types SET schema=? WHERE key=?`, string(data), typeKey)
+	if err != nil {
+		return fmt.Errorf("保存类型模型失败: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: %s", ErrTypeNotFound, typeKey)
+	}
+	return nil
+}
+
+// TypeAttrStat 是"某类型上的某个属性键"的统计（覆盖度与来源分布）。
+//
+// **刻意不含属性值**：模型页是"看模型"而不是"看数据"，而属性值里可能有连接串、口令、
+// 内网地址（设计件 D9）。
+type TypeAttrStat struct {
+	TypeKey string
+	Key     string
+	// Assets 是**拥有这个键**的资产数（一个键在同一资产上可能有采集/人工两行，按资产去重）。
+	Assets int
+	// Discovery / Manual 是有该来源值的行数，用来回答"这个字段是不是只有人在维护"。
+	Discovery int
+	Manual    int
+}
+
+// typeAttrStats 统计"类型 × 属性键"的覆盖与来源分布。
+//
+// 条件与台账**共用** assetWhere（含资源范围两个维度），因此模型页上的数字与列表能对得上；
+// 聚合在 SQL 里做，不把属性拉回内存再数（属性条数随资产数增长）。
+func (s *Store) typeAttrStats(f ListFilter, limit int) ([]TypeAttrStat, error) {
+	where, args := assetWhere("a", f)
+	if limit <= 0 {
+		limit = 2000
+	}
+	q := `SELECT a.type_key, t.key, COUNT(DISTINCT a.id),
+	        SUM(CASE WHEN t.source=? THEN 1 ELSE 0 END),
+	        SUM(CASE WHEN t.source=? THEN 1 ELSE 0 END)
+	    FROM assets a JOIN asset_attrs t ON t.asset_id=a.id` + where + `
+	    GROUP BY a.type_key, t.key ORDER BY a.type_key, t.key LIMIT ?`
+	rows, err := s.db.Query(q, append(append([]any{}, args...), string(SourceDiscovery), string(SourceManual), limit)...)
+	if err != nil {
+		return nil, fmt.Errorf("统计属性模型失败: %w", err)
+	}
+	defer rows.Close()
+	out := make([]TypeAttrStat, 0, 64)
+	for rows.Next() {
+		var st TypeAttrStat
+		if err := rows.Scan(&st.TypeKey, &st.Key, &st.Assets, &st.Discovery, &st.Manual); err != nil {
+			return nil, fmt.Errorf("统计属性模型失败: %w", err)
+		}
+		out = append(out, st)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("统计属性模型失败: %w", err)
+	}
+	return out, nil
+}
+
+// typeAssetCounts 统计各类型的资产数（条件同台账；**不限类型**，短命对象也要出现）。
+func (s *Store) typeAssetCounts(f ListFilter) (map[string]int, error) {
+	where, args := assetWhere("a", f)
+	rows, err := s.db.Query(`SELECT a.type_key, COUNT(*) FROM assets a`+where+` GROUP BY a.type_key`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("统计各类型资产数失败: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var key string
+		var n int
+		if err := rows.Scan(&key, &n); err != nil {
+			return nil, fmt.Errorf("统计各类型资产数失败: %w", err)
+		}
+		out[key] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("统计各类型资产数失败: %w", err)
+	}
+	return out, nil
 }
 
 // typeExists 判断资产类型是否已注册。

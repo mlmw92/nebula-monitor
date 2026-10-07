@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -189,6 +190,43 @@ func (f ListFilter) offset() int {
 type Service struct {
 	store *Store
 	now   func() int64
+	// 类型模型（asset_types.schema）的进程内缓存：巡检与快照对**每个资产**都要用一次，
+	// 逐次查库在大台账上就是 N 次查询。类型极少、且只在改模型时变，因此"缓存 + 写时失效"
+	// 是最省事且不会读到陈旧值的方式（改模型走同一个 Service 实例，见 UpdateTypeModel）。
+	// 为 nil 表示尚未加载（**不是**"没有模型"）；加载失败时不写入，避免一次故障把模型钉死。
+	schemaMu    sync.RWMutex
+	schemaCache map[string]TypeSchema
+}
+
+// typeSchemaOf 取某类型的模型；没有该类型的行、或读库失败时返回零值（= 用内置默认）。
+func (s *Service) typeSchemaOf(typeKey string) TypeSchema {
+	s.schemaMu.RLock()
+	cache := s.schemaCache
+	if cache != nil {
+		// 缓存里是**全部**类型，因此缺失即"这个类型没有模型"，不必再查库
+		sch := cache[typeKey]
+		s.schemaMu.RUnlock()
+		return sch
+	}
+	s.schemaMu.RUnlock()
+	all, err := s.store.typeSchemas()
+	if err != nil {
+		// 读不到就按内置默认跑：模型是配置，不该因为它读不出来而让巡检/快照整个失败。
+		// 但要记日志——静默降级会让"我配的模型没生效"变成一个谜。
+		slog.Warn("读取资产类型模型失败，本次按内置默认处理", "err", err)
+		return TypeSchema{}
+	}
+	s.schemaMu.Lock()
+	s.schemaCache = all
+	s.schemaMu.Unlock()
+	return all[typeKey]
+}
+
+// invalidateTypeSchemas 让下一次取模型重新读库（改完模型立刻生效）。
+func (s *Service) invalidateTypeSchemas() {
+	s.schemaMu.Lock()
+	s.schemaCache = nil
+	s.schemaMu.Unlock()
 }
 
 // NewService 创建资产服务。store 由 Open 得到，生命周期由调用方管理。
@@ -748,13 +786,9 @@ func (s *Service) resolve(ref Ref) (Asset, error) {
 
 // ---- 差异巡检（inspect）----
 
-// runtimeFields 是巡检默认排除的「运行态字段」。
-//
-// 巡检问的是「配置有没有变」；up / status / uptime 这类字段每次探活都可能翻转，
-// 放进差异清单只会把真正的配置变更淹掉（它们已经有专门的告警与状态通道）。
-var runtimeFields = map[string]bool{
-	"up": true, "status": true, "uptime": true, "uptimeSeconds": true,
-}
+// 运行态字段（巡检默认排除）现在是**类型模型**的一部分：见 model.go 的 TypeSchema
+// 与 DefaultRuntimeFields。这里刻意不再保留包级常量——"运行态字段"从今天起只有一处定义，
+// 否则模型页改完、巡检却仍按常量跑，就成了两套口径。
 
 // InspectScope 是一次差异巡检的范围。
 type InspectScope struct {
@@ -796,7 +830,10 @@ func (s *Service) RunInspect(sc InspectScope, actor string) (InspectRun, error) 
 		run.Assets++
 		beforeAsset := len(findings)
 		baselined := false
-		cur := focusFields(a, sc.Fields)
+		// 同一个字段计划同时用于两侧：cur（本资产当前值）与 prev（上一次快照）的"缺失"判定，
+		// 见下面 L2 那段。focusFields 内部用的是同一份计划，不会漂成两套口径。
+		plan := s.focusPlanOf(a.TypeKey, sc.Fields)
+		cur := s.focusFields(a, sc.Fields)
 
 		prev, hasPrev, err := s.store.latestSnapshot(a.ID)
 		if err != nil {
@@ -818,6 +855,13 @@ func (s *Service) RunInspect(sc InspectScope, actor string) (InspectRun, error) 
 				}
 			}
 			for k, v := range prev.Fields {
+				// 「缺失」这一侧也要按**当前**字段计划裁剪：模型把某个字段移出关注集合后，
+				// 它不该被报成"缺失"（配置项没被删，只是不再比对了）；同理，显式给了 fields 的
+				// 巡检不该把上一次快照里其它字段全报成缺失。这不是"少报"——
+				// 它把"缺失"还原成它本来的意思：**当前关注的字段在资产上消失了**。
+				if !plan.includes(k) {
+					continue
+				}
 				if _, ok := cur[k]; !ok {
 					findings = append(findings, newFinding(a, at, k, FindingMissing, FindingCritical, v, ""))
 				}
@@ -959,7 +1003,7 @@ func (s *Service) SetBaselineIfCurrent(ref Ref, actor string, currentAssetID int
 	if err != nil {
 		return Baseline{}, err
 	}
-	id, err := s.store.recordSnapshot(a.ID, s.now(), focusFields(a, nil))
+	id, err := s.store.recordSnapshot(a.ID, s.now(), s.focusFields(a, nil))
 	if err != nil {
 		return Baseline{}, err
 	}
@@ -1005,7 +1049,7 @@ func (s *Service) SetBaseline(ref Ref, actor string) (Baseline, error) {
 		return Baseline{}, err
 	}
 	at := s.now()
-	id, err := s.store.recordSnapshot(a.ID, at, focusFields(a, nil))
+	id, err := s.store.recordSnapshot(a.ID, at, s.focusFields(a, nil))
 	if err != nil {
 		return Baseline{}, err
 	}
@@ -1170,28 +1214,218 @@ func (s *Service) SetLabels(ref Ref, labels map[string]string, remove []string, 
 	return s.resolve(ref)
 }
 
-// focusFields 抽取资产的「关注字段集合」（生效值，人工优先）。
+// ---- 配置项模型（类型 × 字段）的读与写 ----
+
+// TypeModel 是配置项模型页需要的一条"类型 + 它的字段画像"。
+type TypeModel struct {
+	Key     string
+	Title   string
+	Builtin bool
+	// Ephemeral 是"运行时短命对象"（Pod / 工作负载）：模型页要显示它们，但必须标出来
+	// （它们默认不计入健康度；标记的唯一定义处仍是 EphemeralTypes）。
+	Ephemeral bool
+	// Assets 是当前可见范围内该类型的资产数（**含短命对象**：模型页看的是全量模型）。
+	Assets int
+	Schema TypeSchema
+	// Baseline 是该类型的标杆资产（可空；已按调用者的节点范围裁剪）。
+	Baseline *Baseline
+	// Attrs 是该类型上出现过的属性键，含覆盖数与来源分布；**不含属性值**。
+	Attrs []TypeAttrStat
+	// AttrsTruncated 表示属性清单被上限截断——必须显式透出，
+	// 否则会被读成"这个类型就这几个字段"。
+	AttrsTruncated bool
+	// SynonymGroups 是"疑似同义键"分组（只提示，不自动合并）。
+	SynonymGroups [][]string
+}
+
+// maxModelAttrs 是单个类型返回的属性条数上限。属性种类远少于资产数（一台主机几十个键），
+// 200 已足够；设上限是为了让异常大的台账不会把页面响应撑爆。
+const maxModelAttrs = 200
+
+// TypeModels 返回所有类型的模型与字段画像。
 //
-// fields 非空时按它裁剪；为空时取全部生效字段但排除运行态字段（见 runtimeFields）。
-func focusFields(a Asset, fields []string) map[string]string {
-	want := map[string]bool{}
+// 口径：**资产数与属性覆盖度按 f（含资源范围两个维度）统计**，模型本身不受范围限制——
+// 类型与字段定义是平台的配置，而"有多少资产、哪些字段有值"是数据（设计件 D8）。
+// 属性**值一律不进结果**（设计件 D9）。
+func (s *Service) TypeModels(f ListFilter, nodes []string) ([]TypeModel, error) {
+	types, err := s.store.listTypes()
+	if err != nil {
+		return nil, err
+	}
+	counts, err := s.store.typeAssetCounts(f)
+	if err != nil {
+		return nil, err
+	}
+	stats, err := s.store.typeAttrStats(f, 0)
+	if err != nil {
+		return nil, err
+	}
+	// 标杆与关系的裁剪口径一致：按调用者的节点范围筛（范围外标杆不该出现在模型页）
+	bls, err := s.BaselinesInNodes(nodes)
+	if err != nil {
+		return nil, err
+	}
+	baselineOf := map[string]*Baseline{}
+	for i := range bls {
+		baselineOf[bls[i].TypeKey] = &bls[i]
+	}
+	attrsOf := map[string][]TypeAttrStat{}
+	for _, st := range stats {
+		attrsOf[st.TypeKey] = append(attrsOf[st.TypeKey], st)
+	}
+	rank := map[string]int{}
+	for i, t := range BuiltinTypes() {
+		rank[t.Key] = i
+	}
+	out := make([]TypeModel, 0, len(types))
+	for _, t := range types {
+		list := attrsOf[t.Key]
+		// 按覆盖数倒序（"大家都有的字段"排前面），同覆盖数按键名——顺序稳定，界面才可读
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].Assets != list[j].Assets {
+				return list[i].Assets > list[j].Assets
+			}
+			return list[i].Key < list[j].Key
+		})
+		truncated := false
+		if len(list) > maxModelAttrs {
+			list, truncated = list[:maxModelAttrs], true
+		}
+		keys := make([]string, 0, len(list))
+		for _, it := range list {
+			keys = append(keys, it.Key)
+		}
+		model := TypeModel{
+			Key: t.Key, Title: t.Title, Builtin: t.Builtin,
+			Ephemeral:      slices.Contains(EphemeralTypes(), t.Key),
+			Assets:         counts[t.Key],
+			Schema:         s.typeSchemaOf(t.Key),
+			Baseline:       baselineOf[t.Key],
+			Attrs:          list,
+			AttrsTruncated: truncated,
+			SynonymGroups:  AttrSynonymGroups(keys),
+		}
+		out = append(out, model)
+	}
+	// 顺序：内置类型按 BuiltinTypes 的顺序（平台自己的排列），其余按类型键。
+	// 本批不会有非内置类型，但顺序规则写清楚，将来加类型时不必再改这里。
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, iok := rank[out[i].Key]
+		rj, jok := rank[out[j].Key]
+		if iok != jok {
+			return iok
+		}
+		if iok && jok && ri != rj {
+			return ri < rj
+		}
+		return out[i].Key < out[j].Key
+	})
+	return out, nil
+}
+
+// UpdateTypeModel 保存某类型的模型（只改 schema 列；标题与内置标记由播种管理）。
+//
+// 校验在**写侧**做（读侧不校验）：存量 schema 可能是历史形态，读进来先按能用的部分用；
+// 但人要写进来的东西必须过校验（见 ValidateTypeSchema）。
+func (s *Service) UpdateTypeModel(typeKey string, sch TypeSchema) error {
+	typeKey = strings.TrimSpace(typeKey)
+	if typeKey == "" {
+		return errors.New("缺少资产类型")
+	}
+	// 先校验**原始提交**再清洗：空键、首尾空白这类要**明确拒掉**，而不是悄悄丢掉——
+	// 静默丢弃会让"我明明加了这个字段"变成一个谜（平台一贯的取向：宁可红，不要假成功）。
+	if err := ValidateTypeSchema(TypeSchema{
+		RuntimeFields: sch.RuntimeFields, FocusFields: sch.FocusFields, AttrMeta: sch.AttrMeta,
+	}); err != nil {
+		return err
+	}
+	clean := TypeSchema{
+		RuntimeFields: cleanModelKeys(sch.RuntimeFields),
+		FocusFields:   cleanModelKeys(sch.FocusFields),
+		AttrMeta:      cleanAttrMeta(sch.AttrMeta),
+		Tolerance:     sch.Tolerance,
+	}
+	if err := s.store.saveTypeSchema(typeKey, clean); err != nil {
+		return err
+	}
+	// 立刻失效缓存：改完模型下一次巡检就用新口径（否则要等重启，那是不可接受的"改了没生效"）
+	s.invalidateTypeSchemas()
+	return nil
+}
+
+// cleanAttrMeta 去掉空白项与空壳条目（只填了空格的说明没必要存下来）。
+func cleanAttrMeta(in map[string]AttrMeta) map[string]AttrMeta {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]AttrMeta, len(in))
+	for k, v := range in {
+		key := strings.TrimSpace(k)
+		meta := AttrMeta{Title: strings.TrimSpace(v.Title), Unit: strings.TrimSpace(v.Unit), Note: strings.TrimSpace(v.Note)}
+		if key == "" || (meta.Title == "" && meta.Unit == "" && meta.Note == "") {
+			continue
+		}
+		out[key] = meta
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// focusPlan 是一次比对/快照的**字段计划**：要么按显式清单（pick），要么按"全部减运行态"。
+//
+// 单独抽出来是因为"哪些字段参与比对"必须只有一处定义：新增侧按当前值走、缺失侧按上一次快照走，
+// 两侧若各判一次，模型一改就会漂成两套口径（用哪个都不对）。
+type focusPlan struct {
+	pick    map[string]bool
+	runtime map[string]bool
+}
+
+// includes 判断某字段是否在当前关注范围内。
+func (p focusPlan) includes(key string) bool {
+	if len(p.pick) > 0 {
+		return p.pick[key]
+	}
+	return !p.runtime[key]
+}
+
+// focusPlanOf 按"类型模型 + 调用方显式字段"得出字段计划。
+//
+// 三级：调用方显式给的 fields > 该类型的 FocusFields > 全部字段。显式指定时**不再**做运行态排除
+// ——那是调用方自己点名的字段。运行态字段按"类型模型 > 内置默认"取（见 TypeSchema）。
+//
+// 模型为空（存量部署）时结果与历史逐字相同，这一点有用例钉住——它是"升级后巡检结论不变"的前提。
+func (s *Service) focusPlanOf(typeKey string, fields []string) focusPlan {
+	sch := s.typeSchemaOf(typeKey)
+	pick := map[string]bool{}
 	for _, k := range fields {
 		if k = strings.TrimSpace(k); k != "" {
-			want[k] = true
+			pick[k] = true
 		}
 	}
-	pick := len(want) > 0
+	if len(pick) == 0 {
+		for _, k := range sch.FocusFields {
+			pick[k] = true
+		}
+	}
+	runtime := map[string]bool{}
+	for _, k := range sch.EffectiveRuntimeFields() {
+		runtime[k] = true
+	}
+	return focusPlan{pick: pick, runtime: runtime}
+}
+
+// focusFields 抽取资产的「关注字段集合」（生效值，人工优先）。字段范围见 focusPlanOf。
+func (s *Service) focusFields(a Asset, fields []string) map[string]string {
+	plan := s.focusPlanOf(a.TypeKey, fields)
 	out := map[string]string{}
 	for _, attr := range a.Attrs {
 		key := attr.Key
 		if _, done := out[key]; done {
 			continue
 		}
-		if pick {
-			if !want[key] {
-				continue
-			}
-		} else if runtimeFields[key] {
+		if !plan.includes(key) {
 			continue
 		}
 		v, ok := a.Value(key)

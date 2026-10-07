@@ -8,8 +8,12 @@
 package asset
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // Source 是属性值的来源。
@@ -118,6 +122,200 @@ func BuiltinTypes() []AssetType {
 		{Key: TypePod, Title: "容器（Pod）", Builtin: true},
 		{Key: TypeWorkload, Title: "工作负载", Builtin: true},
 	}
+}
+
+// ---- 配置项模型（资产类型 × 字段） ----
+//
+// 这一节把"模型"从代码常量搬进 `asset_types.schema`：属性说明、运行态字段、关注字段。
+// 为什么要搬：这三样今天分别散在包级常量（`runtimeFields`）、隐式规则（`focusFields` 的
+// "空即全量减运行态"）与前端硬编码里——界面上既看不到，也改不了。
+//
+// **不做自定义类型**（增删类型影响面很广，见设计件 §2）。
+
+// DefaultRuntimeFields 是**运行态字段**的内置默认集。
+//
+// 运行态字段指"测活与状态翻转"这类会自己变的值（up / status / uptime…）：它们进差异清单
+// 会把真实的配置变更淹掉。类型模型里给的 RuntimeFields **为空即用这一份默认**——
+// "空"不等于"没有运行态字段"，否则一次误保存就会把探活抖动全灌进差异清单。
+var DefaultRuntimeFields = []string{"up", "status", "uptime", "uptimeSeconds"}
+
+// MaxModelKeyLen 是模型里字段键的长度上限（宽松值：存量属性键没有校验过，
+// 定得太紧会让"已经有这个属性、却没法给它写说明"）。
+const MaxModelKeyLen = 128
+
+// ErrTypeNotFound 表示模型写向了一个未注册的类型。
+//
+// 单独一个哨兵错误是为了让接口层能把它映射成 404 而不是 400：现场需要分清
+// "我要改的类型不存在"与"我提交的内容不合法"——两者的下一步动作完全不同。
+var ErrTypeNotFound = errors.New("资产类型未注册")
+
+// AttrMeta 是属性的**说明**：只影响展示，不参与比对、不进导出列。
+type AttrMeta struct {
+	Title string `json:"title,omitempty"` // 中文名（界面优先显示它，原键始终可见、可搜）
+	Unit  string `json:"unit,omitempty"`
+	Note  string `json:"note,omitempty"`
+}
+
+// TypeSchema 是资产类型的模型。
+//
+// 三层含义各自的"空"都不等于"关掉"：
+//   - RuntimeFields 空 → 用 DefaultRuntimeFields；
+//   - FocusFields 空 → 全部非运行态字段都要比对；
+//   - AttrMeta 空 → 界面上就显示原始键名（今天的形态）。
+type TypeSchema struct {
+	RuntimeFields []string            `json:"runtimeFields,omitempty"`
+	FocusFields   []string            `json:"focusFields,omitempty"`
+	AttrMeta      map[string]AttrMeta `json:"attrMeta,omitempty"`
+	// Tolerance 是**预留位**：按字段的比较容忍（数值相对误差、忽略大小写…）。本批不实现——
+	// 容忍度天然长在这一套 schema 上，另起一处就会再造第二套定义。
+	Tolerance map[string]string `json:"tolerance,omitempty"`
+}
+
+// DecodeTypeSchema 解析 `asset_types.schema` 列。
+//
+// **坏数据不当错误**：模型是给人看与改的配置，一份坏 JSON 不该让台账或巡检起不来
+// （与保留策略"配置坏也不阻断启动"同一取向）。调用方拿到 err 时按内置默认继续，
+// 但要把它记进日志——静默降级会让"我配的没生效"变成一个谜。
+func DecodeTypeSchema(raw string) (TypeSchema, error) {
+	var sch TypeSchema
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed == "{}" {
+		return sch, nil
+	}
+	if err := json.Unmarshal([]byte(trimmed), &sch); err != nil {
+		return TypeSchema{}, fmt.Errorf("解析类型模型失败: %w", err)
+	}
+	sch.RuntimeFields = cleanModelKeys(sch.RuntimeFields)
+	sch.FocusFields = cleanModelKeys(sch.FocusFields)
+	if len(sch.AttrMeta) == 0 {
+		sch.AttrMeta = nil
+	}
+	return sch, nil
+}
+
+// IsEmpty 判断模型是否"什么都没配"（界面上据此显示"用内置默认"）。
+func (s TypeSchema) IsEmpty() bool {
+	return len(s.RuntimeFields) == 0 && len(s.FocusFields) == 0 && len(s.AttrMeta) == 0
+}
+
+// EffectiveRuntimeFields 返回**生效的**运行态字段：配了就用配置的，没配用内置默认。
+func (s TypeSchema) EffectiveRuntimeFields() []string {
+	if len(s.RuntimeFields) == 0 {
+		return append([]string{}, DefaultRuntimeFields...)
+	}
+	return append([]string{}, s.RuntimeFields...)
+}
+
+// UsesDefaultRuntimeFields 表示运行态字段是否来自内置默认（界面要能看出"没配过"）。
+func (s TypeSchema) UsesDefaultRuntimeFields() bool { return len(s.RuntimeFields) == 0 }
+
+// ValidateTypeSchema 校验**提交上来的**模型（读侧不校验：存量数据可能有历史形态）。
+func ValidateTypeSchema(sch TypeSchema) error {
+	for _, k := range append(append([]string{}, sch.RuntimeFields...), sch.FocusFields...) {
+		if err := validateModelKey(k); err != nil {
+			return err
+		}
+	}
+	for k := range sch.AttrMeta {
+		if err := validateModelKey(k); err != nil {
+			return err
+		}
+	}
+	// focus 与 runtime 不得同时包含同一个键：那两句话自相矛盾（既说"要关注"又说"不算数"），
+	// 而实现上"关注"会赢（pick 分支不看 runtime）——界面上显示的和实际生效的就对不上了。
+	runtime := map[string]bool{}
+	for _, k := range sch.RuntimeFields {
+		runtime[k] = true
+	}
+	for _, k := range sch.FocusFields {
+		if runtime[k] {
+			return fmt.Errorf("字段 %q 不能同时出现在「关注字段」与「运行态字段」里：那两句话自相矛盾", k)
+		}
+	}
+	return nil
+}
+
+// validateModelKey 校验模型里出现的字段键：非空、不含空白与控制字符、长度有界。
+//
+// 字符集刻意宽松（允许 . _ - : 等）：存量属性键从来没有校验过，
+// 定得太紧会出现"属性已经存在、却没法给它写中文名"。
+func validateModelKey(key string) error {
+	k := strings.TrimSpace(key)
+	if k == "" {
+		return errors.New("字段键不能为空")
+	}
+	if k != key {
+		return fmt.Errorf("字段键 %q 首尾不能有空白", key)
+	}
+	if len(k) > MaxModelKeyLen {
+		return fmt.Errorf("字段键 %q 超过 %d 个字符", key, MaxModelKeyLen)
+	}
+	for _, r := range k {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return fmt.Errorf("字段键 %q 不能包含空白或控制字符", k)
+		}
+	}
+	return nil
+}
+
+// cleanModelKeys 去空白、去重，**保持首次出现的顺序**（顺序在界面上是给人看的，排序反而丢信息）。
+func cleanModelKeys(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, k := range in {
+		k = strings.TrimSpace(k)
+		if k == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// AttrSynonymGroups 找"疑似同义键"：把键按「小写 + 去掉分隔符与空白」归一后相同、但写法不同的
+// 键归到一组（如 cpu_cores / cpu-cores / CPU.Core）。
+//
+// 只提示**写法变体**，不做语义推断——"cpu 与 cpuCores 是不是一回事"要靠人判断，
+// 而自动合并是不可逆的数据破坏。
+func AttrSynonymGroups(keys []string) [][]string {
+	buckets := map[string][]string{}
+	order := []string{}
+	for _, k := range keys {
+		n := normalizeAttrKey(k)
+		if n == "" {
+			continue
+		}
+		if _, ok := buckets[n]; !ok {
+			order = append(order, n)
+		}
+		buckets[n] = append(buckets[n], k)
+	}
+	out := make([][]string, 0, 4)
+	for _, n := range order {
+		if len(buckets[n]) > 1 {
+			out = append(out, buckets[n])
+		}
+	}
+	return out
+}
+
+// normalizeAttrKey 归一属性键用于"疑似同义"判定：小写、去掉分隔符与空白。
+func normalizeAttrKey(k string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(k)) {
+		if r == '_' || r == '-' || r == '.' || r == ':' || unicode.IsSpace(r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // PodNaturalKey 由集群（apiserver 地址）、命名空间与 Pod 名拼出自然键。
