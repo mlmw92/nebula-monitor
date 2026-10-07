@@ -145,6 +145,11 @@ GET /api/v1/security/baselines/export
   `v-if="canExport"`，判定函数是 `web/src/composables/useAuth.js:102 can(perm)`）；
 - 导出失败（400/403）时把报文显示出来，而不是静默什么都不发生。
 
+### 4.7 留痕
+
+导出成功时写一条审计：`Category: "security"`、`Action: "export"`，`Detail` 带规模
+（"导出合规矩阵 N 台 × M 项"）。与资产导出（`asset_batch_api.go:351-359`）同一口径。
+
 ## 5. 决策点（D1~D9，均给建议与理由）
 
 | # | 问题 | 建议 | 理由 |
@@ -154,7 +159,7 @@ GET /api/v1/security/baselines/export
 | D3 | 单元格 | `通过` / `未通过` / **空**（未上报） | **空 ≠ 未通过**：把"没采到"记成"不合规"是这类矩阵最典型的错 |
 | D4 | `Detail`（未通过原因） | **不进矩阵**；如需原因清单，另做一份"未通过明细 CSV"（本批不做） | 一格一值是 CSV 能被透视的前提；原因塞进单元格会毁掉这个价值 |
 | D5 | 上限 | `maxMatrixHosts=2000`、`maxMatrixCells=200000`，超限 **400 明确拒绝** | 反对静默截断（项目多处已明确） |
-| D6 | 权限与留痕 | 新增 `security:export`（独立权限点）+ 加进内置角色；**不写审计** | 沿用 `assets:export` 的既有约定（`auth/model.go:362`）；导出是"看"的延伸，高风险动作（写/下发）才写审计 |
+| D6 | 权限与留痕 | 新增 `security:export`（独立权限点）+ 加进内置角色；**写审计**（`Category: "security"` / `Action: "export"`，带规模） | 沿用 `assets:export` 的既有约定（`auth/model.go:362`）。**此处更正过一处**：初稿写的是"不写审计"，因为我只读了 `handleAssetExport` 的前半段——那个函数在**末尾**（`asset_batch_api.go:351-359`）确实写了审计。导出是"把整份结论拿走"的动作，事后要能回答"谁在什么时候导走了什么" |
 | D7 | CSV 注入 | 本批新增共享消毒函数，并**同时加固既有三处** | 三处现状都无防护，而节点显示名管理员可改，是真实可触发路径 |
 | D8 | 无数据 | **400 + 明确报文**，不给空表 | 空表看起来像"全部合规"，是危险误导 |
 | D9 | 前端位置 | 安全中心「基线合规明细」卡片加按钮；无权限隐藏（`useAuth.js:102 can()`）；失败显示报文 | 数据在这张卡上，"在哪里看就在哪里导" |
@@ -190,3 +195,38 @@ GET /api/v1/security/baselines/export
 ## 7. 待评审
 
 D1~D9 若都按建议，则按 §6.1 的三笔开工；有异议的挑出来。
+
+## 8. 实施记录（2026-10-07，Server 1.30.46）
+
+三笔都已落地（D1~D9 全部按建议，D6 的"写审计"按 §5 的更正执行）：
+
+**① 共享 CSV 工具 + 加固既有三处**：新增 `internal/server/api/csvexport.go`
+（`csvCell` 公式注入消毒、`csvCells`、`csvDownload` 统一出口、`csvFilename` 时间戳命名）；
+`asset_batch_api.go` 的清单导出、`export.go` 的指标导出、`security_api.go` 的审计导出全部改用它。
+**顺带修掉两处真实缺陷**：审计导出此前**漏了 BOM**（Excel 打开中文乱码）；
+三处导出此前**都没有**公式注入防护。
+
+**② 合规矩阵导出接口**：新增 `internal/server/api/security_matrix_export.go`
+（`handleComplianceMatrixExport`、`matrixColumns`、`matrixHeader`、`matrixCell`、`matrixLimitError`）；
+路由 `GET /api/v1/security/baselines/export`（`query.go`，权限 `security:export`）；
+权限点登记在 `auth/model.go` 的「安全中心」域，并加进**安全管理员**与**审计员**两个内置角色
+（超管走 `allKeys()` 自动获得）。同时把"取当前身份可见的基线"抽成
+`securityBaselinesInScope`（`security_api.go`），**列表与导出共用**——两处各写一遍范围过滤，
+迟早会出现"看得见却导不出"或"导出越权"。
+
+**③ 前端**：`web/src/api/security.js` 新增 `exportComplianceMatrix`（读 `Content-Disposition` 文件名、
+失败抛服务端报文）；`SecurityView.vue` 的「基线合规明细」卡片加「导出矩阵 CSV」按钮，
+无 `security:export` 时**不显示**（而不是点下去才 403），失败把报文弹出来。
+
+**测试**：后端 `go test ./...` 全绿，新增 11 条用例（`csvexport_test.go` 3 条：
+消毒表 / BOM 与逐格消毒 / 文件名；`security_matrix_export_test.go` 8 条：形状与三态、
+**导出与列表在受限范围下集合一致**、缺权限 403、无数据 400、未启用 400、
+上限边界（纯函数穷尽 4 个边界）、超格子上限走 HTTP 400、导出写审计）。
+前端 `npm test` **23 文件 135 项**全绿（新增 `api/security.test.js` 3 条、
+`components/SecurityView.test.js` 3 条：无权限不显示、点击导出并提示文件名、失败显示报文）。
+
+**实施中自己踩到并修掉的**：`security_matrix_export_test.go` 的超限用例第一版用
+`rune('a'+i%26)` 拼键，只有 676 个**唯一**键 → 并集合并后根本没超限，用例变成空话；
+改成 `check_%04d` 后 50 台 × 4001 项 = 200050 格 > 20 万，才真的走到拒绝分支。
+
+**待办**：出包后在 dev-server 按 §6.2 跑实机核对（该机有 4 节点 × 5 项的真实基线）。
