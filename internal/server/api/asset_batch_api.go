@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -313,41 +312,32 @@ func (a *API) handleAssetExport(w http.ResponseWriter, r *http.Request) {
 
 	// 一次请求只取一次"现在"，与列表/摘要同一口径（否则门槛上的资产两处结论不同）
 	staleBefore := assetStaleBefore(time.Now())
-	fname := fmt.Sprintf("assets-%s.csv", time.Now().Format("20060102-150405"))
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename="+fname)
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("\xEF\xBB\xBF")) // BOM：Excel 打开中文列名不乱码
-
-	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{
-		"资产ID", "名称", "类型", "自然键", "归属节点", "上报状态", "来源", "责任人",
-		"标签", "已忽略", "忽略理由", "人工值", "首次发现", "最近上报",
-	})
-	for _, it := range rows {
-		manual, conflict := it.SourceMix()
-		_ = cw.Write([]string{
-			fmt.Sprintf("ast_%d", it.ID),
-			it.Name,
-			it.TypeKey,
-			it.NaturalKey,
-			it.Node,
-			assetStatusLabelCSV(assetStatusOf(it, staleBefore)),
-			assetSourceLabelCSV(assetSourceKind(manual, conflict)),
-			it.Owner(),
-			formatAssetLabels(it.Labels),
-			boolLabelCSV(it.Ignored),
-			it.IgnoreReason,
-			formatManualAttrs(it),
-			formatCSVTime(it.CreatedAt),
-			formatCSVTime(it.LastSeenAt()),
+	csvDownload(w, csvFilename("assets"),
+		[]string{
+			"资产ID", "名称", "类型", "自然键", "归属节点", "上报状态", "来源", "责任人",
+			"标签", "已忽略", "忽略理由", "人工值", "首次发现", "最近上报",
+		},
+		func(write func([]string)) {
+			for _, it := range rows {
+				manual, conflict := it.SourceMix()
+				write([]string{
+					fmt.Sprintf("ast_%d", it.ID),
+					it.Name,
+					it.TypeKey,
+					it.NaturalKey,
+					it.Node,
+					assetStatusLabelCSV(assetStatusOf(it, staleBefore)),
+					assetSourceLabelCSV(assetSourceKind(manual, conflict)),
+					it.Owner(),
+					formatAssetLabels(it.Labels),
+					boolLabelCSV(it.Ignored),
+					it.IgnoreReason,
+					formatManualAttrs(it),
+					formatCSVTime(it.CreatedAt),
+					formatCSVTime(it.LastSeenAt()),
+				})
+			}
 		})
-	}
-	cw.Flush()
-	if err := cw.Error(); err != nil {
-		// 响应头已发出，无法再改状态码；如实记日志，避免"导出到一半失败却没人知道"
-		slog.Error("写资产 CSV 失败", "err", err)
-	}
 	if a.audit != nil {
 		_ = a.audit.Record(audit.Event{
 			User: AuthenticatedUser(r), Method: r.Method, Path: r.URL.Path,

@@ -364,7 +364,15 @@ func PermissionCatalog() []permDomain {
 			{"inspect:read", "查看配置巡检"},
 			{"inspect:run", "执行配置巡检"},
 		}},
-		{Domain: "安全中心", Items: []Permission{{"security:read", "查看"}, {"security:write", "操作"}, {"agent:secret:read", "查看 Agent 密钥"}}},
+		// 安全中心：读看评分/事件/基线明细；写指入侵防御指令下发。
+		// 合规矩阵导出单设权限点：一次把**全部可见节点**的合规结论（哪些项没过）落盘，
+		// 与"在界面上逐台翻看"不是一个量级的动作（与 assets:export / audit:export 同一约定）。
+		{Domain: "安全中心", Items: []Permission{
+			{"security:read", "查看"},
+			{"security:write", "操作"},
+			{"security:export", "导出合规矩阵"},
+			{"agent:secret:read", "查看 Agent 密钥"},
+		}},
 		// 下行操作：读看动作目录与任务状态；执行指下发动作到指定节点（属高风险）。
 		// 执行成功与否还取决于目标机器自己的 guards.ops 放行情况——权限只是四道护栏之一。
 		{Domain: "节点操作", Items: []Permission{
@@ -449,7 +457,7 @@ func BuiltinRoles() []Role {
 			Description: "安全中心、入侵防御与审计查看",
 			ScopeMode:   ScopeGlobal,
 			Permissions: []string{
-				"dashboard:read", "security:read", "security:write", "agent:read",
+				"dashboard:read", "security:read", "security:write", "security:export", "agent:read",
 				"agent:secret:read", "audit:read", "audit:export", "roles:read",
 			},
 		},
@@ -466,7 +474,9 @@ func BuiltinRoles() []Role {
 			Name: RoleAuditor, Builtin: true,
 			Description: "仅查看与导出审计记录",
 			ScopeMode:   ScopeGlobal,
-			Permissions: []string{"audit:read", "audit:export", "roles:read"},
+			// 审计员要拿"合规矩阵"去对账，因此与 audit:export 一并给；
+			// 仍然**不给** security:write（导出是"看"的延伸，操作入侵防御是另一回事）。
+			Permissions: []string{"audit:read", "audit:export", "security:export", "roles:read"},
 		},
 	}
 }

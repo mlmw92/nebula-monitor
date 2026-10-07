@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/csv"
 	"net/http"
 	"strconv"
 	"strings"
@@ -134,18 +133,19 @@ func (a *API) auditExportCSV(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeAuditCSV(w http.ResponseWriter, events []audit.Event) {
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename=\"audit-events.csv\"")
-	writer := csv.NewWriter(w)
-	_ = writer.Write([]string{"time", "user", "method", "path", "status", "remote_ip", "source_location", "succeeded", "category", "action", "detail"})
-	for _, event := range events {
-		_ = writer.Write([]string{
-			event.Time.Format(time.RFC3339), event.User, event.Method, event.Path,
-			strconv.Itoa(event.Status), event.RemoteIP, event.SourceLocation, strconv.FormatBool(event.Succeeded),
-			event.Category, event.Action, event.Detail,
+	// 统一走 csvDownload：这里此前**漏了 BOM**（Excel 打开中文列名乱码），
+	// 也顺带补上公式注入消毒（审计的 detail 里可能带用户可控内容）。
+	csvDownload(w, "audit-events.csv",
+		[]string{"time", "user", "method", "path", "status", "remote_ip", "source_location", "succeeded", "category", "action", "detail"},
+		func(write func([]string)) {
+			for _, event := range events {
+				write([]string{
+					event.Time.Format(time.RFC3339), event.User, event.Method, event.Path,
+					strconv.Itoa(event.Status), event.RemoteIP, event.SourceLocation, strconv.FormatBool(event.Succeeded),
+					event.Category, event.Action, event.Detail,
+				})
+			}
 		})
-	}
-	writer.Flush()
 }
 
 // handleSecurityEvents 返回安全事件列表（按时间倒序），支持 limit/category/node 筛选。
@@ -189,9 +189,24 @@ func (a *API) handleSecurityEvents(w http.ResponseWriter, r *http.Request) {
 // handleSecurityBaselines 返回各主机安全基线评分与检查项明细。
 // GET /api/v1/security/baselines
 func (a *API) handleSecurityBaselines(w http.ResponseWriter, r *http.Request) {
+	baselines, enabled := a.securityBaselinesInScope(r)
+	if baselines == nil {
+		baselines = []model.SecurityBaseline{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"baselines": baselines, "enabled": enabled})
+}
+
+// securityBaselinesInScope 取"当前身份可见的安全基线"，并补全 IP 与节点别名。
+//
+// 列表（/security/baselines）与导出（/security/baselines/export）**必须共用这一份**：
+// 两处各写一遍，迟早会出现"界面上看得见、导出里没有"或者更糟的"导出越权"——
+// 导出是最容易漏掉资源范围的地方（资源范围这一课在本项目里已经上过几次）。
+//
+// 第二个返回值是"安全能力是否启用"：未注入 security store 时为 false，
+// 调用方据此给出不同的提示（未启用 vs 有启用但还没数据）。
+func (a *API) securityBaselinesInScope(r *http.Request) ([]model.SecurityBaseline, bool) {
 	if a.security == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"baselines": []model.SecurityBaseline{}, "enabled": false})
-		return
+		return nil, false
 	}
 	baselines := a.security.Baselines()
 	if baselines == nil {
@@ -205,7 +220,7 @@ func (a *API) handleSecurityBaselines(w http.ResponseWriter, r *http.Request) {
 		}
 		baselines[i].DisplayName = a.nodeDisplayName(baselines[i].Node)
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"baselines": baselines, "enabled": true})
+	return baselines, true
 }
 
 // normalizeSecurityFilter 将安全事件/基线查询参数归一化：

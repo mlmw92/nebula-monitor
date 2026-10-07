@@ -321,6 +321,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/security/summary", a.permit(a.handleSecuritySummary, "security:read"))
 	mux.HandleFunc("GET /api/v1/security/events", a.permit(a.handleSecurityEvents, "security:read"))
 	mux.HandleFunc("GET /api/v1/security/baselines", a.permit(a.handleSecurityBaselines, "security:read"))
+	// 合规矩阵导出：一次把全部可见节点的合规结论落盘，与"逐台翻看"不是一个量级的动作，
+	// 因此单设权限点（与 assets:export / audit:export 同一约定）。
+	mux.HandleFunc("GET /api/v1/security/baselines/export", a.permit(a.handleComplianceMatrixExport, "security:export"))
 
 	// 受控 fail2ban 入侵防御（仅管理 nebula 专属 SSH jail）
 	mux.HandleFunc("GET /api/v1/security/defense/status", a.permit(a.handleDefenseStatusList, "security:read"))

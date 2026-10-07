@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/csv"
 	"fmt"
 	"net/http"
 	"sort"
@@ -88,30 +87,27 @@ func (a *API) handleMetricsExport(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeMetricsCSV 按序列数量选择单序列/多序列表头并写出 CSV 响应。
+//
+// 写出统一走 csvDownload（响应头 / BOM / 公式注入消毒都在那里）。
 func writeMetricsCSV(w http.ResponseWriter, metric string, start, end int64, series []model.Series) {
 	fname := fmt.Sprintf("metric_%s_%d_%d.csv", metric, start, end)
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename="+fname)
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("\xEF\xBB\xBF")) // BOM 便于 Excel 识别 UTF-8
-	writer := csv.NewWriter(w)
 	multi := len(series) > 1
+	header := []string{"timestamp", "value"}
 	if multi {
-		_ = writer.Write([]string{"timestamp", "labels", "value"})
-	} else {
-		_ = writer.Write([]string{"timestamp", "value"})
+		header = []string{"timestamp", "labels", "value"}
 	}
-	for _, s := range series {
-		for _, p := range s.Points {
-			row := []string{time.UnixMilli(p.Timestamp).Format("2006-01-02 15:04:05")}
-			if multi {
-				row = append(row, labelStr(s.Labels))
+	csvDownload(w, fname, header, func(write func([]string)) {
+		for _, s := range series {
+			for _, p := range s.Points {
+				row := []string{time.UnixMilli(p.Timestamp).Format("2006-01-02 15:04:05")}
+				if multi {
+					row = append(row, labelStr(s.Labels))
+				}
+				row = append(row, strconv.FormatFloat(p.Value, 'g', 6, 64))
+				write(row)
 			}
-			row = append(row, strconv.FormatFloat(p.Value, 'g', 6, 64))
-			_ = writer.Write(row)
 		}
-	}
-	writer.Flush()
+	})
 }
 
 // labelStr 将标签集序列化为可读字符串（排除内部 __name__）。
