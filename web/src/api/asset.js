@@ -149,6 +149,15 @@ export const setAssetBaseline = (id) => http.post('/api/v1/assets/' + encodeURIC
 // 清除该资产所属类型的标杆（幂等）。
 export const clearAssetBaseline = (id) => http.del('/api/v1/assets/' + encodeURIComponent(id) + '/baseline')
 
+// ---- 配置项模型（资产类型 × 字段）----
+//
+// 读 `assets:read`、改 `assets:write`。响应里**没有属性值**（模型页只看模型），
+// 因此这个接口可以拿来做各处的"类型候选"。
+export const getAssetTypes = () => http.get('/api/v1/asset-types')
+
+export const saveAssetTypeModel = (typeKey, payload) =>
+  http.put('/api/v1/asset-types/' + encodeURIComponent(typeKey), payload)
+
 // ---- 周期化巡检（把巡检从"只能人工点"变成"可定时跑"）----
 //
 // 读配置要 inspect:read，改配置与立即执行都要 inspect:run（与报告页"读 report:read、

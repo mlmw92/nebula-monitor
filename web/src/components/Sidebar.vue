@@ -183,6 +183,8 @@ const groups = [
       { key: 'assets', to: '/assets', label: '资产台账', icon: Files, perm: 'assets:read' },
       // 关系视图：只读（关系的维护仍在台账详情里），同样只需读权限
       { key: 'assets-topology', to: '/assets/topology', label: '关系视图', icon: Share, perm: 'assets:read' },
+      // 配置项模型：看类型与字段（含哪些字段参与巡检比对）；改模型另有 assets:write（页面内门控）
+      { key: 'assets-model', to: '/assets/model', label: '配置项模型', icon: Grid, perm: 'assets:read' },
       // 配置巡检：读看记录与差异；触发巡检另有 inspect:run（页面内门控）
       { key: 'inspect', to: '/inspect', label: '配置巡检', icon: Aim, perm: 'inspect:read' },
     ],

@@ -15,8 +15,7 @@
         <div class="field">
           <span class="field-label">类型</span>
           <el-select v-model="filter.type" placeholder="全部类型" clearable size="small" style="width: 150px">
-            <el-option label="主机" value="host" />
-            <el-option label="中间件实例" value="middleware-instance" />
+            <el-option v-for="t in assetTypes" :key="t.key" :label="t.title" :value="t.key" />
           </el-select>
         </div>
         <div class="field">
@@ -59,8 +58,7 @@
           :disabled="!canRun"
           @change="saveSchedule"
         >
-          <el-option label="主机" value="host" />
-          <el-option label="中间件实例" value="middleware-instance" />
+          <el-option v-for="t in assetTypes" :key="t.key" :label="t.title" :value="t.key" />
         </el-select>
         <el-input
           v-model="schedule.node"
@@ -279,9 +277,12 @@ import {
   runInspectScheduleNow,
 } from '../../api/asset'
 import { useAuth } from '../../composables/useAuth'
+import { useAssetTypes } from '../../composables/useAssetTypes'
 import { printPage } from '../../utils/print'
 
 const auth = useAuth()
+// 类型候选来自配置项模型接口（两处下拉共用），接口不可用时退回内置四类
+const { types: assetTypes } = useAssetTypes()
 // 前端隐藏仅为体验：服务端 inspect:run / assets:write 才是边界
 const canRun = computed(() => auth.can('inspect:run'))
 const canWrite = computed(() => auth.can('assets:write'))

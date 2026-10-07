@@ -44,12 +44,10 @@
         <div class="field">
           <span class="field-label">类型</span>
           <el-select v-model="filter.type" placeholder="全部类型" clearable style="width: 150px">
-            <el-option label="主机" value="host" />
-            <el-option label="中间件实例" value="middleware-instance" />
-            <!-- 容器与工作负载是 K8s 清单上报的产物；它们**默认不计入上方数字**，
-                 选中这里才会出现在列表里（服务端 asset.EphemeralTypes 的同一条规则）。 -->
-            <el-option label="容器（Pod）" value="pod" />
-            <el-option label="工作负载" value="workload" />
+            <!-- 类型清单来自 GET /api/v1/asset-types（配置项模型），加类型不必再改这里；
+                 容器与工作负载是 K8s 清单上报的产物，**默认不计入上方数字**，选中才出现在列表里
+                 （服务端 asset.EphemeralTypes 的同一条规则，模型页会把它们标为「短命对象」）。 -->
+            <el-option v-for="t in assetTypes" :key="t.key" :label="t.title" :value="t.key" />
           </el-select>
         </div>
         <div class="field">
@@ -590,9 +588,12 @@
     <el-dialog v-model="createVisible" title="新建资产" width="640px">
       <el-form label-width="100px">
         <el-form-item label="资产类型">
+          <!-- 只提供两种：手工**能**建的只有主机与中间件实例。
+               容器/工作负载由清单上报产生，手工建一个会被下一轮上报覆盖或变成孤儿，
+               因此这里不做成"按类型清单渲染"（标签仍读类型的显示名）。 -->
           <el-radio-group v-model="assetKind">
-            <el-radio-button value="host">主机</el-radio-button>
-            <el-radio-button value="instance">中间件实例</el-radio-button>
+            <el-radio-button value="host">{{ labelOf('host') }}</el-radio-button>
+            <el-radio-button value="instance">{{ labelOf('middleware-instance') }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item v-if="assetKind === 'host'" label="主机名">
@@ -814,6 +815,7 @@ import {
   exportAssets,
 } from '../../api/asset'
 import { useAuth } from '../../composables/useAuth'
+import { useAssetTypes } from '../../composables/useAssetTypes'
 import { Files, DataLine } from '@element-plus/icons-vue'
 import PageHeader from '../common/PageHeader.vue'
 import EmptyState from '../common/EmptyState.vue'
@@ -825,6 +827,8 @@ import BatchBar from '../BatchBar.vue'
 import TopologyGraph from './TopologyGraph.vue'
 
 const auth = useAuth()
+// 资产类型清单（含显示名）来自配置项模型接口，接口不可用时退回内置四类（见 composable）
+const { types: assetTypes, labelOf } = useAssetTypes()
 // 前端隐藏仅为体验：服务端 assets:write 是真正的边界（且属高风险权限，提交前二次确认）。
 const canWrite = computed(() => auth.can('assets:write'))
 // 读审计是独立权限点（audit:read）：没有它时不摆"查看对应审计"的入口，
@@ -950,18 +954,20 @@ const INSTANCE_LABELS = {
   fastdfs: 'FastDFS', docker: 'Docker',
 }
 function typeLabel(row) {
-  // K8s 容器/工作负载的标题只能看 typeKey，**不能走下面的自然键前缀**：
-  // 它们的自然键是 <集群>/<命名空间>/<kind>/<名称>，按 ':' 切会切出 apiserver 的 scheme（https）。
-  if (row.typeKey === 'pod') return '容器（Pod）'
-  if (row.typeKey === 'workload') return '工作负载'
-  if (row.typeKey === 'host') return '主机'
-  const prefix = String(row.naturalKey || '').split(':')[0]
-  return INSTANCE_LABELS[prefix] || prefix || '实例'
+  // 中间件实例：界面要显示**具体产品**（自然键前缀 redis/mysql/…），而类型的标题是"中间件实例"，
+  // 所以这一类不看标题。其余类型一律用类型标题（来自配置项模型接口）——
+  // K8s 容器/工作负载**不能**走自然键前缀：它们的自然键是 <集群>/<命名空间>/<kind>/<名称>，
+  // 按 ':' 切会切出 apiserver 的 scheme（https）。
+  if (row.typeKey === 'middleware-instance') {
+    const prefix = String(row.naturalKey || '').split(':')[0]
+    return INSTANCE_LABELS[prefix] || prefix || '实例'
+  }
+  return labelOf(row.typeKey)
 }
 // 关系对端的类型标签：不复用 typeLabel（它要 row），但语义必须一致——
-// 否则「容器 → 主机」的 runs_on 会被显示成「实例 → 主机」。
+// 否则「容器 → 主机」的 runs_on 会被显示成「实例 → 主机」。位置太窄，用短名，认不出的回落到类型标题。
 const PEER_TYPE_LABELS = { host: '主机', 'middleware-instance': '实例', pod: '容器', workload: '工作负载' }
-const peerTypeLabel = (t) => PEER_TYPE_LABELS[t] || t
+const peerTypeLabel = (t) => PEER_TYPE_LABELS[t] || labelOf(t)
 // 「上报状态」：描述 Agent 是否还在上报这条资产，与实例/容器自身是否可用无关。
 // 措辞刻意避开"在线/离线"——那是采集侧的探活结果，两者同词会让人觉得自相矛盾。
 const STATUS_LABELS = { online: '上报正常', missing: '失联', archived: '归档' }
